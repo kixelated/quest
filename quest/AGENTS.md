@@ -15,11 +15,8 @@ its implementation.
   directly; a questline is complete when all of its quests are complete.
 - Everything lives under `quest/`. [README.md](README.md) is the permanent root
   questline.
-- The root's entries are milestones: questlines in directories named `m0`,
-  `m1`, ... that group work by priority horizon. Lower numbers matter more, and
-  a completed milestone's number is not reshuffled onto the survivors. A
-  milestone may open with a gate quest (the release rule under Creation) that
-  its later work requires.
+- The root's entries are milestone questlines named `m0`, `m1`, `m2`, and so on,
+  as described below.
 - Every `Quests` list is ordered by priority, most important first; ready
   quests are taken in list order. Insert a new quest or questline at its rank
   rather than appending - including the root, where new work joins the
@@ -28,6 +25,27 @@ its implementation.
 - Finished quests and questlines are deleted and remain accessible through git
   history.
 - Merge conflicts are expected. Resolve them by aligning quests.
+
+## Milestones
+
+- Each milestone is a directory such as `quest/m0/`, with a `README.md` stating
+  its `Goal` and listing its `Quests` in priority order. The root
+  `quest/README.md` lists milestones in priority order.
+- Start with `m0` for the first delivery horizon, `m1` for the following horizon,
+  and `m2` and beyond for later work. Give each milestone a concrete outcome;
+  the repository decides whether that means a release, capability, or other
+  delivery boundary.
+- Include agreed future work in later milestones so it remains visible without
+  becoming a requirement of the current milestone. Do not create empty
+  milestones just to reserve numbers.
+- Lower numbers have higher priority. Milestone order does not create a
+  dependency: use a quest's `Required` section for actual blockers, including
+  any dependency on an entire earlier milestone.
+- Keep milestone numbers stable. Completing `m0` does not rename `m1` to `m0`,
+  and gaps are valid. Remove a completed milestone and its root entry using the
+  normal questline deletion rules.
+- A milestone may open with a gate quest for a release or external condition
+  that later quests explicitly require; see Creation.
 
 ## Format
 

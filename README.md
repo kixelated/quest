@@ -41,9 +41,15 @@ This checkout includes `plan-quests`, `plan-issues`, `start-quest`, and
 the same files through `.agents/skills/`. Invoke `/plan-quests` in Claude Code or
 `$plan-quests` in Codex to scope work interactively.
 
-For manual adoption in another repository, copy `quest/CLAUDE.md` and the four
+Shared instructions use `AGENTS.md`. Claude Code supports reading it directly
+from v2.1.277, subject to its project-instruction settings and session support.
+Existing project or ancestor `CLAUDE.md` files can take precedence. See
+[Claude's AGENTS.md documentation](https://code.claude.com/docs/en/memory#agentsmd)
+when adopting Quest in an existing setup.
+
+For manual adoption in another repository, copy `quest/AGENTS.md` and the four
 skill directories. Put skills in the agent's project skill directory, add a brief
-pointer to `quest/CLAUDE.md` in the existing root instructions, and create
+pointer to `quest/AGENTS.md` in the existing root instructions, and create
 `quest/README.md` using the format below. Preserve existing instructions and
 adapt contribution checks to that repository. Automated installation, upgrades,
 and removal are not implemented yet.
@@ -59,15 +65,29 @@ The outcomes this repository is working toward.
 ```
 
 The permanent root may be empty. Once work is scoped, add milestone questlines
-and individual quests following [the format](quest/CLAUDE.md).
+and individual quests following [the format](quest/AGENTS.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and contribution workflow.
+
+## Development
+
+The Nix shell and just recipes are shared by local development and CI:
+
+```sh
+nix develop --command just check
+nix develop --command just test
+nix build
+```
+
+The development setup is trimmed from MoQ and includes pinned tools, optional
+direnv loading, editor settings, dependency updates, and Linux/macOS checks.
 
 ## Origin and license
 
 Extracted from `moq-dev/moq` at commit
 `2bb3e6e3f3f357be7bb5f7a8e7feb4348cfdefe4`: `rs/quest`, the four quest skills,
-and the quest workflow contract. MoQ's application backlog and environment hooks
-are not part of this standalone tool. Original copyright notices are retained.
+and the quest workflow contract. The Nix/just/CI setup and direnv hook are adapted
+from the same repository. MoQ's application backlog, media dependencies, and
+deployment configuration are not included. Original copyright notices are retained.
 
 Licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
