@@ -99,8 +99,22 @@ impl Doc {
 			.filter(move |e| e.section.as_deref() == Some(section))
 	}
 
-	/// A questline is a `README.md`; everything else is an executable quest.
+	/// A questline is a `README.md` with a `Quests` section. Any other README is
+	/// what a line becomes when its last child merges: the line's own remaining
+	/// work, executed like any other quest. The root and the milestones are the
+	/// exception.
 	pub fn is_questline(&self) -> bool {
+		self.is_readme() && (self.has("Quests") || Self::permanent(&self.path))
+	}
+
+	/// The root and the milestones outlive their quests, so an empty one is not
+	/// a leaf. `quest/README.md` has two components and `quest/m0/README.md` has
+	/// three; anything nested further is an ordinary line.
+	pub fn permanent(path: &Path) -> bool {
+		path.file_name().is_some_and(|n| n == "README.md") && path.components().count() <= 3
+	}
+
+	fn is_readme(&self) -> bool {
 		self.path.file_name().is_some_and(|n| n == "README.md")
 	}
 

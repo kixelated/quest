@@ -59,7 +59,11 @@ From your repository root, validate the result and look for ready work:
 ```sh
 quest check
 quest ready
+quest branch quest/m0/some-quest.md
 ```
+
+`branch` prints that quest's branch and each branch it merges through, ending
+at `main`. Milestones themselves have no branch.
 
 Review the plan before starting it. `/start-quest` works on one quest;
 `/spawn-quests` coordinates multiple agents when your session supports them.

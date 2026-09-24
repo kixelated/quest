@@ -9,6 +9,7 @@ Your goal is to execute, plan, and/or merge quests in parallel.
 If you are unsure of the best course of action, ask the user for clarification before proceeding.
 
 The scope consists of all unblocked quests that are not claimed and have no blockers.
+A README whose `Quests` list has been removed is a ready quest too: finishing it marks the line's PR ready.
 Use the argument (if provided) to filter to specific quests/questlines.
 Inspect any blocked quests, and determine if they can be unblocked.
 
@@ -22,7 +23,8 @@ For each quest, interactively prompt the user if:
 Include a recommended option.
 
 For each quest to work on, spawn a background sub-agent to /start-quest.
-Determine the base branch for the quest and create a fresh worktree.
+The base is the next branch `quest branch` prints. Create a fresh worktree on it,
+creating a missing line branch first when remote writes are authorized.
 Choose concurrency within the available agent slots and machine capacity.
 If delegation is unavailable, explain that limitation and offer sequential work.
 

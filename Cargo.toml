@@ -6,7 +6,7 @@ rust-version = "1.91"
 authors = ["Luke Curley"]
 license = "MIT OR Apache-2.0"
 publish = false
-description = "Versioned Markdown quests: validate plans and find ready work."
+description = "Versioned Markdown quests: validate plans, find ready work, and name the branches a quest lands on."
 repository = "https://github.com/kixelated/quest"
 readme = "README.md"
 

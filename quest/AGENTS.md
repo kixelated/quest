@@ -8,15 +8,21 @@ its implementation.
 
 ## Model
 
-- A quest is a task that should be completed independently in a single PR. It
-  is a Markdown file such as `archive.md`.
-- A questline is an ordered collection of quests and/or other questlines. It is
-  a directory whose entrypoint is `README.md`. Questlines are never executed
-  directly; a questline is complete when all of its quests are complete.
+- A quest is a task completed independently in a single PR. It is a Markdown
+  file such as `archive.md`.
+- A questline is a directory. Its `README.md` lists the children in `Quests`
+  and holds the work no child owns. While children remain, that README is the
+  index and is not started. Once they have merged, the `Quests` section is
+  gone and the README is an ordinary quest: the line's own remaining work.
+  The line is complete when that quest lands.
 - Everything lives under `quest/`. [README.md](README.md) is the permanent root
   questline.
 - The root's entries are milestone questlines named `m0`, `m1`, `m2`, and so on,
   as described below.
+- A document's branch is its path without `.md`: `quest/m1/foo/bar.md` is
+  branch `quest/m1/foo/bar`, and its line is `quest/m1/foo/README`. A quest
+  merges into its line's branch, a line into its parent's, and a milestone's
+  direct children into `main`. The root and the milestones have no branch.
 - Every `Quests` list is ordered by priority, most important first; ready
   quests are taken in list order. Insert a new quest or questline at its rank
   rather than appending - including the root, where new work joins the
@@ -29,7 +35,7 @@ its implementation.
 ## Milestones
 
 - Each milestone is a directory such as `quest/m0/`, with a `README.md` stating
-  its `Goal` and listing its `Quests` in priority order. The root
+  its `Goal` and listing any `Quests` in priority order. The root
   `quest/README.md` lists milestones in priority order.
 - Start with `m0` for the first delivery horizon, `m1` for the following horizon,
   and `m2` and beyond for later work. Give each milestone a concrete outcome;
@@ -44,6 +50,9 @@ its implementation.
 - Keep milestone numbers stable. Completing `m0` does not rename `m1` to `m0`,
   and gaps are valid. Remove a completed milestone and its root entry using the
   normal questline deletion rules.
+- The root and the milestones are permanent. After a milestone's quests are
+  gone it stays as a horizon: it is not a quest, needs no size, and omits
+  `Quests` until it has children again.
 - A milestone may open with a gate quest for a release or external condition
   that later quests explicitly require; see Creation.
 
@@ -76,13 +85,15 @@ Current decisions, open questions, or implementation guidance.
 ```
 
 `Goal` is required. Prefix the title with `[XS]`, `[S]`, `[M]`, `[L]`, or
-`[XL]`, estimating implementation, verification, and landing work. Every other
-section is optional. Use these exact headings: readiness checks grep for
-`## Required` literally.
+`[XL]`, estimating implementation, verification, and landing work. A README
+that still lists children carries no size. A README with no `Quests` section
+is a plain quest and needs one. The root and the milestones are neither.
+Every other section is optional. Use these exact headings: readiness checks
+grep for `## Required` literally.
 
-A questline uses `Quests` instead of `Required`, listing at least one entry in
-priority order, each with a one-line summary. The permanent root may have an
-empty `Quests` section when no work is planned:
+A questline README lists its children under `Quests`, in priority order, each
+with a one-line summary. The permanent root may have an empty `Quests` section
+when no work is planned:
 
 ```markdown
 ## Quests
@@ -94,7 +105,7 @@ empty `Quests` section when no work is planned:
 - A quest's `Required` section lists its blockers. Its absence means the quest
   is ready to start.
 - A quest may require a questline; that blocker clears only when the whole
-  questline is complete.
+  line has merged, including the README's own quest.
 - A `Required` bullet may be plain text naming a condition outside the
   repository; remove it when the condition clears.
 - `Required` relationships must be acyclic. Before adding one, follow links
@@ -105,10 +116,14 @@ empty `Quests` section when no work is planned:
 - `quest ready <quest>` reads the same section the other way: it prints what
   blocks that quest, one per line, expanding a required questline into the
   quests it still holds. `quest ready` with no path lists every ready quest in
-  tree order. Both exit 0, so the printed list is the answer: no output means
+  tree order. A README with no `Quests` left is ready work, same as any other
+  quest. Both exit 0, so the printed list is the answer: no output means
   ready. From this source checkout, run `cargo run --quiet --locked -- ready ...`.
   It reads the tree and nothing else, so a quest an unrelated PR already
   finished still reports ready; that question is GitHub's.
+- `quest branch <path>` prints the branch for that document, then every branch
+  it merges through, nearest first and ending at `main`. It reads the path
+  only. The root and milestones have no branch, and the command fails on them.
 
 ## Creation
 
@@ -116,7 +131,9 @@ empty `Quests` section when no work is planned:
 - Size every quest in its title. Re-estimate it when scope changes materially.
 - Search the living tree and git history before creating a quest.
 - Split independently completable work into separate quests. Group them in a
-  questline only when they ship together; a one-off sits directly in its parent.
+  questline only when they ship together, and give the README the work no
+  child owns: the end-to-end test, the docs page. A one-off sits directly in
+  its parent.
 - For GitHub repositories using the `quest` label, apply it to issues listed
   under `Closes` when the quest lands and issue updates are authorized. A
   `Related` link is context, not tracking, and gets no label.
@@ -129,14 +146,18 @@ empty `Quests` section when no work is planned:
 ## Execution
 
 - Only quests are executed, and only when ready: no `Required` section means no
-  blockers.
-- The branch name is the quest path without the trailing `.md`, e.g.
-  `quest/foo/bar.md` becomes branch `quest/foo/bar`.
-- If a local or remote branch for the quest already exists, someone may be
-  working on it; continue only if it is stale (old, no open PR).
-- When remote writes are authorized, claim the quest by pushing its branch with
-  an empty placeholder commit. Check for existing claims first. Work locally
-  when remote access is unavailable; do not claim exclusive ownership.
+  blockers. A questline README is not a quest while it still has `Quests`.
+- `quest branch` names the branch and its bases. When remote writes are
+  authorized, push each missing line branch from the one after it and open its
+  draft PR against that base, then push the quest's branch with an empty
+  placeholder commit. Check for existing claims first. The remote branch is
+  the claim; continue only if an existing one is stale (old, no open PR).
+  Work locally when remote access is unavailable.
+- Keep a shared line current by merging its base in. Do not rebase it.
+- A line's PR stays a draft until its `Quests` list is empty. The PR that
+  removes the last child gives the README a sized title. That README is then
+  a ready quest. Completing it is what makes the line's PR ready to merge.
+  Merging is a separate invocation.
 - Quests may be updated over time as the plan changes.
 - A quest is completed when the plan is executed and no further work is needed.
   Suggest follow-up work as a new quest.
@@ -144,9 +165,9 @@ empty `Quests` section when no work is planned:
   before completing the change.
 - When the quest is complete, open a PR per
   [CONTRIBUTING.md](../CONTRIBUTING.md), with a GitHub closing keyword for every
-  issue listed under `Closes` by the quest AND by any questline the same PR
-  completes - a parent's issues are usually where a line's tracking lives, and
-  its last child is the only PR that can close them.
+  issue listed under `Closes` by the quest and by any questline the same PR
+  completes. A line's issues usually live on its README, and the PR that
+  completes that README is the one that closes them.
 
 ## Deletion
 
@@ -158,5 +179,7 @@ empty `Quests` section when no work is planned:
 - When deleting a quest or questline, grep its absolute path and remove every
   reference; this reveals every quest the finished work unblocks. If the
   removed link was the last entry in a section, remove the heading too.
-- Deleting a questline's last quest deletes the questline directory in the
-  same change. The root questline is never deleted.
+- Completing or abandoning a README deletes its directory in the same change.
+  Removing its last child does not: take the `Quests` heading off and leave
+  the README as the line's remaining quest. The root and the milestones stay;
+  an empty milestone remains a horizon.
