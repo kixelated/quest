@@ -20,4 +20,5 @@ Never write to or clean up a directory other agents share, such as a session scr
 When done, explain the result in a few lines and summarize any issues encountered.
 Prompt the user interactively for every open decision (naming, API shape, branch, blockers, manual steps), each with your recommendation, and offer follow-ups as a multi-select to /plan-quests.
 Keep the PR a draft until the user confirms every decision, then ask whether to mark it ready.
+Record the outcome as a PR comment when it isn't already in the PR: each decision and its reason, and any follow-up the user declined.
 A background agent that cannot prompt lists its decisions in its report instead and leaves the PR a draft.
