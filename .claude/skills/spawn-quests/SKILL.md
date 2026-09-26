@@ -26,8 +26,15 @@ Each agent blocks on its own checks and reports back only when done or blocked.
 Limit the concurrency to at most N agents in parallel, where N is half the number of physical CPU cores.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
+Each agent switches into its own worktree before editing, opens its PR as a draft, and never marks it ready itself.
+Its report lists every open decision with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
-Prompt the user if they want to /plan-quests for any suggested follow-ups.
+
+As each agent reports, explain its result in a few lines, then prompt the user inline without waiting for the rest.
+Ask about every open decision (naming, API shape, branch, blockers, manual steps), a few per prompt, each with the PR, a short summary, and your recommendation first.
+Offer its follow-ups as a multi-select to /plan-quests.
+Resume the owning agent with each answer, and prompt again on anything its next report raises.
+Once nothing is open, ask whether to mark the PR ready, then mark it yourself.
 
 Run /plan-quests for any selected quests in the foreground.
 Perform any research and monitoring in the background.
