@@ -111,15 +111,13 @@ The [format and workflow](quest/AGENTS.md) fit in one file.
 
 ## Where this is going
 
-The first release should let you install Quest, bring in existing GitHub issues,
-work through quests, and leave again without losing your plans or local edits.
-Skills will guide setup and removal; the binary will handle the repeatable parts.
+The first release should let you paste one line into your agent to set Quest up,
+bring in existing GitHub issues, work through quests, and leave again without
+losing your plans. The binary carries the skills, your tool manager (mise or nix)
+pins its version, and your repository's instructions stay yours. macOS and Linux
+come first; [native Windows](quest/m1/windows.md) follows later.
 
-Upgrades will replace unchanged Quest-owned files and show you changes to files
-you edited. Your repository's instructions stay yours. macOS and Linux come first;
-[native Windows](quest/m1/windows.md) follows later.
-
-The [planning notes](docs/planning.md) track the decisions still being worked out.
+The [first release plan](quest/m0/README.md) lists what is left.
 
 ## Hack on it
 
