@@ -66,7 +66,9 @@ quest branch quest/m0/some-quest.md
 ```
 
 `branch` prints that quest's branch and each branch it merges through, ending
-at `main`. Milestones themselves have no branch.
+at `main`. Milestones themselves have no branch. Children merge into their
+line's branch first, so after a `git fetch`, `quest ready --remote origin`
+reads each line from its branch instead of the working tree.
 
 Review the plan before starting it. `/start-quest` works on one quest;
 `/spawn-quests` coordinates multiple agents when your session supports them.

@@ -39,6 +39,8 @@
           quest = craneLib.buildPackage {
             src = craneLib.cleanCargoSource ./.;
             strictDeps = true;
+            # The line-branch readiness tests build real repositories.
+            nativeCheckInputs = [ pkgs.git ];
           };
         in
         {
