@@ -17,4 +17,5 @@ stable as earlier milestones complete.
 
 ## Quests
 
+- [M0: First public release](/quest/m0/README.md) - the standalone CLI, skills, and adoption loop, starting with MoQ
 - [M1: Broader platform support](/quest/m1/README.md) - support adoption beyond the initial macOS, Linux, and WSL targets
