@@ -35,6 +35,7 @@ Ask about every open decision (naming, API shape, branch, blockers, manual steps
 Offer its follow-ups as a multi-select to /plan-quests.
 Resume the owning agent with each answer, and prompt again on anything its next report raises.
 Once nothing is open, ask whether to mark the PR ready, then mark it yourself.
+Record the outcome as a PR comment when it isn't already in the PR: each decision and its reason, and any follow-up the user declined.
 
 Run /plan-quests for any selected quests in the foreground.
 Perform any research and monitoring in the background.
