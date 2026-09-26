@@ -10,6 +10,10 @@ description = "Versioned Markdown quests: validate plans, find ready work, and n
 repository = "https://github.com/kixelated/quest"
 readme = "README.md"
 
+# A workspace of its own, so a checkout vendored inside another Cargo workspace
+# (a submodule, say) still builds with `--manifest-path`.
+[workspace]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
