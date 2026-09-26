@@ -61,9 +61,10 @@ impl fmt::Display for Blocker {
 /// holds. Empty means ready.
 ///
 /// `path` is the quest as the tree writes it (`/quest/m0/one.md`), as the shell
-/// completes it (`quest/m0/one.md`), or as an absolute filesystem path.
-pub fn blockers(root: &Path, path: &Path) -> Result<Vec<Blocker>> {
-	let docs = crate::load(root)?;
+/// completes it (`quest/m0/one.md`), or as an absolute filesystem path. With a
+/// `remote`, each line is read from its branch there; see [`crate::branch::overlay`].
+pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Blocker>> {
+	let docs = crate::load_from(root, remote)?;
 	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|d| (d.path.as_path(), d)).collect();
 	let path = locate(root, path, &by_path)?;
 	Ok(expand(&by_path, by_path[path.as_path()], &mut vec![path.clone()]))
@@ -74,9 +75,9 @@ pub fn blockers(root: &Path, path: &Path) -> Result<Vec<Blocker>> {
 /// A questline is not listed while it still indexes children; a README with
 /// no `## Quests` left is the line's own remaining work and lists like any
 /// other quest. The absence of a `## Required` heading is what quest/AGENTS.md
-/// defines as ready.
-pub fn quests(root: &Path) -> Result<Vec<PathBuf>> {
-	let docs = crate::load(root)?;
+/// defines as ready. `remote` is as for [`blockers`].
+pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
+	let docs = crate::load_from(root, remote)?;
 	let mut remaining: BTreeMap<PathBuf, &Doc> = docs.iter().map(|doc| (doc.path.clone(), doc)).collect();
 	let mut pending = vec![PathBuf::from("quest/README.md")];
 	let mut ready = Vec::new();

@@ -11,7 +11,7 @@ If you are unsure of the best course of action, ask the user for clarification b
 The scope consists of all ready quests that are not claimed.
 Use the argument (if provided) to filter to specific quests/questlines.
 Main's tree lags its lines: a child finished on its line branch still looks ready from `main`.
-Judge readiness from each line branch's own quest directory.
+Fetch, then judge readiness with `quest ready --remote origin`, which reads each line from its branch.
 Inspect any blocked quests, and determine if they can be unblocked.
 A line whose `Quests` list has emptied is a ready quest too: finishing it marks the line's PR ready.
 

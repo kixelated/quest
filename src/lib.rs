@@ -41,15 +41,19 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 		let kind = entry.file_type()?;
 		if kind.is_dir() {
 			walk(root, &path, out)?;
-		} else if path.extension().is_some_and(|e| e == "md")
-			&& !path
-				.file_name()
-				.is_some_and(|n| NOT_QUESTS.iter().any(|skip| n == *skip))
-		{
+		} else if is_quest(&path) {
 			out.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
 		}
 	}
 	Ok(())
+}
+
+/// A Markdown file other than agent instructions.
+fn is_quest(path: &Path) -> bool {
+	path.extension().is_some_and(|e| e == "md")
+		&& !path
+			.file_name()
+			.is_some_and(|n| NOT_QUESTS.iter().any(|skip| n == *skip))
 }
 
 /// Parse and validate the tree. Returns every finding, worst-case empty.
@@ -64,4 +68,13 @@ fn load(root: &Path) -> Result<Vec<Doc>> {
 		bail!("no quest documents found under {}", root.join("quest").display());
 	}
 	paths.into_iter().map(|p| Doc::parse(root, p)).collect()
+}
+
+/// [`load`], with each line read from its branch on `remote` when one is given.
+fn load_from(root: &Path, remote: Option<&str>) -> Result<Vec<Doc>> {
+	let docs = load(root)?;
+	match remote {
+		Some(remote) => branch::overlay(root, docs, remote),
+		None => Ok(docs),
+	}
 }
