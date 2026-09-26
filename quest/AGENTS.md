@@ -65,10 +65,11 @@ Current decisions, open questions, or implementation guidance.
 - `quest check` enforces this structure; run it before submitting quest
   changes. `quest ready [<path>]` prints what blocks a quest, or every ready
   quest; `--remote origin` reads each line from its fetched branch, where its
-  children finish before `main` sees them. `quest branch <path>` prints the branch and every branch it merges
-  through, nearest first and ending at `main`. The root instructions say how
-  to run `quest` when it is not on `PATH`. It reads the tree alone: whether a
-  PR already claims a quest is GitHub's question.
+  children finish before `main` sees them. `quest branch <path>` prints the
+  branch and every branch it merges through, nearest first and ending at
+  `main`. The root instructions say how to run `quest` when it is not on
+  `PATH`. Only `--remote` reads git; nothing asks GitHub whether a PR already
+  claims a quest.
 
 ## Creation
 
