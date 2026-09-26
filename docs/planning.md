@@ -76,11 +76,13 @@ adopting repositories remain user-owned and are not treated as quests.
 
 ## Existing foundation
 
-The Rust CLI provides `check`, `ready`, and an explicit `--root`. It parses
-Markdown, validates the tree and dependency graph, and orders ready work by the
-questline indexes. Four skills cover planning, issue triage, execution, and
-parallel coordination. No installation manifest, issue migration engine, update
-command, or binary release pipeline exists yet.
+The Rust CLI provides `check`, `ready`, `branch`, and an explicit `--root`. It
+parses Markdown, validates the tree and dependency graph, orders ready work by
+the questline indexes, and names the branch chain a quest merges through. A
+README that no longer lists children is itself ready work. Four skills cover
+planning, issue triage, execution, and parallel coordination. No installation
+manifest, issue migration engine, update command, or binary release pipeline
+exists yet.
 
 The extraction removes Cargo workspace dependencies, retains licenses and tests,
 and adapts instructions to a standalone contribution workflow. Empty permanent

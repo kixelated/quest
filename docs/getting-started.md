@@ -1,39 +1,42 @@
 # Use Quest in your repository
 
-Setup is manual for now. You need the `quest` binary and, if you want the agent
-workflow, the skills and instructions from this checkout.
+Setup is manual for now. You need the `quest` binary and, for the agent
+workflow, the skills and instructions from this repository.
 
-## Install the binary
+## Vendor it as a submodule
 
-From a clone of this repository:
+A submodule pins the CLI, the skills, and the instructions to one commit, so
+they cannot drift apart. From your repository root:
 
 ```sh
-cargo install --locked --path .
+git submodule add https://github.com/kixelated/quest .claude/quest
+ln -s ../.claude/quest/quest/AGENTS.md quest/AGENTS.md
+for skill in plan-issues plan-quests spawn-quests start-quest; do
+  ln -s ../quest/.claude/skills/$skill .claude/skills/$skill
+done
+echo /.scratch/ >> .gitignore
 ```
 
-The package requires Rust 1.91 or newer; `rust-toolchain.toml` pins the development
-toolchain. `nix develop` supplies that toolchain and the other development tools.
+Run the pinned CLI with
+`cargo run --quiet --locked --manifest-path .claude/quest/Cargo.toml -- check`,
+or wrap that in your task runner. It needs Rust 1.91 or newer. Codex reads
+skills from `.agents/skills/`; a directory symlink to `.claude/skills` shares
+one copy. Check for existing skills with the same names first.
 
-## Add the instructions and skills
-
-Copy `quest/AGENTS.md` into the same path in your repository. Keep your existing
-root instructions and add a brief reference asking agents to read
-`quest/AGENTS.md` when working on quests. Adapt its contribution workflow to your
-repository's checks and PR conventions.
-
-Copy the four directories under `.claude/skills/` into the project skill location
-for the agent you use:
-
-- Claude Code: `.claude/skills/`
-- Codex: `.agents/skills/`
-
-If you use both, this repository demonstrates sharing one copy with a directory
-symlink. Check for existing skills with the same names before copying anything.
+Keep repository-specific rules in your root instructions, not in the vendored
+files, and add a line there asking agents to read `quest/AGENTS.md` when work
+mentions a quest. Upgrade by moving the submodule to a newer commit. Fresh
+worktrees need `git submodule update --init .claude/quest` before the
+symlinks resolve.
 
 Claude Code's direct `AGENTS.md` support starts at v2.1.277 and depends on the
 session configuration. An existing project or ancestor `CLAUDE.md` can take
 precedence. See [Claude's instruction-loading rules](https://code.claude.com/docs/en/memory#agentsmd)
 if the shared instructions do not load.
+
+To install the binary instead, run `cargo install --locked --path .` from a
+clone of this repository. `nix develop` supplies the pinned toolchain and the
+other development tools.
 
 ## Start a roadmap
 
@@ -59,7 +62,11 @@ From your repository root, validate the result and look for ready work:
 ```sh
 quest check
 quest ready
+quest branch quest/m0/some-quest.md
 ```
+
+`branch` prints that quest's branch and each branch it merges through, ending
+at `main`. Milestones themselves have no branch.
 
 Review the plan before starting it. `/start-quest` works on one quest;
 `/spawn-quests` coordinates multiple agents when your session supports them.
@@ -68,7 +75,7 @@ still need checking; the local readiness command cannot see them.
 
 ## Update or remove it
 
-Automatic upgrades, issue export, and uninstall are not implemented yet. For
-now, review changes to copied files manually and keep your customizations.
-If you stop using Quest, preserve any unfinished plans before removing the
-skills and instruction references. Completed plans remain in Git history.
+Automatic upgrades, issue export, and uninstall are not implemented yet.
+Upgrade by moving the submodule and reviewing the diff. If you stop using
+Quest, preserve any unfinished plans before removing the submodule, the
+symlinks, and the instruction reference. Completed plans remain in Git history.

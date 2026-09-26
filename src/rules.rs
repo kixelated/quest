@@ -124,13 +124,10 @@ fn headings(found: &mut Findings, doc: &Doc) {
 		}
 	}
 
-	// A questline is a README with `## Quests`; a quest is everything else and
-	// must not have one. Only quests are executed, so the distinction decides
-	// what a reader is allowed to pick up.
-	match (doc.is_questline(), doc.has("Quests")) {
-		(true, false) => found.on(&doc.path, "a questline needs '## Quests'"),
-		(false, true) => found.on(&doc.path, "only a questline README may have '## Quests'"),
-		_ => {}
+	// Only a README indexes children; a quest is a leaf and must not, since the
+	// index is what makes a file a questline and questlines are not picked up.
+	if doc.has("Quests") && !doc.is_questline() {
+		found.on(&doc.path, "only a README may have '## Quests'");
 	}
 	for heading in &doc.headings {
 		if LIST_SECTIONS.contains(&heading.text.as_str()) && doc.entries(&heading.text).next().is_none() {
@@ -304,10 +301,12 @@ fn index<'a>(found: &mut Findings, known: &BTreeSet<&Path>, docs: &'a [Doc]) -> 
 	}
 
 	for doc in docs {
-		// A non-root questline lists at least one quest. Completing its last one is
-		// supposed to delete the directory; a heading holding a bullet with no
-		// quest in it (`- TBD`) leaves the husk standing just as well as a bare
-		// one does.
+		// A questline lists at least one quest. An empty `## Quests` is a husk:
+		// either the line still has work of its own, in which case the heading
+		// comes off and the README becomes that quest, or the directory should
+		// have been deleted. The root may list nothing; a new repository's
+		// roadmap is empty until the first milestone lands. A milestone omits
+		// the heading while it is empty, and stays.
 		if doc.is_questline()
 			&& doc.path != Path::new(ROOT)
 			&& doc.has("Quests")
