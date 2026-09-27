@@ -26,8 +26,8 @@ Prefer simple, maintainable changes and ask about consequential product choices.
 - Ask about consequential scope or API choices, with options and a recommendation.
 - Stop and report when progress stalls. Leave follow-up work as scoped quests.
 - Do not edit instructions or skills unless the user asks for that work.
-- Starting or spawning quests stops at PR creation. Merge requires a separate
-  invocation and passing repository checks and reviews.
+- Starting or spawning quests stops at PR creation. It merges only when the user
+  picks /quest-merge, and only after repository checks and reviews pass.
 - End every GitHub post with `(written by <model>)`, naming the running model.
   Do not comment on repositories outside kixelated/moq-dev without approval.
 
