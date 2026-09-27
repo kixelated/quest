@@ -1,6 +1,6 @@
 # Quests
 
-Read this file whenever work mentions a quest or questline.
+Read this whenever work mentions a quest or questline.
 
 Quests are versioned plans checked into the repository under `quest/`. GitHub
 issues remain the public front door; prefer a quest for work that needs
@@ -12,7 +12,7 @@ durable scope or coordination.
   whose `README.md` is its quest: its `Quests` section lists the children, and
   it completes when its own work is done and every child has merged.
 - The root's entries are milestones, `m0`, `m1`, ..., grouping work by
-  priority horizon; lower numbers matter more. [README.md](README.md) says
+  priority horizon; lower numbers matter more. `quest/README.md` says
   what each holds. Priority decides the milestone, and starting a quest does
   not move it. Numbers stay stable as earlier milestones complete.
 - A document's branch is its path without `.md`: `quest/m1/foo/bar.md` is
@@ -95,7 +95,7 @@ Current decisions, open questions, or implementation guidance.
 - Keep a line current by merging its base in; never rebase a shared branch.
 - Update the quest as the plan changes. Complete it when no work remains, and
   suggest follow-ups as new quests.
-- Open the PR per [CONTRIBUTING.md](../CONTRIBUTING.md) against the base, with
+- Open the PR per the repository's `CONTRIBUTING.md` against the base, with
   a closing keyword for every issue under `Closes`, including those of any
   questline the same PR completes.
 - A line's PR stays a draft until its `Quests` list is empty. The PR that

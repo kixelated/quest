@@ -4,9 +4,9 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-/// The quest tree, the interlinked Markdown plans under quest/ whose contract is
-/// quest/AGENTS.md: validate its structure, report what blocks a quest, or name
-/// the branches a quest lands on.
+/// The quest tree, the interlinked Markdown plans under quest/: validate its
+/// structure, report what blocks a quest, name the branches a quest lands on, and
+/// print the guide and skills agents follow.
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
@@ -49,6 +49,22 @@ enum Command {
 		/// Quest or questline to locate.
 		path: PathBuf,
 	},
+
+	/// Print the quest guide: the format, workflow, and rules agents follow.
+	Guide,
+
+	/// Print a skill's instructions, or list the skills with no name.
+	///
+	/// A repository installs only a stub per skill, which runs this, so the
+	/// pinned binary decides what every agent follows.
+	Skill {
+		/// Skill to print.
+		name: Option<String>,
+
+		/// Print the stub SKILL.md a repository installs instead.
+		#[arg(long, requires = "name")]
+		stub: bool,
+	},
 }
 
 fn main() -> Result<ExitCode> {
@@ -78,7 +94,7 @@ fn main() -> Result<ExitCode> {
 				// Blocked is not a verdict on the whole plan: the piece of it
 				// that does not need the blocker is split into its own quest.
 				eprintln!(
-					"quest: {} is blocked; split any independently landable piece into its own quest (quest/AGENTS.md, Creation) rather than starting this one as it stands",
+					"quest: {} is blocked; split any independently landable piece into its own quest (`quest guide`, Creation) rather than starting this one as it stands",
 					path.display()
 				);
 			}
@@ -93,6 +109,28 @@ fn main() -> Result<ExitCode> {
 		Command::Branch { path } => {
 			for branch in quest::branch::chain(&cli.root, &path)? {
 				println!("{branch}");
+			}
+			Ok(ExitCode::SUCCESS)
+		}
+		Command::Guide => {
+			print!("{}", quest::skills::GUIDE);
+			Ok(ExitCode::SUCCESS)
+		}
+		Command::Skill { name: None, .. } => {
+			for skill in quest::skills::all() {
+				println!("{} - {}", skill.name, skill.description());
+			}
+			Ok(ExitCode::SUCCESS)
+		}
+		Command::Skill { name: Some(name), stub } => {
+			let Some(skill) = quest::skills::get(&name) else {
+				let names: Vec<_> = quest::skills::all().map(|skill| skill.name).collect();
+				anyhow::bail!("no skill named {name} (have: {})", names.join(", "));
+			};
+			if stub {
+				print!("{}", skill.stub());
+			} else {
+				print!("{}", skill.body());
 			}
 			Ok(ExitCode::SUCCESS)
 		}

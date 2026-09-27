@@ -24,7 +24,6 @@ ownership-manifest design:
 
 ## Quests
 
-- [Embedded skills](/quest/m0/embedded-skills.md) - `quest skill <name>` and `quest guide` serve the skills and contract from the binary
 - [Release binaries](/quest/m0/releases.md) - tagged releases publish macOS and Linux binaries that mise and a shell installer can fetch
 - [Init and uninstall](/quest/m0/init.md) - `quest init` sets a repository up with stubs and a root reference; `quest uninstall` reverses it
 - [Export skill](/quest/m0/export.md) - turn active quests back into GitHub issues before leaving Quest

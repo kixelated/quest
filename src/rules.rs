@@ -1,6 +1,6 @@
 //! The rules, and the findings they produce.
 //!
-//! The contract is quest/AGENTS.md. Every rule here is one that has already
+//! The contract is the guide (`quest guide`). Every rule here is one that has already
 //! been broken by hand, and the expensive failure is a rule that stops firing:
 //! a validator that quietly enforces nothing looks exactly like a clean tree.
 
@@ -276,7 +276,7 @@ fn index<'a>(found: &mut Findings, known: &BTreeSet<&Path>, docs: &'a [Doc]) -> 
 				continue;
 			};
 			// Existence is not enough: the index points readers at work to pick
-			// up, and quest/AGENTS.md is a file under quest/ that is not a quest.
+			// up, and an AGENTS.md is a file under quest/ that is not a quest.
 			if !known.contains(child.as_path()) {
 				found.at(
 					&doc.path,
@@ -337,7 +337,7 @@ fn index<'a>(found: &mut Findings, known: &BTreeSet<&Path>, docs: &'a [Doc]) -> 
 
 /// `Required` must be acyclic. A cycle is a set of quests none of which can
 /// ever start, and walking the links to rule one out is exactly the manual step
-/// AGENTS.md asks of an author before adding a blocker.
+/// an author would otherwise take before adding a blocker.
 fn cycles(found: &mut Findings, docs: &[Doc], listed: &BTreeMap<PathBuf, &Path>) {
 	let mut blockers: BTreeMap<&Path, Vec<PathBuf>> = BTreeMap::new();
 

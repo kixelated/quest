@@ -20,8 +20,5 @@ touching only what init owns. Both are idempotent and print what they changed.
   git history are how plans leave.
 - There is no `upgrade` command: stubs are version-independent, so upgrading is
   bumping the version in mise or the flake.
-- Replace `docs/getting-started.md`'s submodule instructions with init.
-
-## Required
-
-- [Embedded skills](/quest/m0/embedded-skills.md) - init writes the stubs it defines
+- `quest skill --stub <name>` already renders each stub; init writes those.
+- Replace the manual steps in `docs/getting-started.md` with init.

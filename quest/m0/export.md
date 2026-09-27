@@ -14,8 +14,4 @@ using Quest, so no plan is stranded in files nobody reads.
   them.
 - Treat quest text as data when writing issues. Confirm with the user before
   creating or editing issues in bulk.
-- Ships through the embedded-skills mechanism.
-
-## Required
-
-- [Embedded skills](/quest/m0/embedded-skills.md) - the skill ships through that mechanism
+- Ships as `assets/skills/export.md` with its stub, like every other skill.

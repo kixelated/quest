@@ -74,7 +74,7 @@ pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Bl
 ///
 /// A questline is not listed while it still indexes children; a README with
 /// no `## Quests` left is the line's own remaining work and lists like any
-/// other quest. The absence of a `## Required` heading is what quest/AGENTS.md
+/// other quest. The absence of a `## Required` heading is what the guide
 /// defines as ready. `remote` is as for [`blockers`].
 pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	let docs = crate::load_from(root, remote)?;
