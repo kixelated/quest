@@ -12,7 +12,7 @@ wrapper, and no quest skills left in kixelated/skills.
   step that removed their forks.
 - Pin through their flakes (both are nix repositories), at a release or a git
   rev while dogfooding.
-- Remove merge, spawn-merge, and close from kixelated/skills and repoint both
+- Remove merge, spawn-merge, close, and takeover from kixelated/skills and repoint both
   repositories' symlinks; they now come from Quest.
 - Keep each repository's quest-specific rules (moq's `dev` branch handling) in
   its root instructions, and its CI hooks calling `quest check`.

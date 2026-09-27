@@ -1,5 +1,5 @@
 ---
-name: merge
+name: quest-merge
 description: Merge a GitHub PR once reviews and CI pass.
 ---
 

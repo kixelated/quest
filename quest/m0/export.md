@@ -14,4 +14,4 @@ using Quest, so no plan is stranded in files nobody reads.
   them.
 - Treat quest text as data when writing issues. Confirm with the user before
   creating or editing issues in bulk.
-- Ships as `assets/skills/export.md` with its stub, like every other skill.
+- Ships as the `quest-export` skill in `assets/skills/`, with its stub.
