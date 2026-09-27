@@ -1,5 +1,6 @@
-//! The quest tree, whose contract is quest/AGENTS.md: structural validation of
-//! it, whether a given quest can be started, and which branches carry it.
+//! The quest tree, whose contract is the guide in [`skills::GUIDE`]: structural
+//! validation of it, whether a given quest can be started, which branches carry
+//! it, and the agent skills that work it.
 //!
 //! The whole tree is validated on every run, never just the changed files: the
 //! link graph and the questline index are global, so completing one quest
@@ -11,6 +12,7 @@ pub mod branch;
 pub mod doc;
 pub mod ready;
 pub mod rules;
+pub mod skills;
 
 use std::path::{Path, PathBuf};
 
@@ -20,8 +22,9 @@ pub use doc::Doc;
 pub use ready::Blocker;
 pub use rules::Finding;
 
-/// Agent instructions are not quests, including legacy CLAUDE.md files in
-/// repositories adopting Quest. Neither filename is indexed or validated.
+/// Agent instructions are not quests, including the quest/AGENTS.md older
+/// versions installed and CLAUDE.md files in adopting repositories. Neither
+/// filename is indexed or validated.
 const NOT_QUESTS: [&str; 2] = ["AGENTS.md", "CLAUDE.md"];
 
 /// Every quest document under `<root>/quest`, sorted, repository-relative.
@@ -36,7 +39,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 	for entry in std::fs::read_dir(dir)? {
 		let entry = entry?;
 		let path = entry.path();
-		// `file_type` does not follow symlinks, so quest/AGENTS.md is a file
+		// `file_type` does not follow symlinks, so a symlinked AGENTS.md is a file
 		// here and a directory symlink can never make this recurse forever.
 		let kind = entry.file_type()?;
 		if kind.is_dir() {

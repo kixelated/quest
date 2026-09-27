@@ -37,7 +37,17 @@
           toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           quest = craneLib.buildPackage {
-            src = craneLib.cleanCargoSource ./.;
+            # The guide and skills are compiled in, and a test compares this
+            # repository's installed stubs against them.
+            src = pkgs.lib.cleanSourceWith {
+              src = ./.;
+              filter =
+                path: type:
+                craneLib.filterCargoSources path type
+                || pkgs.lib.hasInfix "/assets" path
+                || pkgs.lib.hasSuffix "/.claude" path
+                || pkgs.lib.hasInfix "/.claude/skills" path;
+            };
             strictDeps = true;
             # The line-branch readiness tests build real repositories.
             nativeCheckInputs = [ pkgs.git ];

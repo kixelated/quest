@@ -1,9 +1,9 @@
 ---
-name: spawn-quests
+name: quest-spawn
 description: Spawn background agents to work on quests in parallel.
 ---
 
-Before you begin, read `quest/AGENTS.md` completely.
+Before you begin, run `quest guide` and read its output completely.
 
 Your goal is to execute, plan, and/or merge quests in parallel.
 If you are unsure of the best course of action, ask the user for clarification before proceeding.
@@ -15,11 +15,11 @@ Fetch, then judge readiness with `quest ready --remote origin`, which reads each
 Inspect any blocked quests, and determine if they can be unblocked.
 A line whose `Quests` list has emptied is a ready quest too: finishing it marks the line's PR ready.
 
-Recommend an action for each quest: /start-quest, /plan-quests, skip, or delete.
+Recommend an action for each quest: /quest-start, /quest-plan, skip, or delete.
 Start the quests you'd start with no open question right away.
 Interactively prompt the user about the rest, a few per prompt, each with a short summary and your recommendation.
 
-Spawn a background sub-agent for each /start-quest.
+Spawn a background sub-agent for each /quest-start.
 Create a fresh worktree on the base `quest branch` prints, creating that line branch first if it is missing.
 Agents share no writable files: each keeps its scratch files in its own worktree's `.scratch/`, and anything you hand every agent goes in its prompt, not a shared file.
 Each agent blocks on its own checks and reports back only when done or blocked.
@@ -32,12 +32,12 @@ Report each sub-agent's final status, staying silent on interim notifications, b
 
 As each agent reports, explain its result in a few lines, then prompt the user inline without waiting for the rest.
 Ask about every open decision (naming, API shape, branch, blockers, manual steps), a few per prompt, each with the PR, a short summary, and your recommendation first.
-Offer its follow-ups as a multi-select to /plan-quests.
+Offer its follow-ups as a multi-select to /quest-plan.
 Resume the owning agent with each answer, and prompt again on anything its next report raises.
 Once nothing is open, ask whether to mark the PR ready, then mark it yourself.
 Record the outcome as a PR comment when it isn't already in the PR: each decision and its reason, and any follow-up the user declined.
 
-Run /plan-quests for any selected quests in the foreground.
+Run /quest-plan for any selected quests in the foreground.
 Perform any research and monitoring in the background.
 
 Finally, create a PR for any created/updated quests.

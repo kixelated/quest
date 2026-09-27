@@ -10,9 +10,9 @@ and Codex plan the work and pick it up.
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
 
-**Early days:** validation, readiness, and the four planning/execution skills are
-here. Automatic setup, issue migration, managed upgrades, and a dedicated merge
-workflow are still being planned.
+**Early days:** validation, readiness, and the planning, execution, and merge
+skills are here. Automatic setup, issue export, and release binaries are still
+being built.
 
 ## A quest is just a file
 
@@ -93,21 +93,27 @@ may already be working on.
 
 ## Work with an agent
 
-Open this repository in Claude Code or Codex. The skills ship with it:
+Open this repository in Claude Code or Codex. The binary carries the skills;
+a repository installs only a stub per skill that runs `quest skill <name>`, so
+the version you pin decides what your agents follow:
 
 | Skill | What it does |
 | --- | --- |
-| `plan-quests` | Ask the questions that turn an idea into scoped quests. |
-| `plan-issues` | Bring selected GitHub issues into the planning conversation. |
-| `start-quest` | Claim a ready quest, implement it, and prepare a PR. |
-| `spawn-quests` | Triage a scope and hand independent quests to parallel agents. |
+| `quest-plan` | Ask the questions that turn an idea into scoped quests. |
+| `quest-issues` | Bring selected GitHub issues into the planning conversation. |
+| `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
+| `quest-spawn` | Triage a scope and hand independent quests to parallel agents. |
+| `quest-merge` | Land a PR once CI and reviews pass. |
+| `quest-spawn-merge` | Decide and land open PRs in parallel. |
+| `quest-close` | Abandon a PR, deleting its quest if it was completing one. |
+| `quest-takeover` | Adopt someone else's PR and drive it to landable. |
 
-Use `/plan-quests` in Claude Code or `$plan-quests` in Codex. Skills coordinate
+Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. Starting work stops at a PR; merging is a separate
 invocation.
 
 To use Quest in your own repository, follow the [manual setup](docs/getting-started.md).
-The [format and workflow](quest/AGENTS.md) fit in one file.
+`quest guide` prints the format and workflow.
 
 ## Where this is going
 

@@ -3,11 +3,12 @@
 Keep the core independent of a particular repository, agent, or issue tracker.
 Prefer simple, maintainable changes and ask about consequential product choices.
 
-- Read `quest/AGENTS.md` completely before planning or executing quests.
+- Run `quest guide` and read it completely before planning or executing quests.
+  In this checkout, `quest` means `cargo run --quiet --locked --`.
 - Read `CONTRIBUTING.md` before making changes or preparing a PR.
 - Read `PROMPTING.md` before changing instructions or skills, or delegating work.
-- Keep shared workflow instructions in `quest/AGENTS.md`; skills explain only
-  their particular workflow.
+- Keep shared workflow instructions in `assets/guide.md`; skills in
+  `assets/skills/` explain only their particular workflow.
 - Keep README examples consistent with the CLI's actual `--help` output.
 - Distinguish implemented features from proposed release work.
 
@@ -30,5 +31,6 @@ Prefer simple, maintainable changes and ask about consequential product choices.
 - End every GitHub post with `(written by <model>)`, naming the running model.
   Do not comment on repositories outside kixelated/moq-dev without approval.
 
-The quest skills live in `.claude/skills/` and are also exposed through
-`.agents/skills/`.
+The binary embeds the guide and skills from `assets/`. `.claude/skills/` holds
+the same stubs every adopting repository installs, also exposed through
+`.agents/skills/`; regenerate one with `quest skill --stub <name>`.
