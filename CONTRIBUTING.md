@@ -32,7 +32,8 @@ builds and tests the Nix package and validates the repository's quest tree.
 Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations. Start PRs as drafts
 and mark them ready after checks pass. Merge only within the user's authorized
-scope and after required repository checks and reviews pass.
+scope and after required repository checks and reviews pass. Never block on a
+CodeRabbit review; it is optional.
 Quest execution stops at PR creation; it merges only when the user picks /quest-merge.
 
 Every AI-authored GitHub post must end with `(written by <model>)`, naming the

@@ -18,3 +18,4 @@ A background agent that cannot prompt lists its decisions in its report instead.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
+Never close a PR to unstick it, and never work around a refused merge; ask instead.
