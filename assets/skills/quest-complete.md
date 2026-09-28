@@ -3,7 +3,7 @@ name: quest-complete
 description: Complete quests in parallel.
 ---
 
-Before starting, run `quest guide`, `quest skill merge`, and `quest skill plan`.
+Before starting, run `quest guide`, `quest skill quest-merge`, and `quest skill quest-plan`.
 
 The goal is to evaluate the open (non-draft) PRs in the repository and decide which ones to merge.
 The skill argument can be used to filter the PRs in scope.

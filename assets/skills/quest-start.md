@@ -1,5 +1,5 @@
 ---
-name: start
+name: quest-start
 description: Start work on a quest.
 ---
 

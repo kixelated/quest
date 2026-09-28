@@ -6,18 +6,18 @@
 //! upgrading never rewrites repository files.
 
 /// The quest contract: the format, workflow, and rules every skill builds on.
-pub const GUIDE: &str = include_str!("../assets/guide.md");
+pub const GUIDE: &str = include_str!("../assets/AGENTS.md");
 
 /// Every skill, sorted by name.
 const SKILLS: [(&str, &str); 8] = [
-	("close", include_str!("../assets/skills/close.md")),
-	("issues", include_str!("../assets/skills/issues.md")),
-	("merge", include_str!("../assets/skills/merge.md")),
-	("plan", include_str!("../assets/skills/plan.md")),
-	("spawn", include_str!("../assets/skills/spawn.md")),
-	("spawn-merge", include_str!("../assets/skills/spawn-merge.md")),
-	("start", include_str!("../assets/skills/start.md")),
-	("takeover", include_str!("../assets/skills/takeover.md")),
+	("quest-close", include_str!("../assets/skills/quest-close.md")),
+	("quest-complete", include_str!("../assets/skills/quest-complete.md")),
+	("quest-convert", include_str!("../assets/skills/quest-convert.md")),
+	("quest-delete", include_str!("../assets/skills/quest-delete.md")),
+	("quest-merge", include_str!("../assets/skills/quest-merge.md")),
+	("quest-plan", include_str!("../assets/skills/quest-plan.md")),
+	("quest-spawn", include_str!("../assets/skills/quest-spawn.md")),
+	("quest-start", include_str!("../assets/skills/quest-start.md")),
 ];
 
 /// Where an agent without the binary learns to install it.

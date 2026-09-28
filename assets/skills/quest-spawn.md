@@ -1,5 +1,5 @@
 ---
-name: quest-spawn 
+name: quest-spawn
 description: Start multiple quests in parallel.
 ---
 

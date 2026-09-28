@@ -1,5 +1,5 @@
 ---
-name: delete
+name: quest-delete
 description: Abandon a quest.
 ---
 
