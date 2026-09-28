@@ -1,6 +1,6 @@
 ---
 name: quest-audit
-description: Audit outstanding quests for disagreements, conflicts, and misaligned priorities, then resolve them with /quest-plan.
+description: Audit outstanding quests for disagreements, conflicts, misaligned priorities, and stale plans, then resolve them with /quest-plan. Use when the user invokes /quest-audit or asks to check the quest tree for consistency.
 ---
 
 Run `quest skill audit` and follow its output.
