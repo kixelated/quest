@@ -5,6 +5,8 @@ description: Scope and create quests through an interactive interview. Use when 
 Before you begin, run `quest guide` and read its output completely.
 
 Interview the user until you reach a shared understanding.
+Every follow-up the user picks goes through this interview, including edits to existing quests and to quests in other repositories.
+A background agent that cannot prompt puts the problem in its report with a recommendation, so this skill can run in the foreground; it never creates or edits quests itself.
 
 Work the tree in **rounds**.
 The **frontier** is every decision whose prerequisites are already settled.
@@ -39,4 +41,5 @@ New work joins the milestone matching its priority, at its rank; a questline gro
 Include all of the decision prompts in the PR as a paper trail, with a ✅ next to the selected option.
 
 When done, commit, create a PR, and run `/quest-merge` on it.
+Quests planned as follow-ups of an open PR may be committed to that PR instead.
 The quest should be reviewed before it is merged.

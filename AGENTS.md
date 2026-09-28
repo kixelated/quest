@@ -23,7 +23,8 @@ Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
   interfaces. Keep changes focused on the requested outcome.
 - Reproduce bugs and add a regression test when practical. Wire tests into CI.
 - Ask about consequential scope or API choices, with options and a recommendation.
-- Stop and report when progress stalls. Leave follow-up work as scoped quests.
+- Stop and report when progress stalls. Suggest follow-up work for `/quest-plan`
+  rather than creating quests for it directly.
 - Starting or spawning quests stops at PR creation. It merges only when the user
   picks /quest-merge, and only after repository checks and reviews pass.
 - End every GitHub post with `(written by <model>)`, naming the running model.
