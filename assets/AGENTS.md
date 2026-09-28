@@ -110,6 +110,13 @@ At least one review is required before merging the PR, except for any trivial ch
 
 Any findings that seem out-of-scope, or bugs encountered during the process, should be suggested as follow-ups.
 
+## Follow-ups
+
+Suggest each follow-up with a recommendation.
+Only `/quest-plan` turns a follow-up the user picks into quest changes, including edits to existing quests and to quests in other repositories.
+Run it in the foreground, in the session that can prompt the user.
+A background agent that cannot prompt lists its suggested follow-ups in its report and never creates or edits quests for them.
+
 ## Deletion
 
 A quest that is no longer needed or cannot be completed is abandoned.
