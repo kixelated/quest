@@ -10,9 +10,9 @@ pub const GUIDE: &str = include_str!("../assets/AGENTS.md");
 
 /// Every skill, sorted by name.
 const SKILLS: [(&str, &str); 7] = [
-	("complete", include_str!("../assets/skills/complete.md")),
 	("convert", include_str!("../assets/skills/convert.md")),
 	("delete", include_str!("../assets/skills/delete.md")),
+	("finish", include_str!("../assets/skills/finish.md")),
 	("merge", include_str!("../assets/skills/merge.md")),
 	("plan", include_str!("../assets/skills/plan.md")),
 	("spawn", include_str!("../assets/skills/spawn.md")),
