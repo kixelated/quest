@@ -9,24 +9,27 @@
 pub const GUIDE: &str = include_str!("../assets/AGENTS.md");
 
 /// Every skill, sorted by name.
-const SKILLS: [(&str, &str); 8] = [
-	("quest-close", include_str!("../assets/skills/quest-close.md")),
-	("quest-complete", include_str!("../assets/skills/quest-complete.md")),
-	("quest-convert", include_str!("../assets/skills/quest-convert.md")),
-	("quest-delete", include_str!("../assets/skills/quest-delete.md")),
-	("quest-merge", include_str!("../assets/skills/quest-merge.md")),
-	("quest-plan", include_str!("../assets/skills/quest-plan.md")),
-	("quest-spawn", include_str!("../assets/skills/quest-spawn.md")),
-	("quest-start", include_str!("../assets/skills/quest-start.md")),
+const SKILLS: [(&str, &str); 7] = [
+	("complete", include_str!("../assets/skills/complete.md")),
+	("convert", include_str!("../assets/skills/convert.md")),
+	("delete", include_str!("../assets/skills/delete.md")),
+	("merge", include_str!("../assets/skills/merge.md")),
+	("plan", include_str!("../assets/skills/plan.md")),
+	("spawn", include_str!("../assets/skills/spawn.md")),
+	("start", include_str!("../assets/skills/start.md")),
 ];
 
 /// Where an agent without the binary learns to install it.
 const SETUP: &str = "https://github.com/kixelated/quest/blob/main/SETUP.md";
 
+/// Installed skills carry this prefix so they don't collide with a
+/// repository's own.
+const PREFIX: &str = "quest-";
+
 /// One skill: YAML frontmatter, then the instructions.
 #[derive(Clone, Copy, Debug)]
 pub struct Skill {
-	/// The name an agent invokes it by, which is also its directory name.
+	/// The name `quest skill <name>` takes.
 	pub name: &'static str,
 	text: &'static str,
 }
@@ -50,11 +53,17 @@ impl Skill {
 			.unwrap_or("")
 	}
 
+	/// The name an agent invokes it by, which is also its installed directory.
+	pub fn installed(&self) -> String {
+		format!("{PREFIX}{}", self.name)
+	}
+
 	/// The `SKILL.md` a repository installs: the frontmatter, and a pointer
 	/// back to this binary for everything else.
 	pub fn stub(&self) -> String {
 		format!(
-			"---\n{}\n---\n\nRun `quest skill {}` and follow its output.\nIf `quest` is not installed, follow {SETUP} first.\n",
+			"---\nname: {}\n{}\n---\n\nRun `quest skill {}` and follow its output.\nIf `quest` is not installed, follow {SETUP} first.\n",
+			self.installed(),
 			self.frontmatter(),
 			self.name,
 		)
@@ -83,17 +92,14 @@ pub fn get(name: &str) -> Option<Skill> {
 mod tests {
 	use super::*;
 
-	/// A skill whose frontmatter names another skill would install under one
-	/// name and trigger as another.
+	/// The stub writes the installed name, so a `name:` in the source would
+	/// install under one name and trigger as another.
 	#[test]
-	fn frontmatter_matches_the_name() {
+	fn frontmatter_is_complete() {
 		for skill in all() {
 			assert!(
-				skill
-					.frontmatter()
-					.lines()
-					.any(|line| line == format!("name: {}", skill.name)),
-				"{} frontmatter",
+				!skill.frontmatter().lines().any(|line| line.starts_with("name:")),
+				"{} frontmatter names itself",
 				skill.name
 			);
 			assert!(!skill.description().is_empty(), "{} description", skill.name);
@@ -129,9 +135,9 @@ mod tests {
 			.map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
 			.collect();
 		installed.sort();
-		assert_eq!(installed, all().map(|skill| skill.name).collect::<Vec<_>>());
+		assert_eq!(installed, all().map(|skill| skill.installed()).collect::<Vec<_>>());
 		for skill in all() {
-			let stub = std::fs::read_to_string(dir.join(skill.name).join("SKILL.md")).expect("read stub");
+			let stub = std::fs::read_to_string(dir.join(skill.installed()).join("SKILL.md")).expect("read stub");
 			assert_eq!(
 				stub,
 				skill.stub(),

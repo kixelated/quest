@@ -1,5 +1,4 @@
 ---
-name: quest-merge
 description: Merge a quest once reviews and CI pass.
 ---
 
@@ -12,7 +11,7 @@ Fix any mechanical issues with the PR, such as merge conflicts and failing CI ch
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
 
 Abort the merge if there is a significant decision to be made.
-Interactively prompt the user with your recommendation and any alternatives. 
+Interactively prompt the user with your recommendation and any alternatives.
 This includes deciding if we should `/quest-plan` for suggested follow-ups.
 
 A background agent that cannot prompt lists its decisions in its report instead.

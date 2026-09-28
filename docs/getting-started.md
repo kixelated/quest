@@ -23,8 +23,8 @@ From your repository root:
 
 ```sh
 for skill in $(quest skill | cut -d' ' -f1); do
-  mkdir -p .claude/skills/$skill
-  quest skill --stub $skill > .claude/skills/$skill/SKILL.md
+  mkdir -p .claude/skills/quest-$skill
+  quest skill --stub $skill > .claude/skills/quest-$skill/SKILL.md
 done
 echo /.scratch/ >> .gitignore
 ```
@@ -51,8 +51,6 @@ Create `quest/README.md`:
 ## Goal
 
 What this project is working toward.
-
-## Quests
 ```
 
 An empty root is valid. Invoke `/quest-plan` in Claude Code or `$quest-plan` in
@@ -70,13 +68,13 @@ quest branch quest/m0/some-quest.md
 
 `branch` prints that quest's branch and each branch it merges through, ending
 at `main`. Milestones themselves have no branch. Children merge into their
-line's branch first, so after a `git fetch`, `quest ready --remote origin`
-reads each line from its branch instead of the working tree.
+line's branch first, so `quest ready` reads each line from its branch on
+`origin` (fetch first); `--local` reads only the working tree.
 
 Review the plan before starting it. `/quest-start` works on one quest;
 `/quest-spawn` coordinates multiple agents when your session supports them.
 Use `$quest-start` and `$quest-spawn` in Codex. Existing branch claims and PRs
-still need checking; the local readiness command cannot see them.
+still need checking; `quest ready` does not look for them.
 
 ## Update or remove it
 

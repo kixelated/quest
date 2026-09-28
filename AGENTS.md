@@ -6,7 +6,8 @@ Prefer simple, maintainable changes and ask about consequential product choices.
 - Keep shared workflow instructions in `assets/AGENTS.md`.
 - Keep skills in `assets/skills/` and explain only their particular workflow.
 
-Do not edit these files without permission.
+Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
+`assets/skills/` unless the user asks for that work.
 
 ## Development
 
@@ -23,7 +24,6 @@ Do not edit these files without permission.
 - Reproduce bugs and add a regression test when practical. Wire tests into CI.
 - Ask about consequential scope or API choices, with options and a recommendation.
 - Stop and report when progress stalls. Leave follow-up work as scoped quests.
-- Do not edit instructions or skills unless the user asks for that work.
 - Starting or spawning quests stops at PR creation. It merges only when the user
   picks /quest-merge, and only after repository checks and reviews pass.
 - End every GitHub post with `(written by <model>)`, naming the running model.

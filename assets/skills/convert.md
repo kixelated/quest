@@ -1,9 +1,8 @@
 ---
-name: quest-convert
 description: Convert Github issues to quests.
 ---
 
-Before starting, run `quest guide` and `quest skill quest-plan`.
+Before starting, run `quest guide` and `quest skill plan`.
 
 Call `/quest-plan` for repository's open GitHub issues without the `quest` label.
 Add the `quest` label to these issues once the PR is open, so another planner skips them.

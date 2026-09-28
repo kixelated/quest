@@ -19,7 +19,7 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Position {
 	/// The link opens a list item, ignoring any emphasis around it. This is the
-	/// shape every `Required` blocker and every `Quests` entry must have.
+	/// shape every `Required` entry must have.
 	Entry,
 	/// Somewhere else inside a list item: a sentence that happens to link.
 	Inside,
@@ -40,8 +40,7 @@ pub struct Link {
 	pub position: Position,
 }
 
-/// One top-level list entry: the shape a `Required` blocker and a `Quests`
-/// index entry both have.
+/// One top-level list entry: the shape a `Required` child or blocker has.
 #[derive(Clone, Debug)]
 pub struct Entry {
 	/// 1-based source line, for findings.
@@ -99,12 +98,22 @@ impl Doc {
 			.filter(move |e| e.section.as_deref() == Some(section))
 	}
 
-	/// A questline is a `README.md` with a `Quests` section. Any other README is
-	/// what a line becomes when its last child merges: the line's own remaining
-	/// work, executed like any other quest. The root and the milestones are the
-	/// exception.
+	/// A questline is a `README.md` that still requires a child. Any other README
+	/// is what a line becomes when its last child merges: the line's own
+	/// remaining work, executed like any other quest. The root and the milestones
+	/// are the exception.
 	pub fn is_questline(&self) -> bool {
-		self.is_readme() && (self.has("Quests") || Self::permanent(&self.path))
+		self.is_readme() && (self.children().next().is_some() || Self::permanent(&self.path))
+	}
+
+	/// The `Required` entries that sit directly under a README's directory: the
+	/// line's children, in priority order. Every other entry is a blocker like
+	/// any quest's, and a quest that is not a README has no children.
+	pub fn children(&self) -> impl Iterator<Item = PathBuf> + '_ {
+		let dir = self.path.parent().filter(|_| self.is_readme());
+		self.entries("Required")
+			.filter_map(|entry| entry.target.as_deref().and_then(crate::rules::rooted))
+			.filter(move |child| dir.is_some_and(|dir| Self::owner(child) == dir))
 	}
 
 	/// The root and the milestones outlive their quests, so an empty one is not

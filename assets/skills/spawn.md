@@ -1,5 +1,4 @@
 ---
-name: quest-spawn
 description: Start multiple quests in parallel.
 ---
 
@@ -10,13 +9,13 @@ The scope consists of all ready quests that are not claimed.
 Use the argument (if provided) to filter to specific quests/questlines.
 Inspect any blocked quests and determine if they can be unblocked.
 
-Interactively prompt the user about every PR (batch a few), with your recommendation:
+Interactively prompt the user about every quest (batch a few), with your recommendation:
 - `/quest-start`: If the quest is well planned with no blockers.
 - `/quest-plan`: If the quest has significant design issues.
 - skip: If the quest should not be started yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Include a brief summary of each PR.
+Include a brief summary of each quest.
 Consider ordering, suggesting to skip any quests that would result in conflicts.
 
 Spawn a background sub-agent for each `/quest-start`.

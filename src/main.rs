@@ -32,11 +32,15 @@ enum Command {
 		/// Quest to explain. Omit to list every ready quest in tree order.
 		path: Option<PathBuf>,
 
-		/// Read each questline from its branch on this remote (`origin`) when
-		/// that branch exists: a line's children finish there before the line
-		/// reaches the working tree. Fetch first; this reads remote-tracking refs.
-		#[arg(long)]
-		remote: Option<String>,
+		/// Read each questline from its branch on this remote when that branch
+		/// exists: a line's children finish there before the line reaches the
+		/// working tree. Fetch first; this reads remote-tracking refs.
+		#[arg(long, default_value = "origin")]
+		remote: String,
+
+		/// Read only the working tree, ignoring line branches on the remote.
+		#[arg(long, conflicts_with = "remote")]
+		local: bool,
 	},
 
 	/// Print the branch carrying a quest, then every branch it merges through.
@@ -85,8 +89,10 @@ fn main() -> Result<ExitCode> {
 		Command::Ready {
 			path: Some(path),
 			remote,
+			local,
 		} => {
-			let blockers = quest::ready::blockers(&cli.root, &path, remote.as_deref())?;
+			let remote = (!local).then_some(remote.as_str());
+			let blockers = quest::ready::blockers(&cli.root, &path, remote)?;
 			for blocker in &blockers {
 				print!("{blocker}");
 			}
@@ -100,8 +106,13 @@ fn main() -> Result<ExitCode> {
 			}
 			Ok(ExitCode::SUCCESS)
 		}
-		Command::Ready { path: None, remote } => {
-			for path in quest::ready::quests(&cli.root, remote.as_deref())? {
+		Command::Ready {
+			path: None,
+			remote,
+			local,
+		} => {
+			let remote = (!local).then_some(remote.as_str());
+			for path in quest::ready::quests(&cli.root, remote)? {
 				println!("{}", path.display());
 			}
 			Ok(ExitCode::SUCCESS)

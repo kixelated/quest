@@ -11,7 +11,7 @@ versioned Markdown, with a standalone CLI and a reversible adoption path.
 horizons when concrete work warrants them, keeping milestone numbers stable as
 earlier milestones complete.
 
-## Quests
+## Required
 
 - [M0: First public release](/quest/m0/README.md) - install, set up, work, and leave, driven from one pinned binary
 - [M1: Broader platform support](/quest/m1/README.md) - support adoption beyond the initial macOS, Linux, and WSL targets

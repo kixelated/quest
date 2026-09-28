@@ -1,6 +1,5 @@
 ---
-name: quest-plan
-description: Create a new quest via an interactive session.
+description: Scope and create quests through an interactive interview. Use when the user invokes /quest-plan, asks to plan a quest, or wants unsettled work split into quests.
 ---
 
 Before you begin, run `quest guide` and read its output completely.
