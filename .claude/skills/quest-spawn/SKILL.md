@@ -1,6 +1,6 @@
 ---
-name: spawn
-description: Spawn background agents to work on quests in parallel.
+name: quest-spawn
+description: Start multiple quests in parallel.
 ---
 
 Run `quest skill spawn` and follow its output.

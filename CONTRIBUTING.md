@@ -33,7 +33,7 @@ Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations. Start PRs as drafts
 and mark them ready after checks pass. Merge only within the user's authorized
 scope and after required repository checks and reviews pass.
-Quest execution stops at PR creation; it merges only when the user picks /merge.
+Quest execution stops at PR creation; it merges only when the user picks /quest-merge.
 
 Every AI-authored GitHub post must end with `(written by <model>)`, naming the
 running model. This is separate from commit co-author trailers.

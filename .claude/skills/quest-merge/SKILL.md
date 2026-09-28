@@ -1,6 +1,6 @@
 ---
-name: merge
-description: Merge a GitHub PR once reviews and CI pass.
+name: quest-merge
+description: Merge a quest once reviews and CI pass.
 ---
 
 Run `quest skill merge` and follow its output.

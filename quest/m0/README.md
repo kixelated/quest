@@ -22,7 +22,7 @@ ownership-manifest design:
   claims, merging) lives in skills.
 - Repository-specific rules stay in the repository's own root instructions.
 
-## Quests
+## Required
 
 - [Release binaries](/quest/m0/releases.md) - tagged releases publish macOS and Linux binaries that mise and a shell installer can fetch
 - [Init and uninstall](/quest/m0/init.md) - `quest init` sets a repository up with stubs and a root reference; `quest uninstall` reverses it

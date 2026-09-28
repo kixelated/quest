@@ -1,43 +1,35 @@
 ---
-name: spawn
-description: Spawn background agents to work on quests in parallel.
+description: Start multiple quests in parallel.
 ---
 
 Before you begin, run `quest guide` and read its output completely.
 
-Your goal is to execute, plan, and/or merge quests in parallel.
-If you are unsure of the best course of action, ask the user for clarification before proceeding.
-
+Your goal is to execute many quests in parallel.
 The scope consists of all ready quests that are not claimed.
 Use the argument (if provided) to filter to specific quests/questlines.
-Main's tree lags its lines: a child finished on its line branch still looks ready from `main`.
-Fetch, then judge readiness with `quest ready --remote origin`, which reads each line from its branch.
-Inspect any blocked quests, and determine if they can be unblocked.
-A line whose `Quests` list has emptied is a ready quest too: finishing it marks the line's PR ready.
+Inspect any blocked quests and determine if they can be unblocked.
 
-Recommend an action for each quest: /start, /plan, skip, or delete.
-Start the quests you'd start with no open question right away.
-Interactively prompt the user about the rest, a few per prompt, each with a short summary and your recommendation.
+Interactively prompt the user about every quest (batch a few), with your recommendation:
+- `/quest-start`: If the quest is well planned with no blockers.
+- `/quest-plan`: If the quest has significant design issues.
+- skip: If the quest should not be started yet.
+- `/quest-delete`: If the quest should be deleted.
 
-Spawn a background sub-agent for each /start.
-Create a fresh worktree on the base `quest branch` prints, creating that line branch first if it is missing.
-Agents share no writable files: each keeps its scratch files in its own worktree's `.scratch/`, and anything you hand every agent goes in its prompt, not a shared file.
-Each agent blocks on its own checks and reports back only when done or blocked.
-Limit the concurrency to at most N agents in parallel, where N is half the number of physical CPU cores.
+Include a brief summary of each quest.
+Consider ordering, suggesting to skip any quests that would result in conflicts.
+
+Spawn a background sub-agent for each `/quest-start`.
+Create a fresh worktree on the base `quest branch` prints, creating the questline branch first if it is missing.
+
+Each agent reports back only when done or blocked.
+Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-Each agent switches into its own worktree before editing, opens its PR as a draft, and never marks it ready itself.
+Each agent switches into its own worktree and when done, opens a draft PR.
 Its report lists every open decision with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
-As each agent reports, explain its result in a few lines, then prompt the user inline without waiting for the rest.
-Ask about every open decision (naming, API shape, branch, blockers, manual steps), a few per prompt, each with the PR, a short summary, and your recommendation first.
-Offer its follow-ups as a multi-select to /plan.
-Resume the owning agent with each answer, and prompt again on anything its next report raises.
-Once nothing is open, ask whether to mark the PR ready, then mark it yourself.
-Record the outcome as a PR comment when it isn't already in the PR: each decision and its reason, and any follow-up the user declined.
-
-Run /plan for any selected quests in the foreground.
+As each agent reports, explain its result in a few lines, then interactively prompt the user.
+Run any `/quest-plan` sessions in the foreground.
+Start any asynchronous tasks first before blocking on user prompt.
 Perform any research and monitoring in the background.
-
-Finally, create a PR for any created/updated quests.
