@@ -18,8 +18,16 @@ Keep scratch files (PR body, logs, notes) in the worktree's gitignored `.scratch
 Never write to or clean up a directory other agents share, such as a session scratchpad.
 
 When done, explain the result in a few lines and summarize any issues encountered.
-Prompt the user interactively for every open decision (naming, API shape, branch, blockers, manual steps), each with your recommendation, and offer follow-ups as a multi-select to /plan.
-Keep the PR a draft until the user confirms every decision.
-Then mark it ready and ask what to do with it: /merge (addressing any minor issues), skip, or /close, with your recommendation first and room for questions.
-Record the outcome as a PR comment when it isn't already in the PR: each decision and its reason, and any follow-up the user declined.
+Prompt the user interactively for any open decisions, including your recommendation.
+Record the outcome as a PR comment as a paper-trail.
+
+Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
+It's fine to create quests inline rather than making a dedicated PR.
+
+If there are no outstanding decisions, interactively prompt the user with your recommendation:
+- `/quest-merge`: If this quest is ready to be merged.
+- `/quest-plan`: If this quest has significant design issues.
+- skip: If this quest should stay as a draft PR.
+- `/quest-delete`: If this quest should be deleted.
+
 A background agent that cannot prompt lists its decisions in its report instead and leaves the PR a draft.

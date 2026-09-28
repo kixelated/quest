@@ -1,5 +1,3 @@
-# Writing agent instructions
-
 Keep shared instructions short; place workflow-specific detail in skills or
 nested `AGENTS.md` files. State the goal, important constraints, and observable
 outcome rather than prescribing a fragile sequence of implementation steps.

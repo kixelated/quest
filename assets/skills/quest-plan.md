@@ -1,6 +1,6 @@
 ---
-name: plan
-description: Scope, create, and publish a quest through an interactive grilling interview. Use when the user invokes /plan, asks to plan a quest, or wants unsettled work split into quests.
+name: quest-plan
+description: Create a new quest via an interactive session.
 ---
 
 Before you begin, run `quest guide` and read its output completely.
@@ -23,7 +23,7 @@ The *decisions* are the user's: put each to them and wait.
 
 Search other quests and questlines to keep the larger plan consistent.
 When the work changes what a user sees (a wire, an API, a flag, a dashboard), ask whether it needs documentation the feature quest cannot carry inline (a new page or guide), and recommend a quest for that; docs a change makes stale stay in that change.
-When the frontier disagrees with a settled quest/plan, challenge the user and resolve the conflict.
+When the frontier disagrees with an existing quest, challenge the user and resolve the conflict.
 
 Begin the interview by scoping the goal: the observable outcome, why it matters, and its important boundaries and non-goals.
 Restate the goal in one sentence and get it confirmed before moving on to implementation decisions.
@@ -37,5 +37,5 @@ Once complete, create, update, or delete the relevant quests and questlines.
 Record each settled decision and its reason in the quest's Plan, so later sessions don't ask it again.
 New work joins the milestone matching its priority, at its rank; a questline groups only quests that ship together, and its README holds the work no child owns (the end-to-end test, the docs page).
 
-When done, commit and create a draft PR following `CONTRIBUTING.md`.
-After local checks pass, run `/merge` on it, unless `CONTRIBUTING.md` says otherwise.
+When done, commit, create a PR, and run `/quest-merge` on it.
+The quest should be reviewed before it is merged.
