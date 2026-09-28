@@ -10,17 +10,14 @@ pub const GUIDE: &str = include_str!("../assets/guide.md");
 
 /// Every skill, sorted by name.
 const SKILLS: [(&str, &str); 8] = [
-	("quest-close", include_str!("../assets/skills/quest-close.md")),
-	("quest-issues", include_str!("../assets/skills/quest-issues.md")),
-	("quest-merge", include_str!("../assets/skills/quest-merge.md")),
-	("quest-plan", include_str!("../assets/skills/quest-plan.md")),
-	("quest-spawn", include_str!("../assets/skills/quest-spawn.md")),
-	(
-		"quest-spawn-merge",
-		include_str!("../assets/skills/quest-spawn-merge.md"),
-	),
-	("quest-start", include_str!("../assets/skills/quest-start.md")),
-	("quest-takeover", include_str!("../assets/skills/quest-takeover.md")),
+	("close", include_str!("../assets/skills/close.md")),
+	("issues", include_str!("../assets/skills/issues.md")),
+	("merge", include_str!("../assets/skills/merge.md")),
+	("plan", include_str!("../assets/skills/plan.md")),
+	("spawn", include_str!("../assets/skills/spawn.md")),
+	("spawn-merge", include_str!("../assets/skills/spawn-merge.md")),
+	("start", include_str!("../assets/skills/start.md")),
+	("takeover", include_str!("../assets/skills/takeover.md")),
 ];
 
 /// Where an agent without the binary learns to install it.
@@ -29,12 +26,18 @@ const SETUP: &str = "https://github.com/kixelated/quest/blob/main/SETUP.md";
 /// One skill: YAML frontmatter, then the instructions.
 #[derive(Clone, Copy, Debug)]
 pub struct Skill {
-	/// The name an agent invokes it by, which is also its directory name.
+	/// The name `quest skill <name>` prints it by.
 	pub name: &'static str,
 	text: &'static str,
 }
 
 impl Skill {
+	/// The name an agent invokes it by, which is also its directory name. The
+	/// prefix keeps it from colliding with a repository's own skills.
+	pub fn installed_name(&self) -> String {
+		format!("quest-{}", self.name)
+	}
+
 	/// The frontmatter, fences excluded.
 	fn frontmatter(&self) -> &'static str {
 		self.split().0
@@ -95,7 +98,7 @@ mod tests {
 				skill
 					.frontmatter()
 					.lines()
-					.any(|line| line == format!("name: {}", skill.name)),
+					.any(|line| line == format!("name: {}", skill.installed_name())),
 				"{} frontmatter",
 				skill.name
 			);
@@ -132,9 +135,9 @@ mod tests {
 			.map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
 			.collect();
 		installed.sort();
-		assert_eq!(installed, all().map(|skill| skill.name).collect::<Vec<_>>());
+		assert_eq!(installed, all().map(|skill| skill.installed_name()).collect::<Vec<_>>());
 		for skill in all() {
-			let stub = std::fs::read_to_string(dir.join(skill.name).join("SKILL.md")).expect("read stub");
+			let stub = std::fs::read_to_string(dir.join(skill.installed_name()).join("SKILL.md")).expect("read stub");
 			assert_eq!(
 				stub,
 				skill.stub(),

@@ -3,7 +3,7 @@ name: quest-spawn-merge
 description: Decide and merge GitHub PRs in parallel.
 ---
 
-Before starting, read `quest skill quest-merge`, `quest skill quest-takeover`, and `quest skill quest-close`.
+Before starting, read `quest skill merge`, `quest skill takeover`, and `quest skill close`.
 The skill argument can be used to filter the PRs in scope.
 
 The goal is to evaluate the open PRs in the repository and decide which ones to merge.

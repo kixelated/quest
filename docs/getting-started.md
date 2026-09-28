@@ -23,8 +23,8 @@ From your repository root:
 
 ```sh
 for skill in $(quest skill | cut -d' ' -f1); do
-  mkdir -p .claude/skills/$skill
-  quest skill --stub $skill > .claude/skills/$skill/SKILL.md
+  mkdir -p .claude/skills/quest-$skill
+  quest skill --stub $skill > .claude/skills/quest-$skill/SKILL.md
 done
 echo /.scratch/ >> .gitignore
 ```
