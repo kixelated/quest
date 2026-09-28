@@ -36,5 +36,7 @@ Once complete, create, update, or delete the relevant quests and questlines.
 Record each settled decision and its reason in the quest's Plan, so later sessions don't ask it again.
 New work joins the milestone matching its priority, at its rank; a questline groups only quests that ship together, and its README holds the work no child owns (the end-to-end test, the docs page).
 
+Include all of the decision prompts in the PR as a paper trail, with a ✅ next to the selected option.
+
 When done, commit, create a PR, and run `/quest-merge` on it.
 The quest should be reviewed before it is merged.

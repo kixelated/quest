@@ -30,6 +30,8 @@ Its report lists every open decision with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
 As each agent reports, explain its result in a few lines, then interactively prompt the user.
+Include quest context, as many quests are concurrently in flight.
+
 Run any `/quest-plan` sessions in the foreground.
 Start any asynchronous tasks first before blocking on user prompt.
 Perform any research and monitoring in the background.
