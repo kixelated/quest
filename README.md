@@ -102,6 +102,7 @@ the version you pin decides what your agents follow:
 | --- | --- |
 | `quest-plan` | Ask the questions that turn an idea into scoped quests. |
 | `quest-convert` | Bring open GitHub issues into the planning conversation. |
+| `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
 | `quest-spawn` | Triage ready quests and hand them to parallel agents. |
 | `quest-merge` | Land a quest's PR once CI and reviews pass. |
