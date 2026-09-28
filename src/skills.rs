@@ -26,18 +26,12 @@ const SETUP: &str = "https://github.com/kixelated/quest/blob/main/SETUP.md";
 /// One skill: YAML frontmatter, then the instructions.
 #[derive(Clone, Copy, Debug)]
 pub struct Skill {
-	/// The name `quest skill <name>` prints it by.
+	/// The name an agent invokes it by, which is also its directory name.
 	pub name: &'static str,
 	text: &'static str,
 }
 
 impl Skill {
-	/// The name an agent invokes it by, which is also its directory name. The
-	/// prefix keeps it from colliding with a repository's own skills.
-	pub fn installed_name(&self) -> String {
-		format!("quest-{}", self.name)
-	}
-
 	/// The frontmatter, fences excluded.
 	fn frontmatter(&self) -> &'static str {
 		self.split().0
@@ -98,7 +92,7 @@ mod tests {
 				skill
 					.frontmatter()
 					.lines()
-					.any(|line| line == format!("name: {}", skill.installed_name())),
+					.any(|line| line == format!("name: {}", skill.name)),
 				"{} frontmatter",
 				skill.name
 			);
@@ -135,9 +129,9 @@ mod tests {
 			.map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
 			.collect();
 		installed.sort();
-		assert_eq!(installed, all().map(|skill| skill.installed_name()).collect::<Vec<_>>());
+		assert_eq!(installed, all().map(|skill| skill.name).collect::<Vec<_>>());
 		for skill in all() {
-			let stub = std::fs::read_to_string(dir.join(skill.installed_name()).join("SKILL.md")).expect("read stub");
+			let stub = std::fs::read_to_string(dir.join(skill.name).join("SKILL.md")).expect("read stub");
 			assert_eq!(
 				stub,
 				skill.stub(),

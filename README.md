@@ -99,16 +99,16 @@ the version you pin decides what your agents follow:
 
 | Skill | What it does |
 | --- | --- |
-| `quest-plan` | Ask the questions that turn an idea into scoped quests. |
-| `quest-issues` | Bring selected GitHub issues into the planning conversation. |
-| `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
-| `quest-spawn` | Triage a scope and hand independent quests to parallel agents. |
-| `quest-merge` | Land a PR once CI and reviews pass. |
-| `quest-spawn-merge` | Decide and land open PRs in parallel. |
-| `quest-close` | Abandon a PR, deleting its quest if it was completing one. |
-| `quest-takeover` | Adopt someone else's PR and drive it to landable. |
+| `plan` | Ask the questions that turn an idea into scoped quests. |
+| `issues` | Bring selected GitHub issues into the planning conversation. |
+| `start` | Claim a ready quest, implement it, and prepare a PR. |
+| `spawn` | Triage a scope and hand independent quests to parallel agents. |
+| `merge` | Land a PR once CI and reviews pass. |
+| `spawn-merge` | Decide and land open PRs in parallel. |
+| `close` | Abandon a PR, deleting its quest if it was completing one. |
+| `takeover` | Adopt someone else's PR and drive it to landable. |
 
-Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
+Use `/plan` in Claude Code or `$plan` in Codex. Skills coordinate
 within your agent session. Starting work stops at a PR; merging is a separate
 invocation.
 

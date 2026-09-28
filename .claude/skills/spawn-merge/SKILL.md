@@ -1,5 +1,5 @@
 ---
-name: quest-spawn-merge
+name: spawn-merge
 description: Decide and merge GitHub PRs in parallel.
 ---
 

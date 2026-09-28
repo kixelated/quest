@@ -1,5 +1,5 @@
 ---
-name: quest-takeover
+name: takeover
 description: Adopt someone else's open PR and drive it to landable.
 ---
 

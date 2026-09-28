@@ -1,5 +1,5 @@
 ---
-name: quest-takeover
+name: takeover
 description: Adopt someone else's open PR and drive it to landable.
 ---
 
@@ -13,4 +13,4 @@ If unsure about any course of action, prompt the user for guidance.
 - Address any automated review findings you agree with, without waiting on CodeRabbit. Turn down any you disagree with with a comment. One round only; never request a review.
 - Push any changes you made to the PR, updating the summary if needed.
 - Summarize the changes made and any potential follow-up actions.
-- Do not merge the PR; that is the `quest-merge` skill's job, and only once the user approves.
+- Do not merge the PR; that is the `merge` skill's job, and only once the user approves.

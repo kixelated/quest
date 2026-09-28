@@ -1,5 +1,5 @@
 ---
-name: quest-issues
+name: issues
 description: Plan quests from open GitHub issues without the quest label.
 ---
 

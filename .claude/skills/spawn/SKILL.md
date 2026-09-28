@@ -1,5 +1,5 @@
 ---
-name: quest-spawn
+name: spawn
 description: Spawn background agents to work on quests in parallel.
 ---
 
