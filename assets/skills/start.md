@@ -28,4 +28,4 @@ If there are no outstanding decisions, interactively prompt the user including y
 - skip: If this quest should stay as a draft PR.
 - `/quest-delete`: If this quest should be deleted.
 
-A background agent that cannot prompt lists its decisions in its report instead and leaves the PR a draft.
+A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead and leaves the PR a draft.

@@ -27,5 +27,5 @@ Other sessions share this machine: hold new agents while the load average exceed
 Keep going until all PRs have been decided then wait for all spawned sub-agents to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.
 
-As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions.
+As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for its suggested follow-ups.
 Start any asynchronous tasks first before blocking on any prompt.
