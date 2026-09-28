@@ -10,17 +10,14 @@ pub const GUIDE: &str = include_str!("../assets/guide.md");
 
 /// Every skill, sorted by name.
 const SKILLS: [(&str, &str); 8] = [
-	("quest-close", include_str!("../assets/skills/quest-close.md")),
-	("quest-issues", include_str!("../assets/skills/quest-issues.md")),
-	("quest-merge", include_str!("../assets/skills/quest-merge.md")),
-	("quest-plan", include_str!("../assets/skills/quest-plan.md")),
-	("quest-spawn", include_str!("../assets/skills/quest-spawn.md")),
-	(
-		"quest-spawn-merge",
-		include_str!("../assets/skills/quest-spawn-merge.md"),
-	),
-	("quest-start", include_str!("../assets/skills/quest-start.md")),
-	("quest-takeover", include_str!("../assets/skills/quest-takeover.md")),
+	("close", include_str!("../assets/skills/close.md")),
+	("issues", include_str!("../assets/skills/issues.md")),
+	("merge", include_str!("../assets/skills/merge.md")),
+	("plan", include_str!("../assets/skills/plan.md")),
+	("spawn", include_str!("../assets/skills/spawn.md")),
+	("spawn-merge", include_str!("../assets/skills/spawn-merge.md")),
+	("start", include_str!("../assets/skills/start.md")),
+	("takeover", include_str!("../assets/skills/takeover.md")),
 ];
 
 /// Where an agent without the binary learns to install it.

@@ -1,6 +1,6 @@
 ---
-name: quest-plan
-description: Scope, create, and publish a quest through an interactive grilling interview. Use when the user invokes /quest-plan, asks to plan a quest, or wants unsettled work split into quests.
+name: plan
+description: Scope, create, and publish a quest through an interactive grilling interview. Use when the user invokes /plan, asks to plan a quest, or wants unsettled work split into quests.
 ---
 
 Before you begin, run `quest guide` and read its output completely.
@@ -38,4 +38,4 @@ Record each settled decision and its reason in the quest's Plan, so later sessio
 New work joins the milestone matching its priority, at its rank; a questline groups only quests that ship together, and its README holds the work no child owns (the end-to-end test, the docs page).
 
 When done, commit and create a draft PR following `CONTRIBUTING.md`.
-After local checks pass, run `/quest-merge` on it, unless `CONTRIBUTING.md` says otherwise.
+After local checks pass, run `/merge` on it, unless `CONTRIBUTING.md` says otherwise.
