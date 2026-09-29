@@ -10,7 +10,11 @@ The argument is the quest to work on.
 If you are unsure on the best course of action, ask the user for direction.
 
 Confirm the quest is ready and unclaimed.
+Run `git fetch` and `quest ready --remote origin` again, and confirm the quest file still exists on origin's base branch.
+Another PR may have completed it.
+Confirm you can write in your worktree; if you cannot, stop and report without claiming.
 Claim it as `quest guide` describes: `quest branch` names the branch and its bases, missing line branches get a draft PR, and the quest branch gets an empty commit.
+Delete a claim you cannot finish (remote branch and worktree) so an empty claim never lingers.
 
 Implement the quest until it is complete, or some blocker is hit, then create a PR against the base.
 Keep scratch files (PR body, logs, notes) in the worktree's gitignored `.scratch/`.
