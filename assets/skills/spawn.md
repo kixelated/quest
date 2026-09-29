@@ -25,7 +25,7 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-Each agent switches into its own worktree and when done, opens a PR.
+Each agent switches into its own worktree and when done, opens a draft PR.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
