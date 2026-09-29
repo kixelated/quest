@@ -69,6 +69,12 @@ enum Command {
 		#[arg(long, requires = "name")]
 		stub: bool,
 	},
+
+	/// Install skill stubs, a quest root, and agent pointers for this repository.
+	Init,
+
+	/// Remove Quest stubs and markers installed by `quest init`.
+	Uninstall,
 }
 
 fn main() -> Result<ExitCode> {
@@ -142,6 +148,18 @@ fn main() -> Result<ExitCode> {
 				print!("{}", skill.stub());
 			} else {
 				print!("{}", skill.body());
+			}
+			Ok(ExitCode::SUCCESS)
+		}
+		Command::Init => {
+			for path in quest::setup::init(&cli.root)? {
+				println!("{}", path.display());
+			}
+			Ok(ExitCode::SUCCESS)
+		}
+		Command::Uninstall => {
+			for path in quest::setup::uninstall(&cli.root)? {
+				println!("{}", path.display());
 			}
 			Ok(ExitCode::SUCCESS)
 		}

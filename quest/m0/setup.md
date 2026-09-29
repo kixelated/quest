@@ -21,4 +21,3 @@ root instructions. The same file covers removal.
 ## Required
 
 - [Release binaries](/quest/m0/releases.md) - the guide installs a release
-- [Init and uninstall](/quest/m0/init.md) - the guide runs them
