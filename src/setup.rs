@@ -3,6 +3,7 @@
 //! Init touches only stubs, one reference line, `/.scratch/` in `.gitignore`, and
 //! an empty `quest/README.md` when missing. Uninstall never deletes the quest tree.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -14,6 +15,10 @@ pub const REFERENCE_LINE: &str = "When work mentions a quest, run `quest guide` 
 
 const SCRATCH_IGNORE: &str = "/.scratch/";
 
+/// The skill directories Claude Code and Codex read. One holds the stubs and
+/// the other links to it.
+const SKILL_DIRS: [&str; 2] = [".claude/skills", ".agents/skills"];
+
 const QUEST_ROOT_README: &str = "\
 # Quests
 
@@ -22,298 +27,204 @@ const QUEST_ROOT_README: &str = "\
 What this project is working toward.
 ";
 
-/// Install Quest stubs and markers under `root`. Returns paths changed.
+/// Install Quest stubs and markers under `root`. Returns the paths it changed,
+/// relative to `root`.
 pub fn init(root: &Path) -> Result<Vec<PathBuf>> {
 	let mut changes = Vec::new();
-	let skills_dir = ensure_skills_layout(root, &mut changes)?;
-	install_stubs(&skills_dir, &mut changes)?;
-	if write_quest_readme(root)? {
-		changes.push(root.join("quest/README.md"));
-	}
-	if append_gitignore_scratch(root)? {
-		changes.push(root.join(".gitignore"));
-	}
-	if append_reference_line(root)? {
-		changes.push(instructions_path(root));
-	}
-	Ok(changes)
-}
-
-/// Remove Quest-owned files under `root`. Returns paths changed.
-pub fn uninstall(root: &Path) -> Result<Vec<PathBuf>> {
-	let mut changes = Vec::new();
-	if let Some(skills_dir) = skills_root(root)? {
-		remove_stubs(&skills_dir, &mut changes)?;
-		clean_skills_layout(root, &mut changes)?;
-	}
-	if remove_gitignore_scratch(root)? {
-		changes.push(root.join(".gitignore"));
-	}
-	changes.extend(remove_reference_lines(root)?);
-	Ok(changes)
-}
-
-fn skills_root(root: &Path) -> Result<Option<PathBuf>> {
-	let claude = root.join(".claude/skills");
-	let agents = root.join(".agents/skills");
-	let claude_meta = meta(&claude);
-	let agents_meta = meta(&agents);
-	match (claude_meta, agents_meta) {
-		(None, None) => Ok(None),
-		(Some(kind), None) if kind.is_dir() => Ok(Some(claude)),
-		(None, Some(kind)) if kind.is_dir() => Ok(Some(agents)),
-		(Some(claude_kind), Some(agents_kind)) if claude_kind.is_dir() && agents_kind.is_symlink() => Ok(Some(claude)),
-		(Some(claude_kind), Some(agents_kind)) if agents_kind.is_dir() && claude_kind.is_symlink() => Ok(Some(agents)),
-		(Some(claude_kind), Some(agents_kind)) if claude_kind.is_dir() && agents_kind.is_dir() => {
-			bail!(
-				"both .claude/skills and .agents/skills exist as directories; \
-				 remove one or symlink them before running `quest init`"
-			);
-		}
-		_ => Ok(None),
-	}
-}
-
-fn meta(path: &Path) -> Option<std::fs::FileType> {
-	std::fs::symlink_metadata(path).ok().map(|m| m.file_type())
-}
-
-fn ensure_skills_layout(root: &Path, changes: &mut Vec<PathBuf>) -> Result<PathBuf> {
-	let claude = root.join(".claude/skills");
-	let agents = root.join(".agents/skills");
-	let claude_meta = meta(&claude);
-	let agents_meta = meta(&agents);
-
-	match (claude_meta, agents_meta) {
-		(None, None) => {
-			std::fs::create_dir_all(&claude).context("create .claude/skills")?;
-			changes.push(claude.clone());
-			link_dir(&agents, &claude, changes)?;
-			Ok(claude)
-		}
-		(Some(kind), None) if kind.is_dir() => {
-			link_dir(&agents, &claude, changes)?;
-			Ok(claude)
-		}
-		(None, Some(kind)) if kind.is_dir() => {
-			link_dir(&claude, &agents, changes)?;
-			Ok(agents)
-		}
-		(Some(claude_kind), Some(agents_kind)) if claude_kind.is_dir() && agents_kind.is_symlink() => Ok(claude),
-		(Some(claude_kind), Some(agents_kind)) if agents_kind.is_dir() && claude_kind.is_symlink() => Ok(agents),
-		(Some(claude_kind), Some(agents_kind)) if claude_kind.is_dir() && agents_kind.is_dir() => {
-			bail!(
-				"both .claude/skills and .agents/skills exist as directories; \
-				 remove one or symlink them before running `quest init`"
-			);
-		}
-		_ => bail!("unexpected .claude/skills or .agents/skills layout"),
-	}
-}
-
-fn link_dir(link: &Path, target: &Path, changes: &mut Vec<PathBuf>) -> Result<()> {
-	if link.exists() {
-		return Ok(());
-	}
-	let parent = link.parent().context("skills parent")?;
-	std::fs::create_dir_all(parent).context("create agent config dir")?;
-	let rel = relative_skills_link(parent, target);
-	#[cfg(unix)]
-	{
-		std::os::unix::fs::symlink(&rel, link).with_context(|| format!("symlink {}", link.display()))?;
-	}
-	#[cfg(not(unix))]
-	{
-		bail!("directory symlinks for skills require a Unix platform");
-	}
-	changes.push(link.to_path_buf());
-	Ok(())
-}
-
-/// Relative path from `link_parent` to `skills_dir`, for the two layouts init creates.
-fn relative_skills_link(link_parent: &Path, skills_dir: &Path) -> PathBuf {
-	if link_parent.ends_with(".agents") && skills_dir.ends_with(".claude/skills") {
-		PathBuf::from("../.claude/skills")
-	} else if link_parent.ends_with(".claude") && skills_dir.ends_with(".agents/skills") {
-		PathBuf::from("../.agents/skills")
-	} else {
-		PathBuf::from(skills_dir)
-	}
-}
-
-fn install_stubs(skills_dir: &Path, changes: &mut Vec<PathBuf>) -> Result<()> {
+	let skills = link_skill_dirs(root, &mut changes)?;
 	for skill in skills::all() {
-		let dir = skills_dir.join(skill.installed());
+		let dir = Path::new(skills).join(skill.installed());
 		let path = dir.join("SKILL.md");
-		if path.is_file() {
-			let existing = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
-			if existing == skill.stub() {
+		if root.join(&path).is_file() {
+			if read(root, &path)? == skill.stub() {
 				continue;
 			}
 			bail!(
 				"{} is not a Quest stub; remove or rename it before running `quest init`",
 				path.display()
 			);
-		} else if dir.exists() {
+		} else if root.join(&dir).exists() {
 			bail!(
 				"{} exists without SKILL.md; remove or rename it before running `quest init`",
 				dir.display()
 			);
 		}
-		std::fs::create_dir_all(&dir).context("create skill dir")?;
-		std::fs::write(&path, skill.stub()).with_context(|| path.display().to_string())?;
+		fs::create_dir_all(root.join(&dir)).with_context(|| dir.display().to_string())?;
+		write(root, &path, &skill.stub())?;
 		changes.push(path);
 	}
-	Ok(())
-}
 
-fn write_quest_readme(root: &Path) -> Result<bool> {
-	let path = root.join("quest/README.md");
-	if path.exists() {
-		return Ok(false);
+	let readme = Path::new("quest/README.md");
+	if !root.join(readme).exists() {
+		fs::create_dir_all(root.join("quest")).context("quest")?;
+		write(root, readme, QUEST_ROOT_README)?;
+		changes.push(readme.into());
 	}
-	std::fs::create_dir_all(path.parent().unwrap()).context("create quest/")?;
-	std::fs::write(&path, QUEST_ROOT_README).context("write quest/README.md")?;
-	Ok(true)
-}
 
-fn append_gitignore_scratch(root: &Path) -> Result<bool> {
-	let path = root.join(".gitignore");
-	if path.is_file() {
-		let content = std::fs::read_to_string(&path).context("read .gitignore")?;
-		if content.lines().any(|line| line == SCRATCH_IGNORE) {
-			return Ok(false);
-		}
-		let mut out = content;
-		if !out.ends_with('\n') {
-			out.push('\n');
-		}
-		out.push_str(SCRATCH_IGNORE);
-		out.push('\n');
-		std::fs::write(&path, out).context("update .gitignore")?;
-	} else {
-		std::fs::write(&path, format!("{SCRATCH_IGNORE}\n")).context("write .gitignore")?;
+	let ignore = Path::new(".gitignore");
+	if append_line(root, ignore, SCRATCH_IGNORE, false)? {
+		changes.push(ignore.into());
 	}
-	Ok(true)
-}
 
-fn instructions_path(root: &Path) -> PathBuf {
-	if root.join("AGENTS.md").is_file() {
-		root.join("AGENTS.md")
-	} else if root.join("CLAUDE.md").is_file() {
-		root.join("CLAUDE.md")
-	} else {
-		root.join("AGENTS.md")
-	}
-}
-
-fn append_reference_line(root: &Path) -> Result<bool> {
-	let path = instructions_path(root);
-	if path.is_file() {
-		let content = std::fs::read_to_string(&path).context("read agent instructions")?;
-		if content.lines().any(|line| line == REFERENCE_LINE) {
-			return Ok(false);
-		}
-		let mut out = content;
-		if !out.is_empty() && !out.ends_with('\n') {
-			out.push('\n');
-		}
-		if !out.is_empty() {
-			out.push('\n');
-		}
-		out.push_str(REFERENCE_LINE);
-		out.push('\n');
-		std::fs::write(&path, out).context("update agent instructions")?;
-	} else {
-		std::fs::write(&path, format!("{REFERENCE_LINE}\n")).context("write agent instructions")?;
-	}
-	Ok(true)
-}
-
-fn remove_stubs(skills_dir: &Path, changes: &mut Vec<PathBuf>) -> Result<()> {
-	for skill in skills::all() {
-		let path = skills_dir.join(skill.installed()).join("SKILL.md");
-		if !path.is_file() {
-			continue;
-		}
-		let existing = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
-		if existing != skill.stub() {
-			continue;
-		}
-		std::fs::remove_file(&path).with_context(|| path.display().to_string())?;
-		changes.push(path);
-		let dir = skills_dir.join(skill.installed());
-		if dir.read_dir()?.next().is_none() {
-			std::fs::remove_dir(&dir).with_context(|| dir.display().to_string())?;
-			changes.push(dir);
-		}
-	}
-	Ok(())
-}
-
-fn clean_skills_layout(root: &Path, changes: &mut Vec<PathBuf>) -> Result<()> {
-	let claude = root.join(".claude/skills");
-	let agents = root.join(".agents/skills");
-	for dir in [&claude, &agents] {
-		if dir.is_dir() && dir.read_dir()?.next().is_none() {
-			std::fs::remove_dir(dir).with_context(|| dir.display().to_string())?;
-			changes.push(dir.clone());
-		}
-	}
-	for link in [&agents, &claude] {
-		if link.is_symlink() {
-			let target = link.parent().unwrap().join(std::fs::read_link(link)?);
-			if !target.exists() {
-				std::fs::remove_file(link).with_context(|| link.display().to_string())?;
-				changes.push(link.clone());
-			}
-		}
-	}
-	Ok(())
-}
-
-fn remove_gitignore_scratch(root: &Path) -> Result<bool> {
-	let path = root.join(".gitignore");
-	if !path.is_file() {
-		return Ok(false);
-	}
-	let content = std::fs::read_to_string(&path).context("read .gitignore")?;
-	let filtered: Vec<_> = content.lines().filter(|line| *line != SCRATCH_IGNORE).collect();
-	if filtered.len() == content.lines().count() {
-		return Ok(false);
-	}
-	if filtered.is_empty() {
-		std::fs::remove_file(&path).context("remove .gitignore")?;
-	} else {
-		let mut out = filtered.join("\n");
-		out.push('\n');
-		std::fs::write(&path, out).context("update .gitignore")?;
-	}
-	Ok(true)
-}
-
-fn remove_reference_lines(root: &Path) -> Result<Vec<PathBuf>> {
-	let mut changes = Vec::new();
-	for name in ["AGENTS.md", "CLAUDE.md"] {
-		let path = root.join(name);
-		if !path.is_file() {
-			continue;
-		}
-		let content = std::fs::read_to_string(&path).context("read agent instructions")?;
-		let filtered: Vec<_> = content.lines().filter(|line| *line != REFERENCE_LINE).collect();
-		if filtered.len() == content.lines().count() {
-			continue;
-		}
-		let mut out = filtered.join("\n");
-		if content.ends_with('\n') {
-			out.push('\n');
-		}
-		if out.trim().is_empty() {
-			std::fs::remove_file(&path).context("remove agent instructions")?;
-		} else {
-			std::fs::write(&path, out).context("update agent instructions")?;
-		}
-		changes.push(path);
+	let instructions = ["AGENTS.md", "CLAUDE.md"]
+		.into_iter()
+		.find(|name| root.join(name).is_file())
+		.unwrap_or("AGENTS.md");
+	if append_line(root, Path::new(instructions), REFERENCE_LINE, true)? {
+		changes.push(instructions.into());
 	}
 	Ok(changes)
+}
+
+/// Remove Quest stubs and markers under `root`. Returns the paths it changed,
+/// relative to `root`.
+pub fn uninstall(root: &Path) -> Result<Vec<PathBuf>> {
+	let mut changes = Vec::new();
+	for skills in SKILL_DIRS {
+		if !is_real_dir(&root.join(skills)) {
+			continue;
+		}
+		for skill in skills::all() {
+			let dir = Path::new(skills).join(skill.installed());
+			let path = dir.join("SKILL.md");
+			if !root.join(&path).is_file() || read(root, &path)? != skill.stub() {
+				continue;
+			}
+			fs::remove_file(root.join(&path)).with_context(|| path.display().to_string())?;
+			changes.push(path);
+			remove_if_empty(&root.join(dir))?;
+		}
+		remove_if_empty(&root.join(skills))?;
+	}
+	// A link whose target just went away was the one init made.
+	for skills in SKILL_DIRS {
+		let link = root.join(skills);
+		if link.is_symlink() && !link.exists() {
+			fs::remove_file(&link).with_context(|| skills.to_string())?;
+			changes.push(skills.into());
+		}
+		let parent = link.parent().context(skills)?;
+		if is_real_dir(parent) {
+			remove_if_empty(parent)?;
+		}
+	}
+
+	for (path, line) in [
+		(".gitignore", SCRATCH_IGNORE),
+		("AGENTS.md", REFERENCE_LINE),
+		("CLAUDE.md", REFERENCE_LINE),
+	] {
+		if remove_line(root, Path::new(path), line)? {
+			changes.push(path.into());
+		}
+	}
+	Ok(changes)
+}
+
+/// Make one skill directory real and link the other to it, creating
+/// `.claude/skills` when neither exists. Returns the real one.
+fn link_skill_dirs(root: &Path, changes: &mut Vec<PathBuf>) -> Result<&'static str> {
+	let [claude, agents] = SKILL_DIRS.map(|dir| fs::symlink_metadata(root.join(dir)).ok().map(|meta| meta.file_type()));
+	let (real, link) = match (claude, agents) {
+		(Some(claude), Some(agents)) if claude.is_dir() && agents.is_dir() => bail!(
+			"both .claude/skills and .agents/skills are directories; \
+			 merge them and link one to the other before running `quest init`"
+		),
+		(Some(claude), agents) if claude.is_dir() && agents.is_none_or(|kind| kind.is_symlink()) => {
+			(SKILL_DIRS[0], SKILL_DIRS[1])
+		}
+		(claude, Some(agents)) if agents.is_dir() && claude.is_none_or(|kind| kind.is_symlink()) => {
+			(SKILL_DIRS[1], SKILL_DIRS[0])
+		}
+		(None, None) => {
+			fs::create_dir_all(root.join(SKILL_DIRS[0])).context(SKILL_DIRS[0])?;
+			(SKILL_DIRS[0], SKILL_DIRS[1])
+		}
+		_ => bail!("unexpected .claude/skills or .agents/skills layout; link one directory to the other"),
+	};
+
+	let link_path = root.join(link);
+	if !link_path.is_symlink() {
+		fs::create_dir_all(link_path.parent().context(link)?).context(link)?;
+		symlink(&Path::new("..").join(real), &link_path).context(link)?;
+		changes.push(link.into());
+	}
+	Ok(real)
+}
+
+#[cfg(unix)]
+fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+	std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(unix))]
+fn symlink(_target: &Path, _link: &Path) -> std::io::Result<()> {
+	Err(std::io::Error::other(
+		"linking skill directories requires a Unix platform",
+	))
+}
+
+fn is_real_dir(path: &Path) -> bool {
+	fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
+}
+
+fn remove_if_empty(dir: &Path) -> Result<()> {
+	if dir.read_dir()?.next().is_none() {
+		fs::remove_dir(dir).with_context(|| dir.display().to_string())?;
+	}
+	Ok(())
+}
+
+fn read(root: &Path, path: &Path) -> Result<String> {
+	fs::read_to_string(root.join(path)).with_context(|| path.display().to_string())
+}
+
+fn write(root: &Path, path: &Path, content: &str) -> Result<()> {
+	fs::write(root.join(path), content).with_context(|| path.display().to_string())
+}
+
+/// Append `line` unless the file already has it, creating the file if missing.
+/// `paragraph` separates it from existing content with a blank line.
+fn append_line(root: &Path, path: &Path, line: &str, paragraph: bool) -> Result<bool> {
+	let mut content = if root.join(path).is_file() {
+		read(root, path)?
+	} else {
+		String::new()
+	};
+	if content.lines().any(|existing| existing == line) {
+		return Ok(false);
+	}
+	if !content.is_empty() {
+		if !content.ends_with('\n') {
+			content.push('\n');
+		}
+		if paragraph {
+			content.push('\n');
+		}
+	}
+	content.push_str(line);
+	content.push('\n');
+	write(root, path, &content)?;
+	Ok(true)
+}
+
+/// Remove every copy of `line` and the blank lines it leaves at the end,
+/// deleting the file if nothing else remains.
+fn remove_line(root: &Path, path: &Path, line: &str) -> Result<bool> {
+	if !root.join(path).is_file() {
+		return Ok(false);
+	}
+	let content = read(root, path)?;
+	if !content.lines().any(|existing| existing == line) {
+		return Ok(false);
+	}
+	let kept: Vec<_> = content.lines().filter(|existing| *existing != line).collect();
+	let kept = kept.join("\n");
+	let kept = kept.trim_end();
+	if kept.is_empty() {
+		fs::remove_file(root.join(path)).with_context(|| path.display().to_string())?;
+	} else {
+		write(root, path, &format!("{kept}\n"))?;
+	}
+	Ok(true)
 }

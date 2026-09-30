@@ -75,13 +75,13 @@ still need checking; `quest ready` does not look for them.
 
 ## Update or remove it
 
-Upgrade by changing the pin; the stubs stay as they are. Before leaving Quest,
-export unfinished plans with the export skill, then run:
+Upgrade by changing the pin; the stubs stay as they are. Issue export is not
+implemented yet, so preserve any unfinished plans before leaving Quest, then run:
 
 ```sh
 quest uninstall
 ```
 
 Uninstall removes only Quest stubs that still match, the reference line, and the
-`/.scratch/` ignore entry. It never deletes your quest tree; completed and
-unfinished plans remain in Git history.
+`/.scratch/` ignore entry. It never deletes your quest tree, and completed plans
+remain in Git history.

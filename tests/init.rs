@@ -78,10 +78,34 @@ fn uninstall_round_trip_preserves_user_content() {
 	uninstall(dir.path());
 
 	let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-	assert!(agents.contains("User rule."));
-	assert!(!agents.contains(quest::setup::REFERENCE_LINE));
+	assert_eq!(agents, "# Repo\n\nUser rule.\n");
 	assert!(dir.path().join("quest/m0/plan.md").is_file());
-	assert!(!dir.path().join(".claude/skills/quest-start/SKILL.md").exists());
+	assert!(!dir.path().join(".gitignore").exists());
+	assert!(!dir.path().join(".claude").exists());
+	assert!(!dir.path().join(".agents").exists());
+}
+
+#[test]
+fn round_trip_with_codex_skills_directory() {
+	let dir = repo();
+	std::fs::create_dir_all(dir.path().join(".agents/skills")).unwrap();
+	init(dir.path());
+	assert!(dir.path().join(".agents/skills/quest-start/SKILL.md").is_file());
+	assert!(dir.path().join(".claude/skills/quest-start/SKILL.md").is_file());
+	assert!(dir.path().join(".claude/skills").is_symlink());
+
+	uninstall(dir.path());
+	assert!(!dir.path().join(".agents/skills").exists());
+	assert!(!dir.path().join(".claude/skills").is_symlink());
+}
+
+#[test]
+fn init_refuses_two_skill_directories() {
+	let dir = repo();
+	std::fs::create_dir_all(dir.path().join(".claude/skills")).unwrap();
+	std::fs::create_dir_all(dir.path().join(".agents/skills")).unwrap();
+	let err = quest::setup::init(dir.path()).unwrap_err();
+	assert!(err.to_string().contains("both"));
 }
 
 #[test]
