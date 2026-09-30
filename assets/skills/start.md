@@ -15,7 +15,6 @@ Claim it as `quest guide` describes: `quest branch` names the branch and its bas
 Delete a claim you cannot finish (remote branch and worktree).
 
 Implement the quest until it is complete, or some blocker is hit, then create a PR against the base.
-Keep scratch files (PR body, logs, notes) in the worktree's gitignored `.scratch/`.
 Never write to or clean up a directory other agents share, such as a session scratchpad.
 
 When done, explain the result in a few lines and summarize any issues encountered.

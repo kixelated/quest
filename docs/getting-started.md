@@ -25,10 +25,9 @@ quest init
 ```
 
 This writes a Quest stub for each shipped skill under `.claude/skills/`, links
-`.agents/skills/` to the same tree when needed, adds `/.scratch/` to
-`.gitignore`, creates `quest/README.md` when missing, and appends one line to
-your root `AGENTS.md` or `CLAUDE.md` telling agents to run `quest guide` when
-work mentions a quest. That line starts with `Quests: `; reword the rest freely,
+`.agents/skills/` to the same tree when needed, creates `quest/README.md` when
+missing, and appends one line to your root `AGENTS.md` or `CLAUDE.md` telling
+agents to run `quest guide` when work mentions a quest. That line starts with `Quests: `; reword the rest freely,
 since init and uninstall recognize it by that prefix.
 
 Init refuses to overwrite an existing same-named skill that is not a Quest stub.
@@ -84,6 +83,5 @@ GitHub issues, then run:
 quest uninstall
 ```
 
-Uninstall removes only Quest stubs that still match, the reference line, and the
-`/.scratch/` ignore entry. It never deletes your quest tree, and completed plans
-remain in Git history. Then remove the pin.
+Uninstall removes only Quest stubs that still match and the reference line. It
+never deletes your quest tree, and completed plans remain in Git history. Then remove the pin.
