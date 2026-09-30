@@ -24,10 +24,8 @@ fn init_creates_layout_and_is_idempotent() {
 	assert!(dir.path().join(".claude/skills/quest-start/SKILL.md").is_file());
 	assert!(dir.path().join(".agents/skills/quest-start/SKILL.md").is_file());
 	assert!(dir.path().join("quest/README.md").is_file());
-	assert!(dir.path().join(".gitignore").is_file());
+	assert!(!dir.path().join(".gitignore").exists());
 	assert!(dir.path().join("AGENTS.md").is_file());
-	let ignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-	assert!(ignore.lines().any(|line| line == "/.scratch/"));
 	let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
 	assert!(agents.contains(quest::setup::REFERENCE_LINE));
 
@@ -80,7 +78,6 @@ fn uninstall_round_trip_preserves_user_content() {
 	let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
 	assert_eq!(agents, "# Repo\n\nUser rule.\n");
 	assert!(dir.path().join("quest/m0/plan.md").is_file());
-	assert!(!dir.path().join(".gitignore").exists());
 	assert!(!dir.path().join(".claude").exists());
 	assert!(!dir.path().join(".agents").exists());
 }

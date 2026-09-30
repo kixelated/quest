@@ -1,7 +1,7 @@
 //! `quest init` and `quest uninstall`: install skill stubs and reverse it.
 //!
-//! Init touches only stubs, one reference line, `/.scratch/` in `.gitignore`, and
-//! an empty `quest/README.md` when missing. Uninstall never deletes the quest tree.
+//! Init touches only stubs, one reference line, and an empty `quest/README.md`
+//! when missing. Uninstall never deletes the quest tree.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,8 +16,6 @@ const REFERENCE_MARKER: &str = "Quests: ";
 
 /// Appended to the root agent instructions when Quest is installed.
 pub const REFERENCE_LINE: &str = "Quests: when work mentions a quest, run `quest guide` and follow it.";
-
-const SCRATCH_IGNORE: &str = "/.scratch/";
 
 /// The skill directories Claude Code and Codex read. One holds the stubs and
 /// the other links to it.
@@ -65,16 +63,11 @@ pub fn init(root: &Path) -> Result<Vec<PathBuf>> {
 		changes.push(readme.into());
 	}
 
-	let ignore = Path::new(".gitignore");
-	if append_line(root, ignore, SCRATCH_IGNORE, SCRATCH_IGNORE, false)? {
-		changes.push(ignore.into());
-	}
-
 	let instructions = ["AGENTS.md", "CLAUDE.md"]
 		.into_iter()
 		.find(|name| root.join(name).is_file())
 		.unwrap_or("AGENTS.md");
-	if append_line(root, Path::new(instructions), REFERENCE_MARKER, REFERENCE_LINE, true)? {
+	if append_line(root, Path::new(instructions), REFERENCE_MARKER, REFERENCE_LINE)? {
 		changes.push(instructions.into());
 	}
 	Ok(changes)
@@ -113,12 +106,8 @@ pub fn uninstall(root: &Path) -> Result<Vec<PathBuf>> {
 		}
 	}
 
-	for (path, marker) in [
-		(".gitignore", SCRATCH_IGNORE),
-		("AGENTS.md", REFERENCE_MARKER),
-		("CLAUDE.md", REFERENCE_MARKER),
-	] {
-		if remove_line(root, Path::new(path), marker)? {
+	for path in ["AGENTS.md", "CLAUDE.md"] {
+		if remove_line(root, Path::new(path), REFERENCE_MARKER)? {
 			changes.push(path.into());
 		}
 	}
@@ -188,8 +177,8 @@ fn write(root: &Path, path: &Path, content: &str) -> Result<()> {
 }
 
 /// Append `line` unless a line already starts with `marker`, creating the file
-/// if missing. `paragraph` separates it from existing content with a blank line.
-fn append_line(root: &Path, path: &Path, marker: &str, line: &str, paragraph: bool) -> Result<bool> {
+/// if missing, separated from existing content by a blank line.
+fn append_line(root: &Path, path: &Path, marker: &str, line: &str) -> Result<bool> {
 	let mut content = if root.join(path).is_file() {
 		read(root, path)?
 	} else {
@@ -202,9 +191,7 @@ fn append_line(root: &Path, path: &Path, marker: &str, line: &str, paragraph: bo
 		if !content.ends_with('\n') {
 			content.push('\n');
 		}
-		if paragraph {
-			content.push('\n');
-		}
+		content.push('\n');
 	}
 	content.push_str(line);
 	content.push('\n');
