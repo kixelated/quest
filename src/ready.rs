@@ -19,9 +19,8 @@ use crate::rules;
 /// One thing standing between a quest and being started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blocker {
-	/// The quest or questline that has to finish first, when the blocker is one
-	/// of ours. `None` is a plain-text condition, which nothing in the tree can
-	/// ever clear.
+	/// The quest or questline that has to finish first. `None` is an entry that
+	/// is not a quest, which `quest check` rejects and nothing here can clear.
 	pub path: Option<PathBuf>,
 	/// The `Required` bullet as written, whitespace collapsed.
 	pub text: String,
@@ -32,7 +31,7 @@ pub struct Blocker {
 }
 
 impl Blocker {
-	/// What names the blocker: the document, or the condition's own words.
+	/// What names the blocker: the document, or the entry's own words.
 	pub fn label(&self) -> String {
 		match &self.path {
 			Some(path) => path.display().to_string(),
@@ -119,9 +118,8 @@ fn expand(by_path: &BTreeMap<&Path, &Doc>, doc: &Doc, stack: &mut Vec<PathBuf>) 
 }
 
 fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &mut Vec<PathBuf>) -> Blocker {
-	// A bullet that does not open with a link into the tree is a plain-text
-	// condition: an issue, a release, a customer. Nothing here can clear it, so
-	// it is a blocker with nothing under it.
+	// A bullet that does not open with a link into the tree is invalid, and
+	// nothing here can clear it, so it is a blocker with nothing under it.
 	let path = entry
 		.target
 		.as_deref()

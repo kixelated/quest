@@ -73,7 +73,7 @@ pub fn check(root: &Path, docs: &[Doc]) -> Vec<Finding> {
 		links(&mut found, root, &known, doc);
 	}
 
-	index(&mut found, docs);
+	index(&mut found, &known, docs);
 	cycles(&mut found, docs);
 
 	found.0.sort();
@@ -210,24 +210,10 @@ fn links(found: &mut Findings, root: &Path, known: &BTreeSet<&Path>, doc: &Doc) 
 			);
 		}
 
-		// An AGENTS.md under quest/ is a file, but not a quest anything can finish.
-		if link.section.as_deref() == Some("Required")
-			&& link.position == Position::Entry
-			&& path.starts_with("quest")
-			&& !known.contains(path.as_path())
-		{
-			found.at(
-				&doc.path,
-				link.line,
-				format!("requires {}, which is not a quest document", link.target),
-			);
-		}
-
-		// A `Required` bullet is either a dependency edge (the link opens it) or
-		// a plain-text external condition (no quest link at all).
-		// moq-dev/moq.pro#1170 shipped the third shape: a customer-gate sentence
-		// mentioning a questline mid-line, which reads as context but IS a
-		// blocker, and so silently required all of m2.
+		// A `Required` entry opens with its quest link. moq-dev/moq.pro#1170
+		// shipped a customer-gate sentence mentioning a questline mid-line,
+		// which reads as context but IS a blocker, and so silently required all
+		// of m2.
 		if link.section.as_deref() == Some("Required")
 			&& known.contains(path.as_path())
 			&& link.position != Position::Entry
@@ -245,8 +231,13 @@ fn links(found: &mut Findings, root: &Path, known: &BTreeSet<&Path>, doc: &Doc) 
 }
 
 /// Every document is listed by the questline it sits under, as a child in that
-/// README's `Required`, and nothing is required twice by the same document.
-fn index(found: &mut Findings, docs: &[Doc]) {
+/// README's `Required`, and every `Required` entry is a quest, required once.
+///
+/// A condition outside the repository (a release, a customer, a person) is a
+/// quest of its own rather than a plain-text bullet: a blocked quest drops out
+/// of every ready listing, so the condition would be forgotten, while its own
+/// quest keeps surfacing as ready until someone clears it.
+fn index(found: &mut Findings, known: &BTreeSet<&Path>, docs: &[Doc]) {
 	let mut listed: BTreeSet<PathBuf> = BTreeSet::new();
 
 	for doc in docs {
@@ -254,9 +245,19 @@ fn index(found: &mut Findings, docs: &[Doc]) {
 
 		let mut seen = BTreeSet::new();
 		for entry in doc.entries("Required") {
-			if let Some(target) = entry.target.as_deref().and_then(rooted)
-				&& !seen.insert(target)
-			{
+			let target = entry.target.as_deref().and_then(rooted);
+			let Some(target) = target.filter(|t| known.contains(t.as_path())) else {
+				found.at(
+					&doc.path,
+					entry.line,
+					format!(
+						"requires {}, which is not a quest document; make an outside condition its own quest",
+						entry.target.as_deref().unwrap_or(&entry.text)
+					),
+				);
+				continue;
+			};
+			if !seen.insert(target) {
 				found.at(
 					&doc.path,
 					entry.line,
