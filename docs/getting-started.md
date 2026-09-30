@@ -75,8 +75,9 @@ still need checking; `quest ready` does not look for them.
 
 ## Update or remove it
 
-Upgrade by changing the pin; the stubs stay as they are. Issue export is not
-implemented yet, so preserve any unfinished plans before leaving Quest, then run:
+Upgrade by changing the pin; the stubs stay as they are. Before you remove Quest,
+invoke `/quest-export` (or `$quest-export` in Codex) so active quests become
+GitHub issues, then run:
 
 ```sh
 quest uninstall
@@ -84,4 +85,4 @@ quest uninstall
 
 Uninstall removes only Quest stubs that still match, the reference line, and the
 `/.scratch/` ignore entry. It never deletes your quest tree, and completed plans
-remain in Git history.
+remain in Git history. Then remove the pin.

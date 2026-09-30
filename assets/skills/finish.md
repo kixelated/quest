@@ -8,7 +8,7 @@ The goal is to evaluate the open (non-draft) PRs in the repository and decide wh
 The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent.
 
-Interactively prompt the user about every PR (batch a few PRs per prompt), with your recommendation:
+Interactively prompt the user with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), with your recommendation:
 - `/quest-merge`: Only have minor outstanding issues.
 - `/quest-plan`: Have significant issues and need decisions.
 - skip: Are not ready to be merged yet.

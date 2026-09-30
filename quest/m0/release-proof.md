@@ -17,5 +17,4 @@ user owned was lost. Then v0.1.0 is tagged and published.
 ## Required
 
 - [Release binaries](/quest/m0/releases.md) - installs a real release
-- [Export skill](/quest/m0/export.md) - removal exports first
 - [Setup guide](/quest/m0/setup.md) - the documented entry point

@@ -9,7 +9,7 @@ The scope consists of all ready quests that are not claimed.
 Use the argument (if provided) to filter to specific quests/questlines.
 Inspect any blocked quests and determine if they can be unblocked.
 
-Interactively prompt the user about every quest (batch a few), with your recommendation:
+Interactively prompt the user with one question per quest, never grouping quests into one question (a prompt may hold a few questions), with your recommendation:
 - `/quest-start`: If the quest is well planned with no blockers.
 - `/quest-plan`: If the quest has significant design issues.
 - skip: If the quest should not be started yet.
@@ -25,7 +25,7 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-Each agent switches into its own worktree and when done, opens a PR.
+Each agent switches into its own worktree and when done, opens a draft PR.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
