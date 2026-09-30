@@ -18,19 +18,14 @@ Interactively prompt the user with one question per quest, never grouping quests
 Include a brief summary of each quest.
 Consider ordering, suggesting to skip any quests that would result in conflicts.
 
-Just before spawning, run `git fetch` and `quest ready --remote origin` again.
-Skip any quest that is no longer listed, as another PR may have completed it.
-
-Spawn a background sub-agent for each `/quest-start`, each with its own isolated worktree.
-The harness refuses writes outside a session's own worktree, so an agent cannot edit one its parent created.
-The agent then switches that worktree to the base `quest branch` prints (`git checkout -B <quest branch> origin/<base>`), creating the questline branch first if it is missing.
-An agent that cannot write in its worktree stops and reports without claiming.
+Spawn a background sub-agent for each `/quest-start` with its own isolated worktree, since agents cannot write to a worktree their parent created.
+The agent switches it to the base `quest branch` prints (`git checkout -B <quest branch> origin/<base>`), creating the questline branch first if it is missing.
 
 Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-Each agent switches into its own worktree and when done, opens a draft PR.
+When done, each agent opens a draft PR.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
