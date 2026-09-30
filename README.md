@@ -101,7 +101,7 @@ the version you pin decides what your agents follow:
 | Skill | What it does |
 | --- | --- |
 | `quest-plan` | Ask the questions that turn an idea into scoped quests. |
-| `quest-convert` | Bring open GitHub issues into the planning conversation. |
+| `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |

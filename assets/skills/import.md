@@ -1,5 +1,5 @@
 ---
-description: Convert Github issues to quests.
+description: Import GitHub issues as quests.
 ---
 
 Before starting, run `quest guide` and `quest skill plan`.
