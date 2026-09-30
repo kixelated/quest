@@ -107,7 +107,7 @@ the version you pin decides what your agents follow:
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
 | `quest-spawn` | Triage ready quests and hand them to parallel agents. |
 | `quest-merge` | Land a quest's PR once CI and reviews pass. |
-| `quest-finish` | Decide which open PRs to merge, then merge them in parallel. |
+| `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
