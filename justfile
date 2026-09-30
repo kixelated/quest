@@ -8,6 +8,7 @@ default:
 check:
     cargo fmt --all -- --check
     cargo clippy --locked --all-targets -- -D warnings
+    dist generate --check
     cargo run --quiet --locked -- check
     cargo run --quiet --locked -- --root examples/export check
     actionlint
