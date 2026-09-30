@@ -7,12 +7,13 @@ Before you begin, run `quest guide` and read its output completely.
 Your goal is to execute many quests in parallel.
 The scope consists of all ready quests that are not claimed.
 Use the argument (if provided) to filter to specific quests/questlines.
-Inspect any blocked quests and determine if they can be unblocked.
+For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Interactively prompt the user with one question per quest, never grouping quests into one question (a prompt may hold a few questions), with your recommendation:
 - `/quest-start`: If the quest is well planned with no blockers.
 - `/quest-plan`: If the quest has significant design issues.
 - skip: If the quest should not be started yet.
+- deprioritize: If the quest should wait behind other work; `/quest-plan` moves it down.
 - `/quest-delete`: If the quest should be deleted.
 
 Include a brief summary of each quest.

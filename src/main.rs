@@ -43,26 +43,6 @@ enum Command {
 		local: bool,
 	},
 
-	/// List every plain-text `Required` bullet beside the quest it blocks.
-	///
-	/// A plain-text bullet is a condition outside the repository, which nothing
-	/// in the tree can clear. Each blocked quest prints on its own line with its
-	/// conditions indented beneath it, in tree order; whether one has cleared is
-	/// for whoever reads the list to check.
-	Gates {
-		/// Quest or questline to list. Omit to list the whole tree.
-		path: Option<PathBuf>,
-
-		/// Read each questline from its branch on this remote when that branch
-		/// exists. Fetch first; this reads remote-tracking refs.
-		#[arg(long, default_value = "origin")]
-		remote: String,
-
-		/// Read only the working tree, ignoring line branches on the remote.
-		#[arg(long, conflicts_with = "remote")]
-		local: bool,
-	},
-
 	/// Print the branch carrying a quest, then every branch it merges through.
 	///
 	/// One per line, nearest first, ending at `main`: a quest merges into its
@@ -140,16 +120,6 @@ fn main() -> Result<ExitCode> {
 			let remote = (!local).then_some(remote.as_str());
 			for path in quest::ready::quests(&cli.root, remote)? {
 				println!("{}", path.display());
-			}
-			Ok(ExitCode::SUCCESS)
-		}
-		Command::Gates { path, remote, local } => {
-			let remote = (!local).then_some(remote.as_str());
-			for (quest, gates) in quest::ready::gates(&cli.root, path.as_deref(), remote)? {
-				println!("{}", quest.display());
-				for gate in gates {
-					println!("  {gate}");
-				}
 			}
 			Ok(ExitCode::SUCCESS)
 		}

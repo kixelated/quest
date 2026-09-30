@@ -55,13 +55,10 @@ The `Goal` section is required; everything else is optional. Use these exact hea
 Size the title `[XS]` to `[XL]` for implementation, verification, and landing.
 A questline carries no size until its last child is removed; its README is then the line's remaining work.
 
-`Required` lists what must finish before the work starts.
+`Required` lists the quests that must finish before the work starts.
 The list is ordered by priority, inserted at rank.
 When the section is empty, delete it; the quest is now unblocked.
 `Required` must be acyclic.
-
-A plain-text bullet names a condition outside the repository.
-Periodically check if it has cleared; `quest gates` lists every one.
 
 `quest check` enforces this structure.
 Run it after creating or updating quests.
@@ -75,6 +72,10 @@ Split independently completable work into separate quests.
 Group them in a questline only when they should ship together.
 
 A release or pin bump that unblocks work is its own quest.
+
+So is anything waiting on an outside party or a human action (an upstream fix, a customer, a decision).
+Its Goal names the condition and how to check or advance it; it is deleted once the condition clears.
+Unlike a blocked quest it stays ready, so it resurfaces every time ready work is triaged instead of stalling in the backlog.
 
 ## Execution
 

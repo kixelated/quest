@@ -149,19 +149,6 @@ impl Tree {
 			.collect()
 	}
 
-	/// Each gated document with its conditions, as `path: condition`.
-	fn gates(&self, path: Option<&str>, remote: Option<&str>) -> Vec<String> {
-		quest::ready::gates(self.path(), path.map(Path::new), remote)
-			.expect("gates")
-			.into_iter()
-			.flat_map(|(quest, gates)| {
-				gates
-					.into_iter()
-					.map(move |gate| format!("{}: {gate}", quest.display()))
-			})
-			.collect()
-	}
-
 	fn ready(&self) -> Vec<String> {
 		self.ready_on(None)
 	}
@@ -524,7 +511,7 @@ fn cycle_through_a_reference_style_link() {
 	tree.rejects("Required cycle:");
 }
 
-/// moq-dev/moq.pro#1170: a plain-text external condition that happens to link a
+/// moq-dev/moq.pro#1170: a customer-gate sentence that happens to link a
 /// questline mid-sentence reads as context but IS a dependency edge.
 #[test]
 fn required_link_mid_sentence() {
@@ -548,16 +535,28 @@ fn required_link_on_a_wrapped_bullet() {
 	tree.rejects("mid-sentence");
 }
 
-/// The other half of that rule: an external condition with no link at all is the
-/// shape AGENTS.md prescribes, and must stay legal.
+/// An outside condition is its own quest, so it keeps surfacing as ready
+/// instead of hiding the quest it blocks from every ready listing. The bullet
+/// wraps here because that is what such bullets in trees actually looked like.
 #[test]
 fn required_external_condition() {
 	let tree = Tree::new();
 	tree.append(
 		"quest/m0/line/one.md",
-		"\n## Required\n\n- A customer who justifies the work.\n",
+		"\n## Required\n\n- A `moq-video` release that carries\n  the encoder\n",
 	);
-	tree.accepts();
+	tree.rejects("requires A moq-video release that carries the encoder, which is not a quest document");
+}
+
+/// An issue or release link is outside the tree too; only a quest can clear.
+#[test]
+fn required_external_link() {
+	let tree = Tree::new();
+	tree.append(
+		"quest/m0/line/one.md",
+		"\n## Required\n\n- [#1](https://github.com/OWNER/REPO/issues/1) - upstream fix\n",
+	);
+	tree.rejects("requires https://github.com/OWNER/REPO/issues/1, which is not a quest document");
 }
 
 /// A LOOSE list - blank lines between entries - wraps every item in a paragraph.
@@ -579,9 +578,9 @@ fn loose_required_list() {
 	let tree = Tree::new();
 	tree.append(
 		"quest/m0/line/one.md",
-		"\n## Required\n\n- [Two](/quest/m0/line/two.md) - must finish first\n\n- A customer who justifies the work.\n",
+		"\n## Required\n\n- [Two](/quest/m0/line/two.md) - must finish first\n\n- [Line](/quest/m0/line/README.md) - the whole line\n",
 	);
-	// The edge registered (hence the cycle) without reading as prose.
+	// Both edges registered (hence the cycle) without reading as prose.
 	tree.rejects("Required cycle:");
 	tree.without("mid-sentence");
 }
@@ -685,14 +684,14 @@ fn escaped_link_resolving_beside_the_root() {
 	tree.rejects(&format!("link does not resolve: ../../../../{name}/AGENTS.md"));
 }
 
-/// A plain-text bullet is a blocker, not a child, so a README holding only one
-/// is a quest and needs a size like any other.
+/// A blocker outside the line's directory is not a child, so a README holding
+/// only one is a quest and needs a size like any other.
 #[test]
 fn questline_listing_no_quest() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/husk/README.md",
-		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Required\n\n- TBD\n",
+		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n",
 	);
 	tree.append("quest/m0/README.md", "- [Husk](/quest/m0/husk/README.md)\n");
 	tree.rejects("quest title must be");
@@ -752,22 +751,6 @@ fn ready_quest_has_no_blockers() {
 fn blocked_by_a_quest() {
 	let tree = Tree::new();
 	assert_eq!(tree.blockers("quest/m0/line/two.md"), ["quest/m0/line/one.md"]);
-}
-
-/// A plain-text bullet names a condition outside the repository, so nothing in
-/// the tree can ever clear it: it is a blocker, printed as written. Wrapped
-/// here because that is what the bullets in the tree actually look like.
-#[test]
-fn blocked_by_plain_text() {
-	let tree = Tree::new();
-	tree.append(
-		"quest/m0/line/one.md",
-		"\n## Required\n\n- A `moq-video` release that carries\n  the encoder\n",
-	);
-	assert_eq!(
-		tree.blockers("quest/m0/line/one.md"),
-		["A moq-video release that carries the encoder"]
-	);
 }
 
 /// A questline blocker clears only when the whole line is complete, so the
@@ -867,7 +850,7 @@ fn ready_listing_appends_unindexed_quests() {
 	tree.write("quest/m0/aaa.md", "# [S] Unindexed\n\n## Goal\n\nDiscover me.\n");
 	tree.write(
 		"quest/m0/blocked.md",
-		"# [S] Blocked\n\n## Goal\n\nWait.\n\n## Required\n\n- External condition\n",
+		"# [S] Blocked\n\n## Goal\n\nWait.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n",
 	);
 	assert_eq!(tree.ready(), ["quest/m0/line/one.md", "quest/m0/aaa.md"]);
 }
@@ -945,63 +928,6 @@ fn branch_chain_of_a_nested_line() {
 			"quest/m0/line/README",
 			"main"
 		]
-	);
-}
-
-// Gates: plain-text `Required` bullets, the conditions outside the repository.
-
-/// Every document can carry one, a milestone included, and they list in tree
-/// order. A link into the tree is a blocker the tree tracks, not a gate; a
-/// link out of it is a gate like any other plain text.
-#[test]
-fn gates_list_plain_text_bullets_in_tree_order() {
-	let tree = Tree::new();
-	tree.append("quest/m0/README.md", "- Budget approved\n")
-		.append(
-			"quest/m0/line/two.md",
-			"- [#12](https://example.invalid/12) - merged upstream\n",
-		)
-		.append("quest/m0/line/two.md", "- A release ships\n")
-		.write(
-			"quest/m0/line/one.md",
-			&format!("{ONE}\n## Required\n\n- Vendor replies\n"),
-		);
-	tree.accepts();
-	assert_eq!(
-		tree.gates(None, None),
-		[
-			"quest/m0/README.md: Budget approved",
-			"quest/m0/line/one.md: Vendor replies",
-			"quest/m0/line/two.md: #12 - merged upstream",
-			"quest/m0/line/two.md: A release ships",
-		]
-	);
-	assert_eq!(
-		tree.gates(Some("quest/m0/line/README.md"), None),
-		[
-			"quest/m0/line/one.md: Vendor replies",
-			"quest/m0/line/two.md: #12 - merged upstream",
-			"quest/m0/line/two.md: A release ships",
-		]
-	);
-	assert_eq!(
-		tree.gates(Some("/quest/m0/line/one.md"), None),
-		["quest/m0/line/one.md: Vendor replies"]
-	);
-}
-
-/// A gate added on a line's branch has not reached `main` yet, and the audit
-/// that re-checks gates has to see it anyway.
-#[test]
-fn gates_read_line_branches() {
-	let tree = Tree::new();
-	tree.init_git().push_line("quest/m0/line/README", |t| {
-		t.append("quest/m0/line/two.md", "- A release ships\n");
-	});
-	assert!(tree.gates(None, None).is_empty());
-	assert_eq!(
-		tree.gates(None, Some("origin")),
-		["quest/m0/line/two.md: A release ships"]
 	);
 }
 

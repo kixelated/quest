@@ -10,8 +10,12 @@ use anyhow::{Context, Result, bail};
 
 use crate::skills;
 
+/// Marks Quest's line in the root agent instructions, so a repository can
+/// reword the rest of it without init adding another.
+const REFERENCE_MARKER: &str = "Quests: ";
+
 /// Appended to the root agent instructions when Quest is installed.
-pub const REFERENCE_LINE: &str = "When work mentions a quest, run `quest guide` and follow it.";
+pub const REFERENCE_LINE: &str = "Quests: when work mentions a quest, run `quest guide` and follow it.";
 
 const SCRATCH_IGNORE: &str = "/.scratch/";
 
@@ -62,7 +66,7 @@ pub fn init(root: &Path) -> Result<Vec<PathBuf>> {
 	}
 
 	let ignore = Path::new(".gitignore");
-	if append_line(root, ignore, SCRATCH_IGNORE, false)? {
+	if append_line(root, ignore, SCRATCH_IGNORE, SCRATCH_IGNORE, false)? {
 		changes.push(ignore.into());
 	}
 
@@ -70,7 +74,7 @@ pub fn init(root: &Path) -> Result<Vec<PathBuf>> {
 		.into_iter()
 		.find(|name| root.join(name).is_file())
 		.unwrap_or("AGENTS.md");
-	if append_line(root, Path::new(instructions), REFERENCE_LINE, true)? {
+	if append_line(root, Path::new(instructions), REFERENCE_MARKER, REFERENCE_LINE, true)? {
 		changes.push(instructions.into());
 	}
 	Ok(changes)
@@ -109,12 +113,12 @@ pub fn uninstall(root: &Path) -> Result<Vec<PathBuf>> {
 		}
 	}
 
-	for (path, line) in [
+	for (path, marker) in [
 		(".gitignore", SCRATCH_IGNORE),
-		("AGENTS.md", REFERENCE_LINE),
-		("CLAUDE.md", REFERENCE_LINE),
+		("AGENTS.md", REFERENCE_MARKER),
+		("CLAUDE.md", REFERENCE_MARKER),
 	] {
-		if remove_line(root, Path::new(path), line)? {
+		if remove_line(root, Path::new(path), marker)? {
 			changes.push(path.into());
 		}
 	}
@@ -183,15 +187,15 @@ fn write(root: &Path, path: &Path, content: &str) -> Result<()> {
 	fs::write(root.join(path), content).with_context(|| path.display().to_string())
 }
 
-/// Append `line` unless the file already has it, creating the file if missing.
-/// `paragraph` separates it from existing content with a blank line.
-fn append_line(root: &Path, path: &Path, line: &str, paragraph: bool) -> Result<bool> {
+/// Append `line` unless a line already starts with `marker`, creating the file
+/// if missing. `paragraph` separates it from existing content with a blank line.
+fn append_line(root: &Path, path: &Path, marker: &str, line: &str, paragraph: bool) -> Result<bool> {
 	let mut content = if root.join(path).is_file() {
 		read(root, path)?
 	} else {
 		String::new()
 	};
-	if content.lines().any(|existing| existing == line) {
+	if content.lines().any(|existing| existing.starts_with(marker)) {
 		return Ok(false);
 	}
 	if !content.is_empty() {
@@ -208,17 +212,20 @@ fn append_line(root: &Path, path: &Path, line: &str, paragraph: bool) -> Result<
 	Ok(true)
 }
 
-/// Remove every copy of `line` and the blank lines it leaves at the end,
-/// deleting the file if nothing else remains.
-fn remove_line(root: &Path, path: &Path, line: &str) -> Result<bool> {
+/// Remove every line starting with `marker` and the blank lines it leaves at
+/// the end, deleting the file if nothing else remains.
+fn remove_line(root: &Path, path: &Path, marker: &str) -> Result<bool> {
 	if !root.join(path).is_file() {
 		return Ok(false);
 	}
 	let content = read(root, path)?;
-	if !content.lines().any(|existing| existing == line) {
+	if !content.lines().any(|existing| existing.starts_with(marker)) {
 		return Ok(false);
 	}
-	let kept: Vec<_> = content.lines().filter(|existing| *existing != line).collect();
+	let kept: Vec<_> = content
+		.lines()
+		.filter(|existing| !existing.starts_with(marker))
+		.collect();
 	let kept = kept.join("\n");
 	let kept = kept.trim_end();
 	if kept.is_empty() {
