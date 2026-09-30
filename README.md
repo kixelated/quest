@@ -88,7 +88,11 @@ the quest's branch, then each branch it merges through, nearest first and
 ending at `main`. A milestone has no branch, so its quests merge straight into
 `main`.
 
-`ready` reads each questline from its branch on `origin` (fetch first;
+`gates` lists every plain-text `Required` bullet, a condition outside the
+repository, indented under the quest it blocks, so a periodic check can see
+them all at once. The CLI never judges whether one has cleared.
+
+`ready` and `gates` read each questline from its branch on `origin` (fetch first;
 `--local` skips this). It does not look for claims or PRs, so check those before
 starting a quest someone else may already be working on.
 

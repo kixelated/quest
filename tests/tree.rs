@@ -149,6 +149,19 @@ impl Tree {
 			.collect()
 	}
 
+	/// Each gated document with its conditions, as `path: condition`.
+	fn gates(&self, path: Option<&str>, remote: Option<&str>) -> Vec<String> {
+		quest::ready::gates(self.path(), path.map(Path::new), remote)
+			.expect("gates")
+			.into_iter()
+			.flat_map(|(quest, gates)| {
+				gates
+					.into_iter()
+					.map(move |gate| format!("{}: {gate}", quest.display()))
+			})
+			.collect()
+	}
+
 	fn ready(&self) -> Vec<String> {
 		self.ready_on(None)
 	}
@@ -932,6 +945,63 @@ fn branch_chain_of_a_nested_line() {
 			"quest/m0/line/README",
 			"main"
 		]
+	);
+}
+
+// Gates: plain-text `Required` bullets, the conditions outside the repository.
+
+/// Every document can carry one, a milestone included, and they list in tree
+/// order. A link into the tree is a blocker the tree tracks, not a gate; a
+/// link out of it is a gate like any other plain text.
+#[test]
+fn gates_list_plain_text_bullets_in_tree_order() {
+	let tree = Tree::new();
+	tree.append("quest/m0/README.md", "- Budget approved\n")
+		.append(
+			"quest/m0/line/two.md",
+			"- [#12](https://example.invalid/12) - merged upstream\n",
+		)
+		.append("quest/m0/line/two.md", "- A release ships\n")
+		.write(
+			"quest/m0/line/one.md",
+			&format!("{ONE}\n## Required\n\n- Vendor replies\n"),
+		);
+	tree.accepts();
+	assert_eq!(
+		tree.gates(None, None),
+		[
+			"quest/m0/README.md: Budget approved",
+			"quest/m0/line/one.md: Vendor replies",
+			"quest/m0/line/two.md: #12 - merged upstream",
+			"quest/m0/line/two.md: A release ships",
+		]
+	);
+	assert_eq!(
+		tree.gates(Some("quest/m0/line/README.md"), None),
+		[
+			"quest/m0/line/one.md: Vendor replies",
+			"quest/m0/line/two.md: #12 - merged upstream",
+			"quest/m0/line/two.md: A release ships",
+		]
+	);
+	assert_eq!(
+		tree.gates(Some("/quest/m0/line/one.md"), None),
+		["quest/m0/line/one.md: Vendor replies"]
+	);
+}
+
+/// A gate added on a line's branch has not reached `main` yet, and the audit
+/// that re-checks gates has to see it anyway.
+#[test]
+fn gates_read_line_branches() {
+	let tree = Tree::new();
+	tree.init_git().push_line("quest/m0/line/README", |t| {
+		t.append("quest/m0/line/two.md", "- A release ships\n");
+	});
+	assert!(tree.gates(None, None).is_empty());
+	assert_eq!(
+		tree.gates(None, Some("origin")),
+		["quest/m0/line/two.md: A release ships"]
 	);
 }
 

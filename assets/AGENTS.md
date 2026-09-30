@@ -61,7 +61,7 @@ When the section is empty, delete it; the quest is now unblocked.
 `Required` must be acyclic.
 
 A plain-text bullet names a condition outside the repository.
-Periodically check if it has cleared.
+Periodically check if it has cleared; `quest gates` lists every one.
 
 `quest check` enforces this structure.
 Run it after creating or updating quests.

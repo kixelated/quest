@@ -78,25 +78,58 @@ pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Bl
 /// `remote` is as for [`blockers`].
 pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	let docs = crate::load_from(root, remote)?;
-	let mut remaining: BTreeMap<PathBuf, &Doc> = docs.iter().map(|doc| (doc.path.clone(), doc)).collect();
-	let mut pending = vec![PathBuf::from("quest/README.md")];
-	let mut ready = Vec::new();
+	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|d| (d.path.as_path(), d)).collect();
+	Ok(order(&by_path, None)
+		.into_iter()
+		.filter(|doc| !doc.is_questline() && !doc.has("Required"))
+		.map(|doc| doc.path.clone())
+		.collect())
+}
+
+/// Every plain-text `Required` bullet, grouped under the document it blocks, in
+/// tree order: the conditions outside the repository that only someone looking
+/// can clear. Whether one has cleared is not a question the tree can answer, so
+/// this only lists them.
+///
+/// `path` limits the listing to that quest, or to a questline and everything
+/// under it. `remote` is as for [`blockers`].
+pub fn gates(root: &Path, path: Option<&Path>, remote: Option<&str>) -> Result<Vec<(PathBuf, Vec<String>)>> {
+	let docs = crate::load_from(root, remote)?;
+	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|d| (d.path.as_path(), d)).collect();
+	let start = path.map(|path| locate(root, path, &by_path)).transpose()?;
+	Ok(order(&by_path, start.as_deref())
+		.into_iter()
+		.filter_map(|doc| {
+			let gates: Vec<String> = doc
+				.entries("Required")
+				.filter(|entry| target(&by_path, entry).is_none())
+				.map(|entry| entry.text.clone())
+				.collect();
+			(!gates.is_empty()).then(|| (doc.path.clone(), gates))
+		})
+		.collect())
+}
+
+/// Documents in tree order: depth first through each questline's children from
+/// `start`, or from the root followed by anything no questline lists.
+fn order<'a>(by_path: &BTreeMap<&Path, &'a Doc>, start: Option<&Path>) -> Vec<&'a Doc> {
+	let mut remaining = by_path.clone();
+	let mut pending = vec![start.unwrap_or(Path::new("quest/README.md")).to_path_buf()];
+	let mut out = Vec::new();
 	while let Some(path) = pending.pop() {
-		let Some(doc) = remaining.remove(&path) else { continue };
+		let Some(doc) = remaining.remove(path.as_path()) else {
+			continue;
+		};
 		if doc.is_questline() {
 			let children: Vec<_> = doc.children().collect();
 			pending.extend(children.into_iter().rev());
-		} else if !doc.has("Required") {
-			ready.push(path);
 		}
+		out.push(doc);
 	}
-	ready.extend(
-		remaining
-			.into_iter()
-			.filter(|(_, doc)| !doc.is_questline() && !doc.has("Required"))
-			.map(|(path, _)| path),
-	);
-	Ok(ready)
+	if start.is_none() {
+		out.extend(remaining.into_values());
+	}
+	out
 }
 
 /// The blockers of one document: its `Required` entries, which for a questline
@@ -119,14 +152,7 @@ fn expand(by_path: &BTreeMap<&Path, &Doc>, doc: &Doc, stack: &mut Vec<PathBuf>) 
 }
 
 fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &mut Vec<PathBuf>) -> Blocker {
-	// A bullet that does not open with a link into the tree is a plain-text
-	// condition: an issue, a release, a customer. Nothing here can clear it, so
-	// it is a blocker with nothing under it.
-	let path = entry
-		.target
-		.as_deref()
-		.and_then(rules::rooted)
-		.filter(|path| by_path.contains_key(path.as_path()));
+	let path = target(by_path, entry);
 
 	// Only a questline expands. A required QUEST is the blocker itself, and its
 	// own chain is the answer to running this on that quest instead; printing
@@ -148,6 +174,17 @@ fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &m
 		text: entry.text.clone(),
 		blockers,
 	}
+}
+
+/// The document a `Required` entry names. A bullet that does not open with a
+/// link into the tree is a plain-text condition: an issue, a release, a
+/// customer. Nothing here can clear it, so it is a blocker with nothing under it.
+fn target(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry) -> Option<PathBuf> {
+	entry
+		.target
+		.as_deref()
+		.and_then(rules::rooted)
+		.filter(|path| by_path.contains_key(path.as_path()))
 }
 
 /// Resolve a quest path the way a caller is likely to have it to the
