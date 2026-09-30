@@ -16,5 +16,4 @@ user owned was lost. Then v0.1.0 is tagged and published.
 
 ## Required
 
-- [Init and uninstall](/quest/m0/init.md) - the lifecycle under test
 - [Setup guide](/quest/m0/setup.md) - the documented entry point

@@ -1,8 +1,7 @@
 # Use Quest in your repository
 
-Setup is manual for now; `quest init` will automate it. The binary carries the
-skills and the quest guide, so your repository only pins a version and installs
-small stubs that call it.
+The binary carries the skills and the quest guide, so your repository only pins a
+version and installs small stubs that call it.
 
 ## Install and pin the binary
 
@@ -17,24 +16,22 @@ manager your repository already uses:
 
 The package requires Rust 1.91 or newer.
 
-## Add the stubs and the reference line
+## Initialize Quest
 
 From your repository root:
 
 ```sh
-for skill in $(quest skill | cut -d' ' -f1); do
-  mkdir -p .claude/skills/quest-$skill
-  quest skill --stub $skill > .claude/skills/quest-$skill/SKILL.md
-done
-echo /.scratch/ >> .gitignore
+quest init
 ```
 
-Check for existing skills with the same names first. Codex reads skills from
-`.agents/skills/`; a directory symlink to `.claude/skills` shares one copy.
+This writes a Quest stub for each shipped skill under `.claude/skills/`, links
+`.agents/skills/` to the same tree when needed, adds `/.scratch/` to
+`.gitignore`, creates `quest/README.md` when missing, and appends one line to
+your root `AGENTS.md` or `CLAUDE.md` telling agents to run `quest guide` when
+work mentions a quest.
 
-Add one line to your root `AGENTS.md` or `CLAUDE.md`: when work mentions a quest,
-run `quest guide` and follow it. Keep repository-specific rules there too; the
-stubs never change between versions, so upgrading is only a new pin.
+Init refuses to overwrite an existing same-named skill that is not a Quest stub.
+Run it again safely: it only prints paths it changed.
 
 Claude Code's direct `AGENTS.md` support starts at v2.1.277 and depends on the
 session configuration. An existing project or ancestor `CLAUDE.md` can take
@@ -43,7 +40,7 @@ if the shared instructions do not load.
 
 ## Start a roadmap
 
-Create `quest/README.md`:
+If `quest init` created an empty root, edit `quest/README.md`:
 
 ```markdown
 # Quests
@@ -53,9 +50,9 @@ Create `quest/README.md`:
 What this project is working toward.
 ```
 
-An empty root is valid. Invoke `/quest-plan` in Claude Code or `$quest-plan` in
-Codex with an outcome you want to work toward. The skill helps settle the scope,
-then creates milestones, quests, and dependencies. See the
+Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome you
+want to work toward. The skill helps settle the scope, then creates milestones,
+quests, and dependencies. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
 From your repository root, validate the result and look for ready work:
@@ -80,5 +77,12 @@ still need checking; `quest ready` does not look for them.
 
 Upgrade by changing the pin; the stubs stay as they are. Before you remove Quest,
 invoke `/quest-export` (or `$quest-export` in Codex) so active quests become
-GitHub issues; `quest uninstall` is not implemented yet. Then remove the stubs,
-the pin, and the reference line. Completed plans remain in Git history.
+GitHub issues, then run:
+
+```sh
+quest uninstall
+```
+
+Uninstall removes only Quest stubs that still match, the reference line, and the
+`/.scratch/` ignore entry. It never deletes your quest tree, and completed plans
+remain in Git history. Then remove the pin.

@@ -10,8 +10,8 @@ and Codex plan the work and pick it up.
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
 
-**Early days:** validation, readiness, and the planning, execution, merge, and
-export skills are here. Automatic setup and release binaries are still being
+**Early days:** validation, readiness, init/uninstall, and the planning,
+execution, merge, and export skills are here. Release binaries are still being
 built.
 
 ## A quest is just a file
@@ -114,7 +114,7 @@ Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. Starting work stops at a PR; merging is a separate
 invocation.
 
-To use Quest in your own repository, follow the [manual setup](docs/getting-started.md).
+To use Quest in your own repository, follow the [getting started guide](docs/getting-started.md) (`quest init`).
 `quest guide` prints the format and workflow.
 
 ## Where this is going
