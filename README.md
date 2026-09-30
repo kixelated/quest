@@ -10,9 +10,9 @@ and Codex plan the work and pick it up.
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
 
-**Early days:** validation, readiness, and the planning, execution, and merge
-skills are here. Automatic setup, issue export, and release binaries are still
-being built.
+**Early days:** validation, readiness, and the planning, execution, merge, and
+export skills are here. Automatic setup and release binaries are still being
+built.
 
 ## A quest is just a file
 
@@ -101,7 +101,8 @@ the version you pin decides what your agents follow:
 | Skill | What it does |
 | --- | --- |
 | `quest-plan` | Ask the questions that turn an idea into scoped quests. |
-| `quest-convert` | Bring open GitHub issues into the planning conversation. |
+| `quest-import` | Bring open GitHub issues into the planning conversation. |
+| `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
 | `quest-spawn` | Triage ready quests and hand them to parallel agents. |

@@ -78,7 +78,7 @@ still need checking; `quest ready` does not look for them.
 
 ## Update or remove it
 
-Upgrade by changing the pin; the stubs stay as they are. Issue export and
-`quest uninstall` are not implemented yet. If you stop using Quest, preserve any
-unfinished plans before removing the stubs, the pin, and the reference line.
-Completed plans remain in Git history.
+Upgrade by changing the pin; the stubs stay as they are. Before you remove Quest,
+invoke `/quest-export` (or `$quest-export` in Codex) so active quests become
+GitHub issues; `quest uninstall` is not implemented yet. Then remove the stubs,
+the pin, and the reference line. Completed plans remain in Git history.
