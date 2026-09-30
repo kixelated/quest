@@ -24,7 +24,6 @@ ownership-manifest design:
 
 ## Required
 
-- [Release binaries](/quest/m0/releases.md) - tagged releases publish macOS and Linux binaries that mise and a shell installer can fetch
 - [Init and uninstall](/quest/m0/init.md) - `quest init` sets a repository up with stubs and a root reference; `quest uninstall` reverses it
 - [Setup guide](/quest/m0/setup.md) - one line pasted into an agent installs, pins, and initializes Quest, or removes it
 - [Release proof](/quest/m0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
