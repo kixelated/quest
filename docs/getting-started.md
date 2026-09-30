@@ -28,7 +28,8 @@ This writes a Quest stub for each shipped skill under `.claude/skills/`, links
 `.agents/skills/` to the same tree when needed, adds `/.scratch/` to
 `.gitignore`, creates `quest/README.md` when missing, and appends one line to
 your root `AGENTS.md` or `CLAUDE.md` telling agents to run `quest guide` when
-work mentions a quest.
+work mentions a quest. That line starts with `Quests: `; reword the rest freely,
+since init and uninstall recognize it by that prefix.
 
 Init refuses to overwrite an existing same-named skill that is not a Quest stub.
 Run it again safely: it only prints paths it changed.
