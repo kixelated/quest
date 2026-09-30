@@ -115,3 +115,17 @@ fn uninstall_is_idempotent() {
 	uninstall(dir.path());
 	assert!(uninstall(dir.path()).is_empty());
 }
+
+#[test]
+fn init_keeps_a_reworded_reference_line() {
+	let dir = repo();
+	let custom = "Quests: run `quest guide` first; skills live upstream.";
+	std::fs::write(dir.path().join("AGENTS.md"), format!("# Repo\n\n{custom}\n")).unwrap();
+	init(dir.path());
+	let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+	assert_eq!(agents, format!("# Repo\n\n{custom}\n"));
+
+	uninstall(dir.path());
+	let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+	assert_eq!(agents, "# Repo\n");
+}
