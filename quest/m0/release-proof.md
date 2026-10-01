@@ -13,7 +13,3 @@ user owned was lost. Then v0.1.0 is tagged and published.
   with the transcript kept for the launch demo.
 - Include a repository that already has an `AGENTS.md` or `CLAUDE.md` and
   a same-named skill, to prove init refuses rather than overwrites.
-
-## Required
-
-- [Setup guide](/quest/m0/setup.md) - the documented entry point

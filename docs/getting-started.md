@@ -3,40 +3,19 @@
 The binary carries the skills and the quest guide, so your repository only pins a
 version and installs small stubs that call it.
 
-## Install and pin the binary
+## Set it up
 
-There are no release binaries yet, so build from source. Pin it with the tool
-manager your repository already uses:
+Paste this into Claude Code or Codex from your repository root:
 
-- mise: `mise use 'cargo:https://github.com/kixelated/quest@rev:<sha>'`
-- nix: add `github:kixelated/quest/<sha>` as a flake input and put its
-  `packages.default` in your dev shell.
-- Otherwise: `cargo install --locked --git https://github.com/kixelated/quest`,
-  which is unpinned.
-
-The package requires Rust 1.91 or newer.
-
-## Initialize Quest
-
-From your repository root:
-
-```sh
-quest init
+```text
+Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest here.
 ```
 
-This writes a Quest stub for each shipped skill under `.claude/skills/`, links
-`.agents/skills/` to the same tree when needed, creates `quest/README.md` when
-missing, and appends one line to your root `AGENTS.md` or `CLAUDE.md` telling
-agents to run `quest guide` when work mentions a quest. That line starts with `Quests: `; reword the rest freely,
-since init and uninstall recognize it by that prefix.
-
-Init refuses to overwrite an existing same-named skill that is not a Quest stub.
-Run it again safely: it only prints paths it changed.
-
-Claude Code's direct `AGENTS.md` support starts at v2.1.277 and depends on the
-session configuration. An existing project or ancestor `CLAUDE.md` can take
-precedence. See [Claude's instruction-loading rules](https://code.claude.com/docs/en/memory#agentsmd)
-if the shared instructions do not load.
+[SETUP.md](../SETUP.md) has the agent install and pin the binary with mise or a
+nix flake, run `quest init`, and fit Quest into your root `AGENTS.md` or
+`CLAUDE.md`. Init writes a stub per skill under `.claude/skills/` and one line
+starting with `Quests: ` in your root instructions; reword the rest of that
+line freely, since init and uninstall recognize it by the prefix.
 
 ## Start a roadmap
 
@@ -75,13 +54,7 @@ still need checking; `quest ready` does not look for them.
 
 ## Update or remove it
 
-Upgrade by changing the pin; the stubs stay as they are. Before you remove Quest,
-invoke `/quest-export` (or `$quest-export` in Codex) so active quests become
-GitHub issues, then run:
-
-```sh
-quest uninstall
-```
-
-Uninstall removes only Quest stubs that still match and the reference line. It
-never deletes your quest tree, and completed plans remain in Git history. Then remove the pin.
+Upgrade by changing the pin; the stubs stay as they are. To remove Quest, ask
+your agent to follow SETUP.md to remove Quest. It exports active quests to
+GitHub issues, runs `quest uninstall`, and drops the pin. Uninstall never
+deletes your quest tree, and completed plans remain in Git history.

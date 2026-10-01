@@ -114,7 +114,13 @@ Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. Starting work stops at a PR; merging is a separate
 invocation.
 
-To use Quest in your own repository, follow the [getting started guide](docs/getting-started.md) (`quest init`).
+To use Quest in your own repository, paste this into your agent:
+
+```text
+Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest here.
+```
+
+The [getting started guide](docs/getting-started.md) covers what happens next.
 `quest guide` prints the format and workflow.
 
 ## Where this is going
