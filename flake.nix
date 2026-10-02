@@ -68,6 +68,7 @@
               gh
               direnv
               cargo-nextest
+              wasm-bindgen-cli
               cargo-dist
               actionlint
               shellcheck

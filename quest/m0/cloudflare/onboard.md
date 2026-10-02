@@ -12,8 +12,3 @@ sync is on.
 - Opening a PR (not pushing to main) keeps the maintainer in control.
 - Import uses the Artifacts `import` API. `quest init` runs in a Sandbox
   built from this repository's commit.
-
-## Required
-
-- [GitHub sync](/quest/m0/cloudflare/github-sync.md) - the GitHub App and the sync this turns on
-- [Fork intake](/quest/m0/cloudflare/intake.md) - the hook config the PR includes
