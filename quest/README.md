@@ -13,5 +13,5 @@ earlier milestones complete.
 
 ## Required
 
-- [M0: First public release](/quest/m0/README.md) - install, set up, work, and leave, driven from one pinned binary
-- [M1: Broader platform support](/quest/m1/README.md) - support adoption beyond the initial macOS, Linux, and WSL targets
+- [M0: First public release](/quest/m0/README.md) - install, set up, work, and leave, driven from one pinned binary, launched with Quest on Cloudflare
+- [M1: Later work](/quest/m1/README.md) - ChatGPT-funded hosted runs and native Windows
