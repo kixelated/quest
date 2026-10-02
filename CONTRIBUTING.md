@@ -61,8 +61,12 @@ Maintainers cut a release after the version bump lands on `main`:
 3. Push an annotated tag `vX.Y.Z` (for example `v0.1.0`). The Release workflow
    builds macOS (arm64, x86_64) and Linux (x86_64, arm64) artifacts and opens
    a GitHub Release.
-4. Smoke-test installs (`mise install github:kixelated/quest@vX.Y.Z`, or the
-   generated `quest-installer.sh` from the release assets).
+4. Wait for the Release workflow's install checks. After publication, it
+   installs the tag through both mise's `github:` backend and
+   `quest-installer.sh` on all four native targets and checks `quest --version`.
+   A failed check makes the release run red; fix it in the next patch release.
+   To rerun published installs, dispatch the Check release installs workflow
+   with that tag. The first real install check runs on v0.1.0; no rc is needed.
 
 Do not push release tags or publish GitHub releases from ordinary development
 work; that is a maintainer action after review.
