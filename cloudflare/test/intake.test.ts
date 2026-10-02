@@ -179,7 +179,7 @@ describe("intake coordinator", () => {
 		"keeps expiry scheduled through a %s outage and resumes after eviction",
 		async (provider) => {
 			const fake = services(),
-				stub = env.REPOSITORIES.getByName("intake-outage");
+				stub = env.REPOSITORIES.getByName(`intake-outage-${provider}`);
 			const clock = Date.now() + 49 * 60 * 60 * 1000;
 			await runInDurableObject(stub, async (object, state) => {
 				Object.assign(object, { env: fake.mockEnv });

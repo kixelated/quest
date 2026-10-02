@@ -365,6 +365,56 @@ describe("checked change lifecycle", () => {
 			),
 		).rejects.toBeInstanceOf(GitConflict);
 	});
+	it.each([403, 409] as const)("preserves HTTP %s from an actual coordinator RPC rejection", async (status) => {
+		const f = fixture(),
+			stub = env.REPOSITORIES.getByName(`http-rpc-${status}`);
+		await runInDurableObject(stub, (object, state) => {
+			if (status === 409) {
+				state.storage.sql.exec("INSERT OR REPLACE INTO repository_name VALUES(1,?)", "different-repository");
+			} else {
+				const db = {
+					prepare: (query: string) => ({
+						bind() {
+							return this;
+						},
+						first: async () =>
+							query.includes("FROM repositories")
+								? {
+										name: identity.repositoryName,
+										remote: "https://git.test/upstream",
+										defaultBranch: "main",
+										maintainerId: "different-maintainer",
+									}
+								: { ...fork, userId: "different-contributor" },
+					}),
+				};
+				Object.assign(object, { env: { ...f.bindings, DB: db } });
+			}
+		});
+		const bindings = { ...f.bindings, REPOSITORIES: { getByName: () => stub } } as unknown as Env;
+		const response = await changesRoutes.request(
+			"http://localhost:8787/repos/changes-repo/changes/changes-fork/comment",
+			{
+				method: "POST",
+				headers: {
+					Origin: "http://localhost:8787",
+					Cookie: await sessionCookie(),
+					"Content-Type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({
+					branch: identity.branch,
+					head: identity.head,
+					operationId: "http-rpc",
+					text: "Review",
+				}),
+			},
+			bindings,
+		);
+		expect(response.status).toBe(status);
+		expect(await response.text()).toContain(
+			status === 403 ? "Mutation not authorized" : "Coordinator repository mismatch",
+		);
+	});
 	it("requires trusted push subscriptions and rejects anonymous/cross-origin routes", async () => {
 		const f = fixture();
 		const forged = event();
