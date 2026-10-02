@@ -45,6 +45,25 @@ export class GitConflict extends Error {
 		this.name = "GitConflict";
 	}
 }
+export class GitUnavailable extends Error {
+	constructor() {
+		super("Git transport temporarily unavailable");
+		this.name = "GitUnavailable";
+	}
+}
+function transportFailure(operation: string, result: GitResult): never {
+	// Classify only recognizable transport failures; credentials, bad refs and
+	// implementation errors require operator repair rather than expiry retries.
+	if (
+		["fetch", "push", "ls-remote"].includes(operation) &&
+		!/(Authentication failed|returned error: 40[13]|Permission denied)/i.test(result.stderr) &&
+		/(returned error: 50[0234]|Failed to connect|Could not resolve host|Connection timed out|Recv failure: Connection reset)/i.test(
+			result.stderr,
+		)
+	)
+		throw new GitUnavailable();
+	throw new Error(`Git ${operation} failed (${result.exitCode})`);
+}
 
 export function assertSha(sha: string): void {
 	if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid Git object ID");
@@ -127,7 +146,7 @@ export class GitRepository {
 		if (!allowFailure && result.exitCode !== 0) {
 			// Git's transport diagnostics can contain credentials. Return a
 			// fixed error, with no stderr or remote URL, across RPC/HTTP.
-			throw new Error(`Git ${args[0]} failed (${result.exitCode})`);
+			transportFailure(args[0], result);
 		}
 		return result;
 	}
@@ -343,7 +362,11 @@ export class GitRepository {
 			{ capability: upstream },
 			true,
 		);
-		if (pushed.exitCode !== 0) throw new GitConflict("Upstream push rejected; refresh the change");
+		if (pushed.exitCode !== 0) {
+			if (/\[rejected\].*(non-fast-forward|fetch first)/i.test(pushed.stderr))
+				throw new GitConflict("Upstream push rejected; refresh the change");
+			transportFailure("push", pushed);
+		}
 		return commit;
 	}
 	private async recover(expectedHead: string, tree: string, operationId: string): Promise<string | null> {

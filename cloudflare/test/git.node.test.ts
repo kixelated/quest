@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { creditAuthor } from "../src/intake/claim";
-import { GitRepository, operationKey, type GitCapability, type GitExecutor } from "../src/git";
+import { GitRepository, GitUnavailable, operationKey, type GitCapability, type GitExecutor } from "../src/git";
 
 const author = { name: "Trusted Maintainer", email: "maintainer@example.test" };
 const directories: string[] = [];
@@ -60,6 +60,34 @@ async function fixture() {
 	await git.initialize();
 	return { directory, source, upstream, fork, git, head: await run(source, "rev-parse", "HEAD") };
 }
+describe("safe Git transport errors", () => {
+	it.each(["The requested URL returned error: 503", "Failed to connect to git.test port 443"])(
+		"classifies temporary diagnostics without leaking them: %s",
+		async (stderr) => {
+			const git = new GitRepository(async () => ({ stdout: "", stderr, exitCode: 128 }), "/tmp/unused");
+			await expect(
+				git.head(
+					{ name: "upstream", remote: "https://git.test/upstream", token: "private-token" },
+					"refs/heads/main",
+				),
+			).rejects.toBeInstanceOf(GitUnavailable);
+		},
+	);
+	it.each([
+		"The requested URL returned error: 401",
+		"The requested URL returned error: 403",
+		"Authentication failed",
+		"Invalid refspec",
+	])("does not reclassify permanent failures: %s", async (stderr) => {
+		const git = new GitRepository(async () => ({ stdout: "", stderr, exitCode: 128 }), "/tmp/unused");
+		await expect(
+			git.head(
+				{ name: "upstream", remote: "https://git.test/upstream", token: "private-token" },
+				"refs/heads/main",
+			),
+		).rejects.toThrow("Git ls-remote failed (128)");
+	});
+});
 describe("real Git orchestration", () => {
 	it.each([
 		"quarantine:upstream-contributor",
