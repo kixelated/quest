@@ -110,7 +110,11 @@ fork renews activity, including pushes outside intake. At 48 hours without a pus
 the alarm rechecks current provider activity and releases only the still-matching
 Claim. Reassigned claims are preserved. Ordinary release preserves all non-Claim
 bytes; accepted claims restore the original document when unchanged. Maintainers
-can release any current valid Claim immediately.
+can release any current valid Claim immediately. Transient Artifacts service or retryable RPC failures are logged and
+rearm an alarm five minutes later, preserving recovery through outages longer
+than the platform's finite automatic alarm retry window. Monitor `expiry_failed`
+events to resolve persistent provider failures. Invalid metadata, configuration
+and implementation errors remain exceptions rather than successful alarm runs.
 
 ## Issue quarantine and agent warnings
 

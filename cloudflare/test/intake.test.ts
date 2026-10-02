@@ -175,6 +175,53 @@ describe("intake coordinator", () => {
 			expect(await state.storage.getAlarm()).toBeNull();
 		});
 	});
+	it("keeps expiry scheduled across a prolonged provider failure and resumes after eviction", async () => {
+		const fake = services(),
+			stub = env.REPOSITORIES.getByName("intake-outage");
+		const clock = Date.now() + 49 * 60 * 60 * 1000;
+		await runInDurableObject(stub, async (object, state) => {
+			Object.assign(object, { env: fake.mockEnv });
+			await object.ingest(event());
+			vi.spyOn(Date, "now").mockReturnValue(clock);
+			vi.spyOn(fake.source, "info").mockRejectedValueOnce(
+				Object.assign(new Error("Provider unavailable"), { code: "INTERNAL_ERROR" }),
+			);
+			await object.alarm();
+			expect(await state.storage.getAlarm()).toBe(clock + 5 * 60 * 1000);
+			expect(state.storage.sql.exec("SELECT * FROM claims").toArray()).toHaveLength(1);
+		});
+		await evictDurableObject(stub);
+		await runInDurableObject(stub, async (object, state) => {
+			Object.assign(object, { env: fake.mockEnv });
+			await object.alarm();
+			expect(state.storage.sql.exec("SELECT * FROM claims").toArray()).toEqual([]);
+			expect(await state.storage.getAlarm()).toBeNull();
+		});
+	});
+
+	it("keeps a renewed claim after provider recovery and surfaces invalid provider metadata", async () => {
+		const fake = services(),
+			clock = Date.now() + 49 * 60 * 60 * 1000;
+		await runInDurableObject(env.REPOSITORIES.getByName("intake-outage-renew"), async (object, state) => {
+			Object.assign(object, { env: fake.mockEnv });
+			await object.ingest(event());
+			vi.spyOn(Date, "now").mockReturnValue(clock);
+			vi.spyOn(fake.source, "info").mockRejectedValueOnce(
+				Object.assign(new Error("Provider unavailable"), { code: "INTERNAL_ERROR" }),
+			);
+			await object.alarm();
+			fake.source.lastPushAt = clock;
+			await object.alarm();
+			expect(state.storage.sql.exec("SELECT * FROM claims").toArray()).toHaveLength(1);
+			expect(await state.storage.getAlarm()).toBe(clock + 48 * 60 * 60 * 1000);
+			vi.spyOn(fake.source, "info").mockResolvedValueOnce({
+				...(await fake.source.info()),
+				lastPushAt: "invalid",
+			});
+			await expect(object.alarm()).rejects.toThrow("Invalid fork activity metadata");
+		});
+	});
+
 	it("does not expire a claim that has been reassigned since it was tracked", async () => {
 		const fake = services();
 		await runInDurableObject(env.REPOSITORIES.getByName("intake-reassigned"), async (object, state) => {

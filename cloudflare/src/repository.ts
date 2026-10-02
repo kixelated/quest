@@ -359,28 +359,41 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 
 	alarm() {
 		return this.serial.run(async () => {
-			const bound = this.ctx.storage.sql
-				.exec<{ name: string }>("SELECT name FROM repository_name WHERE id=1")
-				.toArray()[0];
-			if (!bound) return;
-			const repository = await getRepository(this.env.DB, bound.name);
-			const claims = this.ctx.storage.sql
-				.exec<{ path: string; forkName: string; text: string }>("SELECT path,forkName,text FROM claims")
-				.toArray();
-			for (const claim of claims) {
-				const fork = await getFork(this.env.DB, claim.forkName);
-				if (!fork) continue;
-				using source = await this.env.ARTIFACTS.get(fork.forkName);
-				const info = await source.info(),
-					fresh = Date.parse(info.lastPushAt ?? info.createdAt);
-				if (!Number.isFinite(fresh)) throw new Error("Invalid fork activity metadata");
-				const lastPushAt = Math.max(fresh, fork.lastPushAt);
-				await this.env.DB.prepare("UPDATE forks SET lastPushAt=? WHERE forkName=?")
-					.bind(lastPushAt, fork.forkName)
-					.run();
-				if (lastPushAt + claimLifetime <= Date.now()) await this.remove(repository, claim.path, claim.text);
+			try {
+				const bound = this.ctx.storage.sql
+					.exec<{ name: string }>("SELECT name FROM repository_name WHERE id=1")
+					.toArray()[0];
+				if (!bound) return;
+				const repository = await getRepository(this.env.DB, bound.name);
+				const claims = this.ctx.storage.sql
+					.exec<{ path: string; forkName: string; text: string }>("SELECT path,forkName,text FROM claims")
+					.toArray();
+				for (const claim of claims) {
+					const fork = await getFork(this.env.DB, claim.forkName);
+					if (!fork) continue;
+					using source = await this.env.ARTIFACTS.get(fork.forkName);
+					const info = await source.info(),
+						fresh = Date.parse(info.lastPushAt ?? info.createdAt);
+					if (!Number.isFinite(fresh)) throw new Error("Invalid fork activity metadata");
+					const lastPushAt = Math.max(fresh, fork.lastPushAt);
+					await this.env.DB.prepare("UPDATE forks SET lastPushAt=? WHERE forkName=?")
+						.bind(lastPushAt, fork.forkName)
+						.run();
+					if (lastPushAt + claimLifetime <= Date.now()) await this.remove(repository, claim.path, claim.text);
+				}
+				await this.schedule();
+			} catch (error) {
+				// Native alarm retries are finite. Keep the durable claim lease
+				// alive through a prolonged provider outage; report the failure.
+				console.error({ event: "expiry_failed", name: error instanceof Error ? error.name : "Error" });
+				const transient =
+					error &&
+					typeof error === "object" &&
+					(("code" in error && error.code === "INTERNAL_ERROR") ||
+						("retryable" in error && error.retryable === true));
+				if (!transient) throw error;
+				await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
 			}
-			await this.schedule();
 		});
 	}
 }
