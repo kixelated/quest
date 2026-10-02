@@ -10,7 +10,7 @@ export const changesRoutes = new Hono<{ Bindings: Env }>();
 changesRoutes.use("/repos/*", bodyLimit({ maxSize: 32_768 }));
 changesRoutes.onError((error, c) => {
 	const status = intakeStatus(error);
-if (status) return c.text(error.message, status);
+	if (status) return c.text(error.message, status);
 	if (error instanceof GitConflict || error.name === "GitConflict") return c.text(error.message, 409);
 	console.error({ event: "change_failed", name: error.name });
 	return c.text("Could not load change", 500);
