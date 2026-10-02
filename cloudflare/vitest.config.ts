@@ -13,6 +13,7 @@ export default defineConfig({
 			main: config.main,
 			remoteBindings: false,
 			miniflare: {
+				modulesRules: [{ type: "CompiledWasm", include: ["**/*.wasm", "**/*.wasm?module"] }],
 				compatibilityDate: config.compatibility_date,
 				compatibilityFlags: config.compatibility_flags,
 				d1Databases: config.d1_databases.map((db: { binding: string }) => db.binding),

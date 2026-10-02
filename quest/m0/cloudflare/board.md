@@ -12,7 +12,3 @@ from its page. A maintainer can release claims and promote issues.
 - Readiness comes from the wasm core, run over the tree read from Artifacts.
 - This is the main surface for the demo, so ease of use counts for 25% of the
   judging.
-
-## Required
-
-- [Core as wasm](/quest/m0/cloudflare/wasm.md) - check and ready in the Worker

@@ -11,7 +11,8 @@ an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
 SQLite Durable Object. The coordinator currently initializes its schema and
 exposes an internal status method. Repository authorization, creation, claims,
 changes, and the board belong to later quests; there are no public repository
-or token routes yet. The Rust CLI remains independent of the Worker.
+or token routes yet. The Rust CLI remains independent of the Worker. Both use
+the same Rust core for Markdown validation and readiness.
 
 ## Development
 
@@ -44,6 +45,43 @@ The scaffold does not call Artifacts yet. Use a separate development namespace
 before adding repository operations. Integration tests explicitly omit this
 binding so tests and CI never need Cloudflare credentials or call live services.
 
+## Shared Rust core
+
+`just wasm-build` builds the Rust library for `wasm32-unknown-unknown` and creates
+the ignored local `quest-core/` module with the pinned `wasm-bindgen` tool. Worker
+check, test, dev, and deploy commands build it automatically. Wrangler bundles
+the precompiled module; request handling performs no dynamic compilation.
+
+`src/core.ts` exports `evaluate({ documents, paths }, questPath?)`. Supply the
+complete quest tree as Markdown bodies and an explicit inventory of existing
+repository-relative files/directories, including ordinary nonquest assets. The
+result contains findings, ready paths, optional blockers for the requested quest,
+and structured Claim fields. Paths in results use `quest/...`; the optional
+quest path also accepts `/quest/...`. The parser, rules, and readiness expansion
+are the same implementation used by the native CLI. Git overlays and repository
+fetching remain adapters.
+
+`readSnapshot(repo, commitSha, limits?)` in `src/snapshot.ts` reads a pinned
+Artifacts commit and returns all tree entries with modes/hashes, all Markdown
+bodies (including issues), and the path inventory. Defaults cap it at 10,000
+entries, 1 MiB per read blob, and 16 MiB of total reads. Invalid UTF-8, missing
+objects, invalid paths, and exceeded limits throw `SnapshotError`; Artifacts
+service errors propagate separately. UTF-8 BOMs and line endings are preserved.
+
+Native checks use live filesystem existence, including untracked files and
+symlink resolution. Artifacts snapshots include tracked paths only, resolve
+repository-internal symlinks, and expose directory symlink aliases for ordinary
+links. They cannot see external symlink targets or submodule contents. Broken or
+external Markdown symlinks fail the read, rather than silently dropping a quest.
+
+`removeClaim(content)` removes the one valid Claim section using the Markdown
+parser's byte range and preserves every other byte. Invalid or ambiguous Claims
+throw. `isClaimAddition(before, after)` compares a Claim-only edit and permits
+only the minimal blank separator inserted immediately before its heading.
+`readTreeSnapshot(reader, treeHash, limits?)` uses the same object traversal for
+Sandbox Git candidate trees without creating a temporary commit. Identity and
+ownership authorization stay with the calling application.
+
 ## Checks
 
 ```sh
@@ -56,8 +94,11 @@ These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 `wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
 with real local D1 and SQLite Durable Objects. Tests cover the mocked GitHub
 OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
-and coordinator storage across eviction and repository boundaries. No OAuth
-credentials or Cloudflare account are required for checks.
+and coordinator storage across eviction and repository boundaries. Wasm tests
+execute the compiled module in workerd and cover readiness, ordinary links,
+Claim edits, and complete immutable snapshots. Native parity tests also
+cover untracked assets and symlinks. No OAuth credentials or Cloudflare account
+are required for checks.
 
 After changing bindings, regenerate types:
 
