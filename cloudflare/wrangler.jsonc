@@ -9,6 +9,7 @@
 	},
 	"vars": {
 		"AUTH_URL": "http://localhost:8787",
+		"GOOGLE_CLIENT_ID": "",
 		"AUTH_MAINTAINERS": "",
 		"ARTIFACTS_NAMESPACE": "quest",
 		"EVENT_ACCOUNT_ID": "",

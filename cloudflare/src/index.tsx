@@ -3,6 +3,8 @@ import { changesRoutes } from "./changes/routes";
 export { GitSandbox } from "./git-sandbox";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
+import { accountRoutes } from "./account";
+import authClient from "./generated/auth-client";
 import { createAuth } from "./auth";
 import { intakeRoutes } from "./intake/routes";
 import { consumePushes } from "./intake/queue";
@@ -13,9 +15,16 @@ export { QuestCore } from "./core";
 const app = new Hono<{ Bindings: Env }>();
 app.use(secureHeaders());
 app.route("/", changesRoutes);
+app.get("/auth.js", (c) =>
+	c.body(authClient, 200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-cache" }),
+);
 app.get("/health", (c) => c.json({ status: "ok" }));
+// Account-linking policy and stable contributor attribution await a product choice.
+// Keep this flow closed so adding a provider cannot change an existing fork owner.
+app.all("/api/auth/link-social", (c) => c.json({ error: "Account linking is not available yet" }, 503));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 intakeRoutes(app);
+accountRoutes(app);
 
 app.get("/", async (c) => {
 	const session = await createAuth(c.env).api.getSession({
@@ -28,6 +37,7 @@ app.get("/", async (c) => {
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<title>Quest</title>
+				<script src="/auth.js" defer></script>
 			</head>
 			<body>
 				<main>
@@ -36,15 +46,28 @@ app.get("/", async (c) => {
 					{session ? (
 						<>
 							<p>Signed in as {session.user.name}.</p>
+							<a href="/account">Account and passkeys</a>
 							<form method="post" action="/sign-out">
 								<button>Sign out</button>
 							</form>
 						</>
 					) : (
-						<form method="post" action="/sign-in">
-							<button>Sign in with GitHub</button>
-						</form>
+						<>
+							<form method="post" action="/sign-in">
+								<button>Sign in with GitHub</button>
+							</form>
+							{c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET && (
+								<form method="post" action="/sign-in/google">
+									<button>Sign in with Google</button>
+								</form>
+							)}
+							<button type="button" data-auth-action="passkey-sign-in">
+								Sign in with a passkey
+							</button>
+							<noscript>Passkeys require JavaScript.</noscript>
+						</>
 					)}
+					<p id="auth-status" role="status" aria-live="polite"></p>
 				</main>
 			</body>
 		</html>,
@@ -53,7 +76,7 @@ app.get("/", async (c) => {
 
 // The server API bypasses Better Auth's HTTP middleware. Guard form routes
 // before calling it; the /api/auth/* handler enforces its own Origin/CSRF checks.
-for (const path of ["/sign-in", "/sign-out"]) {
+for (const path of ["/sign-in", "/sign-in/google", "/sign-out"]) {
 	app.use(path, async (c, next) => {
 		if (c.req.header("Origin") !== new URL(c.env.AUTH_URL).origin) {
 			return c.json({ error: "Invalid origin" }, 403);
@@ -61,22 +84,28 @@ for (const path of ["/sign-in", "/sign-out"]) {
 		await next();
 	});
 }
-app.post("/sign-in", async (c) => {
-	const response = await createAuth(c.env).api.signInSocial({
-		body: { provider: "github", callbackURL: "/" },
-		headers: c.req.raw.headers,
-		asResponse: true,
+for (const [path, provider] of [
+	["/sign-in", "github"],
+	["/sign-in/google", "google"],
+] as const)
+	app.post(path, async (c) => {
+		if (provider === "google" && !(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET))
+			return c.json({ error: "Google sign-in is not configured" }, 503);
+		const response = await createAuth(c.env).api.signInSocial({
+			body: { provider, callbackURL: "/" },
+			headers: c.req.raw.headers,
+			asResponse: true,
+		});
+		if (!response.ok) return response;
+		const result: { url?: string } = await response.json();
+		if (!result.url) return c.json({ error: "Sign in unavailable" }, 502);
+		const headers = new Headers(response.headers);
+		headers.delete("content-type");
+		headers.delete("content-length");
+		headers.set("Location", result.url);
+		headers.set("Cache-Control", "no-store");
+		return new Response(null, { status: 303, headers });
 	});
-	if (!response.ok) return response;
-	const result: { url?: string } = await response.json();
-	if (!result.url) return c.json({ error: "Sign in unavailable" }, 502);
-	const headers = new Headers(response.headers);
-	headers.delete("content-type");
-	headers.delete("content-length");
-	headers.set("Location", result.url);
-	headers.set("Cache-Control", "no-store");
-	return new Response(null, { status: 303, headers });
-});
 app.post("/sign-out", async (c) => {
 	const response = await createAuth(c.env).api.signOut({
 		headers: c.req.raw.headers,

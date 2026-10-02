@@ -4,3 +4,6 @@ GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
 GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
 # Account-scoped Queues Write token for event subscription management.
 EVENT_SUBSCRIPTION_TOKEN=replace-with-scoped-cloudflare-api-token
+
+# Optional Google OAuth: also set GOOGLE_CLIENT_ID in wrangler.jsonc.
+# GOOGLE_CLIENT_SECRET=replace-with-google-oauth-client-secret

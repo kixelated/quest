@@ -1,9 +1,10 @@
 # Quest Worker
 
-A deployable foundation for Quest on Cloudflare. Hono serves HTML directly, so
-there is no separate client build. Better Auth uses D1 for accounts and sessions;
+A deployable foundation for Quest on Cloudflare. Hono serves HTML directly. The ordinary Worker build bundles a small browser
+client for passkeys and account controls. Better Auth uses D1 for accounts and sessions;
 adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
-state, cookies, and callbacks. Form routes enforce the configured origin before
+state, cookies, and callbacks. See [Google and passkeys](LOGINS.md) for additional
+login setup and account recovery. Form routes enforce the configured origin before
 calling Better Auth's server API.
 
 `ARTIFACTS` points at one namespace per deployment, with each project stored as
