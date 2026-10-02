@@ -46,15 +46,15 @@ All routes require a Better Auth session. Write requests also require an `Origin
 header exactly equal to the origin of `AUTH_URL`. JSON request bodies are limited
 to 8 KiB. Repository and token responses use `Cache-Control: no-store`.
 
-| Method and path | Request / result |
-| --- | --- |
-| `GET /repositories` | Current verified identity and registered repositories. |
-| `POST /repositories` | `{ "name": "project" }`; operator registers existing repository and installs quarantine. |
-| `POST /repositories/:name/fork` | Creates/reuses the caller's fork, installs its push subscription, returns remote, 24-hour write token and a Claim template. |
-| `POST /repositories/:name/tokens` | Issues another 24-hour write token for the caller's ready fork. |
-| `GET /repositories/:name/tokens` | Lists that fork's token metadata. |
-| `DELETE /repositories/:name/tokens/:id` | Revokes a token in that fork. |
-| `POST /repositories/:name/release` | Maintainer releases `{ "path": "quest/example.md" }`. |
+| Method and path                         | Request / result                                                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `GET /repositories`                     | Current verified identity and registered repositories.                                                                      |
+| `POST /repositories`                    | `{ "name": "project" }`; operator registers existing repository and installs quarantine.                                    |
+| `POST /repositories/:name/fork`         | Creates/reuses the caller's fork, installs its push subscription, returns remote, 24-hour write token and a Claim template. |
+| `POST /repositories/:name/tokens`       | Issues another 24-hour write token for the caller's ready fork.                                                             |
+| `GET /repositories/:name/tokens`        | Lists that fork's token metadata.                                                                                           |
+| `DELETE /repositories/:name/tokens/:id` | Revokes a token in that fork.                                                                                               |
+| `POST /repositories/:name/release`      | Maintainer releases `{ "path": "quest/example.md" }`.                                                                       |
 
 Fork names derive from repository plus server user ID. Caller-supplied fork names,
 commit authors and event authors never establish ownership. The server records

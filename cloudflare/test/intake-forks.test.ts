@@ -81,6 +81,20 @@ describe("trusted fork provisioning and token capability boundaries", () => {
 		expect(repo.revokeToken).toHaveBeenCalledWith("abandoned");
 		expect(fake.fork).toHaveBeenCalledTimes(1);
 	});
+	it("rejects an unrelated repository at a reserved deterministic fork name", async () => {
+		const fake = setup(),
+			name = await forkName("upstream", contributor.userId),
+			repo = new FixtureRepo(name);
+		const metadata = await repo.info();
+		vi.spyOn(repo, "info").mockResolvedValue({ ...metadata, source: "artifacts:other/not-owned" });
+		fake.repos.set(name, repo);
+		await expect(provisionFork(fake.mockEnv, "upstream", contributor)).rejects.toThrow("metadata mismatch");
+		expect(fake.fork).not.toHaveBeenCalled();
+		expect(fake.fetcher).not.toHaveBeenCalled();
+		expect(repo.createToken).not.toHaveBeenCalled();
+		await expect(ownedFork(fake.mockEnv, "upstream", contributor)).rejects.toThrow("Create your fork");
+	});
+
 	it("revokes short-lived upstream tokens even when the Git operation fails", async () => {
 		const fake = setup();
 		await expect(

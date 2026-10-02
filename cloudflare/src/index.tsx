@@ -6,7 +6,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { createAuth } from "./auth";
 import { intakeRoutes } from "./intake/routes";
 import { consumePushes } from "./intake/queue";
-import { IntakeError } from "./intake/registry";
+import { intakeStatus } from "./intake/registry";
 export { RepositoryCoordinator } from "./repository";
 export { QuestCore } from "./core";
 
@@ -91,7 +91,8 @@ app.post("/sign-out", async (c) => {
 	return new Response(null, { status: 303, headers });
 });
 app.onError((error, c) => {
-	if (error instanceof IntakeError) return c.json({ error: error.message }, error.status);
+	const status = intakeStatus(error);
+	if (status) return c.json({ error: error.message }, status);
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });
