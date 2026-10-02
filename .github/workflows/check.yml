@@ -36,5 +36,8 @@ jobs:
         run: nix develop --command just test
         env:
           NEXTEST_PROFILE: ci
+      - name: Build Git container
+        if: runner.os == 'Linux'
+        run: docker build --platform linux/amd64 --file cloudflare/Dockerfile.git --tag quest-git-check cloudflare
       - name: Check Nix package
         run: nix flake check
