@@ -12,8 +12,8 @@ check:
     cargo run --quiet --locked -- check
     cargo run --quiet --locked -- --root examples/export check
     actionlint
-    shellcheck .claude/hooks/*.sh
-    shfmt -d .claude/hooks/*.sh
+    shellcheck .claude/hooks/*.sh scripts/*.sh
+    shfmt -d .claude/hooks/*.sh scripts/*.sh
     taplo format --check
     nixfmt --check flake.nix
     just worker-check
@@ -23,12 +23,13 @@ test:
     cargo nextest run --locked
     cargo test --locked --doc
     bash .claude/hooks/direnv.test.sh
+    bash scripts/install-check.test.sh
     just worker-test
 
 # Apply formatters without changing program behavior.
 fix:
     cargo fmt --all
-    shfmt -w .claude/hooks/*.sh
+    shfmt -w .claude/hooks/*.sh scripts/*.sh
     taplo format
     nixfmt flake.nix
     npm --prefix cloudflare run fix
