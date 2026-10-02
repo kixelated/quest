@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { creditAuthor } from "../src/intake/claim";
 import { GitRepository, operationKey, type GitCapability, type GitExecutor } from "../src/git";
 
 const author = { name: "Trusted Maintainer", email: "maintainer@example.test" };
@@ -202,6 +203,76 @@ describe("real Git orchestration", () => {
 		const newer = await run(f.source, "rev-parse", "HEAD");
 		await run(f.source, "push", f.fork.remote, "HEAD:refs/heads/quest/new");
 		expect((await f.git.inspect(f.upstream, f.fork, "quest/new", newer)).merged).toBe(false);
+	});
+	it("uses safe credited Git labels without publishing private account emails", async () => {
+		const f = await fixture();
+		const credited = await creditAuthor({
+			name: "Person <team>\n (reviewer)",
+			provider: "github",
+			identity: "1234",
+		});
+		await f.git.applyMutation(
+			f.upstream,
+			f.head,
+			"angle-credit",
+			[{ path: "issues/credit.md", content: "Credit\n" }],
+			credited,
+		);
+		const actual = await run(f.directory, "--git-dir=" + f.upstream.remote, "log", "-1", "--format=%an <%ae>");
+		expect(actual).toContain("Person ＜team＞ （reviewer） [github:1234]");
+		expect(actual).toContain("@users.quest.invalid");
+		expect(actual).not.toContain("private@example.test");
+	});
+	it("recovers a trusted note after the annotated fork ref disappears", async () => {
+		const f = await fixture();
+		await f.git.fetch(f.upstream, "refs/heads/main", "refs/remotes/upstream/main");
+		await f.git.appendNote(
+			f.upstream,
+			{
+				version: 1,
+				kind: "comment",
+				operationId: "lost-note",
+				head: f.head,
+				actor: { id: "reviewer", name: "Reviewer" },
+				text: "Comment",
+				time: "2026-10-02T00:00:00Z",
+			},
+			author,
+		);
+		const restarted = new GitRepository(execute, join(f.directory, "notes-recovery.git"));
+		await restarted.initialize();
+		expect(await restarted.recoverNote(f.upstream, f.head, "lost-note", "comment", "reviewer")).toMatch(
+			/^[a-f0-9]{40}$/,
+		);
+		expect(await restarted.recoverNote(f.upstream, f.head, "lost-note", "approve", "reviewer")).toBeNull();
+	});
+	it("displays the exact prepared tree including automatic claim removal", async () => {
+		const f = await fixture();
+		await run(f.source, "switch", "-c", "quest/task");
+		await writeFile(join(f.source, "docs", "readme.txt"), "Fork update\n");
+		await run(f.source, "commit", "-am", "Fork update");
+		const forkHead = await run(f.source, "rev-parse", "HEAD");
+		await run(f.source, "push", f.fork.remote, "HEAD:refs/heads/quest/task");
+		await f.git.applyMutation(
+			f.upstream,
+			f.head,
+			"claim-first",
+			[
+				{
+					path: "quest/task.md",
+					content:
+						"# [S] Task\n\n## Goal\n\nSee [docs](/docs).\n\n## Claim\n\n- Someone (github:1) on https://git.test/fork since 2026-10-02\n",
+				},
+			],
+			author,
+		);
+		const candidate = await f.git.inspect(f.upstream, f.fork, "quest/task", forkHead);
+		const prepared = await f.git.writeTree(candidate.tree!, [
+			{ path: "quest/task.md", content: "# [S] Task\n\n## Goal\n\nSee [docs](/docs).\n" },
+		]);
+		const diff = await f.git.diff(candidate.upstreamHead, prepared);
+		expect(diff.patch).toContain("-## Claim");
+		expect(diff.patch).toContain("+Fork update");
 	});
 	it("reports merge conflicts without changing upstream", async () => {
 		const f = await fixture();

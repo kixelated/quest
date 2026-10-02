@@ -67,7 +67,12 @@ export async function dispatchChangePush(env: Env, event: PushEvent, fork: Fork)
 	};
 	const merged = await withCapability(env, fork.repositoryName, "read", (upstream) =>
 		withCapability(env, fork.forkName, "read", async (contributor) => {
-			using result = await env.GIT.getByName(fork.repositoryName).inspect(upstream, contributor, branch, event.payload.after);
+			using result = await env.GIT.getByName(fork.repositoryName).inspect(
+				upstream,
+				contributor,
+				branch,
+				event.payload.after,
+			);
 			return result.merged;
 		}),
 	);

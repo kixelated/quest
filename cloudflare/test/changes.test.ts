@@ -4,16 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RepositoryCoordinator } from "../src/repository";
 import { changesRoutes } from "../src/changes/routes";
 import { dispatchChangePush } from "../src/changes/workflow";
-import { inspectChange, type ChangeIdentity } from "../src/mutations";
-import { requireActor } from "../src/auth";
+import { writeFiles, type ChangeIdentity } from "../src/mutations";
+import { GitConflict } from "../src/git";
 import type { ReviewNote } from "../src/git";
 import type { Fork } from "../src/intake/registry";
 import type { PushEvent } from "../src/intake/events";
 
-vi.mock("../src/auth", async (original) => ({
-	...(await original<typeof import("../src/auth")>()),
-	requireActor: vi.fn(),
-}));
 const main = "a".repeat(40),
 	head = "b".repeat(40),
 	tree = "c".repeat(40),
@@ -61,7 +57,7 @@ function fixture() {
 			capability.name === fork.forkName ? forkHead : merged ? mergedHead : main,
 		),
 		inspect: vi.fn(async () => ({
-            [Symbol.dispose]() {},
+			[Symbol.dispose]() {},
 			upstreamHead: merged ? mergedHead : main,
 			forkHead,
 			merged,
@@ -73,6 +69,14 @@ function fixture() {
 			upstreamSnapshot: merged ? null : upstreamSnapshot,
 		})),
 		notes: vi.fn(async () => notes),
+		recoverNote: vi.fn(
+			async (_capability: unknown, _head: string, operationId: string, kind: string, actorId: string) =>
+				notes.some(
+					(note) => note.operationId === operationId && note.kind === kind && note.actor.id === actorId,
+				)
+					? "e".repeat(40)
+					: null,
+		),
 		appendNote: vi.fn(async (_upstream: unknown, _fork: unknown, _branch: string, note: ReviewNote) => {
 			notes.push(note);
 			return "e".repeat(40);
@@ -127,6 +131,25 @@ async function cache(headValue = head) {
 async function count() {
 	return (await env.DB.prepare("SELECT count(*) AS count FROM changes").first<{ count: number }>())!.count;
 }
+async function sessionCookie() {
+	const token = "changes-session";
+	await env.DB.prepare(
+		"INSERT OR REPLACE INTO session(id,expiresAt,token,createdAt,updatedAt,userId) VALUES(?,?,?,?,?,?)",
+	)
+		.bind("changes-session", Date.now() + 3600000, token, Date.now(), Date.now(), "maintainer")
+		.run();
+	const key = await crypto.subtle.importKey(
+		"raw",
+		new TextEncoder().encode(env.AUTH_SECRET),
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign"],
+	);
+	const signature = btoa(
+		String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(token)))),
+	);
+	return "better-auth.session_token=" + encodeURIComponent(token + "." + signature);
+}
 function event(after = head): PushEvent {
 	return {
 		type: "cf.artifacts.repo.pushed",
@@ -142,21 +165,22 @@ function event(after = head): PushEvent {
 }
 beforeEach(async () => {
 	vi.clearAllMocks();
+	await env.DB.prepare("DELETE FROM changes").run();
 	await env.DB.batch([
 		env.DB.prepare(
-			"INSERT INTO user(id,name,email,createdAt,updatedAt) VALUES('maintainer','Maintainer <team>','private-maintainer@example.test',0,0),('contributor','Contributor','private-contributor@example.test',0,0)",
+			"INSERT OR IGNORE INTO user(id,name,email,createdAt,updatedAt) VALUES('maintainer','Maintainer <team>','private-maintainer@example.test',0,0),('contributor','Contributor','private-contributor@example.test',0,0)",
 		),
 		env.DB.prepare(
-			"INSERT INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('owner','1','github','maintainer',0,0),('contributor-account','2','github','contributor',0,0)",
+			"INSERT OR IGNORE INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('owner','1','github','maintainer',0,0),('contributor-account','2','github','contributor',0,0)",
 		),
-		env.DB.prepare("INSERT INTO repositories VALUES(?,?,?,?,?)").bind(
+		env.DB.prepare("INSERT OR IGNORE INTO repositories VALUES(?,?,?,?,?)").bind(
 			identity.repositoryName,
 			"https://git.test/upstream",
 			"main",
 			"maintainer",
 			0,
 		),
-		env.DB.prepare("INSERT INTO forks VALUES(?,?,?,?,?,?,?,?,?,?)").bind(
+		env.DB.prepare("INSERT OR REPLACE INTO forks VALUES(?,?,?,?,?,?,?,?,?,?)").bind(
 			fork.forkName,
 			fork.repositoryName,
 			fork.userId,
@@ -169,13 +193,6 @@ beforeEach(async () => {
 			0,
 		),
 	]);
-	vi.mocked(requireActor).mockResolvedValue({
-		userId: "maintainer",
-		provider: "github",
-		identity: "1",
-		name: "Maintainer",
-		email: "private@example.test",
-	});
 });
 describe("checked change lifecycle", () => {
 	it("checks, approves and merges a new quest proposal through the coordinator", async () => {
@@ -231,6 +248,27 @@ describe("checked change lifecycle", () => {
 		expect(await count()).toBe(0);
 		expect(f.git.merge).toHaveBeenCalledTimes(1);
 	});
+	it("recovers a landed comment after the fork head moves", async () => {
+		const f = fixture();
+		await runInDurableObject(env.REPOSITORIES.getByName(identity.repositoryName), async (_object, state) => {
+			const coordinator = new RepositoryCoordinator(state, f.bindings);
+			const request = {
+				...identity,
+				userId: "contributor",
+				kind: "comment" as const,
+				operationId: "comment-retry",
+				text: "Review",
+			};
+			f.git.appendNote.mockImplementationOnce(async (_u, _f, _b, note) => {
+				(await f.git.notes()).push(note);
+				throw new Error("Note response lost");
+			});
+			await expect(coordinator.mutate(request)).rejects.toThrow("Note response lost");
+			f.git.inspect.mockRejectedValueOnce(new Error("Fork moved"));
+			expect(await coordinator.mutate(request)).toEqual({ notesCommit: "e".repeat(40) });
+			expect(f.git.inspect).toHaveBeenCalledTimes(1);
+		});
+	});
 	it("rejects stale checked trees and contributor approvals", async () => {
 		const f = fixture();
 		await runInDurableObject(env.REPOSITORIES.getByName(identity.repositoryName), async (_object, state) => {
@@ -255,7 +293,7 @@ describe("checked change lifecycle", () => {
 					checkedTree: tree,
 					expectedHead: main,
 				}),
-			).rejects.toThrow("Maintainer required");
+			).rejects.toThrow("Mutation not authorized");
 		});
 		expect(f.git.merge).not.toHaveBeenCalled();
 	});
@@ -263,11 +301,11 @@ describe("checked change lifecycle", () => {
 		const f = fixture();
 		await cache();
 		const url = `http://localhost:8787/repos/${identity.repositoryName}/changes/${identity.forkName}?branch=${identity.branch}&head=${head}`;
-		const open = await changesRoutes.request(url, {}, f.bindings);
+		const open = await changesRoutes.request(url, { headers: { Cookie: await sessionCookie() } }, f.bindings);
 		expect(open.status).toBe(200);
 		expect(await open.text()).toContain("&lt;script&gt;unsafe&lt;/script&gt;");
 		f.setMerged(true);
-		const closed = await changesRoutes.request(url, {}, f.bindings);
+		const closed = await changesRoutes.request(url, { headers: { Cookie: await sessionCookie() } }, f.bindings);
 		const html = await closed.text();
 		expect(html).toContain("already part of upstream");
 		expect(html).not.toContain("<form");
@@ -289,15 +327,51 @@ describe("checked change lifecycle", () => {
 		await dispatchChangePush(f.bindings, event(), fork);
 		expect((await env.DB.prepare("SELECT head FROM changes").first<{ head: string }>())!.head).toBe(newer);
 	});
+	it("preserves confirmed conflicts across the actual Git RPC boundary", async () => {
+		const f = fixture(),
+			stub = env.GIT.getByName("rpc-conflict");
+		await runInDurableObject(stub, (object) => {
+			Object.assign(object, {
+				use: async (operation: (git: unknown) => Promise<unknown>) =>
+					operation({
+						applyMutation: async () => {
+							throw new GitConflict("Upstream head moved");
+						},
+					}),
+			});
+		});
+		const request = {
+			expectedHead: main,
+			operationId: "rpc:conflict",
+			files: [],
+			author: { name: "Quest", email: "quest@localhost" },
+		};
+		using result = await stub.applyMutation(
+			{ name: "changes-repo", remote: "https://git.test/upstream", token: "test" },
+			request,
+		);
+		expect(result).toEqual({ conflict: "Upstream head moved" });
+		const bindings = { ...f.bindings, GIT: { getByName: () => stub } } as unknown as Env;
+		await expect(
+			writeFiles(
+				bindings,
+				{
+					name: identity.repositoryName,
+					remote: "https://git.test/upstream",
+					defaultBranch: "main",
+					maintainerId: "maintainer",
+				},
+				request,
+			),
+		).rejects.toBeInstanceOf(GitConflict);
+	});
 	it("requires trusted push subscriptions and rejects anonymous/cross-origin routes", async () => {
 		const f = fixture();
 		const forged = event();
 		forged.metadata.eventSubscriptionId = "attacker";
 		await dispatchChangePush(f.bindings, forged, fork);
 		expect(f.git.head).not.toHaveBeenCalled();
-		vi.mocked(requireActor).mockRejectedValueOnce(
-			new (await import("../src/intake/registry")).IntakeError(401, "Sign in required"),
-		);
+
 		expect(
 			(await changesRoutes.request("http://localhost:8787/repos/changes-repo/changes", {}, f.bindings)).status,
 		).toBe(401);
