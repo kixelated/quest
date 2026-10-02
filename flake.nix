@@ -63,6 +63,7 @@
             packages = with pkgs; [
               toolchain
               just
+              jq
               git
               gh
               direnv

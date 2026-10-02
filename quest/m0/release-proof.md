@@ -14,9 +14,5 @@ installs through mise and the shell installer on macOS and Linux.
   with the transcript kept for the launch demo.
 - Include a repository that already has an `AGENTS.md` or `CLAUDE.md` and
   a same-named skill, to prove init refuses rather than overwrites.
-- There's no rc tag. The install check's run on v0.1.0 gates this quest, and a
-  broken install ships as a fixed v0.1.x.
-
-## Required
-
-- [Install check](/quest/m0/install-check.md) - proves the v0.1.0 release installs
+- There's no rc tag. The Release workflow's install checks on v0.1.0 gate
+  this quest, and a broken install ships as a fixed v0.1.x.
