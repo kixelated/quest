@@ -20,5 +20,3 @@ installs through mise and the shell installer on macOS and Linux.
 ## Required
 
 - [Install check](/quest/m0/install-check.md) - proves the v0.1.0 release installs
-- [Init and uninstall](/quest/m0/init.md) - the lifecycle under test
-- [Setup guide](/quest/m0/setup.md) - the documented entry point

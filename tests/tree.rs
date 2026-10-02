@@ -511,7 +511,7 @@ fn cycle_through_a_reference_style_link() {
 	tree.rejects("Required cycle:");
 }
 
-/// moq-dev/moq.pro#1170: a plain-text external condition that happens to link a
+/// moq-dev/moq.pro#1170: a customer-gate sentence that happens to link a
 /// questline mid-sentence reads as context but IS a dependency edge.
 #[test]
 fn required_link_mid_sentence() {
@@ -535,16 +535,28 @@ fn required_link_on_a_wrapped_bullet() {
 	tree.rejects("mid-sentence");
 }
 
-/// The other half of that rule: an external condition with no link at all is the
-/// shape AGENTS.md prescribes, and must stay legal.
+/// An outside condition is its own quest, so it keeps surfacing as ready
+/// instead of hiding the quest it blocks from every ready listing. The bullet
+/// wraps here because that is what such bullets in trees actually looked like.
 #[test]
 fn required_external_condition() {
 	let tree = Tree::new();
 	tree.append(
 		"quest/m0/line/one.md",
-		"\n## Required\n\n- A customer who justifies the work.\n",
+		"\n## Required\n\n- A `moq-video` release that carries\n  the encoder\n",
 	);
-	tree.accepts();
+	tree.rejects("requires A moq-video release that carries the encoder, which is not a quest document");
+}
+
+/// An issue or release link is outside the tree too; only a quest can clear.
+#[test]
+fn required_external_link() {
+	let tree = Tree::new();
+	tree.append(
+		"quest/m0/line/one.md",
+		"\n## Required\n\n- [#1](https://github.com/OWNER/REPO/issues/1) - upstream fix\n",
+	);
+	tree.rejects("requires https://github.com/OWNER/REPO/issues/1, which is not a quest document");
 }
 
 /// A LOOSE list - blank lines between entries - wraps every item in a paragraph.
@@ -566,9 +578,9 @@ fn loose_required_list() {
 	let tree = Tree::new();
 	tree.append(
 		"quest/m0/line/one.md",
-		"\n## Required\n\n- [Two](/quest/m0/line/two.md) - must finish first\n\n- A customer who justifies the work.\n",
+		"\n## Required\n\n- [Two](/quest/m0/line/two.md) - must finish first\n\n- [Line](/quest/m0/line/README.md) - the whole line\n",
 	);
-	// The edge registered (hence the cycle) without reading as prose.
+	// Both edges registered (hence the cycle) without reading as prose.
 	tree.rejects("Required cycle:");
 	tree.without("mid-sentence");
 }
@@ -672,14 +684,14 @@ fn escaped_link_resolving_beside_the_root() {
 	tree.rejects(&format!("link does not resolve: ../../../../{name}/AGENTS.md"));
 }
 
-/// A plain-text bullet is a blocker, not a child, so a README holding only one
-/// is a quest and needs a size like any other.
+/// A blocker outside the line's directory is not a child, so a README holding
+/// only one is a quest and needs a size like any other.
 #[test]
 fn questline_listing_no_quest() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/husk/README.md",
-		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Required\n\n- TBD\n",
+		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n",
 	);
 	tree.append("quest/m0/README.md", "- [Husk](/quest/m0/husk/README.md)\n");
 	tree.rejects("quest title must be");
@@ -739,22 +751,6 @@ fn ready_quest_has_no_blockers() {
 fn blocked_by_a_quest() {
 	let tree = Tree::new();
 	assert_eq!(tree.blockers("quest/m0/line/two.md"), ["quest/m0/line/one.md"]);
-}
-
-/// A plain-text bullet names a condition outside the repository, so nothing in
-/// the tree can ever clear it: it is a blocker, printed as written. Wrapped
-/// here because that is what the bullets in the tree actually look like.
-#[test]
-fn blocked_by_plain_text() {
-	let tree = Tree::new();
-	tree.append(
-		"quest/m0/line/one.md",
-		"\n## Required\n\n- A `moq-video` release that carries\n  the encoder\n",
-	);
-	assert_eq!(
-		tree.blockers("quest/m0/line/one.md"),
-		["A moq-video release that carries the encoder"]
-	);
 }
 
 /// A questline blocker clears only when the whole line is complete, so the
@@ -854,7 +850,7 @@ fn ready_listing_appends_unindexed_quests() {
 	tree.write("quest/m0/aaa.md", "# [S] Unindexed\n\n## Goal\n\nDiscover me.\n");
 	tree.write(
 		"quest/m0/blocked.md",
-		"# [S] Blocked\n\n## Goal\n\nWait.\n\n## Required\n\n- External condition\n",
+		"# [S] Blocked\n\n## Goal\n\nWait.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n",
 	);
 	assert_eq!(tree.ready(), ["quest/m0/line/one.md", "quest/m0/aaa.md"]);
 }

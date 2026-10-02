@@ -4,5 +4,3 @@
 /result
 /result-*
 /.claude/settings.local.json
-# Per-worktree agent scratch (PR bodies, logs, notes); see the start-quest skill.
-/.scratch/

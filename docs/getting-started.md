@@ -1,49 +1,25 @@
 # Use Quest in your repository
 
-Setup is manual for now; `quest init` will automate it. The binary carries the
-skills and the quest guide, so your repository only pins a version and installs
-small stubs that call it.
+The binary carries the skills and the quest guide, so your repository only pins a
+version and installs small stubs that call it.
 
-## Install and pin the binary
+## Set it up
 
-There are no release binaries yet, so build from source. Pin it with the tool
-manager your repository already uses:
+Paste this into Claude Code or Codex from your repository root:
 
-- mise: `mise use 'cargo:https://github.com/kixelated/quest@rev:<sha>'`
-- nix: add `github:kixelated/quest/<sha>` as a flake input and put its
-  `packages.default` in your dev shell.
-- Otherwise: `cargo install --locked --git https://github.com/kixelated/quest`,
-  which is unpinned.
-
-The package requires Rust 1.91 or newer.
-
-## Add the stubs and the reference line
-
-From your repository root:
-
-```sh
-for skill in $(quest skill | cut -d' ' -f1); do
-  mkdir -p .claude/skills/quest-$skill
-  quest skill --stub $skill > .claude/skills/quest-$skill/SKILL.md
-done
-echo /.scratch/ >> .gitignore
+```text
+Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest here.
 ```
 
-Check for existing skills with the same names first. Codex reads skills from
-`.agents/skills/`; a directory symlink to `.claude/skills` shares one copy.
-
-Add one line to your root `AGENTS.md` or `CLAUDE.md`: when work mentions a quest,
-run `quest guide` and follow it. Keep repository-specific rules there too; the
-stubs never change between versions, so upgrading is only a new pin.
-
-Claude Code's direct `AGENTS.md` support starts at v2.1.277 and depends on the
-session configuration. An existing project or ancestor `CLAUDE.md` can take
-precedence. See [Claude's instruction-loading rules](https://code.claude.com/docs/en/memory#agentsmd)
-if the shared instructions do not load.
+[SETUP.md](../SETUP.md) has the agent install and pin the binary with mise or a
+nix flake, run `quest init`, and fit Quest into your root `AGENTS.md` or
+`CLAUDE.md`. Init writes a stub per skill under `.claude/skills/` and one line
+starting with `Quests: ` in your root instructions; reword the rest of that
+line freely, since init and uninstall recognize it by the prefix.
 
 ## Start a roadmap
 
-Create `quest/README.md`:
+If `quest init` created an empty root, edit `quest/README.md`:
 
 ```markdown
 # Quests
@@ -53,9 +29,9 @@ Create `quest/README.md`:
 What this project is working toward.
 ```
 
-An empty root is valid. Invoke `/quest-plan` in Claude Code or `$quest-plan` in
-Codex with an outcome you want to work toward. The skill helps settle the scope,
-then creates milestones, quests, and dependencies. See the
+Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome you
+want to work toward. The skill helps settle the scope, then creates milestones,
+quests, and dependencies. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
 From your repository root, validate the result and look for ready work:
@@ -78,7 +54,7 @@ still need checking; `quest ready` does not look for them.
 
 ## Update or remove it
 
-Upgrade by changing the pin; the stubs stay as they are. Before you remove Quest,
-invoke `/quest-export` (or `$quest-export` in Codex) so active quests become
-GitHub issues; `quest uninstall` is not implemented yet. Then remove the stubs,
-the pin, and the reference line. Completed plans remain in Git history.
+Upgrade by changing the pin; the stubs stay as they are. To remove Quest, ask
+your agent to follow SETUP.md to remove Quest. It exports active quests to
+GitHub issues, runs `quest uninstall`, and drops the pin. Uninstall never
+deletes your quest tree, and completed plans remain in Git history.

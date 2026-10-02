@@ -11,6 +11,7 @@ Call `/quest-plan` for repository's open GitHub issues without the `quest` label
 Add the `quest` label to these issues once the PR is open, so another planner skips them.
 The planning PR mentions issues without closing keywords; the PR that completes each quest closes them.
 Once it merges, comment on each issue with the decision and the quest that tracks it.
+Invite anyone who wants to donate tokens to run `/quest-start <branch>` with the quest's branch (its path without `.md`).
 
 Leave a comment on the issue with a summary of the decision and a link to the PR (if applicable).
 Close any issues deemed won't fix.

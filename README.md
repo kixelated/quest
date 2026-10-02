@@ -10,8 +10,8 @@ and Codex plan the work and pick it up.
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
 
-**Early days:** validation, readiness, and the planning, execution, merge, and
-export skills are here. Automatic setup and release binaries are still being
+**Early days:** validation, readiness, init/uninstall, and the planning,
+execution, merge, and export skills are here. Release binaries are still being
 built.
 
 ## A quest is just a file
@@ -107,14 +107,20 @@ the version you pin decides what your agents follow:
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
 | `quest-spawn` | Triage ready quests and hand them to parallel agents. |
 | `quest-merge` | Land a quest's PR once CI and reviews pass. |
-| `quest-finish` | Decide which open PRs to merge, then merge them in parallel. |
+| `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. Starting work stops at a PR; merging is a separate
 invocation.
 
-To use Quest in your own repository, follow the [manual setup](docs/getting-started.md).
+To use Quest in your own repository, paste this into your agent:
+
+```text
+Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest here.
+```
+
+The [getting started guide](docs/getting-started.md) covers what happens next.
 `quest guide` prints the format and workflow.
 
 ## Where this is going

@@ -10,11 +10,13 @@ the fix ships as the next patch release, not as an rc.
 
 ## Plan
 
-- Use a reusable workflow (`.github/workflows/install-check.yml`, with
-  `workflow_call` and `workflow_dispatch` taking a tag) that dist runs through
-  `post-announce-jobs` in `dist-workspace.toml`, then regenerate `release.yml`
-  with `dist generate`. A separate `release: published` trigger would never
-  fire, because dist creates the release with `GITHUB_TOKEN`.
+- Use a reusable workflow (`.github/workflows/install-check.yml`) that dist
+  runs through `post-announce-jobs = ["./install-check"]` in
+  `dist-workspace.toml`, then regenerate `release.yml` with `dist generate`.
+  Its `workflow_call` accepts dist's `plan` JSON string and reads
+  `announcement_tag`; `workflow_dispatch` accepts a tag for manual runs.
+  A separate `release: published` trigger would never fire, because dist
+  creates the release with `GITHUB_TOKEN`.
 - Use native runners for all four targets, since each archive is built
   separately.
 - Pin actions to commits like the other workflows.
