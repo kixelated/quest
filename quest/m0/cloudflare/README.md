@@ -53,7 +53,6 @@ Decided while planning on 2026-10-01. Research sources:
 ## Required
 
 - [Claim sections](/quest/m0/cloudflare/claims.md) - `## Claim` marks a quest locked; `check` validates it and `ready` skips claimed quests
-- [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - a deployable `cloudflare/` app with Artifacts, D1, GitHub login, Nix, and CI
 - [Core as wasm](/quest/m0/cloudflare/wasm.md) - the Worker runs the same parse, check, and ready rules as the CLI
 - [Fork intake](/quest/m0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
 - [Changes](/quest/m0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks

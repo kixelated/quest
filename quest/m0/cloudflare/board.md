@@ -15,5 +15,4 @@ from its page. A maintainer can release claims and promote issues.
 
 ## Required
 
-- [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - the app it lives in
 - [Core as wasm](/quest/m0/cloudflare/wasm.md) - check and ready in the Worker

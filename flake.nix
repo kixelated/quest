@@ -73,6 +73,8 @@
               shfmt
               taplo
               nixfmt
+              nodejs_24
+              wrangler
             ];
           };
           formatter = pkgs.nixfmt;
