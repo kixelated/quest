@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { vi } from "vitest";
-import { GitConflict } from "../src/git";
+import type { GitAuthor } from "../src/git";
 import type { FileChange } from "../src/intake/gate";
 import type { PushEvent } from "../src/intake/events";
 import type { Actor, Fork } from "../src/intake/registry";
@@ -166,12 +166,12 @@ export function services() {
 	const applyMutation = vi.fn(
 		async (
 			_cap: unknown,
-			request: { expectedHead: string; operationId: string; files: FileChange[]; author: Actor },
+			request: { expectedHead: string; operationId: string; files: FileChange[]; author: GitAuthor },
 		) => {
 			await Promise.resolve(); // Force external-I/O interleaving in concurrency tests.
 			const known = landed.get(request.operationId);
 			if (known) return { commitSha: known };
-			if (upstream.head !== request.expectedHead) throw new GitConflict("Upstream advanced");
+			if (upstream.head !== request.expectedHead) return { conflict: "Upstream advanced" };
 			if (fail) {
 				fail = false;
 				throw new Error("Failed before push");
