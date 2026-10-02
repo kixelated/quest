@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { evaluate } from "../src/core";
-import { readSnapshot, SnapshotError } from "../src/snapshot";
+import { readSnapshot, readTreeSnapshot, SnapshotError } from "../src/snapshot";
 
 const sha = "a".repeat(40);
 function fixture() {
@@ -57,6 +57,12 @@ describe("immutable Artifacts snapshots", () => {
 			"\uFEFF# Untrusted issue\r\n",
 		);
 		expect(repo.readBlob).not.toHaveBeenCalledWith("binary");
+		expect(evaluate(snapshot)).toMatchObject({ findings: [], ready: ["quest/one.md"] });
+	});
+	it("reads candidate trees without a commit lookup", async () => {
+		const { repo } = fixture();
+		const snapshot = await readTreeSnapshot(repo, "root");
+		expect(repo.readCommit).not.toHaveBeenCalled();
 		expect(evaluate(snapshot)).toMatchObject({ findings: [], ready: ["quest/one.md"] });
 	});
 	it("rejects incomplete objects, invalid UTF-8 and unsafe names", async () => {
