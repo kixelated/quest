@@ -22,4 +22,3 @@ shows the run's status.
 ## Required
 
 - [Fork intake](/quest/m0/cloudflare/intake.md) - forks and claims
-- [Changes](/quest/m0/cloudflare/changes.md) - where the result lands

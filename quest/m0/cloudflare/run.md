@@ -26,4 +26,3 @@ result as a change.
 ## Required
 
 - [Fork intake](/quest/m0/cloudflare/intake.md) - forks, tokens, and claims
-- [Changes](/quest/m0/cloudflare/changes.md) - where the result lands
