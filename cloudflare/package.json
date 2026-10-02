@@ -4,8 +4,8 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wrangler dev",
-		"check": "wrangler types --check && tsc --noEmit && prettier --check . && wrangler deploy --dry-run",
-		"test": "vitest run",
+		"check": "wrangler types --check && tsc --noEmit && prettier --check . && wrangler deploy --dry-run --containers-rollout=none",
+		"test": "vitest run && vitest run --config vitest.git.config.ts",
 		"fix": "prettier --write .",
 		"types": "wrangler types",
 		"migrate": "wrangler d1 migrations apply DB --local",

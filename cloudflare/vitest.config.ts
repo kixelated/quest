@@ -32,5 +32,5 @@ export default defineConfig({
 			},
 		})),
 	],
-	test: { setupFiles: ["./test/setup.ts"] },
+	test: { setupFiles: ["./test/setup.ts"], exclude: ["**/*.node.test.ts", "**/node_modules/**"] },
 });
