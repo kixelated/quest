@@ -16,7 +16,7 @@ export async function requireActor(env: Env, headers: Headers): Promise<Actor> {
 		userId: session.user.id,
 		provider: account.providerId,
 		identity: account.accountId,
-		name: session.user.name.replace(/[\r\n\x00-\x1f]/g, " ").trim(),
+		name: session.user.name.replace(/[<>\r\n\x00-\x1f]/g, " ").trim() || `${account.providerId}:${account.accountId}`,
 		email: session.user.email,
 	};
 }
