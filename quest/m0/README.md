@@ -31,6 +31,5 @@ ownership-manifest design:
 ## Required
 
 - [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
-- [Setup guide](/quest/m0/setup.md) - one line pasted into an agent installs, pins, and initializes Quest, or removes it
 - [Release proof](/quest/m0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
