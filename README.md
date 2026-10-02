@@ -27,6 +27,10 @@ People can download their data as a CSV from the settings page.
 
 Use the export endpoint. Show progress and let the user retry a failed download.
 
+## Claim
+
+- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02
+
 ## Required
 
 - [CSV endpoint](/quest/m0/export.md) - the button needs something to call
@@ -52,6 +56,10 @@ becomes the line's own quest once its children have landed.
 When a quest lands, its PR removes the plan and the links that depended on it.
 The next task becomes ready. The finished plan stays in Git history, beside the
 code that completed it.
+
+An optional `Claim` section marks work taken. Its single bullet names the
+claimant, identity provider, fork or branch, and date; forges may append fields.
+Remove the section to release it. The CLI leaves expiry policy to the forge.
 
 ## Try it
 
@@ -89,8 +97,9 @@ ending at `main`. A milestone has no branch, so its quests merge straight into
 `main`.
 
 `ready` reads each questline from its branch on `origin` (fetch first;
-`--local` skips this). It does not look for claims or PRs, so check those before
-starting a quest someone else may already be working on.
+`--local` skips this). It excludes quests with a `Claim` section. It does not
+look for branch claims or PRs, so check those before starting a quest someone
+else may already be working on.
 
 ## Work with an agent
 

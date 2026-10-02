@@ -30,6 +30,108 @@ fn empty_permanent_root_is_valid_and_has_no_ready_work() {
 	assert!(tree.ready().is_empty());
 }
 
+const CLAIM: &str = "\n## Claim\n\n- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02";
+
+#[test]
+fn claim_blocks_readiness_and_reports_claimant_in_cli() {
+	let tree = Tree::new();
+	tree.append("quest/m0/line/one.md", CLAIM);
+	tree.accepts();
+	assert!(tree.ready().is_empty());
+	assert_eq!(
+		tree.blockers("quest/m0/line/one.md"),
+		["claimed by Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02"]
+	);
+	let out = std::process::Command::new(env!("CARGO_BIN_EXE_quest"))
+		.args([
+			"--root",
+			tree.path().to_str().unwrap(),
+			"ready",
+			"--local",
+			"quest/m0/line/one.md",
+		])
+		.output()
+		.unwrap();
+	assert!(out.status.success());
+	assert!(String::from_utf8_lossy(&out.stdout).contains("claimed by Jane Doe"));
+	assert!(String::from_utf8_lossy(&out.stderr).contains("claimed by Jane Doe"));
+	tree.write("quest/m0/line/one.md", ONE);
+	assert_eq!(tree.ready(), ["quest/m0/line/one.md"]);
+}
+
+#[test]
+fn claim_envelope_is_forge_independent_and_extensible() {
+	for claim in [
+		"- Jane Doe (gitlab:jdoe) on quest/m0/line/one since 2024-02-29 expires=2024-03-01",
+		"- **Jane Doe** (custom-forge:user@host) on <https://example.com/fork>\n  since 1999-12-31 run=123",
+	] {
+		let tree = Tree::new();
+		tree.append("quest/m0/line/one.md", &format!("\n## Claim\n\n{claim}\n"));
+		tree.accepts();
+		assert!(tree.ready().is_empty());
+	}
+}
+
+#[test]
+fn malformed_claim_envelopes_are_rejected_but_still_block() {
+	for claim in [
+		"- Jane Doe on fork since 2026-10-02",
+		"- Jane Doe (:jdoe) on fork since 2026-10-02",
+		"- Jane Doe (github:) on fork since 2026-10-02",
+		"- Jane Doe (github:jdoe) on  since 2026-10-02",
+		"- Jane Doe (github:jdoe) on fork",
+		"- Jane Doe (github:jdoe) on fork since 2026-02-29",
+		"- Jane Doe (github:jdoe) on fork since 2026-13-01",
+		"- Jane Doe (github:jdoe) on fork since 2026-10-00",
+		"- Jane Doe (github:jdoe) on fork since 明日",
+	] {
+		let tree = Tree::new();
+		tree.append("quest/m0/line/one.md", &format!("\n## Claim\n\n{claim}\n"));
+		tree.rejects("claim must name a claimant");
+		assert!(tree.ready().is_empty());
+		assert!(!tree.blockers("quest/m0/line/one.md").is_empty());
+	}
+}
+
+#[test]
+fn claim_requires_one_list_item_and_one_section() {
+	for claim in [
+		"\n## Claim\n",
+		"\n## Claim\n\nClaimed by Jane\n",
+		"\n## Claim\n\n> - Jane (github:jane) on fork since 2026-10-02\n",
+		"\n## Claim\n\n- Jane\n- John\n",
+		"\n## Claim\n\n- Jane (github:jane) on fork since 2026-10-02\n  - John\n",
+		"\n## Claim\n\nProse\n\n- Jane (github:jane) on fork since 2026-10-02\n",
+		"\n## Claim\n\n- Jane\n\n## Claim\n\n- John\n",
+	] {
+		let tree = Tree::new();
+		tree.append("quest/m0/line/one.md", claim);
+		tree.rejects("'## Claim' must contain exactly one list item");
+		assert!(tree.ready().is_empty());
+		assert!(!tree.blockers("quest/m0/line/one.md").is_empty());
+	}
+}
+
+#[test]
+fn claim_and_dependencies_both_block() {
+	let tree = Tree::new();
+	tree.append("quest/m0/line/two.md", CLAIM);
+	tree.accepts();
+	assert_eq!(tree.blockers("quest/m0/line/two.md").len(), 2);
+	assert_eq!(tree.blockers("quest/m0/line/two.md")[1], "quest/m0/line/one.md");
+}
+
+#[test]
+fn claim_on_line_branch_controls_readiness() {
+	let tree = Tree::new();
+	tree.init_git();
+	tree.push_line("quest/m0/line/README", |tree| {
+		tree.append("quest/m0/line/one.md", CLAIM);
+	});
+	assert_eq!(tree.ready(), ["quest/m0/line/one.md"]);
+	assert!(tree.ready_on(Some("origin")).is_empty());
+}
+
 #[test]
 fn crlf_documents_preserve_validation_and_readiness() {
 	let tree = Tree::new();

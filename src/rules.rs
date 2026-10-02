@@ -12,7 +12,7 @@ use crate::doc::{Doc, Position};
 /// The `## ` headings a quest document may use. Readiness greps `## Required`
 /// literally, so a typo turns a blocked quest ready and fails nowhere else:
 /// the closed vocabulary is what catches it.
-const HEADINGS: [&str; 5] = ["Goal", "Plan", "Required", "Closes", "Related"];
+const HEADINGS: [&str; 6] = ["Goal", "Plan", "Claim", "Required", "Closes", "Related"];
 const SIZES: [&str; 5] = ["XS", "S", "M", "L", "XL"];
 
 /// Sections whose whole content is a list. A heading left standing after its
@@ -70,6 +70,7 @@ pub fn check(root: &Path, docs: &[Doc]) -> Vec<Finding> {
 
 	for doc in docs {
 		headings(&mut found, doc);
+		claim(&mut found, doc);
 		links(&mut found, root, &known, doc);
 	}
 
@@ -78,6 +79,81 @@ pub fn check(root: &Path, docs: &[Doc]) -> Vec<Finding> {
 
 	found.0.sort();
 	found.0
+}
+
+/// Claims use a small, forge-independent envelope. The location and any
+/// trailing fields are opaque; neither forge policy nor expiry belongs here.
+fn claim(found: &mut Findings, doc: &Doc) {
+	let headings: Vec<_> = doc.headings.iter().filter(|heading| heading.text == "Claim").collect();
+	if headings.is_empty() {
+		return;
+	}
+	let entries: Vec<_> = doc.entries("Claim").collect();
+	if headings.len() != 1 || entries.len() != 1 || doc.claim_extra_content {
+		found.at(
+			&doc.path,
+			headings[0].line,
+			"'## Claim' must contain exactly one list item in one section",
+		);
+		return;
+	}
+	if !valid_claim(&entries[0].text) {
+		found.at(
+			&doc.path,
+			entries[0].line,
+			"claim must name a claimant, (provider:identity), fork or branch, and date: Name (provider:identity) on location since YYYY-MM-DD",
+		);
+	}
+}
+
+fn valid_claim(text: &str) -> bool {
+	let Some((name, rest)) = text.split_once(" (") else {
+		return false;
+	};
+	let Some((identity, rest)) = rest.split_once(") on ") else {
+		return false;
+	};
+	let Some((provider, identity)) = identity.split_once(':') else {
+		return false;
+	};
+	let Some((location, rest)) = rest.rsplit_once(" since ") else {
+		return false;
+	};
+	let Some(date) = rest.split_whitespace().next() else {
+		return false;
+	};
+	!name.trim().is_empty()
+		&& !provider.is_empty()
+		&& !identity.is_empty()
+		&& !provider.chars().any(char::is_whitespace)
+		&& !identity.chars().any(char::is_whitespace)
+		&& !location.trim().is_empty()
+		&& valid_date(date)
+}
+
+fn valid_date(date: &str) -> bool {
+	let bytes = date.as_bytes();
+	if bytes.len() != 10
+		|| bytes[4] != b'-'
+		|| bytes[7] != b'-'
+		|| bytes
+			.iter()
+			.enumerate()
+			.any(|(i, byte)| i != 4 && i != 7 && !byte.is_ascii_digit())
+	{
+		return false;
+	}
+	let year: u16 = date[..4].parse().expect("ASCII digits");
+	let month: u8 = date[5..7].parse().expect("ASCII digits");
+	let day: u8 = date[8..].parse().expect("ASCII digits");
+	let max = match month {
+		1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+		4 | 6 | 9 | 11 => 30,
+		2 if year.is_multiple_of(400) || year.is_multiple_of(4) && !year.is_multiple_of(100) => 29,
+		2 => 28,
+		_ => return false,
+	};
+	year != 0 && (1..=max).contains(&day)
 }
 
 fn headings(found: &mut Findings, doc: &Doc) {

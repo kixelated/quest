@@ -101,6 +101,7 @@ fn main() -> Result<ExitCode> {
 			let blockers = quest::ready::blockers(&cli.root, &path, remote)?;
 			for blocker in &blockers {
 				print!("{blocker}");
+				eprintln!("quest: blocked by {}", blocker.label());
 			}
 			if !blockers.is_empty() {
 				// Blocked is not a verdict on the whole plan: the piece of it
