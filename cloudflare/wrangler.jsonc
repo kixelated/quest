@@ -4,10 +4,21 @@
 	"main": "src/index.tsx",
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
-	"observability": { "enabled": true },
-	"vars": { "AUTH_URL": "http://localhost:8787" },
-	"secrets": { "required": ["AUTH_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"] },
-	"artifacts": [{ "binding": "ARTIFACTS", "namespace": "quest" }],
+	"observability": {
+		"enabled": true,
+	},
+	"vars": {
+		"AUTH_URL": "http://localhost:8787",
+	},
+	"secrets": {
+		"required": ["AUTH_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"],
+	},
+	"artifacts": [
+		{
+			"binding": "ARTIFACTS",
+			"namespace": "quest",
+		},
+	],
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -16,6 +27,37 @@
 			"migrations_dir": "migrations",
 		},
 	],
-	"durable_objects": { "bindings": [{ "name": "REPOSITORIES", "class_name": "RepositoryCoordinator" }] },
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepositoryCoordinator"] }],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "REPOSITORIES",
+				"class_name": "RepositoryCoordinator",
+			},
+			{
+				"name": "GIT",
+				"class_name": "GitSandbox",
+			},
+		],
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["RepositoryCoordinator"],
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": ["GitSandbox"],
+		},
+	],
+	"containers": [
+		{
+			"class_name": "GitSandbox",
+			"scheduling_policy": "durable_object",
+			"images": {
+				"git": {
+					"dockerfile": "./Dockerfile.git",
+				},
+			},
+		},
+	],
 }
