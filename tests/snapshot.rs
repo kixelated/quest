@@ -75,3 +75,71 @@ fn claim_removal_ignores_fenced_examples_and_preserves_other_bytes() {
 		.is_err()
 	);
 }
+
+#[cfg(unix)]
+#[test]
+fn native_and_snapshot_agree_on_symlink_files_and_directory_links() {
+	use std::os::unix::fs::symlink;
+	let dir = TempDir::new().unwrap();
+	let mut snapshot = fixture();
+	snapshot.documents[1]
+		.content
+		.push_str("\nSee [alias](/alias/image.png) and [symlink](/linked.png).\n");
+	snapshot.paths.extend(
+		["alias", "alias/image.png", "linked.png"]
+			.into_iter()
+			.map(str::to_string),
+	);
+	for document in &snapshot.documents {
+		let path = dir.path().join(&document.path);
+		std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+		std::fs::write(path, &document.content).unwrap();
+	}
+	std::fs::create_dir(dir.path().join("assets")).unwrap();
+	std::fs::write(dir.path().join("assets/image.png"), [0xff]).unwrap();
+	symlink("assets", dir.path().join("alias")).unwrap();
+	symlink("assets/image.png", dir.path().join("linked.png")).unwrap();
+	assert_eq!(
+		evaluate(&snapshot, None).unwrap().findings,
+		quest::check(dir.path()).unwrap()
+	);
+	std::fs::remove_file(dir.path().join("assets/image.png")).unwrap();
+	snapshot
+		.paths
+		.retain(|path| !["assets/image.png", "alias/image.png", "linked.png"].contains(&path.as_str()));
+	assert_eq!(
+		evaluate(&snapshot, None).unwrap().findings,
+		quest::check(dir.path()).unwrap()
+	);
+}
+
+#[test]
+fn snapshot_rejects_noncanonical_or_missing_paths_and_preserves_order() {
+	let original = fixture();
+	let expected = serde_json::to_value(evaluate(&original, None).unwrap()).unwrap();
+	let mut reordered = original.clone();
+	reordered.documents.reverse();
+	reordered.paths.reverse();
+	assert_eq!(
+		serde_json::to_value(evaluate(&reordered, None).unwrap()).unwrap(),
+		expected
+	);
+	let mut absent = original.clone();
+	absent.paths.retain(|p| p != "quest/one.md");
+	assert!(
+		evaluate(&absent, None)
+			.unwrap_err()
+			.to_string()
+			.contains("absent from path inventory")
+	);
+	for path in ["/quest/one.md", "quest/../one.md", "quest//one.md"] {
+		let mut invalid = original.clone();
+		invalid.paths.push(path.into());
+		assert!(
+			evaluate(&invalid, None)
+				.unwrap_err()
+				.to_string()
+				.contains("invalid repository path")
+		);
+	}
+}
