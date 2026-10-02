@@ -1,4 +1,4 @@
-//! Whether a quest can be started, read from the same `Required` sections the
+//! Whether a quest can be started, read from the same `Required` and `Claim` sections the
 //! rules validate.
 //!
 //! Readiness is a property of the tree alone, which is what makes it cheap and
@@ -22,7 +22,7 @@ pub struct Blocker {
 	/// The quest or questline that has to finish first. `None` is an entry that
 	/// is not a quest, which `quest check` rejects and nothing here can clear.
 	pub path: Option<PathBuf>,
-	/// The `Required` bullet as written, whitespace collapsed.
+	/// The dependency or claim as written, whitespace collapsed.
 	pub text: String,
 	/// The still-open quests under a required questline, which is what a
 	/// questline blocker actually means. Empty for every other blocker: a
@@ -73,7 +73,7 @@ pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Bl
 ///
 /// A questline is not listed while it still requires children; a README with
 /// none left is the line's own remaining work and lists like any other quest.
-/// The absence of a `## Required` heading is what the guide defines as ready.
+/// A quest is ready when it has neither a `## Required` nor a `## Claim` heading.
 /// `remote` is as for [`blockers`].
 pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	let docs = crate::load_from(root, remote)?;
@@ -85,14 +85,14 @@ pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 		if doc.is_questline() {
 			let children: Vec<_> = doc.children().collect();
 			pending.extend(children.into_iter().rev());
-		} else if !doc.has("Required") {
+		} else if !doc.has("Required") && !doc.has("Claim") {
 			ready.push(path);
 		}
 	}
 	ready.extend(
 		remaining
 			.into_iter()
-			.filter(|(_, doc)| !doc.is_questline() && !doc.has("Required"))
+			.filter(|(_, doc)| !doc.is_questline() && !doc.has("Required") && !doc.has("Claim"))
 			.map(|(path, _)| path),
 	);
 	Ok(ready)
@@ -101,20 +101,30 @@ pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 /// The blockers of one document: its `Required` entries, which for a questline
 /// include its children.
 fn expand(by_path: &BTreeMap<&Path, &Doc>, doc: &Doc, stack: &mut Vec<PathBuf>) -> Vec<Blocker> {
+	let mut blockers = Vec::new();
+	if doc.has("Claim") {
+		blockers.push(Blocker {
+			path: None,
+			text: match doc.entries("Claim").next() {
+				Some(entry) => format!("claimed by {}", entry.text),
+				None => "an empty '## Claim' section, which blocks the quest until the heading is removed".to_string(),
+			},
+			blockers: Vec::new(),
+		});
+	}
 	// A heading left standing after its last blocker still reads as blocked to
 	// everything that greps for it, including `quest check`, which reports it.
 	// Calling it ready here would make this the one tool that disagrees.
 	if doc.has("Required") && doc.entries("Required").next().is_none() {
-		return vec![Blocker {
+		blockers.push(Blocker {
 			path: None,
 			text: "an empty '## Required' section, which blocks the quest until the heading is removed".to_string(),
 			blockers: Vec::new(),
-		}];
+		});
 	}
 
-	doc.entries("Required")
-		.map(|entry| blocker(by_path, entry, stack))
-		.collect()
+	blockers.extend(doc.entries("Required").map(|entry| blocker(by_path, entry, stack)));
+	blockers
 }
 
 fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &mut Vec<PathBuf>) -> Blocker {

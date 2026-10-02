@@ -83,6 +83,9 @@ pub struct Doc {
 	/// last entry has none, and a `Required` blocker is one of these whether or
 	/// not it carries a link.
 	pub entries: Vec<Entry>,
+	/// Content outside the claim's one flat list item (prose, quotes, nested
+	/// lists, or other blocks). Claims have a deliberately small envelope.
+	pub claim_extra_content: bool,
 }
 
 impl Doc {
@@ -154,6 +157,7 @@ impl Doc {
 		let mut headings = Vec::new();
 		let mut links = Vec::new();
 		let mut entries: Vec<Entry> = Vec::new();
+		let mut claim_extra_content = false;
 		let mut entry: Option<Entry> = None;
 		let mut section: Option<String> = None;
 
@@ -175,6 +179,20 @@ impl Doc {
 		options.insert(Options::ENABLE_TABLES);
 
 		for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
+			if section.as_deref() == Some("Claim") {
+				match &event {
+					Event::Start(Tag::Heading {
+						level: HeadingLevel::H1 | HeadingLevel::H2,
+						..
+					}) => {}
+					Event::Start(Tag::List(_)) if item_depth > 0 => claim_extra_content = true,
+					Event::Start(tag) if item_depth == 0 && !matches!(tag, Tag::List(_) | Tag::Item) => {
+						claim_extra_content = true;
+					}
+					Event::Html(_) | Event::Rule if item_depth == 0 => claim_extra_content = true,
+					_ => {}
+				}
+			}
 			match event {
 				Event::Start(Tag::Heading { level, .. }) if matches!(level, HeadingLevel::H1 | HeadingLevel::H2) => {
 					heading = Some((level, lines.line_of(range.start), String::new()));
@@ -294,6 +312,7 @@ impl Doc {
 			headings,
 			links,
 			entries,
+			claim_extra_content,
 		}
 	}
 }

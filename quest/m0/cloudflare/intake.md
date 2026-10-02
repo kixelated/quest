@@ -29,5 +29,4 @@ content is untrusted.
 
 ## Required
 
-- [Claim sections](/quest/m0/cloudflare/claims.md) - the format the gate accepts
 - [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - forks, tokens, and sign-in
