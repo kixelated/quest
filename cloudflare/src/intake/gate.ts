@@ -28,8 +28,11 @@ export function plainMarkdown(content: string): boolean {
 // Compare the entire tree, not the event's possibly truncated commit list.
 // Directory hashes change with a child, so only leaf entries are compared.
 export function gate(before: Snapshot, after: Snapshot, upstream: Snapshot, fork: Fork): Accepted | null {
-	try { return validate(before, after, upstream, fork); }
-	catch { return null; } // Pure core rejection is invalid input, never a service retry.
+	try {
+		return validate(before, after, upstream, fork);
+	} catch {
+		return null;
+	} // Pure core rejection is invalid input, never a service retry.
 }
 
 function validate(before: Snapshot, after: Snapshot, upstream: Snapshot, fork: Fork): Accepted | null {
@@ -51,7 +54,7 @@ function validate(before: Snapshot, after: Snapshot, upstream: Snapshot, fork: F
 	if (!next || next.type !== "blob" || next.mode !== "100644") return null;
 	const parts = path.split("/");
 	for (let n = 1; n < parts.length; n++) {
-		const parent = upstream.entries.find(entry=>entry.path===parts.slice(0,n).join("/"));
+		const parent = upstream.entries.find((entry) => entry.path === parts.slice(0, n).join("/"));
 		if (parent && parent.type !== "tree") return null;
 	}
 	const oldDocs = documents(before),

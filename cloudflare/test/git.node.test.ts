@@ -68,7 +68,9 @@ describe("real Git orchestration", () => {
 		const f = await fixture();
 		const files = [{ path: "issues/opaque.md", content: "Request\n" }];
 		const result = await f.git.applyMutation(f.upstream, f.head, operationId, files, author);
-		expect((await f.git.applyMutation(f.upstream, f.head, operationId, files, author)).commitSha).toBe(result.commitSha);
+		expect((await f.git.applyMutation(f.upstream, f.head, operationId, files, author)).commitSha).toBe(
+			result.commitSha,
+		);
 		const body = await run(f.directory, "--git-dir=" + f.upstream.remote, "log", "-1", "--format=%B");
 		expect(body).toContain(await operationKey(operationId));
 		expect(body).not.toContain(operationId);
@@ -157,6 +159,49 @@ describe("real Git orchestration", () => {
 			{ ...note, operationId: await operationKey(note.operationId) },
 		]);
 		expect(await f.git.appendNote(f.upstream, note, author)).toBe(first);
+	});
+	it("merges a proposal once, closes its retained fork head, and recognizes newer work", async () => {
+		const f = await fixture();
+		await run(f.source, "switch", "-c", "quest/new");
+		await writeFile(join(f.source, "quest", "new.md"), "# [S] New\n\n## Goal\n\nProposed work.\n");
+		await run(f.source, "add", ".");
+		await run(f.source, "commit", "-m", "New proposal");
+		const forkHead = await run(f.source, "rev-parse", "HEAD");
+		await run(f.source, "push", f.fork.remote, "HEAD:refs/heads/quest/new");
+		const candidate = await f.git.inspect(f.upstream, f.fork, "quest/new", forkHead);
+		const result = await f.git.merge(
+			f.upstream,
+			f.fork,
+			"quest/new",
+			f.head,
+			forkHead,
+			candidate.tree!,
+			[],
+			author,
+			"merge-proposal",
+		);
+		expect((await f.git.inspect(f.upstream, f.fork, "quest/new", forkHead)).merged).toBe(true);
+		expect((await f.git.recoverMutation(f.upstream, f.head, candidate.tree!, "merge-proposal"))?.commitSha).toBe(
+			result.commitSha,
+		);
+		await expect(
+			f.git.merge(
+				f.upstream,
+				f.fork,
+				"quest/new",
+				result.commitSha,
+				forkHead,
+				candidate.tree!,
+				[],
+				author,
+				"duplicate-merge",
+			),
+		).rejects.toThrow("Merge base changed");
+		await writeFile(join(f.source, "quest", "new.md"), "# [S] New\n\n## Goal\n\nNewer proposed work.\n");
+		await run(f.source, "commit", "-am", "Follow-up");
+		const newer = await run(f.source, "rev-parse", "HEAD");
+		await run(f.source, "push", f.fork.remote, "HEAD:refs/heads/quest/new");
+		expect((await f.git.inspect(f.upstream, f.fork, "quest/new", newer)).merged).toBe(false);
 	});
 	it("reports merge conflicts without changing upstream", async () => {
 		const f = await fixture();

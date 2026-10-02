@@ -21,6 +21,12 @@ export type ChangeMutation = ChangeIdentity & { userId: string; operationId: str
 		| { kind: "merge"; checkedTree: string; expectedHead: string }
 	);
 
+export async function closeChange(env: Env, request: ChangeIdentity) {
+	await env.DB.prepare("DELETE FROM changes WHERE repositoryName = ? AND forkName = ? AND branch = ? AND head = ?")
+		.bind(request.repositoryName, request.forkName, request.branch, request.head)
+		.run();
+}
+
 async function actor(env: Env, userId: string): Promise<GitAuthor> {
 	const row = await env.DB.prepare('SELECT name, email FROM "user" WHERE id = ?').bind(userId).first<GitAuthor>();
 	if (!row) throw new IntakeError(403, "Unknown reviewer");
@@ -49,6 +55,7 @@ export async function inspectChange(env: Env, request: ChangeIdentity) {
 		withCapability(env, fork.forkName, "read", async (contributor) => {
 			const git = env.GIT.getByName(repository.name);
 			const raw = await git.inspect(upstream, contributor, request.branch, request.head);
+			if (raw.merged) await closeChange(env, request);
 			if (!raw.tree || !raw.snapshot || !raw.upstreamSnapshot)
 				return {
 					...raw,
@@ -130,9 +137,16 @@ export async function runChangeMutation(env: Env, repository: Repository, reques
 				request.operationId,
 			),
 		);
-		if (recovered) return recovered;
+		if (recovered) {
+			await closeChange(env, request);
+			return { commitSha: recovered.commitSha };
+		}
 	}
 	const candidate = await inspectChange(env, request);
+	if (candidate.merged) {
+		await closeChange(env, request);
+		throw new IntakeError(409, "Change already merged");
+	}
 	if (request.kind !== "comment") {
 		if (!candidate.tree || !candidate.result || candidate.result.findings.length)
 			throw new IntakeError(409, "Resolve conflicts and failed checks first");
@@ -158,7 +172,7 @@ export async function runChangeMutation(env: Env, repository: Repository, reques
 					)
 				)
 					throw new IntakeError(409, "Current checked head requires approval");
-				return git.merge(upstream, contributor, {
+				const merged = await git.merge(upstream, contributor, {
 					branch: request.branch,
 					expectedHead: candidate.upstreamHead,
 					expectedForkHead: request.head,
@@ -167,6 +181,8 @@ export async function runChangeMutation(env: Env, repository: Repository, reques
 					author,
 					operationId: request.operationId,
 				});
+				await closeChange(env, request);
+				return { commitSha: merged.commitSha };
 			}
 			const note: ReviewNote = {
 				version: 1,
@@ -188,6 +204,10 @@ export async function runChangeCheck(env: Env, request: ChangeIdentity & { opera
 	const repository = await getRepository(env.DB, request.repositoryName);
 	const fork = await requireFork(env.DB, repository.name, request.forkName);
 	const candidate = await inspectChange(env, request);
+	if (candidate.merged) {
+		await closeChange(env, request);
+		return { notesCommit: null };
+	}
 	const passed = !!candidate.tree && !!candidate.result && candidate.result.findings.length === 0;
 	const note: ReviewNote = {
 		version: 1,
