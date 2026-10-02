@@ -64,6 +64,13 @@
 			},
 		},
 	],
+	"workflows": [
+		{
+			"binding": "CHANGE_CHECKS",
+			"name": "quest-change-checks",
+			"class_name": "ChangeChecks",
+		},
+	],
 	"queues": {
 		"consumers": [
 			{
@@ -75,5 +82,4 @@
 			},
 		],
 	},
-	"workflows": [{ "binding": "CHANGE_CHECKS", "name": "quest-change-checks", "class_name": "ChangeChecks" }],
 }

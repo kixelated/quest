@@ -72,6 +72,19 @@ changesRoutes.get("/repos/:repository/changes/:fork", async (c) => {
 	if (actor.userId !== repository.maintainerId && actor.userId !== fork.userId)
 		throw new IntakeError(403, "Repository access required");
 	const candidate = await inspectChange(c.env, identity);
+	if (candidate.merged)
+		return c.html(
+			<html lang="en">
+				<head>
+					<title>Merged change</title>
+				</head>
+				<body>
+					<h1>{identity.branch} merged</h1>
+					<p>This fork head is already part of upstream main.</p>
+					<a href={`/repos/${encodeURIComponent(repository.name)}/changes`}>Changes</a>
+				</body>
+			</html>,
+		);
 	const checked = !!candidate.tree && hasCheck(candidate.notes, identity, candidate.upstreamHead, candidate.tree);
 	const approved =
 		!!candidate.tree &&

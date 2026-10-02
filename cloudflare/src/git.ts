@@ -215,6 +215,20 @@ export class GitRepository {
 		const upstreamHead = await this.fetch(upstream, "refs/heads/main", "refs/remotes/upstream/main");
 		const forkHead = await this.fetch(fork, `refs/heads/${branch}`, "refs/remotes/fork/change");
 		if (!upstreamHead || forkHead !== expectedHead) throw new GitConflict("Change head moved");
+		const ancestry = await this.command(["merge-base", "--is-ancestor", forkHead, upstreamHead], {}, true);
+		if (ancestry.exitCode === 0)
+			return {
+				upstreamHead,
+				forkHead,
+				diff: "",
+				patch: "",
+				conflicts: null,
+				tree: null,
+				snapshot: null,
+				upstreamSnapshot: null,
+				merged: true,
+			};
+		if (ancestry.exitCode !== 1) throw new Error("Git ancestry check failed");
 		const diff = (await this.command(["diff", "--no-ext-diff", "--no-textconv", "--stat", upstreamHead, forkHead]))
 			.stdout;
 		const patch = (
@@ -229,12 +243,23 @@ export class GitRepository {
 		if (patch.length > 2_000_000) throw new Error("Diff size limit exceeded");
 		const merged = await this.command(["merge-tree", "--write-tree", upstreamHead, forkHead], {}, true);
 		if (merged.exitCode !== 0)
-			return { upstreamHead, forkHead, diff, patch, conflicts: merged.stdout, tree: null, snapshot: null };
+			return {
+				upstreamHead,
+				forkHead,
+				diff,
+				patch,
+				conflicts: merged.stdout,
+				tree: null,
+				snapshot: null,
+				upstreamSnapshot: null,
+				merged: false,
+			};
 		const tree = merged.stdout.trim().split("\n")[0];
 		assertSha(tree);
 		return {
 			upstreamHead,
 			forkHead,
+			merged: false,
 			diff,
 			patch,
 			conflicts: null,
