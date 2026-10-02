@@ -7,9 +7,11 @@ export class SnapshotError extends Error {
 export interface SnapshotEntry extends ArtifactsTreeEntry {
 	path: string;
 }
-export interface RepositorySnapshot extends Snapshot {
-	commitSha: string;
+export interface TreeSnapshot extends Snapshot {
 	entries: SnapshotEntry[];
+}
+export interface RepositorySnapshot extends TreeSnapshot {
+	commitSha: string;
 }
 export interface SnapshotLimits {
 	maxEntries: number;
@@ -29,12 +31,21 @@ export async function readSnapshot(
 	overrides: Partial<SnapshotLimits> = {},
 ): Promise<RepositorySnapshot> {
 	if (!/^[a-f0-9]{40}$/.test(commitSha)) throw new SnapshotError("Expected an immutable commit SHA");
+	const commit = await repo.readCommit(commitSha);
+	if (!commit || commit.hash !== commitSha) throw new SnapshotError("Commit not found");
+	return { commitSha, ...(await readTreeSnapshot(repo, commit.treeHash, overrides)) };
+}
+
+// Candidate merge trees use the same reader without creating a temporary commit.
+export async function readTreeSnapshot(
+	repo: Pick<ArtifactsRepo, "readTree" | "readBlob">,
+	treeHash: string,
+	overrides: Partial<SnapshotLimits> = {},
+): Promise<TreeSnapshot> {
 	const limits = { ...defaults, ...overrides };
 	for (const value of Object.values(limits)) {
 		if (!Number.isSafeInteger(value) || value < 1) throw new SnapshotError("Invalid snapshot limit");
 	}
-	const commit = await repo.readCommit(commitSha);
-	if (!commit || commit.hash !== commitSha) throw new SnapshotError("Commit not found");
 	const entries: SnapshotEntry[] = [];
 	const byPath = new Map<string, SnapshotEntry>();
 	async function walk(hash: string, prefix: string): Promise<void> {
@@ -59,8 +70,8 @@ export async function readSnapshot(
 			if (entry.type === "tree") await walk(entry.hash, `${path}/`);
 		}
 	}
-	await walk(commit.treeHash, "");
-	byPath.set("", { path: "", name: "", type: "tree", mode: "40000", hash: commit.treeHash });
+	await walk(treeHash, "");
+	byPath.set("", { path: "", name: "", type: "tree", mode: "40000", hash: treeHash });
 	let totalBytes = 0;
 	const bodies = new Map<string, string>();
 	async function text(entry: SnapshotEntry): Promise<string> {
@@ -131,5 +142,5 @@ export async function readSnapshot(
 		documents.push({ path: entry.path, content: await text(resolved) });
 	}
 	if (paths.size > limits.maxEntries) throw new SnapshotError("Snapshot entry limit exceeded");
-	return { commitSha, entries, paths: [...paths].sort(), documents };
+	return { entries, paths: [...paths].sort(), documents };
 }
