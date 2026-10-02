@@ -33,6 +33,7 @@ export class IntakeError extends Error {
 		message: string,
 	) {
 		super(message);
+		this.name = `IntakeError${status}`;
 	}
 }
 
@@ -77,4 +78,13 @@ export async function withCapability<T>(
 	} finally {
 		await repo.revokeToken(token.id);
 	}
+}
+
+// RPC preserves Error.name and message, but drops custom prototypes/fields.
+// Only our fixed, authoritative rejection names carry an HTTP status.
+export function intakeStatus(error: unknown): IntakeError["status"] | null {
+	if (error instanceof IntakeError) return error.status;
+	if (!(error instanceof Error)) return null;
+	const match = /^IntakeError(400|401|403|404|409)$/.exec(error.name);
+	return match ? (Number(match[1]) as IntakeError["status"]) : null;
 }

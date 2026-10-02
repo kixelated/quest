@@ -1,9 +1,17 @@
-import type { Hono } from "hono";
+import type { Hono, Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { requireActor } from "../auth";
 import { claimMarkdownName } from "./claim";
 import { ownedFork } from "./forks";
 import { getRepository, IntakeError, type Repository } from "./registry";
+
+async function jsonBody<T>(c: Context<{ Bindings: Env }>): Promise<T> {
+	try {
+		return await c.req.json<T>();
+	} catch {
+		throw new IntakeError(400, "Invalid JSON body");
+	}
+}
 
 export function intakeRoutes(app: Hono<{ Bindings: Env }>) {
 	app.use("/repositories/*", bodyLimit({ maxSize: 8192 }));
@@ -38,7 +46,7 @@ export function intakeRoutes(app: Hono<{ Bindings: Env }>) {
 				.includes(`${actor.provider}:${actor.identity}`)
 		)
 			throw new IntakeError(403, "Operator registration required");
-		const { name } = await c.req.json<{ name?: unknown }>();
+		const { name } = await jsonBody<{ name?: unknown }>(c);
 		if (typeof name !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(name))
 			throw new IntakeError(400, "Invalid repository name");
 		return c.json(await c.env.REPOSITORIES.getByName(name).register(name, actor));
@@ -78,7 +86,7 @@ export function intakeRoutes(app: Hono<{ Bindings: Env }>) {
 		const actor = await requireActor(c.env, c.req.raw.headers);
 		const name = c.req.param("name");
 		await getRepository(c.env.DB, name);
-		const { path } = await c.req.json<{ path?: unknown }>();
+		const { path } = await jsonBody<{ path?: unknown }>(c);
 		if (typeof path !== "string" || !/^quest\/.+\.md$/.test(path)) throw new IntakeError(400, "Invalid quest path");
 		return c.json(await c.env.REPOSITORIES.getByName(name).release(name, path, actor.userId));
 	});

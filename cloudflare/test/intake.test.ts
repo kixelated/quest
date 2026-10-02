@@ -234,6 +234,22 @@ describe("Queue and HTTP intake boundaries", () => {
 		expect(ack).toHaveBeenCalledTimes(1);
 		expect(retry).toHaveBeenCalledTimes(1);
 	});
+	it("does not dispatch changes or intake for a forged subscription", async () => {
+		const fake = services(),
+			ack = vi.fn(),
+			retry = vi.fn(),
+			ingest = vi.fn();
+		const spoof = event();
+		spoof.payload.ref = "refs/heads/quest/one";
+		spoof.metadata.eventSubscriptionId = "forged";
+		const mockEnv = { ...fake.mockEnv, REPOSITORIES: { getByName: () => ({ ingest }) } } as unknown as Env;
+		await consumePushes({ messages: [{ body: spoof, ack, retry }] } as unknown as MessageBatch, mockEnv);
+		expect(ingest).not.toHaveBeenCalled();
+		expect(ack).toHaveBeenCalledOnce();
+		expect(retry).not.toHaveBeenCalled();
+		expect(fake.mockEnv.ARTIFACTS.get).not.toHaveBeenCalled();
+	});
+
 	it("requires a session and same-origin writes", async () => {
 		for (const path of [
 			"/repositories/upstream/fork",

@@ -19,6 +19,3 @@ shows the run's status.
 - Reuse the claim, branch, and change flow from `quest run`, so hosted and
   local runs behave the same.
 
-## Required
-
-- [Fork intake](/quest/m0/cloudflare/intake.md) - forks and claims
