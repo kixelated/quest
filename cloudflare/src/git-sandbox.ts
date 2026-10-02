@@ -81,11 +81,17 @@ export class GitSandbox extends DurableObject<Env> {
 			return { ...candidate, tree, snapshot: await git.snapshot(tree) };
 		});
 	}
-	notes(upstream: GitCapability, head: string) {
-		return this.use((git) => git.notes(upstream, head));
+	notes(upstream: GitCapability, fork: GitCapability, branch: string, head: string) {
+		return this.use(async (git) => {
+			await git.inspect(upstream, fork, branch, head);
+			return git.notes(upstream, head);
+		});
 	}
-	appendNote(upstream: GitCapability, note: ReviewNote, author: GitAuthor) {
-		return this.use((git) => git.appendNote(upstream, note, author));
+	appendNote(upstream: GitCapability, fork: GitCapability, branch: string, note: ReviewNote, author: GitAuthor) {
+		return this.use(async (git) => {
+			await git.inspect(upstream, fork, branch, note.head);
+			return git.appendNote(upstream, note, author);
+		});
 	}
 	applyMutation(
 		upstream: GitCapability,
@@ -95,6 +101,10 @@ export class GitSandbox extends DurableObject<Env> {
 			git.applyMutation(upstream, request.expectedHead, request.operationId, request.files, request.author),
 		);
 	}
+	recoverMutation(upstream: GitCapability, expectedHead: string, tree: string, operationId: string) {
+		return this.use((git) => git.recoverMutation(upstream, expectedHead, tree, operationId));
+	}
+
 	merge(
 		upstream: GitCapability,
 		fork: GitCapability,

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GitRepository, type GitCapability, type GitExecutor } from "../src/git";
+import { GitRepository, operationKey, type GitCapability, type GitExecutor } from "../src/git";
 
 const author = { name: "Trusted Maintainer", email: "maintainer@example.test" };
 const directories: string[] = [];
@@ -140,7 +140,9 @@ describe("real Git orchestration", () => {
 			tree: f.head,
 		};
 		const first = await f.git.appendNote(f.upstream, note, author);
-		expect(await f.git.notes(f.upstream, f.head)).toEqual([note]);
+		expect(await f.git.notes(f.upstream, f.head)).toEqual([
+			{ ...note, operationId: await operationKey(note.operationId) },
+		]);
 		expect(await f.git.appendNote(f.upstream, note, author)).toBe(first);
 	});
 	it("reports merge conflicts without changing upstream", async () => {
