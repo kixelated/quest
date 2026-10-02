@@ -50,7 +50,11 @@ export function assertSha(sha: string): void {
 	if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid Git object ID");
 }
 export function assertQuestBranch(branch: string): void {
-	if (!/^quest\/[a-zA-Z0-9][a-zA-Z0-9_/-]*$/.test(branch) || branch.includes("..") || branch.split("/").some((part) => !part)) {
+	if (
+		!/^quest\/[a-zA-Z0-9][a-zA-Z0-9_/-]*$/.test(branch) ||
+		branch.includes("..") ||
+		branch.split("/").some((part) => !part)
+	) {
 		throw new Error("Invalid quest branch");
 	}
 }
@@ -132,7 +136,8 @@ export class GitRepository {
 		await this.command(["init", "--bare", this.directory]);
 	}
 	async head(remote: GitCapability, ref: string): Promise<string | null> {
-		if (!/^refs\/(heads\/[A-Za-z0-9_/-]+|notes\/quest)$/.test(ref) || ref.includes("//")) throw new Error("Invalid Git ref");
+		if (!/^refs\/(heads\/[A-Za-z0-9_/-]+|notes\/quest)$/.test(ref) || ref.includes("//"))
+			throw new Error("Invalid Git ref");
 		const result = await this.command(["ls-remote", "--refs", remote.remote, ref], { capability: remote });
 		const head = result.stdout.trim().split(/\s/)[0];
 		if (!head) return null;
@@ -150,26 +155,39 @@ export class GitRepository {
 	async snapshot(tree: string): Promise<GitSnapshot> {
 		assertSha(tree);
 		const root = (await this.command(["rev-parse", `${tree}^{tree}`])).stdout.trim();
-		return readTreeSnapshot({
-			readTree: async (hash) => {
-				assertSha(hash);
-				return (await this.command(["ls-tree", "-z", hash])).stdout.split("\0").filter(Boolean).map((entry) => {
-					const match = /^(\d+) (\w+) ([a-f0-9]{40})\t([\s\S]*)$/.exec(entry);
-					if (!match) throw new Error("Invalid Git tree entry");
-					const [, rawMode, , object, name] = match;
-					const mode = rawMode.replace(/^0/, "");
-					const types: Record<string, ArtifactsTreeEntryType> = { "40000": "tree", "100644": "blob", "100755": "exec", "120000": "symlink", "160000": "gitlink" };
-					if (!types[mode]) throw new Error("Unsupported Git tree mode");
-					return { name, mode, hash: object, type: types[mode] };
-				});
+		return readTreeSnapshot(
+			{
+				readTree: async (hash) => {
+					assertSha(hash);
+					return (await this.command(["ls-tree", "-z", hash])).stdout
+						.split("\0")
+						.filter(Boolean)
+						.map((entry) => {
+							const match = /^(\d+) (\w+) ([a-f0-9]{40})\t([\s\S]*)$/.exec(entry);
+							if (!match) throw new Error("Invalid Git tree entry");
+							const [, rawMode, , object, name] = match;
+							const mode = rawMode.replace(/^0/, "");
+							const types: Record<string, ArtifactsTreeEntryType> = {
+								"40000": "tree",
+								"100644": "blob",
+								"100755": "exec",
+								"120000": "symlink",
+								"160000": "gitlink",
+							};
+							if (!types[mode]) throw new Error("Unsupported Git tree mode");
+							return { name, mode, hash: object, type: types[mode] };
+						});
+				},
+				readBlob: async (hash) => {
+					assertSha(hash);
+					const length = Number((await this.command(["cat-file", "-s", hash])).stdout.trim());
+					if (length > 2_000_000) throw new Error("Blob size limit exceeded");
+					return new Blob([(await this.command(["cat-file", "blob", hash])).stdout]);
+				},
 			},
-			readBlob: async (hash) => {
-				assertSha(hash);
-				const length = Number((await this.command(["cat-file", "-s", hash])).stdout.trim());
-				if (length > 2_000_000) throw new Error("Blob size limit exceeded");
-				return new Blob([(await this.command(["cat-file", "blob", hash])).stdout]);
-			},
-		}, root, { maxEntries: 100_000, maxBlobBytes: 2_000_000, maxTotalBytes: 4_000_000 });
+			root,
+			{ maxEntries: 100_000, maxBlobBytes: 2_000_000, maxTotalBytes: 4_000_000 },
+		);
 	}
 
 	async writeTree(tree: string, files: FileWrite[]): Promise<string> {

@@ -52,11 +52,12 @@ export async function provisionFork(env: Env, repositoryName: string, actor: Act
 		const id = await subscribeFork(env, name);
 		await env.DB.prepare("UPDATE forks SET subscriptionId = ? WHERE forkName = ?").bind(id, name).run();
 	}
-	return row;
+	return (await getFork(env.DB, name))!;
 }
 
 export async function ownedFork(env: Env, repositoryName: string, actor: Actor): Promise<Fork> {
 	const fork = await getFork(env.DB, await forkName(repositoryName, actor.userId));
-	if (!fork?.remote || fork.userId !== actor.userId) throw new IntakeError(404, "Create your fork first");
+	if (!fork?.remote || !fork.subscriptionId || fork.userId !== actor.userId)
+		throw new IntakeError(404, "Create your fork first");
 	return fork;
 }

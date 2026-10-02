@@ -57,7 +57,8 @@ export function getFork(db: D1Database, forkName: string): Promise<Fork | null> 
 
 export async function requireFork(db: D1Database, repositoryName: string, forkName: string): Promise<Fork> {
 	const fork = await getFork(db, forkName);
-	if (!fork || fork.repositoryName !== repositoryName || !fork.remote) throw new IntakeError(404, "Unknown fork");
+	if (!fork || fork.repositoryName !== repositoryName || !fork.remote || !fork.subscriptionId)
+		throw new IntakeError(404, "Unknown fork");
 	return fork;
 }
 

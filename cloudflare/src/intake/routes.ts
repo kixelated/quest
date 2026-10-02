@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { requireActor } from "../auth";
+import { claimMarkdownName } from "./claim";
 import { ownedFork } from "./forks";
 import { getRepository, IntakeError, type Repository } from "./registry";
 
@@ -52,7 +53,7 @@ export function intakeRoutes(app: Hono<{ Bindings: Env }>) {
 			fork: fork.forkName,
 			remote: fork.remote,
 			token,
-			claim: `## Claim\n\n- ${fork.name} (${fork.provider}:${fork.identity}) on ${fork.remote} since ${new Date().toISOString().slice(0, 10)}\n`,
+			claim: `## Claim\n\n- ${claimMarkdownName(fork.name)} (${fork.provider}:${fork.identity}) on ${fork.remote} since ${new Date().toISOString().slice(0, 10)}\n`,
 		});
 	});
 	app.post("/repositories/:name/tokens", async (c) => {

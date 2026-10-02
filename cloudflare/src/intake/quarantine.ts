@@ -7,7 +7,9 @@ export const warning =
 // advisory warning, not a shell parser or a universal read interception layer.
 export const warningHook = `import { resolve, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+import { realpathSync } from "node:fs";
+const canonical = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
+const root = canonical(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 let input = "";
 for await (const chunk of process.stdin) {
   input += chunk;
@@ -17,7 +19,7 @@ let event;
 try { event = JSON.parse(input); } catch { process.exit(0); }
 const name = event.tool_name ?? "";
 if (!/read|grep|glob|search|bash|exec|shell/i.test(name)) process.exit(0);
-const cwd = event.cwd ?? root;
+const cwd = canonical(event.cwd ?? root);
 const isIssuePath = (value) => {
   if (typeof value !== "string") return false;
   const path = relative(root, resolve(cwd, value)).replaceAll("\\\\", "/");

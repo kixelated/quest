@@ -68,7 +68,9 @@ describe("real Git orchestration", () => {
 		const f = await fixture();
 		const files = [{ path: "issues/opaque.md", content: "Request\n" }];
 		const result = await f.git.applyMutation(f.upstream, f.head, operationId, files, author);
-		expect((await f.git.applyMutation(f.upstream, f.head, operationId, files, author)).commitSha).toBe(result.commitSha);
+		expect((await f.git.applyMutation(f.upstream, f.head, operationId, files, author)).commitSha).toBe(
+			result.commitSha,
+		);
 		const body = await run(f.directory, "--git-dir=" + f.upstream.remote, "log", "-1", "--format=%B");
 		expect(body).toContain(await operationKey(operationId));
 		expect(body).not.toContain(operationId);

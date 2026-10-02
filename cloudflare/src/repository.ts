@@ -4,6 +4,7 @@ import { readSnapshot, SnapshotError } from "./snapshot";
 import { runChangeMutation, runChangeCheck, writeFiles, type ChangeMutation, type ChangeIdentity } from "./mutations";
 import { GitConflict } from "./git";
 import { type PushEvent, eventKey, zeroId } from "./intake/events";
+import { creditAuthor } from "./intake/claim";
 import { provisionFork } from "./intake/forks";
 import { gate, type FileChange } from "./intake/gate";
 import { quarantineFiles, quarantinePaths } from "./intake/quarantine";
@@ -117,29 +118,49 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 
 	register(name: string, actor: Actor) {
 		return this.serial.run(async () => {
-			if (!this.env.AUTH_MAINTAINERS.split(",").map(value=>value.trim()).includes(`${actor.provider}:${actor.identity}`)) throw new IntakeError(403,"Operator registration required");
+			if (
+				!this.env.AUTH_MAINTAINERS.split(",")
+					.map((value) => value.trim())
+					.includes(`${actor.provider}:${actor.identity}`)
+			)
+				throw new IntakeError(403, "Operator registration required");
 			this.bind(name);
 			using repo = await this.env.ARTIFACTS.get(name);
 			const info = await repo.info();
 			if (info.defaultBranch !== "main" || info.readOnly)
 				throw new IntakeError(409, "A writable main repository is required");
-			this.ctx.storage.sql.exec("INSERT OR IGNORE INTO registration VALUES(1,?)",actor.userId);
-			if (this.ctx.storage.sql.exec<{userId:string}>("SELECT userId FROM registration WHERE id=1").one().userId !== actor.userId) throw new IntakeError(403,"Maintainer required");
-			const existingOwner = await this.env.DB.prepare("SELECT maintainerId FROM repositories WHERE name=?").bind(name).first<{maintainerId:string}>();
-			if (existingOwner && existingOwner.maintainerId !== actor.userId) throw new IntakeError(403,"Maintainer required");
-			const repository:Repository = {name,remote:info.remote,defaultBranch:"main",maintainerId:actor.userId};
-			const finish = async (outcome:Outcome) => {
-				await this.env.DB.prepare("INSERT OR IGNORE INTO repositories VALUES(?,?,?,?,?)").bind(name,info.remote,"main",actor.userId,Date.now()).run();
+			this.ctx.storage.sql.exec("INSERT OR IGNORE INTO registration VALUES(1,?)", actor.userId);
+			if (
+				this.ctx.storage.sql.exec<{ userId: string }>("SELECT userId FROM registration WHERE id=1").one()
+					.userId !== actor.userId
+			)
+				throw new IntakeError(403, "Maintainer required");
+			const existingOwner = await this.env.DB.prepare("SELECT maintainerId FROM repositories WHERE name=?")
+				.bind(name)
+				.first<{ maintainerId: string }>();
+			if (existingOwner && existingOwner.maintainerId !== actor.userId)
+				throw new IntakeError(403, "Maintainer required");
+			const repository: Repository = {
+				name,
+				remote: info.remote,
+				defaultBranch: "main",
+				maintainerId: actor.userId,
+			};
+			const finish = async (outcome: Outcome) => {
+				await this.env.DB.prepare("INSERT OR IGNORE INTO repositories VALUES(?,?,?,?,?)")
+					.bind(name, info.remote, "main", actor.userId, Date.now())
+					.run();
 				return outcome;
 			};
 			const id = `quarantine:${name}`;
 			const recorded = this.record(id);
 			if (recorded?.result) return finish(JSON.parse(recorded.result) as Outcome);
 			if (recorded?.payload) {
-				try { return finish(await this.pending(repository,id,JSON.parse(recorded.payload))); }
-				catch(error) {
-					if(!(error instanceof GitConflict)) throw error;
-					this.ctx.storage.sql.exec("UPDATE operations SET payload=NULL WHERE id=?",id);
+				try {
+					return finish(await this.pending(repository, id, JSON.parse(recorded.payload)));
+				} catch (error) {
+					if (!(error instanceof GitConflict)) throw error;
+					this.ctx.storage.sql.exec("UPDATE operations SET payload=NULL WHERE id=?", id);
 				}
 			}
 			const expectedHead = await this.head(repo);
@@ -148,10 +169,11 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 				throw new IntakeError(409, "Fix upstream quest validation before registration");
 			const existing: Record<string, string | null> = {};
 			for (const path of quarantinePaths) {
-				const parts=path.split("/");
-				for(let n=1;n<parts.length;n++) {
-					const parent=snapshot.entries.find(entry=>entry.path===parts.slice(0,n).join("/"));
-					if(parent && parent.type!=="tree") throw new IntakeError(409,"Quarantine directories must be real directories");
+				const parts = path.split("/");
+				for (let n = 1; n < parts.length; n++) {
+					const parent = snapshot.entries.find((entry) => entry.path === parts.slice(0, n).join("/"));
+					if (parent && parent.type !== "tree")
+						throw new IntakeError(409, "Quarantine directories must be real directories");
 				}
 				const entry = snapshot.entries.find((entry) => entry.path === path);
 				if (entry && (entry.type !== "blob" || entry.mode !== "100644"))
@@ -159,15 +181,20 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 				const blob = await repo.readFile({ ref: expectedHead, path });
 				existing[path] = blob ? await boundedText(blob, 64 * 1024) : null;
 			}
-			let files:FileChange[];
-			try { files=quarantineFiles(existing); }
-			catch { throw new IntakeError(409,"Existing quarantine settings require maintainer reconciliation"); }
-			return finish(await this.pending(repository, id, {
-				operationId: id,
-				expectedHead,
-				files,
-				author: actor,
-			}));
+			let files: FileChange[];
+			try {
+				files = quarantineFiles(existing);
+			} catch {
+				throw new IntakeError(409, "Existing quarantine settings require maintainer reconciliation");
+			}
+			return finish(
+				await this.pending(repository, id, {
+					operationId: id,
+					expectedHead,
+					files,
+					author: await creditAuthor(actor),
+				}),
+			);
 		});
 	}
 
@@ -204,12 +231,13 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 			if (recorded?.result) return JSON.parse(recorded.result) as Outcome;
 			const repository = await getRepository(this.env.DB, fork.repositoryName);
 			if (recorded?.payload) {
-				try { return await this.pending(repository,id,JSON.parse(recorded.payload)); }
-				catch(error) {
-					if(!(error instanceof GitConflict)) throw error;
+				try {
+					return await this.pending(repository, id, JSON.parse(recorded.payload));
+				} catch (error) {
+					if (!(error instanceof GitConflict)) throw error;
 					// Recovery already looked for a landed operation. A confirmed
 					// stale-head conflict needs a fresh gate, not endless retries.
-					this.ctx.storage.sql.exec("UPDATE operations SET payload=NULL WHERE id=?",id);
+					this.ctx.storage.sql.exec("UPDATE operations SET payload=NULL WHERE id=?", id);
 				}
 			}
 			const ignore = () => {
@@ -254,7 +282,7 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 					operationId: id,
 					expectedHead,
 					files: [accepted.file],
-					author: fork,
+					author: await creditAuthor(fork),
 					claim,
 				});
 			} catch (error) {
@@ -284,10 +312,10 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 		});
 	}
 
-	checkChange(request:ChangeIdentity & {operationId:string}) {
-		return this.serial.run(async()=>{
+	checkChange(request: ChangeIdentity & { operationId: string }) {
+		return this.serial.run(async () => {
 			this.bind(request.repositoryName);
-			return runChangeCheck(this.env,request);
+			return runChangeCheck(this.env, request);
 		});
 	}
 

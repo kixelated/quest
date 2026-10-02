@@ -8,10 +8,12 @@ calling Better Auth's server API.
 
 `ARTIFACTS` points at one namespace per deployment, with each project stored as
 an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
-SQLite Durable Object. The coordinator currently initializes its schema and
-exposes an internal status method. Repository authorization, creation, claims,
-changes, and the board belong to later quests; there are no public repository
-or token routes yet. The Rust CLI remains independent of the Worker.
+SQLite Durable Object. The coordinator serializes upstream mutations and tracks claim expiry. Signed-in
+contributors receive their own forks and scoped tokens; push intake validates
+complete immutable snapshots with the Rust core before crediting allowed claims
+or issues onto main. See [fork intake](INTAKE.md) for routes, authorization,
+Queue configuration and warning-hook limitations. The Rust CLI remains
+independent of the Worker.
 
 ## Development
 
@@ -40,8 +42,7 @@ it does not probe storage. D1 and the coordinator persist locally under
 
 Artifacts is remote-only, even in Wrangler local mode. Wrangler requires an
 account login (`cd cloudflare; npm exec -- wrangler login`) for that binding.
-The scaffold does not call Artifacts yet. Use a separate development namespace
-before adding repository operations. Integration tests explicitly omit this
+Repository operations call Artifacts. Use a separate development namespace. Integration tests explicitly omit this
 binding so tests and CI never need Cloudflare credentials or call live services.
 
 ## Checks
@@ -56,7 +57,8 @@ These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 `wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
 with real local D1 and SQLite Durable Objects. Tests cover the mocked GitHub
 OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
-and coordinator storage across eviction and repository boundaries. No OAuth
+coordinator storage across eviction and repository boundaries, fork ownership,
+push gates, mutation recovery and claim expiry. No OAuth
 credentials or Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
@@ -101,6 +103,9 @@ npm run types
 npm run check
 npm run deploy
 ```
+
+Configure the Queue, subscription secret and operator allowlist described in
+[the intake setup](INTAKE.md#configuration) before deployment.
 
 Wrangler deploy applies the SQLite Durable Object class migration. D1 schema
 migrations are applied separately before deployment. After deploying, verify
