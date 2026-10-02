@@ -63,6 +63,12 @@ export function assertPath(path: string): void {
 		throw new Error("Invalid repository path");
 }
 
+export async function operationKey(value: string): Promise<string> {
+	if (!value || value.length > 4096 || value.includes("\0")) throw new Error("Invalid operation ID");
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+	return "q1-" + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export class GitRepository {
 	constructor(
 		private readonly execute: GitExecutor,
@@ -203,7 +209,16 @@ export class GitRepository {
 			return { upstreamHead, forkHead, diff, patch, conflicts: merged.stdout, tree: null, snapshot: null };
 		const tree = merged.stdout.trim().split("\n")[0];
 		assertSha(tree);
-		return { upstreamHead, forkHead, diff, patch, conflicts: null, tree, snapshot: await this.snapshot(tree) };
+		return {
+			upstreamHead,
+			forkHead,
+			diff,
+			patch,
+			conflicts: null,
+			tree,
+			snapshot: await this.snapshot(tree),
+			upstreamSnapshot: await this.snapshot(upstreamHead),
+		};
 	}
 	async notes(upstream: GitCapability, head: string): Promise<ReviewNote[]> {
 		assertSha(head);
@@ -215,6 +230,7 @@ export class GitRepository {
 		return notes;
 	}
 	async appendNote(upstream: GitCapability, note: ReviewNote, author: GitAuthor): Promise<string> {
+		note = { ...note, operationId: await operationKey(note.operationId) };
 		const existing = await this.notes(upstream, note.head);
 		if (existing.some((item) => item.operationId === note.operationId)) {
 			return (await this.command(["rev-parse", "refs/notes/quest"])).stdout.trim();
@@ -228,7 +244,7 @@ export class GitRepository {
 		await this.command(["push", upstream.remote, `${commit}:refs/notes/quest`], { capability: upstream });
 		return commit;
 	}
-	async commitAndPush(
+	private async commitAndPush(
 		upstream: GitCapability,
 		tree: string,
 		parents: string[],
@@ -275,6 +291,14 @@ export class GitRepository {
 		}
 		return null;
 	}
+	async recoverMutation(upstream: GitCapability, expectedHead: string, tree: string, operationId: string) {
+		assertSha(expectedHead);
+		assertSha(tree);
+		await this.fetch(upstream, "refs/heads/main", "refs/remotes/upstream/main");
+		const commitSha = await this.recover(expectedHead, tree, await operationKey(operationId));
+		return commitSha ? { commitSha } : null;
+	}
+
 	async applyMutation(
 		upstream: GitCapability,
 		expectedHead: string,
@@ -282,6 +306,7 @@ export class GitRepository {
 		files: FileWrite[],
 		author: GitAuthor,
 	) {
+		operationId = await operationKey(operationId);
 		assertSha(expectedHead);
 		const head = await this.fetch(upstream, "refs/heads/main", "refs/remotes/upstream/main");
 		const tree = await this.writeTree(expectedHead, files);
@@ -301,6 +326,7 @@ export class GitRepository {
 		author: GitAuthor,
 		operationId: string,
 	) {
+		operationId = await operationKey(operationId);
 		await this.fetch(upstream, "refs/heads/main", "refs/remotes/upstream/main");
 		const recovered = await this.recover(expectedHead, expectedTree, operationId);
 		if (recovered) return { commitSha: recovered };
