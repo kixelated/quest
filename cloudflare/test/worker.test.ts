@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { SELF, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requireActor } from "../src/auth";
+import { claimMarkdownName, creditAuthor } from "../src/intake/claim";
+import { evaluate } from "../src/core";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -52,7 +55,7 @@ describe("Worker", () => {
 				return Response.json({
 					id: 1234,
 					login: "contributor",
-					name: "Contributor",
+					name: "Zoë *Doe* <team> (team) on GitHub  李",
 					email: "contributor@example.com",
 					avatar_url: null,
 				});
@@ -74,9 +77,26 @@ describe("Worker", () => {
 			.find((cookie) => cookie.startsWith("better-auth.session_token="))!
 			.split(";")[0];
 		const session = await SELF.fetch(`${origin}/api/auth/get-session`, { headers: { Cookie: sessionCookie } });
-		expect(((await session.json()) as { user: { name: string } }).user.name).toBe("Contributor");
+		expect(((await session.json()) as { user: { name: string } }).user.name).toBe(
+			"Zoë *Doe* <team> (team) on GitHub  李",
+		);
 		const home = await SELF.fetch(origin, { headers: { Cookie: sessionCookie } });
-		expect(await home.text()).toContain("Signed in as Contributor");
+		expect(await home.text()).toContain("Signed in as Zoë *Doe* &lt;team&gt;");
+		const actor = await requireActor(env, new Headers({ Cookie: sessionCookie }));
+		expect(actor).toMatchObject({
+			provider: "github",
+			identity: "1234",
+			name: "Zoë *Doe* ＜team＞ （team） on GitHub 李",
+			email: "contributor@example.com",
+		});
+		const credited = await creditAuthor(actor);
+		expect(credited.name).toContain("[github:1234]");
+		expect(credited.email).toMatch(/^[a-f0-9]{64}@users.quest.invalid$/);
+		const claim = `# [S] One\n\n## Goal\n\nWork.\n\n## Claim\n\n- ${claimMarkdownName(actor.name)} (${actor.provider}:${actor.identity}) on https://example.test/fork.git since 2026-10-02\n`;
+		expect(
+			evaluate({ documents: [{ path: "quest/one.md", content: claim }], paths: ["quest", "quest/one.md"] })
+				.claims["quest/one.md"].name,
+		).toBe(actor.name);
 		const logout = await SELF.fetch(`${origin}/sign-out`, {
 			method: "POST",
 			headers: { Cookie: sessionCookie, Origin: origin },

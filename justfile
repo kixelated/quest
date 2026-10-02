@@ -58,3 +58,8 @@ worker-test:
 worker-dev:
     npm --prefix cloudflare run migrate
     npm --prefix cloudflare run dev
+
+# Build the local wasm package imported by the Worker (same core as the CLI).
+wasm-build:
+    cargo build --locked --lib --release --target wasm32-unknown-unknown
+    wasm-bindgen --target web --out-dir cloudflare/quest-core target/wasm32-unknown-unknown/release/quest.wasm
