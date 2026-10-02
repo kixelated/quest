@@ -4,3 +4,7 @@ GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
 GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
 # Account-scoped Queues Write token for event subscription management.
 EVENT_SUBSCRIPTION_TOKEN=replace-with-scoped-cloudflare-api-token
+# Separate GitHub App for repository mirroring; GITHUB_APP_ID is a Wrangler var.
+# Use a quoted PEM with escaped newlines in this ignored development file.
+GITHUB_APP_PRIVATE_KEY=replace-with-github-app-private-key
+GITHUB_WEBHOOK_SECRET=replace-with-random-webhook-secret

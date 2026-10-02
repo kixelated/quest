@@ -1,3 +1,4 @@
+import { syncRef, type RefState } from "./sync/types";
 import { readTreeSnapshot } from "./snapshot";
 // Trusted orchestration only: never check out or execute contributor code.
 // The same argv-based engine runs in a Container and in local real-Git tests.
@@ -14,6 +15,7 @@ export interface GitCapability {
 	name: string;
 	remote: string;
 	token: string;
+	authorization?: string;
 }
 export interface GitAuthor {
 	name: string;
@@ -116,7 +118,7 @@ export class GitRepository {
 			// a URL/config file or place it in command arguments/logs.
 			env.GIT_CONFIG_COUNT = "1";
 			env.GIT_CONFIG_KEY_0 = `http.${options.capability.remote}.extraHeader`;
-			env.GIT_CONFIG_VALUE_0 = `Authorization: Bearer ${options.capability.token}`;
+			env.GIT_CONFIG_VALUE_0 = `Authorization: ${options.capability.authorization ?? `Bearer ${options.capability.token}`}`;
 		}
 		if (options.author) {
 			if (/[\n\r\x00<>]/.test(options.author.name + options.author.email)) {
@@ -146,7 +148,7 @@ export class GitRepository {
 		if (!allowFailure && result.exitCode !== 0) {
 			// Git's transport diagnostics can contain credentials. Return a
 			// fixed error, with no stderr or remote URL, across RPC/HTTP.
-			transportFailure(args[0], result);
+			transportFailure(args[0] === "-c" ? args[2] : args[0], result);
 		}
 		return result;
 	}
@@ -155,8 +157,8 @@ export class GitRepository {
 		await this.command(["init", "--bare", this.directory]);
 	}
 	async head(remote: GitCapability, ref: string): Promise<string | null> {
-		if (!/^refs\/(heads\/[A-Za-z0-9_/-]+|notes\/quest)$/.test(ref) || ref.includes("//"))
-			throw new Error("Invalid Git ref");
+		if (!ref.startsWith("refs/heads/") && ref !== "refs/notes/quest") throw new Error("Invalid Git ref");
+		await this.command(["check-ref-format", ref]);
 		const result = await this.command(["ls-remote", "--refs", remote.remote, ref], { capability: remote });
 		const head = result.stdout.trim().split(/\s/)[0];
 		if (!head) return null;
@@ -170,6 +172,102 @@ export class GitRepository {
 		const fetched = (await this.command(["rev-parse", local])).stdout.trim();
 		assertSha(fetched);
 		return fetched;
+	}
+	async refs(remote: GitCapability): Promise<Record<string, string>> {
+		const result = await this.command(
+			["ls-remote", "--refs", remote.remote, "refs/heads/main", "refs/heads/quest/*", "refs/notes/quest"],
+			{ capability: remote },
+		);
+		const refs: Record<string, string> = {};
+		for (const line of result.stdout.split("\n").filter(Boolean)) {
+			const [sha, ref] = line.split("\t");
+			assertSha(sha);
+			if (!syncRef(ref)) throw new Error("Unsupported mirror ref");
+			await this.command(["check-ref-format", ref]);
+			refs[ref] = sha;
+		}
+		if (Object.keys(refs).length > 2000) throw new Error("Mirror ref limit exceeded");
+		return refs;
+	}
+	async mirror(
+		left: GitCapability,
+		right: GitCapability,
+		previous: Record<string, string>,
+		observed?: { left: Record<string, string>; right: Record<string, string> },
+	): Promise<RefState[]> {
+		const l = await this.refs(left),
+			r = await this.refs(right),
+			states: RefState[] = [];
+		const refs = [...new Set([...Object.keys(l), ...Object.keys(r), ...Object.keys(previous)])].sort();
+		if (
+			observed &&
+			(JSON.stringify(Object.entries(l).sort()) !== JSON.stringify(Object.entries(observed.left).sort()) ||
+				JSON.stringify(Object.entries(r).sort()) !== JSON.stringify(Object.entries(observed.right).sort()))
+		)
+			throw new GitConflict("Mirror refs moved since receipt");
+		for (const ref of refs) {
+			if (!syncRef(ref)) throw new Error("Unsupported mirror ref");
+			await this.command(["check-ref-format", ref]);
+			const a = l[ref] ?? null,
+				b = r[ref] ?? null;
+			if (a === b) {
+				states.push({ ref, left: a, right: b, status: a === null ? "deleted" : "equal", shared: a });
+				continue;
+			}
+			// Deletion is not a fast-forward. Do not recreate a previously mirrored ref.
+			if ((!a || !b) && previous[ref]) {
+				states.push({ ref, left: a, right: b, status: "deleted", shared: null });
+				continue;
+			}
+			let source = left,
+				target = right,
+				sourceSha: string | null = a,
+				targetSha: string | null = b;
+			await this.command(["update-ref", "-d", "refs/mirror/left"]);
+			await this.command(["update-ref", "-d", "refs/mirror/right"]);
+			if (a) await this.fetch(left, ref, "refs/mirror/left");
+			if (b) await this.fetch(right, ref, "refs/mirror/right");
+			if (a && b) {
+				const ab = await this.command(["merge-base", "--is-ancestor", a, b], {}, true);
+				if (ab.exitCode === 0) {
+					source = right;
+					target = left;
+					sourceSha = b;
+					targetSha = a;
+				} else {
+					if (ab.exitCode !== 1) throw new Error("Git ancestry failed");
+					const ba = await this.command(["merge-base", "--is-ancestor", b, a], {}, true);
+					if (ba.exitCode !== 0) {
+						if (ba.exitCode !== 1) throw new Error("Git ancestry failed");
+						states.push({ ref, left: a, right: b, status: "diverged", shared: null });
+						continue;
+					}
+				}
+			} else if (!a) {
+				source = right;
+				target = left;
+				sourceSha = b;
+				targetSha = null;
+			}
+			if (!sourceSha) throw new Error("Missing mirror source");
+			if ((await this.head(source, ref)) !== sourceSha || (await this.head(target, ref)) !== targetSha)
+				throw new GitConflict("Mirror ref moved");
+			// An explicit old-SHA lease supplies compare-and-swap for notes as well as
+			// branches. Ancestry is proven above; no non-fast-forward update is requested.
+			await this.command(
+				[
+					"-c",
+					"protocol.version=1",
+					"push",
+					`--force-with-lease=${ref}:${targetSha ?? ""}`,
+					target.remote,
+					`${sourceSha}:${ref}`,
+				],
+				{ capability: target },
+			);
+			states.push({ ref, left: sourceSha, right: sourceSha, status: "updated", shared: sourceSha });
+		}
+		return states;
 	}
 	async snapshot(tree: string): Promise<GitSnapshot> {
 		assertSha(tree);

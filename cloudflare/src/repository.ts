@@ -1,3 +1,4 @@
+import { pairGithub, enableGithub, syncGithub } from "./sync/service";
 import { DurableObject } from "cloudflare:workers";
 import { evaluate, removeClaim } from "./core";
 import { readSnapshot, SnapshotError } from "./snapshot";
@@ -41,6 +42,24 @@ export class RepositoryCoordinator extends DurableObject<Env> {
     `);
 	}
 
+	pairGithub(request: Parameters<typeof pairGithub>[1]) {
+		return this.serial.run(() => {
+			this.bind(request.repositoryName);
+			return pairGithub(this.env, request);
+		});
+	}
+	enableGithub(request: Parameters<typeof enableGithub>[1]) {
+		return this.serial.run(() => {
+			this.bind(request.repositoryName);
+			return enableGithub(this.env, request);
+		});
+	}
+	syncGithub(repositoryName: string) {
+		return this.serial.run(() => {
+			this.bind(repositoryName);
+			return syncGithub(this.env, repositoryName);
+		});
+	}
 	status() {
 		const row = this.ctx.storage.sql
 			.exec<{ schema_version: number }>("SELECT schema_version FROM metadata WHERE id = 1")

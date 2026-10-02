@@ -56,6 +56,5 @@ Decided while planning on 2026-10-01. Research sources:
 - [Quest board](/quest/m0/cloudflare/board.md) - browse the tree and see what is ready, blocked, or claimed
 - [Local runner](/quest/m0/cloudflare/run.md) - `quest run` claims a quest and runs Codex on the contributor's ChatGPT plan
 - [Hosted runs](/quest/m0/cloudflare/hosted.md) - fund a quest with a stored API key and run OpenCode in a Sandbox
-- [GitHub sync](/quest/m0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes
 - [GitHub onboarding](/quest/m0/cloudflare/onboard.md) - enter a GitHub repository and get Quest set up through a PR
 - [More logins](/quest/m0/cloudflare/logins.md) - Google and passkey sign-in

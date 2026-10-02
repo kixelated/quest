@@ -64,7 +64,11 @@ describe("safe Git transport errors", () => {
 	it.each(["The requested URL returned error: 503", "Failed to connect to git.test port 443"])(
 		"classifies temporary diagnostics without leaking them: %s",
 		async (stderr) => {
-			const git = new GitRepository(async () => ({ stdout: "", stderr, exitCode: 128 }), "/tmp/unused");
+			const git = new GitRepository(
+				async (argv, options) =>
+					argv.includes("ls-remote") ? { stdout: "", stderr, exitCode: 128 } : execute(argv, options),
+				"/tmp/unused",
+			);
 			await expect(
 				git.head(
 					{ name: "upstream", remote: "https://git.test/upstream", token: "private-token" },
@@ -79,7 +83,11 @@ describe("safe Git transport errors", () => {
 		"Authentication failed",
 		"Invalid refspec",
 	])("does not reclassify permanent failures: %s", async (stderr) => {
-		const git = new GitRepository(async () => ({ stdout: "", stderr, exitCode: 128 }), "/tmp/unused");
+		const git = new GitRepository(
+			async (argv, options) =>
+				argv.includes("ls-remote") ? { stdout: "", stderr, exitCode: 128 } : execute(argv, options),
+			"/tmp/unused",
+		);
 		await expect(
 			git.head(
 				{ name: "upstream", remote: "https://git.test/upstream", token: "private-token" },

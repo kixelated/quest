@@ -13,7 +13,8 @@ contributors receive their own forks and scoped tokens; push intake validates
 complete immutable snapshots with the Rust core before crediting allowed claims
 or issues onto main. See [fork intake](INTAKE.md) for routes, authorization,
 Queue configuration and warning-hook limitations. See [change review](CHANGES.md)
-for checked fork diffs, git-note reviews and serialized merges. The Rust CLI remains
+for checked fork diffs, git-note reviews and serialized merges. See [GitHub sync](SYNC.md)
+for disabled pairing, App setup and fast-forward mirroring. The Rust CLI remains
 independent of the Worker.
 
 ## Development

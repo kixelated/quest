@@ -1,3 +1,6 @@
+export { GithubSync } from "./sync/workflow";
+import { pollSync } from "./sync/workflow";
+import { syncRoutes } from "./sync/routes";
 export { ChangeChecks } from "./changes/workflow";
 import { changesRoutes } from "./changes/routes";
 export { GitSandbox } from "./git-sandbox";
@@ -13,6 +16,7 @@ export { QuestCore } from "./core";
 const app = new Hono<{ Bindings: Env }>();
 app.use(secureHeaders());
 app.route("/", changesRoutes);
+app.route("/", syncRoutes);
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 intakeRoutes(app);
@@ -96,4 +100,10 @@ app.onError((error, c) => {
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });
-export default { fetch: app.fetch, queue: consumePushes } satisfies ExportedHandler<Env>;
+export default {
+	fetch: app.fetch,
+	queue: consumePushes,
+	async scheduled(_controller, env) {
+		await pollSync(env);
+	},
+} satisfies ExportedHandler<Env>;

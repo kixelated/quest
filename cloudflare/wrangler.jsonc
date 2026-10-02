@@ -8,6 +8,7 @@
 		"enabled": true,
 	},
 	"vars": {
+		"GITHUB_APP_ID": "",
 		"AUTH_URL": "http://localhost:8787",
 		"AUTH_MAINTAINERS": "",
 		"ARTIFACTS_NAMESPACE": "quest",
@@ -15,7 +16,14 @@
 		"EVENT_QUEUE_ID": "",
 	},
 	"secrets": {
-		"required": ["AUTH_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "EVENT_SUBSCRIPTION_TOKEN"],
+		"required": [
+			"AUTH_SECRET",
+			"GITHUB_CLIENT_ID",
+			"GITHUB_CLIENT_SECRET",
+			"EVENT_SUBSCRIPTION_TOKEN",
+			"GITHUB_APP_PRIVATE_KEY",
+			"GITHUB_WEBHOOK_SECRET",
+		],
 	},
 	"artifacts": [
 		{
@@ -64,7 +72,9 @@
 			},
 		},
 	],
+	"triggers": { "crons": ["*/5 * * * *"] },
 	"workflows": [
+		{ "binding": "GITHUB_SYNC", "name": "quest-github-sync", "class_name": "GithubSync" },
 		{
 			"binding": "CHANGE_CHECKS",
 			"name": "quest-change-checks",

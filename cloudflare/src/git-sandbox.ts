@@ -63,6 +63,17 @@ export class GitSandbox extends DurableObject<Env> {
 		this.tail = result.catch(() => {});
 		return result;
 	}
+	refs(remote: GitCapability) {
+		return this.use((git) => git.refs(remote));
+	}
+	mirror(
+		left: GitCapability,
+		right: GitCapability,
+		previous: Record<string, string>,
+		observed?: { left: Record<string, string>; right: Record<string, string> },
+	) {
+		return this.use((git) => git.mirror(left, right, previous, observed));
+	}
 	inspect(upstream: GitCapability, fork: GitCapability, branch: string, head: string) {
 		return this.use((git) => git.inspect(upstream, fork, branch, head));
 	}

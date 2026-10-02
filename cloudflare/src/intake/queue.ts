@@ -1,3 +1,4 @@
+import { dispatchArtifactsSync } from "../sync/workflow";
 import { dispatchChangePush } from "../changes/workflow";
 import { pushEvent } from "./events";
 import { getFork } from "./registry";
@@ -14,6 +15,10 @@ export async function consumePushes(batch: MessageBatch<unknown>, env: Env): Pro
 			continue;
 		}
 		try {
+			if (await dispatchArtifactsSync(env, event)) {
+				message.ack();
+				continue;
+			}
 			const fork = await getFork(env.DB, event.source.repoName);
 			if (fork && event.metadata.eventSubscriptionId === fork.subscriptionId) {
 				await env.REPOSITORIES.getByName(fork.repositoryName).ingest(event);
