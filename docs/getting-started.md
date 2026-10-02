@@ -38,14 +38,17 @@ From your repository root, validate the result and look for ready work:
 
 ```sh
 quest check
+git fetch
+git remote set-head origin --auto
 quest ready
 quest branch quest/m0/some-quest.md
 ```
 
-`branch` prints that quest's branch and each branch it merges through, ending
-at `main`. Milestones themselves have no branch. Children merge into their
-line's branch first, so `quest ready` reads each line from its branch on
-`origin` (fetch first); `--local` reads only the working tree.
+`branch` prints that quest's branch and the remote's default branch. Every quest
+PR targets that shared trunk. Questlines group related work, with each child
+landing independently; the README's remaining work follows in its own PR.
+`ready` reads the whole tree from the fetched default branch on `origin`;
+`--local` reads only the working tree. Both commands accept `--remote <name>`.
 
 Review the plan before starting it. `/quest-start` works on one quest;
 `/quest-spawn` coordinates multiple agents when your session supports them.

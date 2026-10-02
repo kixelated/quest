@@ -61,7 +61,7 @@ impl fmt::Display for Blocker {
 ///
 /// `path` is the quest as the tree writes it (`/quest/m0/one.md`), as the shell
 /// completes it (`quest/m0/one.md`), or as an absolute filesystem path. With a
-/// `remote`, each line is read from its branch there; see [`crate::branch::overlay`].
+/// `remote`, the whole tree is read from its fetched default branch.
 pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Blocker>> {
 	let docs = crate::load_from(root, remote)?;
 	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|d| (d.path.as_path(), d)).collect();

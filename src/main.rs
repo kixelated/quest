@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 /// The quest tree, the interlinked Markdown plans under quest/: validate its
-/// structure, report what blocks a quest, name the branches a quest lands on, and
+/// structure, report what blocks a quest, name a quest branch and its trunk, and
 /// print the guide and skills agents follow.
 #[derive(Parser)]
 #[command(version, about)]
@@ -32,26 +32,27 @@ enum Command {
 		/// Quest to explain. Omit to list every ready quest in tree order.
 		path: Option<PathBuf>,
 
-		/// Read each questline from its branch on this remote when that branch
-		/// exists: a line's children finish there before the line reaches the
-		/// working tree. Fetch first; this reads remote-tracking refs.
+		/// Read the tree from this remote's default branch. Fetch and run
+		/// `git remote set-head <remote> --auto` first; this reads cached refs.
 		#[arg(long, default_value = "origin")]
 		remote: String,
 
-		/// Read only the working tree, ignoring line branches on the remote.
+		/// Read only the working tree, including uncommitted plans.
 		#[arg(long, conflicts_with = "remote")]
 		local: bool,
 	},
 
-	/// Print the branch carrying a quest, then every branch it merges through.
+	/// Print the quest branch and the remote's default branch, one per line.
 	///
-	/// One per line, nearest first, ending at `main`: a quest merges into its
-	/// questline's branch, a questline into its parent's, and a milestone's
-	/// children into `main`. A line missing from the remote is created from the
-	/// one printed after it.
+	/// Every quest targets that shared trunk, including a questline README's
+	/// remaining work. Questlines have no shared feature branch.
 	Branch {
-		/// Quest or questline to locate.
+		/// Quest or questline to locate on the fetched default branch.
 		path: PathBuf,
+
+		/// Remote whose default branch is the shared development trunk.
+		#[arg(long, default_value = "origin")]
+		remote: String,
 	},
 
 	/// Print the quest guide: the format, workflow, and rules agents follow.
@@ -123,8 +124,8 @@ fn main() -> Result<ExitCode> {
 			}
 			Ok(ExitCode::SUCCESS)
 		}
-		Command::Branch { path } => {
-			for branch in quest::branch::chain(&cli.root, &path)? {
+		Command::Branch { path, remote } => {
+			for branch in quest::branch::chain(&cli.root, &path, &remote)? {
 				println!("{branch}");
 			}
 			Ok(ExitCode::SUCCESS)

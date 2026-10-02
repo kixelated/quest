@@ -74,11 +74,10 @@ fn load(root: &Path) -> Result<Vec<Doc>> {
 	paths.into_iter().map(|p| Doc::parse(root, p)).collect()
 }
 
-/// [`load`], with each line read from its branch on `remote` when one is given.
+/// Read the fetched default branch when a remote is given, otherwise the working tree.
 fn load_from(root: &Path, remote: Option<&str>) -> Result<Vec<Doc>> {
-	let docs = load(root)?;
 	match remote {
-		Some(remote) => branch::overlay(root, docs, remote),
-		None => Ok(docs),
+		Some(remote) => branch::tree(root, remote),
+		None => load(root),
 	}
 }

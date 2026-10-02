@@ -22,7 +22,7 @@ Offer these choices:
 Consider ordering, suggesting to skip any quests that would result in conflicts.
 
 Only after the user chooses `/quest-start` for that quest, spawn a background sub-agent with its own isolated worktree, since agents cannot write to a worktree their parent created.
-The agent switches it to the base `quest branch` prints (`git checkout -B <quest branch> origin/<base>`), creating the questline branch first if it is missing.
+The agent follows `quest-start`, creating its quest branch from the fetched default branch that `quest branch <path>` prints and targeting that trunk with its PR.
 
 Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.

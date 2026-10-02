@@ -14,7 +14,7 @@ The `README.md` file is the quest and the `Required` section lists the children.
 It completes when its own work is done and every child has merged.
 
 The root's entries are special questlines called **milestones** (`m0`, `m1`, ...) that group work by priority horizon.
-Milestones are permanent and have no branch; their direct children merge into `main`.
+Milestones are permanent priority groups. Every quest PR targets the repository's default branch, the shared development trunk.
 
 Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
@@ -69,7 +69,8 @@ Quests are created in PRs and reviewed.
 Search the tree and git history first before making a new quest.
 
 Split independently completable work into separate quests.
-Group them in a questline only when they should ship together.
+Group related quests in a questline; each child lands independently on the trunk.
+Its README owns any remaining integration, verification, or documentation work.
 
 A release or pin bump that unblocks work is its own quest.
 
@@ -81,19 +82,20 @@ Unlike a blocked quest it stays ready, so it resurfaces every time ready work is
 
 Start only ready quests.
 `quest ready [<path>]` prints what blocks a quest, or every ready quest.
-It reads each questline from its branch on `origin`, so fetch first.
+It reads the tree from the default branch on `origin`, so fetch first and refresh
+its default with `git remote set-head origin --auto`. Use `--local` to inspect
+uncommitted plans in the working tree.
 
 If you have push access, make an empty commit and push a branch to the remote.
 The remote branch claims the quest so other agents skip it.
 If a claim looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.
-For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`, and its questline is `quest/m1/foo/README`.
-`quest branch` names the branch and its bases.
-
-If the questline doesn't have a PR, first make a draft PR against the base.
-It stays a draft until all required quests have been completed, then it's ready for one final review.
-Keep a questline current by merging its base in; never rebase a shared branch.
+For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
+`quest branch <path>` prints the quest branch and the remote's default branch.
+Create the quest branch from that fetched trunk and target it with the PR.
+Questlines have no shared feature branch or umbrella PR. Once its children land,
+the README's remaining work gets its own quest branch and PR against the trunk.
 
 When a quest is complete, create a draft PR.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.

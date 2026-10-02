@@ -49,7 +49,7 @@
                 || pkgs.lib.hasInfix "/.claude/skills" path;
             };
             strictDeps = true;
-            # The line-branch readiness tests build real repositories.
+            # The trunk readiness tests build real repositories.
             nativeCheckInputs = [ pkgs.git ];
           };
         in
