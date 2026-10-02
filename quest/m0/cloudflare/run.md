@@ -18,12 +18,8 @@ result as a change.
 - The app login is a browser device flow that returns the fork's remote and
   token.
 - Claiming is git-native: commit the `## Claim` to the fork and push, then let
-  [intake](/quest/m0/cloudflare/intake.md) pull it into main. If the claim
+  fork intake pull it into main. If the claim
   loses a race, stop.
 - Give the agent the quest-start workflow and push to the quest's branch on
   the fork. Each push keeps the claim alive.
 
-## Required
-
-- [Fork intake](/quest/m0/cloudflare/intake.md) - forks, tokens, and claims
-- [Changes](/quest/m0/cloudflare/changes.md) - where the result lands
