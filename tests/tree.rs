@@ -25,10 +25,7 @@ fn agent_instructions_are_not_quests() {
 #[test]
 fn empty_permanent_root_is_valid_and_has_no_ready_work() {
 	let tree = Tree(TempDir::new().expect("tempdir"));
-	tree.write(
-		"quest/README.md",
-		"# Quests\n\n## Goal\n\nNew repository.\n\n## Quests\n",
-	);
+	tree.write("quest/README.md", "# Quests\n\n## Goal\n\nNew repository.\n");
 	tree.accepts();
 	assert!(tree.ready().is_empty());
 }
@@ -52,7 +49,7 @@ const ROOT_README: &str = "\
 
 The permanent root questline.
 
-## Quests
+## Required
 
 - [M0](/quest/m0/README.md)
 ";
@@ -64,7 +61,7 @@ const M0_README: &str = "\
 
 A milestone.
 
-## Quests
+## Required
 
 - [Line](/quest/m0/line/README.md)
 ";
@@ -76,7 +73,7 @@ const LINE_README: &str = "\
 
 A questline.
 
-## Quests
+## Required
 
 - [One](/quest/m0/line/one.md)
 - [Two](/quest/m0/line/two.md)
@@ -360,16 +357,6 @@ fn typo_in_a_heading() {
 	tree.rejects("unknown '## Requires'");
 }
 
-#[test]
-fn quest_with_a_questline_index() {
-	let tree = Tree::new();
-	tree.append(
-		"quest/m0/line/one.md",
-		"\n## Quests\n\n- [Two](/quest/m0/line/two.md)\n",
-	);
-	tree.rejects("only a README may have '## Quests'");
-}
-
 /// A README whose last child merged is the line's own remaining work: a leaf
 /// quest, sized and listed as ready like any other.
 #[test]
@@ -389,19 +376,17 @@ fn readme_without_an_index_is_a_quest() {
 	assert!(tree.ready().contains(&"quest/m0/line/sub/README.md".to_string()));
 }
 
-/// Completing a questline's last quest deletes the directory. A bare `## Quests`
-/// heading otherwise satisfies the questline rule and leaves the husk standing.
-/// (The other direction - a heading holding a non-quest bullet - is
-/// `questline_listing_no_quest`; one rule, both shapes.)
+/// Completing a questline's last quest removes its heading with the entry, or
+/// deletes the directory. A bare `## Required` would block the husk forever.
 #[test]
 fn empty_questline_index() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/husk/README.md",
-		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Quests\n",
+		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Required\n",
 	);
 	tree.append("quest/m0/README.md", "- [Husk](/quest/m0/husk/README.md)\n");
-	tree.rejects("lists no quest");
+	tree.rejects("'## Required' is empty");
 }
 
 /// The absence of `## Required` means ready. A heading left behind by its last
@@ -420,23 +405,24 @@ fn unlisted_quest() {
 		"quest/m0/line/three.md",
 		"# [S] Three\n\n## Goal\n\nA quest nobody indexed.\n",
 	);
-	tree.rejects("not listed in quest/m0/line/README.md's '## Quests'");
+	tree.rejects("not listed in quest/m0/line/README.md's '## Required'");
 }
 
-/// Quests are indexed where they sit, so a milestone cannot reach past its own
-/// questlines to list a grandchild.
+/// Children are the entries that sit directly under the line, so a milestone
+/// requiring a grandchild only waits on it; the line still owns it.
 #[test]
-fn questline_listing_a_grandchild() {
+fn requiring_a_grandchild_is_a_blocker() {
 	let tree = Tree::new();
 	tree.append("quest/m0/README.md", "- [One](/quest/m0/line/one.md)\n");
-	tree.rejects("does not sit under this questline");
+	tree.accepts();
+	assert_eq!(tree.ready(), ["quest/m0/line/one.md"]);
 }
 
 #[test]
 fn quest_listed_twice() {
 	let tree = Tree::new();
 	tree.append("quest/m0/line/README.md", "- [One again](/quest/m0/line/one.md)\n");
-	tree.rejects("lists /quest/m0/line/one.md twice");
+	tree.rejects("requires /quest/m0/line/one.md twice");
 }
 
 #[test]
@@ -446,17 +432,17 @@ fn relative_index_entry() {
 		"quest/m0/line/README.md",
 		&LINE_README.replace("(/quest/m0/line/one.md)", "(one.md)"),
 	);
-	tree.rejects("must be a root-absolute /quest/... link: one.md");
+	tree.rejects("link to a quest must be root-absolute: one.md");
 }
 
-/// The index points readers at work to pick up, so a target that merely exists
-/// is not enough: quest/AGENTS.md is a file under quest/ that is not a quest.
+/// A target that merely exists is not enough: quest/AGENTS.md is a file under
+/// quest/ that nothing can finish.
 #[test]
 fn index_entry_that_is_not_a_quest() {
 	let tree = Tree::new();
 	tree.write("quest/AGENTS.md", "# Contract\n");
 	tree.append("quest/README.md", "- [Contract](/quest/AGENTS.md)\n");
-	tree.rejects("lists /quest/AGENTS.md, which is not a quest document");
+	tree.rejects("requires /quest/AGENTS.md, which is not a quest document");
 }
 
 /// The index is a list of entries, not prose that happens to link.
@@ -464,7 +450,7 @@ fn index_entry_that_is_not_a_quest() {
 fn prose_under_the_index() {
 	let tree = Tree::new();
 	tree.append("quest/m0/line/README.md", "\nSee also [One](/quest/m0/line/one.md).\n");
-	tree.rejects("a Quests entry must open its bullet");
+	tree.rejects("mid-sentence");
 }
 
 #[test]
@@ -525,7 +511,7 @@ fn cycle_through_a_reference_style_link() {
 	tree.rejects("Required cycle:");
 }
 
-/// moq-dev/moq.pro#1170: a plain-text external condition that happens to link a
+/// moq-dev/moq.pro#1170: a customer-gate sentence that happens to link a
 /// questline mid-sentence reads as context but IS a dependency edge.
 #[test]
 fn required_link_mid_sentence() {
@@ -549,16 +535,28 @@ fn required_link_on_a_wrapped_bullet() {
 	tree.rejects("mid-sentence");
 }
 
-/// The other half of that rule: an external condition with no link at all is the
-/// shape AGENTS.md prescribes, and must stay legal.
+/// An outside condition is its own quest, so it keeps surfacing as ready
+/// instead of hiding the quest it blocks from every ready listing. The bullet
+/// wraps here because that is what such bullets in trees actually looked like.
 #[test]
 fn required_external_condition() {
 	let tree = Tree::new();
 	tree.append(
 		"quest/m0/line/one.md",
-		"\n## Required\n\n- A customer who justifies the work.\n",
+		"\n## Required\n\n- A `moq-video` release that carries\n  the encoder\n",
 	);
-	tree.accepts();
+	tree.rejects("requires A moq-video release that carries the encoder, which is not a quest document");
+}
+
+/// An issue or release link is outside the tree too; only a quest can clear.
+#[test]
+fn required_external_link() {
+	let tree = Tree::new();
+	tree.append(
+		"quest/m0/line/one.md",
+		"\n## Required\n\n- [#1](https://github.com/OWNER/REPO/issues/1) - upstream fix\n",
+	);
+	tree.rejects("requires https://github.com/OWNER/REPO/issues/1, which is not a quest document");
 }
 
 /// A LOOSE list - blank lines between entries - wraps every item in a paragraph.
@@ -570,7 +568,7 @@ fn loose_index_list() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/line/README.md",
-		"# Line\n\n## Goal\n\nA questline.\n\n## Quests\n\n- [One](/quest/m0/line/one.md)\n\n- [Two](/quest/m0/line/two.md)\n",
+		"# Line\n\n## Goal\n\nA questline.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n\n- [Two](/quest/m0/line/two.md)\n",
 	);
 	tree.accepts();
 }
@@ -580,9 +578,9 @@ fn loose_required_list() {
 	let tree = Tree::new();
 	tree.append(
 		"quest/m0/line/one.md",
-		"\n## Required\n\n- [Two](/quest/m0/line/two.md) - must finish first\n\n- A customer who justifies the work.\n",
+		"\n## Required\n\n- [Two](/quest/m0/line/two.md) - must finish first\n\n- [Line](/quest/m0/line/README.md) - the whole line\n",
 	);
-	// The edge registered (hence the cycle) without reading as prose.
+	// Both edges registered (hence the cycle) without reading as prose.
 	tree.rejects("Required cycle:");
 	tree.without("mid-sentence");
 }
@@ -686,17 +684,17 @@ fn escaped_link_resolving_beside_the_root() {
 	tree.rejects(&format!("link does not resolve: ../../../../{name}/AGENTS.md"));
 }
 
-/// A bullet is not an entry. `- TBD` satisfies "the heading has a list" while
-/// leaving a questline that should have been deleted with its last quest.
+/// A blocker outside the line's directory is not a child, so a README holding
+/// only one is a quest and needs a size like any other.
 #[test]
 fn questline_listing_no_quest() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/husk/README.md",
-		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Quests\n\n- TBD\n",
+		"# Husk\n\n## Goal\n\nIts last quest was completed.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n",
 	);
 	tree.append("quest/m0/README.md", "- [Husk](/quest/m0/husk/README.md)\n");
-	tree.rejects("lists no quest");
+	tree.rejects("quest title must be");
 }
 
 #[test]
@@ -753,22 +751,6 @@ fn ready_quest_has_no_blockers() {
 fn blocked_by_a_quest() {
 	let tree = Tree::new();
 	assert_eq!(tree.blockers("quest/m0/line/two.md"), ["quest/m0/line/one.md"]);
-}
-
-/// A plain-text bullet names a condition outside the repository, so nothing in
-/// the tree can ever clear it: it is a blocker, printed as written. Wrapped
-/// here because that is what the bullets in the tree actually look like.
-#[test]
-fn blocked_by_plain_text() {
-	let tree = Tree::new();
-	tree.append(
-		"quest/m0/line/one.md",
-		"\n## Required\n\n- A `moq-video` release that carries\n  the encoder\n",
-	);
-	assert_eq!(
-		tree.blockers("quest/m0/line/one.md"),
-		["A moq-video release that carries the encoder"]
-	);
 }
 
 /// A questline blocker clears only when the whole line is complete, so the
@@ -858,7 +840,7 @@ fn cycle_terminates() {
 fn ready_listing_follows_nested_priority_and_terminates_cycles() {
 	let tree = Tree::new();
 	tree.write("quest/m0/line/two.md", "# [S] Two\n\n## Goal\n\nReady.\n");
-	tree.write("quest/m0/line/README.md", "# Line\n\n## Quests\n\n- [Two](/quest/m0/line/two.md)\n- [Self](/quest/m0/line/README.md)\n- [One](/quest/m0/line/one.md)\n");
+	tree.write("quest/m0/line/README.md", "# Line\n\n## Required\n\n- [Two](/quest/m0/line/two.md)\n- [Self](/quest/m0/line/README.md)\n- [One](/quest/m0/line/one.md)\n");
 	assert_eq!(tree.ready(), ["quest/m0/line/two.md", "quest/m0/line/one.md"]);
 }
 
@@ -868,7 +850,7 @@ fn ready_listing_appends_unindexed_quests() {
 	tree.write("quest/m0/aaa.md", "# [S] Unindexed\n\n## Goal\n\nDiscover me.\n");
 	tree.write(
 		"quest/m0/blocked.md",
-		"# [S] Blocked\n\n## Goal\n\nWait.\n\n## Required\n\n- External condition\n",
+		"# [S] Blocked\n\n## Goal\n\nWait.\n\n## Required\n\n- [One](/quest/m0/line/one.md)\n",
 	);
 	assert_eq!(tree.ready(), ["quest/m0/line/one.md", "quest/m0/aaa.md"]);
 }
@@ -903,7 +885,7 @@ fn later_milestone_branches_from_main() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m2/README.md",
-		"# m2\n\n## Goal\n\nLater work.\n\n## Quests\n\n- [Later](/quest/m2/later.md)\n",
+		"# m2\n\n## Goal\n\nLater work.\n\n## Required\n\n- [Later](/quest/m2/later.md)\n",
 	);
 	tree.write("quest/m2/later.md", "# [S] Later\n\n## Goal\n\nNot started.\n");
 	tree.append("quest/README.md", "- [m2](/quest/m2/README.md)\n");
@@ -930,7 +912,7 @@ fn branch_chain_of_a_nested_line() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/line/sub/README.md",
-		"# Sub\n\n## Goal\n\nA nested line.\n\n## Quests\n\n- [Three](/quest/m0/line/sub/three.md)\n",
+		"# Sub\n\n## Goal\n\nA nested line.\n\n## Required\n\n- [Three](/quest/m0/line/sub/three.md)\n",
 	);
 	tree.write(
 		"quest/m0/line/sub/three.md",
@@ -982,7 +964,7 @@ fn nested_line_branch_wins_until_its_line_completes() {
 	let tree = Tree::new();
 	tree.write(
 		"quest/m0/line/sub/README.md",
-		"# Sub\n\n## Goal\n\nA nested line.\n\n## Quests\n\n- [Three](/quest/m0/line/sub/three.md)\n",
+		"# Sub\n\n## Goal\n\nA nested line.\n\n## Required\n\n- [Three](/quest/m0/line/sub/three.md)\n",
 	)
 	.write(
 		"quest/m0/line/sub/three.md",

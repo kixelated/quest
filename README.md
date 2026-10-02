@@ -10,9 +10,9 @@ and Codex plan the work and pick it up.
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
 
-**Early days:** validation, readiness, and the planning, execution, and merge
-skills are here. Automatic setup, issue export, and release binaries are still
-being built.
+**Early days:** validation, readiness, init/uninstall, and the planning,
+execution, merge, and export skills are here. Release binaries are still being
+built.
 
 ## A quest is just a file
 
@@ -43,9 +43,9 @@ quest/
     download.md       # Waiting on export.md
 ```
 
-Folders are **questlines**. Their READMEs list the work in order. Milestones
-(`m0`, `m1`, ...) give it a delivery horizon and have no branch of their own;
-`Required` links express the actual dependencies. A milestone's quests merge
+Folders are **questlines**. A README's `Required` lists its children in
+priority order, beside any other dependencies. Milestones (`m0`, `m1`, ...)
+give the work a delivery horizon and have no branch of their own. A milestone's quests merge
 toward `main`. A nested line merges into its README's branch, and that README
 becomes the line's own quest once its children have landed.
 
@@ -88,8 +88,9 @@ the quest's branch, then each branch it merges through, nearest first and
 ending at `main`. A milestone has no branch, so its quests merge straight into
 `main`.
 
-Readiness is local: check branches and PRs before claiming a quest someone else
-may already be working on.
+`ready` reads each questline from its branch on `origin` (fetch first;
+`--local` skips this). It does not look for claims or PRs, so check those before
+starting a quest someone else may already be working on.
 
 ## Work with an agent
 
@@ -100,19 +101,20 @@ the version you pin decides what your agents follow:
 | Skill | What it does |
 | --- | --- |
 | `quest-plan` | Ask the questions that turn an idea into scoped quests. |
-| `quest-issues` | Bring selected GitHub issues into the planning conversation. |
+| `quest-import` | Bring open GitHub issues into the planning conversation. |
+| `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
+| `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
-| `quest-spawn` | Triage a scope and hand independent quests to parallel agents. |
-| `quest-merge` | Land a PR once CI and reviews pass. |
-| `quest-spawn-merge` | Decide and land open PRs in parallel. |
-| `quest-close` | Abandon a PR, deleting its quest if it was completing one. |
-| `quest-takeover` | Adopt someone else's PR and drive it to landable. |
+| `quest-spawn` | Triage ready quests and hand them to parallel agents. |
+| `quest-merge` | Land a quest's PR once CI and reviews pass. |
+| `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
+| `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. Starting work stops at a PR; merging is a separate
 invocation.
 
-To use Quest in your own repository, follow the [manual setup](docs/getting-started.md).
+To use Quest in your own repository, follow the [getting started guide](docs/getting-started.md) (`quest init`).
 `quest guide` prints the format and workflow.
 
 ## Where this is going

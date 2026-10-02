@@ -67,6 +67,7 @@
               gh
               direnv
               cargo-nextest
+              cargo-dist
               actionlint
               shellcheck
               shfmt

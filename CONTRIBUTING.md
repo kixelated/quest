@@ -32,12 +32,37 @@ builds and tests the Nix package and validates the repository's quest tree.
 Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations. Start PRs as drafts
 and mark them ready after checks pass. Merge only within the user's authorized
-scope and after required repository checks and reviews pass.
-Quest execution stops at PR creation; merging requires a separate invocation.
+scope and after required repository checks and reviews pass. Never block on a
+CodeRabbit review; it is optional.
+Quest execution stops at PR creation; it merges only when the user picks /quest-merge.
 
 Every AI-authored GitHub post must end with `(written by <model>)`, naming the
 running model. This is separate from commit co-author trailers.
 
-Do not publish packages or releases as part of ordinary development. The package
-is intentionally marked `publish = false` until release naming and distribution
-are settled.
+The crate stays `publish = false` (the `quest` name on crates.io is taken). Tagged
+GitHub releases ship the `quest` binary instead.
+
+## Releases
+
+[cargo-dist](https://axodotdev.github.io/cargo-dist/) builds archives with
+checksums and a shell installer (`.github/workflows/release.yml`). Artifacts use
+the `quest-<target-triple>.tar.xz` layout so mise's `github:` backend can
+install without extra configuration, for example
+`mise use github:kixelated/quest@v0.1.0`.
+
+The version in `Cargo.toml` is the source of truth for releases and for the Nix
+package (`nix build` / `nix flake check` build that version from source).
+
+Maintainers cut a release after the version bump lands on `main`:
+
+1. Confirm `Cargo.toml` has the intended version and `dist plan` looks right
+   (`nix develop --command dist plan`).
+2. Run `just check` and `just test`.
+3. Push an annotated tag `vX.Y.Z` (for example `v0.1.0`). The Release workflow
+   builds macOS (arm64, x86_64) and Linux (x86_64, arm64) artifacts and opens
+   a GitHub Release.
+4. Smoke-test installs (`mise install github:kixelated/quest@vX.Y.Z`, or the
+   generated `quest-installer.sh` from the release assets).
+
+Do not push release tags or publish GitHub releases from ordinary development
+work; that is a maintainer action after review.

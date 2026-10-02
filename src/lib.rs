@@ -12,6 +12,7 @@ pub mod branch;
 pub mod doc;
 pub mod ready;
 pub mod rules;
+pub mod setup;
 pub mod skills;
 
 use std::path::{Path, PathBuf};

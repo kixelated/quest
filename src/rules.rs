@@ -12,16 +12,12 @@ use crate::doc::{Doc, Position};
 /// The `## ` headings a quest document may use. Readiness greps `## Required`
 /// literally, so a typo turns a blocked quest ready and fails nowhere else:
 /// the closed vocabulary is what catches it.
-const HEADINGS: [&str; 6] = ["Goal", "Plan", "Required", "Closes", "Related", "Quests"];
+const HEADINGS: [&str; 5] = ["Goal", "Plan", "Required", "Closes", "Related"];
 const SIZES: [&str; 5] = ["XS", "S", "M", "L", "XL"];
 
 /// Sections whose whole content is a list. A heading left standing after its
-/// last entry was removed is a bug in both directions: an empty `Required`
-/// blocks its quest forever, and an empty `Quests` leaves a questline that
-/// should have been deleted with its last quest.
-/// `Quests` is deliberately absent: a bullet is not an entry (`- TBD` is a list
-/// item with no quest in it), so its emptiness is decided by counting valid
-/// entries in `index` instead.
+/// last entry was removed is a bug: an empty `Required` blocks its quest
+/// forever.
 const LIST_SECTIONS: [&str; 3] = ["Required", "Closes", "Related"];
 
 /// The permanent root questline; the one document nothing has to list.
@@ -77,8 +73,8 @@ pub fn check(root: &Path, docs: &[Doc]) -> Vec<Finding> {
 		links(&mut found, root, &known, doc);
 	}
 
-	let index = index(&mut found, &known, docs);
-	cycles(&mut found, docs, &index);
+	index(&mut found, &known, docs);
+	cycles(&mut found, docs);
 
 	found.0.sort();
 	found.0
@@ -124,16 +120,10 @@ fn headings(found: &mut Findings, doc: &Doc) {
 		}
 	}
 
-	// Only a README indexes children; a quest is a leaf and must not, since the
-	// index is what makes a file a questline and questlines are not picked up.
-	if doc.has("Quests") && !doc.is_questline() {
-		found.on(&doc.path, "only a README may have '## Quests'");
-	}
 	for heading in &doc.headings {
 		if LIST_SECTIONS.contains(&heading.text.as_str()) && doc.entries(&heading.text).next().is_none() {
 			let why = match heading.text.as_str() {
 				"Required" => "; an empty one blocks the quest forever, so remove the heading with its last entry",
-				"Quests" => "; a questline with no quests left should be deleted",
 				_ => "; remove the heading with its last entry",
 			};
 			found.at(&doc.path, heading.line, format!("'## {}' is empty{why}", heading.text));
@@ -220,11 +210,10 @@ fn links(found: &mut Findings, root: &Path, known: &BTreeSet<&Path>, doc: &Doc) 
 			);
 		}
 
-		// A `Required` bullet is either a dependency edge (the link opens it) or
-		// a plain-text external condition (no quest link at all).
-		// moq-dev/moq.pro#1170 shipped the third shape: a customer-gate sentence
-		// mentioning a questline mid-line, which reads as context but IS a
-		// blocker, and so silently required all of m2.
+		// A `Required` entry opens with its quest link. moq-dev/moq.pro#1170
+		// shipped a customer-gate sentence mentioning a questline mid-line,
+		// which reads as context but IS a blocker, and so silently required all
+		// of m2.
 		if link.section.as_deref() == Some("Required")
 			&& known.contains(path.as_path())
 			&& link.position != Position::Entry
@@ -241,104 +230,64 @@ fn links(found: &mut Findings, root: &Path, known: &BTreeSet<&Path>, doc: &Doc) 
 	}
 }
 
-/// Which questline lists each document. The index must be exactly the file
-/// tree: every document is listed by the questline it sits under, and a
-/// questline lists nothing but its own children - together these also give
-/// "listed by exactly one questline".
-fn index<'a>(found: &mut Findings, known: &BTreeSet<&Path>, docs: &'a [Doc]) -> BTreeMap<PathBuf, &'a Path> {
-	let mut listed: BTreeMap<PathBuf, &Path> = BTreeMap::new();
-	let mut entries: BTreeMap<&Path, usize> = BTreeMap::new();
+/// Every document is listed by the questline it sits under, as a child in that
+/// README's `Required`, and every `Required` entry is a quest, required once.
+///
+/// A condition outside the repository (a release, a customer, a person) is a
+/// quest of its own rather than a plain-text bullet: a blocked quest drops out
+/// of every ready listing, so the condition would be forgotten, while its own
+/// quest keeps surfacing as ready until someone clears it.
+fn index(found: &mut Findings, known: &BTreeSet<&Path>, docs: &[Doc]) {
+	let mut listed: BTreeSet<PathBuf> = BTreeSet::new();
 
 	for doc in docs {
-		for link in &doc.links {
-			if link.section.as_deref() != Some("Quests") {
-				continue;
-			}
-			// The index is a list of entries, not prose that happens to link:
-			// `See [One](/quest/m0/one.md)` must not make One look indexed.
-			if link.position != Position::Entry {
+		listed.extend(doc.children());
+
+		let mut seen = BTreeSet::new();
+		for entry in doc.entries("Required") {
+			let target = entry.target.as_deref().and_then(rooted);
+			let Some(target) = target.filter(|t| known.contains(t.as_path())) else {
 				found.at(
 					&doc.path,
-					link.line,
-					format!("a Quests entry must open its bullet: {}", link.target),
-				);
-				continue;
-			}
-			let Some(child) = rooted(&link.target) else {
-				found.at(
-					&doc.path,
-					link.line,
+					entry.line,
 					format!(
-						"a Quests entry must be a root-absolute /quest/... link: {}",
-						link.target
+						"requires {}, which is not a quest document; make an outside condition its own quest",
+						entry.target.as_deref().unwrap_or(&entry.text)
 					),
 				);
 				continue;
 			};
-			// Existence is not enough: the index points readers at work to pick
-			// up, and an AGENTS.md is a file under quest/ that is not a quest.
-			if !known.contains(child.as_path()) {
+			if !seen.insert(target) {
 				found.at(
 					&doc.path,
-					link.line,
-					format!("lists {}, which is not a quest document", link.target),
+					entry.line,
+					format!("requires {} twice", entry.target.as_deref().unwrap_or_default()),
 				);
-				continue;
 			}
-			if Doc::owner(&child) != doc.path.parent().unwrap_or(Path::new("")) {
-				found.at(
-					&doc.path,
-					link.line,
-					format!("lists {}, which does not sit under this questline", link.target),
-				);
-				continue;
-			}
-			if listed.insert(child, doc.path.as_path()).is_some() {
-				found.at(&doc.path, link.line, format!("lists {} twice", link.target));
-			}
-			*entries.entry(doc.path.as_path()).or_default() += 1;
 		}
 	}
 
 	for doc in docs {
-		// A questline lists at least one quest. An empty `## Quests` is a husk:
-		// either the line still has work of its own, in which case the heading
-		// comes off and the README becomes that quest, or the directory should
-		// have been deleted. The root may list nothing; a new repository's
-		// roadmap is empty until the first milestone lands. A milestone omits
-		// the heading while it is empty, and stays.
-		if doc.is_questline()
-			&& doc.path != Path::new(ROOT)
-			&& doc.has("Quests")
-			&& entries.get(doc.path.as_path()).copied().unwrap_or(0) == 0
-		{
-			found.on(
-				&doc.path,
-				"'## Quests' lists no quest; a questline with none left should be deleted",
-			);
-		}
-
 		// The root questline is permanent and has nothing above it to list it.
-		if doc.path == Path::new(ROOT) || listed.contains_key(&doc.path) {
+		if doc.path == Path::new(ROOT) || listed.contains(&doc.path) {
 			continue;
 		}
 		let owner = Doc::owner(&doc.path).join("README.md");
 		found.on(
 			&doc.path,
 			format!(
-				"not listed in {}'s '## Quests'; an unlisted quest is unreachable",
+				"not listed in {}'s '## Required'; an unlisted quest is unreachable",
 				owner.display()
 			),
 		);
 	}
-
-	listed
 }
 
 /// `Required` must be acyclic. A cycle is a set of quests none of which can
 /// ever start, and walking the links to rule one out is exactly the manual step
-/// an author would otherwise take before adding a blocker.
-fn cycles(found: &mut Findings, docs: &[Doc], listed: &BTreeMap<PathBuf, &Path>) {
+/// an author would otherwise take before adding a blocker. A questline requires
+/// its children, so a quest requiring the line that holds it is a cycle too.
+fn cycles(found: &mut Findings, docs: &[Doc]) {
 	let mut blockers: BTreeMap<&Path, Vec<PathBuf>> = BTreeMap::new();
 
 	for doc in docs {
@@ -349,15 +298,6 @@ fn cycles(found: &mut Findings, docs: &[Doc], listed: &BTreeMap<PathBuf, &Path>)
 			.filter_map(|l| rooted(&l.target))
 			.collect();
 		blockers.entry(doc.path.as_path()).or_default().extend(edges);
-	}
-
-	// A quest may require a whole QUESTLINE, and a questline is complete only
-	// when all of its quests are, so a questline waits on its own children.
-	// Without these edges the walk stops at the README and misses the deadlock
-	// that spans it: a quest requiring the questline that holds the quest
-	// requiring it back.
-	for (child, questline) in listed {
-		blockers.entry(questline).or_default().push(child.clone());
 	}
 
 	#[derive(Clone, Copy, PartialEq)]

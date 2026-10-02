@@ -1,11 +1,12 @@
 ---
-name: quest-plan
-description: Scope, create, and publish a quest through an interactive grilling interview. Use when the user invokes /quest-plan, asks to plan a quest, or wants unsettled work split into quests.
+description: Scope and create quests through an interactive interview. Use when the user invokes /quest-plan, asks to plan a quest, or wants unsettled work split into quests.
 ---
 
 Before you begin, run `quest guide` and read its output completely.
 
 Interview the user until you reach a shared understanding.
+Every follow-up the user picks goes through this interview, including edits to existing quests and to quests in other repositories.
+A background agent that cannot prompt puts the problem in its report with a recommendation, so this skill can run in the foreground; it never creates or edits quests itself.
 
 Work the tree in **rounds**.
 The **frontier** is every decision whose prerequisites are already settled.
@@ -23,7 +24,7 @@ The *decisions* are the user's: put each to them and wait.
 
 Search other quests and questlines to keep the larger plan consistent.
 When the work changes what a user sees (a wire, an API, a flag, a dashboard), ask whether it needs documentation the feature quest cannot carry inline (a new page or guide), and recommend a quest for that; docs a change makes stale stay in that change.
-When the frontier disagrees with a settled quest/plan, challenge the user and resolve the conflict.
+When the frontier disagrees with an existing quest, challenge the user and resolve the conflict.
 
 Begin the interview by scoping the goal: the observable outcome, why it matters, and its important boundaries and non-goals.
 Restate the goal in one sentence and get it confirmed before moving on to implementation decisions.
@@ -37,8 +38,8 @@ Once complete, create, update, or delete the relevant quests and questlines.
 Record each settled decision and its reason in the quest's Plan, so later sessions don't ask it again.
 New work joins the milestone matching its priority, at its rank; a questline groups only quests that ship together, and its README holds the work no child owns (the end-to-end test, the docs page).
 
-When done, commit and create a draft PR following `CONTRIBUTING.md`.
-After local checks pass, mark it ready and monitor CI and the automatic reviews.
-Address one review round, then stop and report if the next review still has findings.
+Include all of the decision prompts in the PR as a paper trail, with a ✅ next to the selected option.
 
-Merge the PR when ready, unless `CONTRIBUTING.md` says otherwise.
+When done, commit, create a PR, and run `/quest-merge` on it.
+Quests planned as follow-ups of an open PR may be committed to that PR instead.
+The quest should be reviewed before it is merged.

@@ -7,6 +7,11 @@ line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
 macOS and Linux (WSL) only; native Windows is m1.
 
+The launch includes Quest on Cloudflare. Outside contributors lock quests and
+donate agent tokens to run them, and the result is reviewed and merged in a
+web UI that syncs with GitHub. It is also the entry for Cloudflare's
+competition, due 2026-10-14.
+
 ## Plan
 
 Decided while planning m0 (2026-09-26), replacing the earlier copied-files and
@@ -18,16 +23,14 @@ ownership-manifest design:
 - The repository's own tool manager pins the version: mise (release binaries,
   or a git rev for dogfooding) or a nix flake input. Quest ships no launcher
   and no pin file; an install outside either is simply unpinned.
-- The CLI stays offline. Anything touching GitHub (issue import and export,
+- The CLI is offline except `quest run` (amended 2026-10-01 for Quest on
+  Cloudflare). Anything touching GitHub (issue import and export, branch
   claims, merging) lives in skills.
 - Repository-specific rules stay in the repository's own root instructions.
 
-## Quests
+## Required
 
-- [Release binaries](/quest/m0/releases.md) - tagged releases publish macOS and Linux binaries that mise and a shell installer can fetch
-- [Init and uninstall](/quest/m0/init.md) - `quest init` sets a repository up with stubs and a root reference; `quest uninstall` reverses it
-- [Export skill](/quest/m0/export.md) - turn active quests back into GitHub issues before leaving Quest
+- [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
 - [Setup guide](/quest/m0/setup.md) - one line pasted into an agent installs, pins, and initializes Quest, or removes it
-- [Migrate moq and moq.pro](/quest/m0/migrate-moq.md) - replace their `.quest` submodules with `quest init` and a pinned binary
 - [Release proof](/quest/m0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

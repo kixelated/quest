@@ -17,8 +17,3 @@ root instructions. The same file covers removal.
   installer with the user's consent.
 - Removal: run the export skill, `quest uninstall`, then drop the pin.
 - Written for an agent to execute and a human to audit; keep it short.
-
-## Required
-
-- [Release binaries](/quest/m0/releases.md) - the guide installs a release
-- [Init and uninstall](/quest/m0/init.md) - the guide runs them

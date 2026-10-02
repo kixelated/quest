@@ -19,9 +19,8 @@ use crate::rules;
 /// One thing standing between a quest and being started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blocker {
-	/// The quest or questline that has to finish first, when the blocker is one
-	/// of ours. `None` is a plain-text condition, which nothing in the tree can
-	/// ever clear.
+	/// The quest or questline that has to finish first. `None` is an entry that
+	/// is not a quest, which `quest check` rejects and nothing here can clear.
 	pub path: Option<PathBuf>,
 	/// The `Required` bullet as written, whitespace collapsed.
 	pub text: String,
@@ -32,7 +31,7 @@ pub struct Blocker {
 }
 
 impl Blocker {
-	/// What names the blocker: the document, or the condition's own words.
+	/// What names the blocker: the document, or the entry's own words.
 	pub fn label(&self) -> String {
 		match &self.path {
 			Some(path) => path.display().to_string(),
@@ -72,10 +71,10 @@ pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Bl
 
 /// Every quest that can be started now, in tree order.
 ///
-/// A questline is not listed while it still indexes children; a README with
-/// no `## Quests` left is the line's own remaining work and lists like any
-/// other quest. The absence of a `## Required` heading is what the guide
-/// defines as ready. `remote` is as for [`blockers`].
+/// A questline is not listed while it still requires children; a README with
+/// none left is the line's own remaining work and lists like any other quest.
+/// The absence of a `## Required` heading is what the guide defines as ready.
+/// `remote` is as for [`blockers`].
 pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	let docs = crate::load_from(root, remote)?;
 	let mut remaining: BTreeMap<PathBuf, &Doc> = docs.iter().map(|doc| (doc.path.clone(), doc)).collect();
@@ -84,10 +83,7 @@ pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	while let Some(path) = pending.pop() {
 		let Some(doc) = remaining.remove(&path) else { continue };
 		if doc.is_questline() {
-			let children: Vec<_> = doc
-				.entries("Quests")
-				.filter_map(|entry| entry.target.as_deref().and_then(rules::rooted))
-				.collect();
+			let children: Vec<_> = doc.children().collect();
 			pending.extend(children.into_iter().rev());
 		} else if !doc.has("Required") {
 			ready.push(path);
@@ -102,15 +98,13 @@ pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	Ok(ready)
 }
 
-/// The blockers of one document: a quest waits on its `Required` entries, and a
-/// questline is complete only when all of its quests are, so it waits on those.
+/// The blockers of one document: its `Required` entries, which for a questline
+/// include its children.
 fn expand(by_path: &BTreeMap<&Path, &Doc>, doc: &Doc, stack: &mut Vec<PathBuf>) -> Vec<Blocker> {
-	let section = if doc.is_questline() { "Quests" } else { "Required" };
-
 	// A heading left standing after its last blocker still reads as blocked to
 	// everything that greps for it, including `quest check`, which reports it.
 	// Calling it ready here would make this the one tool that disagrees.
-	if !doc.is_questline() && doc.has("Required") && doc.entries("Required").next().is_none() {
+	if doc.has("Required") && doc.entries("Required").next().is_none() {
 		return vec![Blocker {
 			path: None,
 			text: "an empty '## Required' section, which blocks the quest until the heading is removed".to_string(),
@@ -118,15 +112,14 @@ fn expand(by_path: &BTreeMap<&Path, &Doc>, doc: &Doc, stack: &mut Vec<PathBuf>) 
 		}];
 	}
 
-	doc.entries(section)
+	doc.entries("Required")
 		.map(|entry| blocker(by_path, entry, stack))
 		.collect()
 }
 
 fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &mut Vec<PathBuf>) -> Blocker {
-	// A bullet that does not open with a link into the tree is a plain-text
-	// condition: an issue, a release, a customer. Nothing here can clear it, so
-	// it is a blocker with nothing under it.
+	// A bullet that does not open with a link into the tree is invalid, and
+	// nothing here can clear it, so it is a blocker with nothing under it.
 	let path = entry
 		.target
 		.as_deref()
