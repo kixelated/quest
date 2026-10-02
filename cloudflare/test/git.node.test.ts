@@ -60,6 +60,19 @@ async function fixture() {
 	return { directory, source, upstream, fork, git, head: await run(source, "rev-parse", "HEAD") };
 }
 describe("real Git orchestration", () => {
+	it.each([
+		"quarantine:upstream-contributor",
+		`namespace:upstream-contributor:refs/heads/quest/m0/cloudflare/intake:${"a".repeat(40)}:${"b".repeat(40)}`,
+		`release:${"c".repeat(40)}:quest/m0/cloudflare/intake.md`,
+	])("accepts deterministic opaque intake operation IDs: %s", async (operationId) => {
+		const f = await fixture();
+		const files = [{ path: "issues/opaque.md", content: "Request\n" }];
+		const result = await f.git.applyMutation(f.upstream, f.head, operationId, files, author);
+		expect((await f.git.applyMutation(f.upstream, f.head, operationId, files, author)).commitSha).toBe(result.commitSha);
+		const body = await run(f.directory, "--git-dir=" + f.upstream.remote, "log", "-1", "--format=%B");
+		expect(body).toContain(await operationKey(operationId));
+		expect(body).not.toContain(operationId);
+	});
 	it("recovers a succeeded push after response loss and later upstream advancement", async () => {
 		const f = await fixture();
 		let lost = false;

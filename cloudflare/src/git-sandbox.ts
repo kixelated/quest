@@ -66,6 +66,9 @@ export class GitSandbox extends DurableObject<Env> {
 	inspect(upstream: GitCapability, fork: GitCapability, branch: string, head: string) {
 		return this.use((git) => git.inspect(upstream, fork, branch, head));
 	}
+	head(remote: GitCapability, ref: string) {
+		return this.use((git) => git.head(remote, ref));
+	}
 	snapshot(upstream: GitCapability, ref: string) {
 		return this.use(async (git) => {
 			const head = await git.fetch(upstream, ref, "refs/remotes/upstream/snapshot");

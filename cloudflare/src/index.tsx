@@ -1,3 +1,5 @@
+export { ChangeChecks } from "./changes/workflow";
+import { changesRoutes } from "./changes/routes";
 export { GitSandbox } from "./git-sandbox";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
@@ -7,6 +9,7 @@ export { QuestCore } from "./core";
 
 const app = new Hono<{ Bindings: Env }>();
 app.use(secureHeaders());
+app.route("/", changesRoutes);
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
