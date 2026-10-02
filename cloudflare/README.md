@@ -12,7 +12,8 @@ SQLite Durable Object. The coordinator serializes upstream mutations and tracks 
 contributors receive their own forks and scoped tokens; push intake validates
 complete immutable snapshots with the Rust core before crediting allowed claims
 or issues onto main. See [fork intake](INTAKE.md) for routes, authorization,
-Queue configuration and warning-hook limitations. The Rust CLI remains
+Queue configuration and warning-hook limitations. See [change review](CHANGES.md)
+for checked fork diffs, git-note reviews and serialized merges. The Rust CLI remains
 independent of the Worker.
 
 ## Development
@@ -54,7 +55,9 @@ just test
 
 These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 `just worker-check` checks generated binding types, TypeScript, formatting, and
-`wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
+`wrangler deploy --dry-run --containers-rollout=none`. Linux CI separately
+builds the Git container image; an ordinary bundle check does not build or
+roll out that image. `just worker-test` runs workerd integration tests
 with real local D1 and SQLite Durable Objects. Tests cover the mocked GitHub
 OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
 coordinator storage across eviction and repository boundaries, fork ownership,

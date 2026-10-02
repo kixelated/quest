@@ -1,4 +1,5 @@
 import { evaluate, removeClaim } from "./core";
+import { creditAuthor } from "./intake/claim";
 import { assertQuestBranch, assertSha, GitConflict, type FileWrite, type GitAuthor, type ReviewNote } from "./git";
 import {
 	getRepository,
@@ -28,9 +29,13 @@ export async function closeChange(env: Env, request: ChangeIdentity) {
 }
 
 async function actor(env: Env, userId: string): Promise<GitAuthor> {
-	const row = await env.DB.prepare('SELECT name, email FROM "user" WHERE id = ?').bind(userId).first<GitAuthor>();
+	const row = await env.DB.prepare(
+		"SELECT user.name, account.providerId AS provider, account.accountId AS identity FROM user JOIN account ON account.userId = user.id WHERE user.id = ? ORDER BY providerId, accountId LIMIT 1",
+	)
+		.bind(userId)
+		.first<{ name: string; provider: string; identity: string }>();
 	if (!row) throw new IntakeError(403, "Unknown reviewer");
-	return row;
+	return creditAuthor(row);
 }
 
 export async function writeFiles(
@@ -38,12 +43,15 @@ export async function writeFiles(
 	repository: Repository,
 	request: { expectedHead: string; operationId: string; files: FileWrite[]; author: GitAuthor },
 ): Promise<string> {
-	return withCapability(
-		env,
-		repository.name,
-		"write",
-		async (upstream) => (await env.GIT.getByName(repository.name).applyMutation(upstream, request)).commitSha,
-	);
+	return withCapability(env, repository.name, "write", async (upstream) => {
+		const result = await env.GIT.getByName(repository.name).applyMutation(upstream, request);
+		try {
+			if ("conflict" in result) throw new GitConflict(result.conflict);
+			return result.commitSha;
+		} finally {
+			result[Symbol.dispose]?.();
+		}
+	});
 }
 
 export async function inspectChange(env: Env, request: ChangeIdentity) {
@@ -128,6 +136,18 @@ export async function runChangeMutation(env: Env, repository: Repository, reques
 			throw new IntakeError(403, "Contributor's own fork required");
 	} else await requireMaintainer(env.DB, repository.name, request.userId);
 	const author = await actor(env, request.userId);
+	if (request.kind !== "merge") {
+		const recovered = await withCapability(env, repository.name, "read", (upstream) =>
+			env.GIT.getByName(repository.name).recoverNote(
+				upstream,
+				request.head,
+				request.operationId,
+				request.kind,
+				request.userId,
+			),
+		);
+		if (recovered) return { notesCommit: recovered };
+	}
 	if (request.kind === "merge") {
 		const recovered = await withCapability(env, repository.name, "read", (upstream) =>
 			env.GIT.getByName(repository.name).recoverMutation(

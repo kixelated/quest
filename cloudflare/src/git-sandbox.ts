@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { GitRepository, type GitCapability, type GitAuthor, type FileWrite, type ReviewNote } from "./git";
+import { GitRepository, GitConflict, type GitCapability, type GitAuthor, type FileWrite, type ReviewNote } from "./git";
 
 // This container only runs fixed Git argv. It never runs repository scripts,
 // hooks, build commands, or an agent, and each operation gets a fresh bare repo.
@@ -81,7 +81,12 @@ export class GitSandbox extends DurableObject<Env> {
 			const candidate = await git.inspect(upstream, fork, branch, head);
 			if (!candidate.tree) return candidate;
 			const tree = await git.writeTree(candidate.tree, cleanup);
-			return { ...candidate, tree, snapshot: await git.snapshot(tree) };
+			return {
+				...candidate,
+				tree,
+				snapshot: await git.snapshot(tree),
+				...(await git.diff(candidate.upstreamHead, tree)),
+			};
 		});
 	}
 	notes(upstream: GitCapability, fork: GitCapability, branch: string, head: string) {
@@ -100,12 +105,28 @@ export class GitSandbox extends DurableObject<Env> {
 		upstream: GitCapability,
 		request: { expectedHead: string; operationId: string; files: FileWrite[]; author: GitAuthor },
 	) {
-		return this.use((git) =>
-			git.applyMutation(upstream, request.expectedHead, request.operationId, request.files, request.author),
-		);
+		return this.use(async (git) => {
+			try {
+				return await git.applyMutation(
+					upstream,
+					request.expectedHead,
+					request.operationId,
+					request.files,
+					request.author,
+				);
+			} catch (error) {
+				// Custom Error prototypes do not survive RPC. Only a confirmed Git
+				// conflict permits intake to abandon and re-gate a persisted intent.
+				if (error instanceof GitConflict) return { conflict: error.message };
+				throw error;
+			}
+		});
 	}
 	recoverMutation(upstream: GitCapability, expectedHead: string, tree: string, operationId: string) {
 		return this.use((git) => git.recoverMutation(upstream, expectedHead, tree, operationId));
+	}
+	recoverNote(upstream: GitCapability, head: string, operationId: string, kind: ReviewNote["kind"], actorId: string) {
+		return this.use((git) => git.recoverNote(upstream, head, operationId, kind, actorId));
 	}
 
 	merge(

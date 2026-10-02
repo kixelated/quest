@@ -10,7 +10,7 @@ export const changesRoutes = new Hono<{ Bindings: Env }>();
 changesRoutes.use("/repos/*", bodyLimit({ maxSize: 32_768 }));
 changesRoutes.onError((error, c) => {
 	if (error instanceof IntakeError) return c.text(error.message, error.status);
-	if (error instanceof GitConflict) return c.text(error.message, 409);
+	if (error instanceof GitConflict || error.name === "GitConflict") return c.text(error.message, 409);
 	console.error({ event: "change_failed", name: error.name });
 	return c.text("Could not load change", 500);
 });
@@ -174,6 +174,9 @@ changesRoutes.post("/repos/:repository/changes/:fork/:action", async (c) => {
 	} else {
 		if (action !== "comment" && action !== "approve" && action !== "merge")
 			throw new IntakeError(404, "Unknown action");
+		if (action !== "comment") await requireMaintainer(c.env.DB, repository.name, actor.userId);
+		else if (actor.userId !== repository.maintainerId && actor.userId !== fork.userId)
+			throw new IntakeError(403, "Repository access required");
 		const common = { ...identity, userId: actor.userId, operationId: text("operationId") };
 		const request: ChangeMutation =
 			action === "comment"

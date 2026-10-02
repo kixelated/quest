@@ -260,22 +260,51 @@ export class GitRepository {
 			upstreamHead,
 			forkHead,
 			merged: false,
-			diff,
-			patch,
+			...(await this.diff(upstreamHead, tree)),
 			conflicts: null,
 			tree,
 			snapshot: await this.snapshot(tree),
 			upstreamSnapshot: await this.snapshot(upstreamHead),
 		};
 	}
+	async diff(base: string, tree: string) {
+		assertSha(base);
+		assertSha(tree);
+		const args = ["diff", "--no-ext-diff", "--no-textconv", "--no-renames"];
+		const diff = (await this.command([...args, "--stat", base, tree])).stdout;
+		const patch = (await this.command([...args, base, tree])).stdout;
+		if (patch.length > 2_000_000) throw new Error("Diff size limit exceeded");
+		return { diff, patch };
+	}
 	async notes(upstream: GitCapability, head: string): Promise<ReviewNote[]> {
 		assertSha(head);
-		await this.fetch(upstream, "refs/notes/quest", "refs/notes/quest");
-		const result = await this.command(["notes", "--ref=quest", "show", head], {}, true);
-		if (result.exitCode !== 0) return [];
-		const notes = JSON.parse(result.stdout) as ReviewNote[];
+		if (!(await this.fetch(upstream, "refs/notes/quest", "refs/notes/quest"))) return [];
+		// Read the notes tree directly: a moved/deleted fork branch need not
+		// retain the annotated commit object for trusted note recovery.
+		const entries = (await this.command(["ls-tree", "-r", "-z", "refs/notes/quest"])).stdout.split("\0");
+		const entry = entries.find((value) => value.split("\t")[1]?.replaceAll("/", "") === head);
+		if (!entry) return [];
+		const blob = entry.split("\t")[0].split(" ")[2];
+		assertSha(blob);
+		const notes = JSON.parse((await this.command(["cat-file", "blob", blob])).stdout) as ReviewNote[];
 		if (!Array.isArray(notes)) throw new Error("Invalid review notes");
 		return notes;
+	}
+	async recoverNote(
+		upstream: GitCapability,
+		head: string,
+		operationId: string,
+		kind: ReviewNote["kind"],
+		actorId: string,
+	) {
+		const key = await operationKey(operationId);
+		if (
+			!(await this.notes(upstream, head)).some(
+				(note) => note.operationId === key && note.kind === kind && note.actor.id === actorId,
+			)
+		)
+			return null;
+		return (await this.command(["rev-parse", "refs/notes/quest"])).stdout.trim();
 	}
 	async appendNote(upstream: GitCapability, note: ReviewNote, author: GitAuthor): Promise<string> {
 		note = { ...note, operationId: await operationKey(note.operationId) };
