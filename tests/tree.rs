@@ -63,6 +63,8 @@ fn claim_blocks_readiness_and_reports_claimant_in_cli() {
 fn claim_envelope_is_forge_independent_and_extensible() {
 	for claim in [
 		"- Jane Doe (gitlab:jdoe) on quest/m0/line/one since 2024-02-29 expires=2024-03-01",
+		"- Jane (Team) Doe (github:jdoe) on fork since 2026-10-02",
+		"- Jane Doe (github:jdoe) on fork since 2026-10-02 note=\"running since yesterday\"",
 		"- **Jane Doe** (custom-forge:user@host) on <https://example.com/fork>\n  since 1999-12-31 run=123",
 	] {
 		let tree = Tree::new();

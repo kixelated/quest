@@ -107,16 +107,18 @@ fn claim(found: &mut Findings, doc: &Doc) {
 }
 
 fn valid_claim(text: &str) -> bool {
-	let Some((name, rest)) = text.split_once(" (") else {
+	let Some((claimant, rest)) = text.split_once(") on ") else {
 		return false;
 	};
-	let Some((identity, rest)) = rest.split_once(") on ") else {
+	// Parentheses in the display name are not the provider delimiter.
+	let Some((name, identity)) = claimant.rsplit_once(" (") else {
 		return false;
 	};
 	let Some((provider, identity)) = identity.split_once(':') else {
 		return false;
 	};
-	let Some((location, rest)) = rest.rsplit_once(" since ") else {
+	// Fields after the date are opaque, even if they contain " since ".
+	let Some((location, rest)) = rest.split_once(" since ") else {
 		return false;
 	};
 	let Some(date) = rest.split_whitespace().next() else {
