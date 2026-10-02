@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { createAuth } from "./auth";
 export { RepositoryCoordinator } from "./repository";
+export { QuestCore } from "./core";
 
 const app = new Hono<{ Bindings: Env }>();
 app.use(secureHeaders());

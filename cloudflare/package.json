@@ -9,7 +9,11 @@
 		"fix": "prettier --write .",
 		"types": "wrangler types",
 		"migrate": "wrangler d1 migrations apply DB --local",
-		"deploy": "wrangler deploy"
+		"deploy": "wrangler deploy",
+		"precheck": "cd .. && just wasm-build",
+		"pretest": "cd .. && just wasm-build",
+		"predev": "cd .. && just wasm-build",
+		"predeploy": "cd .. && just wasm-build"
 	},
 	"dependencies": {
 		"better-auth": "1.7.7",
