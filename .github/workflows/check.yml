@@ -28,6 +28,8 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f
         with:
           determinate: false
+      - name: Install Worker dependencies
+        run: nix develop --command just worker-install
       - name: Check
         run: nix develop --command just check
       - name: Test

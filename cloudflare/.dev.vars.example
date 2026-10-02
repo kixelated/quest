@@ -1,0 +1,4 @@
+# Generate a random secret with `openssl rand -hex 32`; replace these placeholders.
+AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters
+GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
+GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret

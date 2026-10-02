@@ -1,0 +1,21 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "quest-cloudflare",
+	"main": "src/index.tsx",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	"vars": { "AUTH_URL": "http://localhost:8787" },
+	"secrets": { "required": ["AUTH_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"] },
+	"artifacts": [{ "binding": "ARTIFACTS", "namespace": "quest" }],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "quest-auth",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations",
+		},
+	],
+	"durable_objects": { "bindings": [{ "name": "REPOSITORIES", "class_name": "RepositoryCoordinator" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepositoryCoordinator"] }],
+}

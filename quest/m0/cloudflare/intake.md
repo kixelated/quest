@@ -26,7 +26,3 @@ content is untrusted.
   in its PR. Check Codex's hook support when starting.
 - A Durable Object per repository serializes claims, so two contributors
   racing for one quest get one winner.
-
-## Required
-
-- [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - forks, tokens, and sign-in
