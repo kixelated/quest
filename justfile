@@ -16,6 +16,7 @@ check:
     shfmt -d .claude/hooks/*.sh scripts/*.sh
     taplo format --check
     nixfmt --check flake.nix
+    just worker-check
 
 # Run tests with bounded execution time, including documentation and shell hooks.
 test:
@@ -23,6 +24,7 @@ test:
     cargo test --locked --doc
     bash .claude/hooks/direnv.test.sh
     bash scripts/install-check.test.sh
+    just worker-test
 
 # Apply formatters without changing program behavior.
 fix:
@@ -30,6 +32,7 @@ fix:
     shfmt -w .claude/hooks/*.sh scripts/*.sh
     taplo format
     nixfmt flake.nix
+    npm --prefix cloudflare run fix
 
 # Build the standalone release binary.
 build:
@@ -38,3 +41,20 @@ build:
 # Run the local CLI, for example `just run ready`.
 run *args:
     cargo run --quiet --locked -- {{args}}
+
+# Install the locked Worker tooling and dependencies.
+worker-install:
+    npm --prefix cloudflare ci
+
+# Check generated binding types, TypeScript, formatting, and deployment bundle.
+worker-check:
+    npm --prefix cloudflare run check
+
+# Run Worker integration tests in the Cloudflare runtime.
+worker-test:
+    npm --prefix cloudflare test
+
+# Apply auth migrations locally and start the Worker.
+worker-dev:
+    npm --prefix cloudflare run migrate
+    npm --prefix cloudflare run dev
