@@ -1,3 +1,4 @@
+import { dispatchChangePush } from "../changes/workflow";
 import { pushEvent } from "./events";
 import { getFork } from "./registry";
 
@@ -14,7 +15,10 @@ export async function consumePushes(batch: MessageBatch<unknown>, env: Env): Pro
 		}
 		try {
 			const fork = await getFork(env.DB, event.source.repoName);
-			if (fork) await env.REPOSITORIES.getByName(fork.repositoryName).ingest(event);
+			if (fork && event.metadata.eventSubscriptionId === fork.subscriptionId) {
+				await env.REPOSITORIES.getByName(fork.repositoryName).ingest(event);
+				await dispatchChangePush(env, event, fork);
+			}
 			message.ack();
 		} catch (error) {
 			console.error({ event: "intake_failed", name: error instanceof Error ? error.name : "Error" });

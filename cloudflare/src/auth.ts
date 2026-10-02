@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { IntakeError, type Actor } from "./intake/registry";
 
+import { claimDisplayName } from "./intake/claim";
+
 export async function requireActor(env: Env, headers: Headers): Promise<Actor> {
 	const session = await createAuth(env).api.getSession({ headers });
 	if (!session) throw new IntakeError(401, "Sign in required");
@@ -16,8 +18,7 @@ export async function requireActor(env: Env, headers: Headers): Promise<Actor> {
 		userId: session.user.id,
 		provider: account.providerId,
 		identity: account.accountId,
-		name:
-			session.user.name.replace(/[<>\r\n\x00-\x1f]/g, " ").trim() || `${account.providerId}:${account.accountId}`,
+		name: claimDisplayName(session.user.name) || `${account.providerId}:${account.accountId}`,
 		email: session.user.email,
 	};
 }

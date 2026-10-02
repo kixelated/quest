@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 
 // Artifacts is remote-only, including Wrangler local mode. Build local test
 // bindings from the deploy config without Artifacts so CI never authenticates
-// or connects to a Cloudflare account. No repository operations exist yet.
+// or connects to a Cloudflare account. Remote operations use local test fixtures.
 const config = parse(readFileSync("./wrangler.jsonc", "utf8"));
 export default defineConfig({
 	plugins: [

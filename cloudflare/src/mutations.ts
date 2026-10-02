@@ -1,4 +1,5 @@
 import { evaluate, removeClaim } from "./core";
+import { creditAuthor } from "./intake/claim";
 import { assertQuestBranch, assertSha, GitConflict, type FileWrite, type GitAuthor, type ReviewNote } from "./git";
 import {
 	getRepository,
@@ -28,9 +29,9 @@ export async function closeChange(env: Env, request: ChangeIdentity) {
 }
 
 async function actor(env: Env, userId: string): Promise<GitAuthor> {
-	const row = await env.DB.prepare('SELECT name, email FROM "user" WHERE id = ?').bind(userId).first<GitAuthor>();
+	const row = await env.DB.prepare('SELECT user.name, account.providerId AS provider, account.accountId AS identity FROM user JOIN account ON account.userId = user.id WHERE user.id = ? ORDER BY providerId, accountId LIMIT 1').bind(userId).first<{name:string;provider:string;identity:string}>();
 	if (!row) throw new IntakeError(403, "Unknown reviewer");
-	return row;
+	return creditAuthor(row);
 }
 
 export async function writeFiles(

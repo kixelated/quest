@@ -4,6 +4,7 @@ import { readSnapshot, SnapshotError } from "./snapshot";
 import { runChangeMutation, runChangeCheck, writeFiles, type ChangeMutation, type ChangeIdentity } from "./mutations";
 import { GitConflict } from "./git";
 import { type PushEvent, eventKey, zeroId } from "./intake/events";
+import { creditAuthor } from "./intake/claim";
 import { provisionFork } from "./intake/forks";
 import { gate, type FileChange } from "./intake/gate";
 import { quarantineFiles, quarantinePaths } from "./intake/quarantine";
@@ -191,7 +192,7 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 					operationId: id,
 					expectedHead,
 					files,
-					author: actor,
+					author: await creditAuthor(actor),
 				}),
 			);
 		});
@@ -281,7 +282,7 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 					operationId: id,
 					expectedHead,
 					files: [accepted.file],
-					author: fork,
+					author: await creditAuthor(fork),
 					claim,
 				});
 			} catch (error) {
