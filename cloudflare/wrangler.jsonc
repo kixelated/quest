@@ -10,13 +10,18 @@
     "enabled": true
   },
   "vars": {
-    "AUTH_URL": "http://localhost:8787"
+    "AUTH_URL": "http://localhost:8787",
+    "AUTH_MAINTAINERS": "",
+    "ARTIFACTS_NAMESPACE": "quest",
+    "EVENT_ACCOUNT_ID": "",
+    "EVENT_QUEUE_ID": ""
   },
   "secrets": {
     "required": [
       "AUTH_SECRET",
       "GITHUB_CLIENT_ID",
-      "GITHUB_CLIENT_SECRET"
+      "GITHUB_CLIENT_SECRET",
+      "EVENT_SUBSCRIPTION_TOKEN"
     ]
   },
   "artifacts": [
@@ -76,5 +81,16 @@
       "name": "quest-change-checks",
       "class_name": "ChangeChecks"
     }
-  ]
+  ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "quest-pushes",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "quest-pushes-dead"
+      }
+    ]
+  }
 }

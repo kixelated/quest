@@ -4,6 +4,9 @@ export { GitSandbox } from "./git-sandbox";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { createAuth } from "./auth";
+import { intakeRoutes } from "./intake/routes";
+import { consumePushes } from "./intake/queue";
+import { IntakeError } from "./intake/registry";
 export { RepositoryCoordinator } from "./repository";
 export { QuestCore } from "./core";
 
@@ -12,6 +15,7 @@ app.use(secureHeaders());
 app.route("/", changesRoutes);
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+intakeRoutes(app);
 
 app.get("/", async (c) => {
 	const session = await createAuth(c.env).api.getSession({
@@ -87,7 +91,8 @@ app.post("/sign-out", async (c) => {
 	return new Response(null, { status: 303, headers });
 });
 app.onError((error, c) => {
+	if (error instanceof IntakeError) return c.json({ error: error.message }, error.status);
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });
-export default app;
+export default { fetch: app.fetch, queue: consumePushes } satisfies ExportedHandler<Env>;
