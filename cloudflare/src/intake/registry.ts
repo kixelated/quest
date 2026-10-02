@@ -18,6 +18,7 @@ export interface Fork extends Actor {
 	repositoryName: string;
 	remote: string | null;
 	lastPushAt: number;
+	subscriptionId: string | null;
 }
 
 export interface Capability {

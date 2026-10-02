@@ -11,6 +11,7 @@ CREATE TABLE forks (
   repositoryName TEXT NOT NULL REFERENCES repositories(name),
   userId TEXT NOT NULL REFERENCES user(id),
   remote TEXT,
+  subscriptionId TEXT,
   provider TEXT NOT NULL,
   identity TEXT NOT NULL,
   name TEXT NOT NULL,
