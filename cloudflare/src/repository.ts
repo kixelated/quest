@@ -389,7 +389,8 @@ export class RepositoryCoordinator extends DurableObject<Env> {
 				const transient =
 					error &&
 					typeof error === "object" &&
-					(("code" in error && error.code === "INTERNAL_ERROR") ||
+					((error instanceof Error && error.name === "GitUnavailable") ||
+						("code" in error && error.code === "INTERNAL_ERROR") ||
 						("retryable" in error && error.retryable === true));
 				if (!transient) throw error;
 				await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
