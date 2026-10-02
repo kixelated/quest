@@ -1,0 +1,64 @@
+name: Check release installs
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist manifest containing announcement_tag
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: install (${{ matrix.target }}, ${{ matrix.method }})
+    strategy:
+      fail-fast: false
+      matrix:
+        method: [mise, shell]
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-gnu
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up mise
+        if: matrix.method == 'mise'
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.0
+          install: false
+          cache: false
+          add_shims_to_path: false
+          env: false
+      - name: Install and check the published release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          DIST_PLAN: ${{ inputs.plan }}
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+          INSTALL_METHOD: ${{ matrix.method }}
+          INSTALL_TARGET: ${{ matrix.target }}
+        run: bash scripts/install-check.sh "$INSTALL_METHOD" "$INSTALL_TARGET"
