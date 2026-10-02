@@ -17,6 +17,7 @@ export default defineConfig({
 				compatibilityDate: config.compatibility_date,
 				compatibilityFlags: config.compatibility_flags,
 				d1Databases: config.d1_databases.map((db: { binding: string }) => db.binding),
+				workflows: Object.fromEntries((config.workflows ?? []).map((workflow: { binding: string; class_name: string; name: string }) => [workflow.binding, { className: workflow.class_name, name: workflow.name }])),
 				durableObjects: Object.fromEntries(
 					config.durable_objects.bindings.map((binding: { name: string; class_name: string }) => [
 						binding.name,
