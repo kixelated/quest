@@ -2,14 +2,15 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { requireActor } from "../auth";
 import { GitConflict } from "../git";
-import { getRepository, requireFork, requireMaintainer, IntakeError } from "../intake/registry";
+import { getRepository, requireFork, requireMaintainer, IntakeError, intakeStatus } from "../intake/registry";
 import { hasApproval, hasCheck, inspectChange, type ChangeIdentity, type ChangeMutation } from "../mutations";
 import { dispatchChangeCheck } from "./workflow";
 
 export const changesRoutes = new Hono<{ Bindings: Env }>();
 changesRoutes.use("/repos/*", bodyLimit({ maxSize: 32_768 }));
 changesRoutes.onError((error, c) => {
-	if (error instanceof IntakeError) return c.text(error.message, error.status);
+	const status = intakeStatus(error);
+if (status) return c.text(error.message, status);
 	if (error instanceof GitConflict || error.name === "GitConflict") return c.text(error.message, 409);
 	console.error({ event: "change_failed", name: error.name });
 	return c.text("Could not load change", 500);
