@@ -24,7 +24,7 @@ const LIST_SECTIONS: [&str; 3] = ["Required", "Closes", "Related"];
 pub const ROOT: &str = "quest/README.md";
 
 /// One violation, addressed like a compiler diagnostic: `path:line: message`.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub struct Finding {
 	/// Repository-relative document the violation is in.
 	pub path: PathBuf,
@@ -64,14 +64,14 @@ impl Findings {
 }
 
 /// `root` is the repository root; every path in `docs` is relative to it.
-pub fn check(root: &Path, docs: &[Doc]) -> Vec<Finding> {
+pub fn check(docs: &[Doc], exists: impl Fn(&Path) -> bool) -> Vec<Finding> {
 	let mut found = Findings(Vec::new());
 	let known: BTreeSet<&Path> = docs.iter().map(|d| d.path.as_path()).collect();
 
 	for doc in docs {
 		headings(&mut found, doc);
 		claim(&mut found, doc);
-		links(&mut found, root, &known, doc);
+		links(&mut found, &exists, &known, doc);
 	}
 
 	index(&mut found, &known, docs);
@@ -97,65 +97,13 @@ fn claim(found: &mut Findings, doc: &Doc) {
 		);
 		return;
 	}
-	if !valid_claim(&entries[0].text) {
+	if crate::claim::Claim::parse(&entries[0].text).is_none() {
 		found.at(
 			&doc.path,
 			entries[0].line,
 			"claim must name a claimant, (provider:identity), fork or branch, and date: Name (provider:identity) on location since YYYY-MM-DD",
 		);
 	}
-}
-
-fn valid_claim(text: &str) -> bool {
-	let Some((claimant, rest)) = text.split_once(") on ") else {
-		return false;
-	};
-	// Parentheses in the display name are not the provider delimiter.
-	let Some((name, identity)) = claimant.rsplit_once(" (") else {
-		return false;
-	};
-	let Some((provider, identity)) = identity.split_once(':') else {
-		return false;
-	};
-	// Fields after the date are opaque, even if they contain " since ".
-	let Some((location, rest)) = rest.split_once(" since ") else {
-		return false;
-	};
-	let Some(date) = rest.split_whitespace().next() else {
-		return false;
-	};
-	!name.trim().is_empty()
-		&& !provider.is_empty()
-		&& !identity.is_empty()
-		&& !provider.chars().any(char::is_whitespace)
-		&& !identity.chars().any(char::is_whitespace)
-		&& !location.trim().is_empty()
-		&& valid_date(date)
-}
-
-fn valid_date(date: &str) -> bool {
-	let bytes = date.as_bytes();
-	if bytes.len() != 10
-		|| bytes[4] != b'-'
-		|| bytes[7] != b'-'
-		|| bytes
-			.iter()
-			.enumerate()
-			.any(|(i, byte)| i != 4 && i != 7 && !byte.is_ascii_digit())
-	{
-		return false;
-	}
-	let year: u16 = date[..4].parse().expect("ASCII digits");
-	let month: u8 = date[5..7].parse().expect("ASCII digits");
-	let day: u8 = date[8..].parse().expect("ASCII digits");
-	let max = match month {
-		1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-		4 | 6 | 9 | 11 => 30,
-		2 if year.is_multiple_of(400) || year.is_multiple_of(4) && !year.is_multiple_of(100) => 29,
-		2 => 28,
-		_ => return false,
-	};
-	year != 0 && (1..=max).contains(&day)
 }
 
 fn headings(found: &mut Findings, doc: &Doc) {
@@ -253,7 +201,7 @@ pub(crate) fn normalize(path: &Path) -> PathBuf {
 	out
 }
 
-fn links(found: &mut Findings, root: &Path, known: &BTreeSet<&Path>, doc: &Doc) {
+fn links(found: &mut Findings, exists: &impl Fn(&Path) -> bool, known: &BTreeSet<&Path>, doc: &Doc) {
 	for link in &doc.links {
 		if link.target.contains("://") || link.target.starts_with("mailto:") {
 			continue;
@@ -268,7 +216,7 @@ fn links(found: &mut Findings, root: &Path, known: &BTreeSet<&Path>, doc: &Doc) 
 		// follow it into whatever sits beside the checkout, so the repo's own
 		// directory name (or a sibling worktree) could make a broken link pass.
 		let path = resolve(&doc.path, target);
-		if path.starts_with("..") || !root.join(&path).exists() {
+		if path.starts_with("..") || !exists(&path) {
 			found.at(&doc.path, link.line, format!("link does not resolve: {}", link.target));
 			continue;
 		}

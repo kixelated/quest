@@ -17,7 +17,7 @@ use crate::doc::Doc;
 use crate::rules;
 
 /// One thing standing between a quest and being started.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Blocker {
 	/// The quest or questline that has to finish first. `None` is an entry that
 	/// is not a quest, which `quest check` rejects and nothing here can clear.
@@ -62,10 +62,19 @@ impl fmt::Display for Blocker {
 /// `path` is the quest as the tree writes it (`/quest/m0/one.md`), as the shell
 /// completes it (`quest/m0/one.md`), or as an absolute filesystem path. With a
 /// `remote`, each line is read from its branch there; see [`crate::branch::overlay`].
+#[cfg(not(target_arch = "wasm32"))]
 pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Blocker>> {
 	let docs = crate::load_from(root, remote)?;
 	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|d| (d.path.as_path(), d)).collect();
 	let path = locate(root, path, &by_path)?;
+	Ok(expand(&by_path, by_path[path.as_path()], &mut vec![path.clone()]))
+}
+
+/// Blockers in an already-loaded tree. Paths are repository-relative or
+/// root-absolute (`/quest/...`); filesystem absolute paths belong to the CLI.
+pub fn blockers_from(docs: &[Doc], path: &Path) -> Result<Vec<Blocker>> {
+	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|doc| (doc.path.as_path(), doc)).collect();
+	let path = locate_in_docs(path, &by_path)?;
 	Ok(expand(&by_path, by_path[path.as_path()], &mut vec![path.clone()]))
 }
 
@@ -75,8 +84,14 @@ pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Bl
 /// none left is the line's own remaining work and lists like any other quest.
 /// A quest is ready when it has neither a `## Required` nor a `## Claim` heading.
 /// `remote` is as for [`blockers`].
+#[cfg(not(target_arch = "wasm32"))]
 pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 	let docs = crate::load_from(root, remote)?;
+	Ok(quests_from(&docs))
+}
+
+/// Every ready quest from already-loaded documents, without IO or git.
+pub fn quests_from(docs: &[Doc]) -> Vec<PathBuf> {
 	let mut remaining: BTreeMap<PathBuf, &Doc> = docs.iter().map(|doc| (doc.path.clone(), doc)).collect();
 	let mut pending = vec![PathBuf::from("quest/README.md")];
 	let mut ready = Vec::new();
@@ -95,7 +110,7 @@ pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
 			.filter(|(_, doc)| !doc.is_questline() && !doc.has("Required") && !doc.has("Claim"))
 			.map(|(path, _)| path),
 	);
-	Ok(ready)
+	ready
 }
 
 /// The blockers of one document: its `Required` entries, which for a questline
@@ -160,6 +175,7 @@ fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &m
 
 /// Resolve a quest path the way a caller is likely to have it to the
 /// repository-relative one the tree is keyed on.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn locate(root: &Path, path: &Path, by_path: &BTreeMap<&Path, &Doc>) -> Result<PathBuf> {
 	let mut candidates = vec![rules::normalize(path)];
 	if let Some(rooted) = path.to_str().and_then(|p| p.strip_prefix('/')) {
@@ -171,12 +187,28 @@ pub(crate) fn locate(root: &Path, path: &Path, by_path: &BTreeMap<&Path, &Doc>) 
 		candidates.push(relative.to_path_buf());
 	}
 
-	match candidates.into_iter().find(|c| by_path.contains_key(c.as_path())) {
-		Some(found) => Ok(found),
-		None => bail!(
-			"{} is not a quest document under {}",
-			path.display(),
-			root.join("quest").display()
-		),
+	for candidate in candidates {
+		if let Ok(found) = locate_in_docs(&candidate, by_path) {
+			return Ok(found);
+		}
+	}
+	bail!(
+		"{} is not a quest document under {}",
+		path.display(),
+		root.join("quest").display()
+	)
+}
+
+fn locate_in_docs(path: &Path, by_path: &BTreeMap<&Path, &Doc>) -> Result<PathBuf> {
+	let path = path
+		.to_str()
+		.and_then(|path| path.strip_prefix('/'))
+		.map(Path::new)
+		.unwrap_or(path);
+	let path = rules::normalize(path);
+	if by_path.contains_key(path.as_path()) {
+		Ok(path)
+	} else {
+		bail!("{} is not a quest document", path.display())
 	}
 }

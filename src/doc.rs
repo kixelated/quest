@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::{Context, Result};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
@@ -86,6 +87,8 @@ pub struct Doc {
 	/// Content outside the claim's one flat list item (prose, quotes, nested
 	/// lists, or other blocks). Claims have a deliberately small envelope.
 	pub claim_extra_content: bool,
+	/// Exact source byte ranges, including heading and content, for forge edits.
+	pub claim_ranges: Vec<std::ops::Range<usize>>,
 }
 
 impl Doc {
@@ -99,6 +102,21 @@ impl Doc {
 		self.entries
 			.iter()
 			.filter(move |e| e.section.as_deref() == Some(section))
+	}
+
+	/// The valid claim envelope, if this document has one. Presence of an
+	/// invalid claim still blocks readiness; `check` reports its violation.
+	pub fn claim(&self) -> Option<crate::claim::Claim> {
+		let mut headings = self.headings.iter().filter(|heading| heading.text == "Claim");
+		if !headings.next()?.literal || headings.next().is_some() || self.claim_extra_content {
+			return None;
+		}
+		let mut entries = self.entries("Claim");
+		let entry = entries.next()?;
+		if entries.next().is_some() {
+			return None;
+		}
+		crate::claim::Claim::parse(&entry.text)
 	}
 
 	/// A questline is a `README.md` that still requires a child. Any other README
@@ -143,6 +161,7 @@ impl Doc {
 	}
 
 	/// Read and parse `<root>/<path>`; `path` stays repository-relative.
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn parse(root: &Path, path: PathBuf) -> Result<Doc> {
 		let text = std::fs::read_to_string(root.join(&path)).with_context(|| format!("reading {}", path.display()))?;
 		Ok(Self::from_str(path, &text))
@@ -158,6 +177,8 @@ impl Doc {
 		let mut links = Vec::new();
 		let mut entries: Vec<Entry> = Vec::new();
 		let mut claim_extra_content = false;
+		let mut claim_ranges = Vec::new();
+		let mut claim_start = None;
 		let mut entry: Option<Entry> = None;
 		let mut section: Option<String> = None;
 
@@ -179,6 +200,16 @@ impl Doc {
 		options.insert(Options::ENABLE_TABLES);
 
 		for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
+			if matches!(
+				&event,
+				Event::Start(Tag::Heading {
+					level: HeadingLevel::H1 | HeadingLevel::H2,
+					..
+				})
+			) && let Some(start) = claim_start.take()
+			{
+				claim_ranges.push(start..range.start);
+			}
 			if section.as_deref() == Some("Claim") {
 				match &event {
 					Event::Start(Tag::Heading {
@@ -213,6 +244,9 @@ impl Doc {
 						if level == HeadingLevel::H1 {
 							title = Some(parsed);
 						} else {
+							if text == "Claim" {
+								claim_start = Some(lines.starts[line - 1]);
+							}
 							section = Some(text);
 							headings.push(parsed);
 						}
@@ -306,6 +340,10 @@ impl Doc {
 			}
 		}
 
+		if let Some(start) = claim_start {
+			claim_ranges.push(start..text.len());
+		}
+
 		Doc {
 			path,
 			title,
@@ -313,6 +351,7 @@ impl Doc {
 			links,
 			entries,
 			claim_extra_content,
+			claim_ranges,
 		}
 	}
 }
