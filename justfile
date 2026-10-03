@@ -23,6 +23,8 @@ test:
     cargo test --locked --doc
     bash .claude/hooks/direnv.test.sh
     bash scripts/install-check.test.sh
+    cargo build --locked
+    bash scripts/lifecycle-check.sh "$PWD/target/debug/quest"
 
 # Apply formatters without changing program behavior.
 fix:
