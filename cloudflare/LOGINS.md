@@ -47,22 +47,35 @@ References: [Google OAuth](https://better-auth.com/docs/authentication/google),
 [passkeys](https://better-auth.com/docs/plugins/passkey), and
 [account linking](https://better-auth.com/docs/concepts/users-accounts).
 
-## Pending product choices
+## Settled policy and remaining work
 
-This draft retains the unfinished login quest. Account linking is disabled at
-the HTTP boundary while its policy and contributor attribution are decided.
+This PR retains the unfinished login quest. Its account-linking and contributor
+identity policies are settled, but linking is still disabled at the HTTP boundary
+until the remaining implementation is complete.
 New Google-only accounts use their verified Google subject. Existing provider
 attribution remains in place when a passkey authenticates the same account.
 
-The recommended completion is explicit authenticated linking plus a stable,
-verified contributor identity. Persist a canonical provider/identity on the
-account, preserving existing registered-fork ownership during migration. Linking
-or passkey sign-in would then keep that identity. Enable the linking controls
-only after round-trip tests cover both linking orders, existing forks, claims,
-issues and maintainer authority.
+The planned completion uses explicit authenticated linking, with no automatic
+email-based linking. Different provider emails are allowed after proving both
+identities. A provider already owned by another account cannot be linked; account
+merging is outside this work.
 
-Automatic email linking would additionally require an explicit product choice
-to let another provider with the same verified email enter an existing account,
-including its maintainer permissions. Sign-in-method attribution instead would
-require server-owned session provenance, a defined passkey identity and changes
-to fork ownership; that is intentionally not implemented in this preparation.
+Each account will retain one canonical verified OAuth provider and subject for
+fork ownership and public contributor credit. New accounts use their first
+verified provider; migration preserves existing registered-fork identities and
+user IDs. Linking or passkey sign-in will keep that identity. Operator registration
+will check the canonical identity against `AUTH_MAINTAINERS`; linking an allowlisted
+provider will not independently confer that permission. Repository maintainer
+rights remain attached to the same user ID.
+
+OAuth provider unlinking is deferred, including closing the currently exposed
+unlink endpoint. Passkey removal and recovery through existing OAuth providers
+or another passkey remain available. No administrator recovery bypass is planned.
+
+The remaining implementation must persist and migrate the canonical identity,
+share it across intake and review attribution, enforce linking ownership and
+collision checks, and then enable the linking controls. Completion requires tests for
+both linking orders, different emails, existing forks, passkeys, claims, issues,
+reviews and operator/maintainer authority. Live provider configuration and browser
+verification remain part of the parent deployment work. The full plan is in the
+[login quest](../quest/m0/cloudflare/logins.md).
