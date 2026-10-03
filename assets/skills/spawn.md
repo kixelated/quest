@@ -42,5 +42,6 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 Also offer `/quest-plan` for its suggested follow-ups.
 Include quest context, as many quests are concurrently in flight.
 
-Run selected `/quest-plan` and `/quest-takeover` sessions in the foreground.
+Run each selected `/quest-merge` or `/quest-takeover` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
+Run selected `/quest-plan` sessions in the foreground.
 While awaiting the active prompt, continue independent research and already authorized background work.
