@@ -45,9 +45,8 @@ quest/
 
 Folders are **questlines**. A README's `Required` lists its children in
 priority order, beside any other dependencies. Milestones (`m0`, `m1`, ...)
-give the work a delivery horizon. Every quest merges directly into the repository's
-default branch, the shared development trunk. Questlines are planning groups; a
-README becomes the line's own remaining quest once its children have landed.
+give the work a delivery horizon. A questline's README becomes its own quest
+once its children have landed.
 
 When a quest lands, its PR removes the plan and the links that depended on it.
 The next task becomes ready. The finished plan stays in Git history, beside the
@@ -70,28 +69,18 @@ quest tree. From this checkout:
 $ quest --root examples/export check
 quest: 4 documents ok
 
-$ quest --root examples/export ready --local
+$ quest --root examples/export ready
 quest/m0/export.md
 
-$ quest --root examples/export ready --local quest/m0/download.md
+$ quest --root examples/export ready quest/m0/download.md
 quest/m0/export.md
-
-$ quest --root examples/export branch quest/m0/download.md
-quest/m0/download
-main
 ```
 
 `ready` prints blockers, with an explanation on stderr. No blockers means no
 stdout. It exits zero for both ready and blocked quests; a nonzero exit means
-the command failed. Run `check` first to catch malformed plans. `branch` prints
-the quest's branch and the remote's default branch (here, `main`). Every quest
-targets that trunk, including the remaining work in a questline README.
-
-`ready` reads the whole quest tree from the default branch on `origin`. Run
-`git fetch` and `git remote set-head origin --auto` first; `--local` reads the
-working tree instead. `branch --remote <name>` and `ready --remote <name>` use
-another remote. It does not look for claims or PRs, so check those before
-starting a quest someone else may already be working on.
+the command failed. Run `check` first to catch malformed plans. `ready` does
+not look for claims or PRs, so check those before starting a quest someone else
+may already be working on.
 
 ## Work with an agent
 

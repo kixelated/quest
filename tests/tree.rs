@@ -142,7 +142,7 @@ impl Tree {
 
 	/// The rendered blocker chain: one line per blocker, nesting indented.
 	fn blockers(&self, path: &str) -> Vec<String> {
-		quest::ready::blockers(self.path(), Path::new(path), None)
+		quest::ready::blockers(self.path(), Path::new(path))
 			.expect("blockers")
 			.iter()
 			.flat_map(|blocker| blocker.to_string().lines().map(str::to_owned).collect::<Vec<_>>())
@@ -150,70 +150,11 @@ impl Tree {
 	}
 
 	fn ready(&self) -> Vec<String> {
-		self.ready_on(None)
-	}
-
-	fn ready_on(&self, remote: Option<&str>) -> Vec<String> {
-		quest::ready::quests(self.path(), remote)
+		quest::ready::quests(self.path())
 			.expect("ready")
 			.iter()
 			.map(|path| path.display().to_string())
 			.collect()
-	}
-
-	fn git(&self, args: &[&str]) -> &Tree {
-		let status = std::process::Command::new("git")
-			.arg("-C")
-			.arg(self.path())
-			.args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
-			.args(args)
-			.status()
-			.expect("git");
-		assert!(status.success(), "git {args:?}");
-		self
-	}
-
-	/// Commit the fixture to `main`, with an `origin` that is never contacted.
-	fn init_git(&self) -> &Tree {
-		self.git(&["init", "-q", "-b", "main"])
-			.git(&["remote", "add", "origin", "https://example.invalid/repo.git"])
-			.commit("main")
-			.git(&["update-ref", "refs/remotes/origin/main", "HEAD"])
-			.git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"])
-	}
-
-	fn commit(&self, message: &str) -> &Tree {
-		self.git(&["add", "-A"]).git(&["commit", "-q", "-m", message])
-	}
-
-	/// Commit whatever `edit` does as the remote copy of `branch`, then put the
-	/// working tree back on `main`.
-	fn push_branch(&self, branch: &str, edit: impl FnOnce(&Tree)) -> &Tree {
-		self.git(&["checkout", "-q", "-b", branch]);
-		edit(self);
-		self.commit(branch)
-			.git(&["update-ref", &format!("refs/remotes/origin/{branch}"), "HEAD"])
-			.git(&["checkout", "-q", "main"])
-	}
-
-	fn remove(&self, rel: &str) -> &Tree {
-		let path = self.path().join(rel);
-		if path.is_dir() {
-			std::fs::remove_dir_all(path).expect("rm");
-		} else {
-			std::fs::remove_file(path).expect("rm");
-		}
-		self
-	}
-
-	fn branch(&self, path: &str) -> Vec<String> {
-		quest::branch::chain(self.path(), Path::new(path), "origin").expect("branch")
-	}
-
-	fn branch_err(&self, path: &str) -> String {
-		quest::branch::chain(self.path(), Path::new(path), "origin")
-			.expect_err("expected no branch")
-			.to_string()
 	}
 
 	#[track_caller]
@@ -857,43 +798,6 @@ fn ready_listing_appends_unindexed_quests() {
 	assert_eq!(tree.ready(), ["quest/m0/line/one.md", "quest/m0/aaa.md"]);
 }
 
-/// Every quest and a line's remaining work target the same fetched trunk.
-#[test]
-fn branch_chain_of_a_quest() {
-	let tree = Tree::new();
-	tree.init_git();
-	assert_eq!(tree.branch("quest/m0/line/one.md"), ["quest/m0/line/one", "main"]);
-	assert_eq!(
-		tree.branch("/quest/m0/line/README.md"),
-		["quest/m0/line/README", "main"]
-	);
-}
-
-/// Neither the root nor a milestone has a branch; their children merge into `main`.
-#[test]
-fn root_and_milestone_have_no_branch() {
-	let tree = Tree::new();
-	tree.init_git();
-	assert!(tree.branch_err("quest/README.md").contains("no branch"));
-	assert!(tree.branch_err("quest/m0/README.md").contains("no branch"));
-}
-
-/// Every milestone's work branches from `main`, whatever its priority: starting a
-/// quest never moves it.
-#[test]
-fn later_milestone_branches_from_main() {
-	let tree = Tree::new();
-	tree.write(
-		"quest/m2/README.md",
-		"# m2\n\n## Goal\n\nLater work.\n\n## Required\n\n- [Later](/quest/m2/later.md)\n",
-	);
-	tree.write("quest/m2/later.md", "# [S] Later\n\n## Goal\n\nNot started.\n");
-	tree.append("quest/README.md", "- [m2](/quest/m2/README.md)\n");
-	tree.accepts();
-	tree.init_git();
-	assert_eq!(tree.branch("quest/m2/later.md"), ["quest/m2/later", "main"]);
-}
-
 /// A milestone with nothing left is not its own work, so it needs no size and
 /// never lists as ready.
 #[test]
@@ -903,165 +807,4 @@ fn milestone_may_be_empty() {
 	std::fs::remove_dir_all(tree.path().join("quest/m0/line")).expect("rm");
 	tree.accepts();
 	assert!(tree.ready().is_empty(), "{:?}", tree.ready());
-}
-
-/// Nesting only groups plans; it never adds intermediate branches.
-#[test]
-fn branch_chain_of_a_nested_line() {
-	let tree = Tree::new();
-	tree.write(
-		"quest/m0/line/sub/README.md",
-		"# Sub\n\n## Goal\n\nA nested line.\n\n## Required\n\n- [Three](/quest/m0/line/sub/three.md)\n",
-	);
-	tree.write(
-		"quest/m0/line/sub/three.md",
-		"# [S] Three\n\n## Goal\n\nA nested quest.\n",
-	);
-	tree.append("quest/m0/line/README.md", "- [Sub](/quest/m0/line/sub/README.md)\n");
-	tree.accepts();
-	tree.init_git();
-	assert_eq!(
-		tree.branch("quest/m0/line/sub/three.md"),
-		["quest/m0/line/sub/three", "main"]
-	);
-}
-
-// Remote readiness: one fetched trunk, regardless of lingering feature branches.
-
-fn finish_one(tree: &Tree) {
-	tree.remove("quest/m0/line/one.md")
-		.write(
-			"quest/m0/line/README.md",
-			&LINE_README.replace("- [One](/quest/m0/line/one.md)\n", ""),
-		)
-		.write("quest/m0/line/two.md", "# [S] Two\n\n## Goal\n\nAnother quest.\n");
-}
-
-/// A child completed on an old feature branch is still open on the trunk.
-#[test]
-fn lingering_line_branches_do_not_change_readiness() {
-	let tree = Tree::new();
-	tree.init_git().push_branch("quest/m0/line/README", finish_one);
-	tree.push_branch("quest/m0/line/sub/README", |t| {
-		t.remove("quest/m0/line");
-	});
-	assert_eq!(tree.ready_on(Some("origin")), ["quest/m0/line/one.md"]);
-	assert_eq!(tree.branch("quest/m0/line/two.md"), ["quest/m0/line/two", "main"]);
-	assert_eq!(
-		quest::ready::blockers(tree.path(), Path::new("quest/m0/line/two.md"), Some("origin")).expect("blockers")[0]
-			.label(),
-		"quest/m0/line/one.md"
-	);
-}
-
-/// A stale checkout cannot resurrect completed quests or hide new trunk plans.
-#[test]
-fn remote_trunk_is_the_whole_tree() {
-	let tree = Tree::new();
-	tree.init_git().push_branch("next", |t| {
-		finish_one(t);
-		t.write("quest/m0/new.md", "# [S] New\n\n## Goal\n\nNew work.\n")
-			.append("quest/m0/README.md", "- [New](/quest/m0/new.md)\n");
-	});
-	tree.git(&["update-ref", "refs/remotes/origin/main", "next"]);
-	assert_eq!(tree.ready(), ["quest/m0/line/one.md"]);
-	assert_eq!(
-		tree.ready_on(Some("origin")),
-		["quest/m0/line/two.md", "quest/m0/new.md"]
-	);
-	assert_eq!(tree.branch("/quest/m0/new.md"), ["quest/m0/new", "main"]);
-	assert!(
-		quest::ready::blockers(tree.path(), Path::new("quest/m0/line/two.md"), Some("origin"))
-			.expect("blockers")
-			.is_empty()
-	);
-	assert!(tree.branch_err("quest/m0/line/one.md").contains("not a quest"));
-	// Remote queries also work with no local quest directory at all.
-	tree.remove("quest");
-	assert_eq!(
-		tree.ready_on(Some("origin")),
-		["quest/m0/line/two.md", "quest/m0/new.md"]
-	);
-}
-
-#[test]
-fn default_branch_flip_changes_both_target_and_readiness() {
-	let tree = Tree::new();
-	tree.init_git().push_branch("dev", finish_one);
-	tree.git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/dev"]);
-	assert_eq!(tree.branch("quest/m0/line/two.md"), ["quest/m0/line/two", "dev"]);
-	assert_eq!(tree.ready_on(Some("origin")), ["quest/m0/line/two.md"]);
-	tree.git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
-	assert_eq!(tree.branch("quest/m0/line/two.md"), ["quest/m0/line/two", "main"]);
-	assert_eq!(tree.ready_on(Some("origin")), ["quest/m0/line/one.md"]);
-}
-
-#[test]
-fn custom_remote_and_branch_name() {
-	let tree = Tree::new();
-	tree.init_git()
-		.git(&["remote", "rename", "origin", "upstream"])
-		.git(&["update-ref", "refs/remotes/upstream/develop/trunk", "main"])
-		.git(&[
-			"symbolic-ref",
-			"refs/remotes/upstream/HEAD",
-			"refs/remotes/upstream/develop/trunk",
-		]);
-	assert_eq!(
-		quest::branch::chain(tree.path(), Path::new("quest/m0/line/one.md"), "upstream").expect("branch"),
-		["quest/m0/line/one", "develop/trunk"]
-	);
-	assert_eq!(tree.ready_on(Some("upstream")), ["quest/m0/line/one.md"]);
-	let output = std::process::Command::new(env!("CARGO_BIN_EXE_quest"))
-		.args([
-			"--root",
-			tree.path().to_str().unwrap(),
-			"branch",
-			"quest/m0/line/one.md",
-			"--remote",
-			"upstream",
-		])
-		.output()
-		.expect("CLI");
-	assert!(output.status.success(), "{:?}", output);
-	assert_eq!(
-		String::from_utf8(output.stdout).unwrap(),
-		"quest/m0/line/one\ndevelop/trunk\n"
-	);
-}
-
-/// Missing metadata must fail explicitly rather than silently choosing main.
-#[test]
-fn missing_or_dangling_remote_head_is_an_error() {
-	let tree = Tree::new();
-	tree.init_git()
-		.git(&["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
-	let err = quest::ready::quests(tree.path(), Some("origin")).expect_err("missing HEAD");
-	assert!(err.to_string().contains("git remote set-head origin --auto"), "{err}");
-	tree.git(&[
-		"symbolic-ref",
-		"refs/remotes/origin/HEAD",
-		"refs/remotes/origin/missing",
-	]);
-	assert!(quest::ready::quests(tree.path(), Some("origin")).is_err());
-	assert!(quest::branch::chain(tree.path(), Path::new("quest/m0/line/one.md"), "origin").is_err());
-}
-
-#[test]
-fn remote_without_quests_is_an_error() {
-	let tree = Tree::new();
-	tree.init_git().push_branch("empty", |t| {
-		t.remove("quest");
-	});
-	tree.git(&["update-ref", "refs/remotes/origin/main", "empty"]);
-	let err = quest::ready::quests(tree.path(), Some("origin")).expect_err("empty trunk");
-	assert!(err.to_string().contains("no quest documents"), "{err}");
-}
-
-#[test]
-fn unknown_remote_is_an_error() {
-	let tree = Tree::new();
-	tree.init_git();
-	let err = quest::ready::quests(tree.path(), Some("upstream")).expect_err("unknown remote");
-	assert!(err.to_string().contains("remote"), "{err}");
 }

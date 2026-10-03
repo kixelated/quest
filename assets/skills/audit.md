@@ -5,7 +5,7 @@ description: Audit outstanding quests for disagreements, conflicts, misaligned p
 Before you begin, run `quest guide` and `quest skill plan`, and read their output completely.
 
 The goal is a quest tree that agrees with itself and the code, ordered by priority.
-The scope is every outstanding quest, on the repository's default branch; the argument (if provided) filters it to specific quests or questlines.
+The scope is every outstanding quest; the argument (if provided) filters it to specific quests or questlines.
 
 Look for:
 - Disagreements: quests whose goals or plans contradict each other, the code, or the repository's docs.

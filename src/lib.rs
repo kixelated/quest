@@ -1,6 +1,6 @@
 //! The quest tree, whose contract is the guide in [`skills::GUIDE`]: structural
-//! validation of it, whether a given quest can be started, which branches carry
-//! it, and the agent skills that work it.
+//! validation of it, whether a given quest can be started, and the agent skills
+//! that work it.
 //!
 //! The whole tree is validated on every run, never just the changed files: the
 //! link graph and the questline index are global, so completing one quest
@@ -8,7 +8,6 @@
 //! the index entry for a completed quest survived a rebase that produced no
 //! conflict at all.
 
-pub mod branch;
 pub mod doc;
 pub mod ready;
 pub mod rules;
@@ -72,12 +71,4 @@ fn load(root: &Path) -> Result<Vec<Doc>> {
 		bail!("no quest documents found under {}", root.join("quest").display());
 	}
 	paths.into_iter().map(|p| Doc::parse(root, p)).collect()
-}
-
-/// Read the fetched default branch when a remote is given, otherwise the working tree.
-fn load_from(root: &Path, remote: Option<&str>) -> Result<Vec<Doc>> {
-	match remote {
-		Some(remote) => branch::tree(root, remote),
-		None => load(root),
-	}
 }

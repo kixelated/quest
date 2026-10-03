@@ -60,10 +60,9 @@ impl fmt::Display for Blocker {
 /// holds. Empty means ready.
 ///
 /// `path` is the quest as the tree writes it (`/quest/m0/one.md`), as the shell
-/// completes it (`quest/m0/one.md`), or as an absolute filesystem path. With a
-/// `remote`, the whole tree is read from its fetched default branch.
-pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Blocker>> {
-	let docs = crate::load_from(root, remote)?;
+/// completes it (`quest/m0/one.md`), or as an absolute filesystem path.
+pub fn blockers(root: &Path, path: &Path) -> Result<Vec<Blocker>> {
+	let docs = crate::load(root)?;
 	let by_path: BTreeMap<&Path, &Doc> = docs.iter().map(|d| (d.path.as_path(), d)).collect();
 	let path = locate(root, path, &by_path)?;
 	Ok(expand(&by_path, by_path[path.as_path()], &mut vec![path.clone()]))
@@ -74,9 +73,8 @@ pub fn blockers(root: &Path, path: &Path, remote: Option<&str>) -> Result<Vec<Bl
 /// A questline is not listed while it still requires children; a README with
 /// none left is the line's own remaining work and lists like any other quest.
 /// The absence of a `## Required` heading is what the guide defines as ready.
-/// `remote` is as for [`blockers`].
-pub fn quests(root: &Path, remote: Option<&str>) -> Result<Vec<PathBuf>> {
-	let docs = crate::load_from(root, remote)?;
+pub fn quests(root: &Path) -> Result<Vec<PathBuf>> {
+	let docs = crate::load(root)?;
 	let mut remaining: BTreeMap<PathBuf, &Doc> = docs.iter().map(|doc| (doc.path.clone(), doc)).collect();
 	let mut pending = vec![PathBuf::from("quest/README.md")];
 	let mut ready = Vec::new();
@@ -150,7 +148,7 @@ fn blocker(by_path: &BTreeMap<&Path, &Doc>, entry: &crate::doc::Entry, stack: &m
 
 /// Resolve a quest path the way a caller is likely to have it to the
 /// repository-relative one the tree is keyed on.
-pub(crate) fn locate(root: &Path, path: &Path, by_path: &BTreeMap<&Path, &Doc>) -> Result<PathBuf> {
+fn locate(root: &Path, path: &Path, by_path: &BTreeMap<&Path, &Doc>) -> Result<PathBuf> {
 	let mut candidates = vec![rules::normalize(path)];
 	if let Some(rooted) = path.to_str().and_then(|p| p.strip_prefix('/')) {
 		candidates.push(rules::normalize(Path::new(rooted)));
