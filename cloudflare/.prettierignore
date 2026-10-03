@@ -1,2 +1,5 @@
 worker-configuration.d.ts
 .wrangler/
+
+quest-core/
+src/generated/

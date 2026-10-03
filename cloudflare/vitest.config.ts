@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 
 // Artifacts is remote-only, including Wrangler local mode. Build local test
 // bindings from the deploy config without Artifacts so CI never authenticates
-// or connects to a Cloudflare account. No repository operations exist yet.
+// or connects to a Cloudflare account. Remote operations use local test fixtures.
 const config = parse(readFileSync("./wrangler.jsonc", "utf8"));
 export default defineConfig({
 	plugins: [
@@ -13,9 +13,16 @@ export default defineConfig({
 			main: config.main,
 			remoteBindings: false,
 			miniflare: {
+				modulesRules: [{ type: "CompiledWasm", include: ["**/*.wasm", "**/*.wasm?module"] }],
 				compatibilityDate: config.compatibility_date,
 				compatibilityFlags: config.compatibility_flags,
 				d1Databases: config.d1_databases.map((db: { binding: string }) => db.binding),
+				workflows: Object.fromEntries(
+					(config.workflows ?? []).map((workflow: { binding: string; class_name: string; name: string }) => [
+						workflow.binding,
+						{ className: workflow.class_name, name: workflow.name },
+					]),
+				),
 				durableObjects: Object.fromEntries(
 					config.durable_objects.bindings.map((binding: { name: string; class_name: string }) => [
 						binding.name,
@@ -24,6 +31,8 @@ export default defineConfig({
 				),
 				bindings: {
 					...config.vars,
+					GOOGLE_CLIENT_ID: "test-google-client-id",
+					GOOGLE_CLIENT_SECRET: "test-google-client-secret",
 					AUTH_SECRET: "test-only-secret-that-is-at-least-32-characters",
 					GITHUB_CLIENT_ID: "test-client-id",
 					GITHUB_CLIENT_SECRET: "test-client-secret",
@@ -32,5 +41,5 @@ export default defineConfig({
 			},
 		})),
 	],
-	test: { setupFiles: ["./test/setup.ts"] },
+	test: { setupFiles: ["./test/setup.ts"], exclude: ["**/*.node.test.ts", "**/node_modules/**"] },
 });
