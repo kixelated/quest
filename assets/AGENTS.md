@@ -77,6 +77,12 @@ So is anything waiting on an outside party or a human action (an upstream fix, a
 Its Goal names the condition and how to check or advance it; it is deleted once the condition clears.
 Unlike a blocked quest it stays ready, so it resurfaces every time ready work is triaged instead of stalling in the backlog.
 
+## Decisions
+
+Block on user decisions. Ask synchronously, using an interactive prompt when supported or a normal chat message otherwise.
+Wait for an explicit answer before proceeding; do not use asynchronous questions.
+When asking in chat, end the turn with the questions, options, and your recommendation.
+
 ## Execution
 
 Start only ready quests.
