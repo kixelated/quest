@@ -9,7 +9,7 @@
 pub const GUIDE: &str = include_str!("../assets/AGENTS.md");
 
 /// Every skill, sorted by name.
-const SKILLS: [(&str, &str); 9] = [
+const SKILLS: [(&str, &str); 10] = [
 	("audit", include_str!("../assets/skills/audit.md")),
 	("complete", include_str!("../assets/skills/complete.md")),
 	("delete", include_str!("../assets/skills/delete.md")),
@@ -19,6 +19,7 @@ const SKILLS: [(&str, &str); 9] = [
 	("plan", include_str!("../assets/skills/plan.md")),
 	("spawn", include_str!("../assets/skills/spawn.md")),
 	("start", include_str!("../assets/skills/start.md")),
+	("takeover", include_str!("../assets/skills/takeover.md")),
 ];
 
 /// Where an agent without the binary learns to install it.

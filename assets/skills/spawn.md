@@ -32,8 +32,15 @@ When done, each agent opens a draft PR.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
-As each agent reports, explain its result in a few lines, then follow the prompt flow above.
+As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
+
+- `/quest-merge`: If the PR is ready to be merged.
+- `/quest-takeover`: If the PR has significant issues or needs decisions.
+- skip: If the PR should stay a draft.
+- `/quest-delete`: If the quest should be deleted.
+
+Also offer `/quest-plan` for its suggested follow-ups.
 Include quest context, as many quests are concurrently in flight.
 
-Run selected `/quest-plan` sessions in the foreground.
+Run selected `/quest-plan` and `/quest-takeover` sessions in the foreground.
 While awaiting the active prompt, continue independent research and already authorized background work.
