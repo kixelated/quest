@@ -8,7 +8,7 @@ board and the CLI never disagree. CI builds and tests the wasm target.
 
 ## Plan
 
-- Separate the pure core (documents in, findings and readiness out) from the
-  git overlay and process calls, which stay native-only.
+- Separate the pure core (documents in, findings and readiness out) from
+  filesystem access, which stays native-only.
 - Expose a small wasm-bindgen API that the Worker imports as a local package.
 - Prefer refactoring the existing modules over adding a parallel API.
