@@ -142,7 +142,7 @@ impl Tree {
 
 	/// The rendered blocker chain: one line per blocker, nesting indented.
 	fn blockers(&self, path: &str) -> Vec<String> {
-		quest::ready::blockers(self.path(), Path::new(path), None)
+		quest::ready::blockers(self.path(), Path::new(path))
 			.expect("blockers")
 			.iter()
 			.flat_map(|blocker| blocker.to_string().lines().map(str::to_owned).collect::<Vec<_>>())
@@ -150,68 +150,11 @@ impl Tree {
 	}
 
 	fn ready(&self) -> Vec<String> {
-		self.ready_on(None)
-	}
-
-	fn ready_on(&self, remote: Option<&str>) -> Vec<String> {
-		quest::ready::quests(self.path(), remote)
+		quest::ready::quests(self.path())
 			.expect("ready")
 			.iter()
 			.map(|path| path.display().to_string())
 			.collect()
-	}
-
-	fn git(&self, args: &[&str]) -> &Tree {
-		let status = std::process::Command::new("git")
-			.arg("-C")
-			.arg(self.path())
-			.args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
-			.args(args)
-			.status()
-			.expect("git");
-		assert!(status.success(), "git {args:?}");
-		self
-	}
-
-	/// Commit the fixture to `main`, with an `origin` that is never contacted.
-	fn init_git(&self) -> &Tree {
-		self.git(&["init", "-q", "-b", "main"])
-			.git(&["remote", "add", "origin", "https://example.invalid/repo.git"])
-			.commit("main")
-	}
-
-	fn commit(&self, message: &str) -> &Tree {
-		self.git(&["add", "-A"]).git(&["commit", "-q", "-m", message])
-	}
-
-	/// Commit whatever `edit` does as the remote copy of `branch`, then put the
-	/// working tree back on `main`.
-	fn push_line(&self, branch: &str, edit: impl FnOnce(&Tree)) -> &Tree {
-		self.git(&["checkout", "-q", "-b", branch]);
-		edit(self);
-		self.commit(branch)
-			.git(&["update-ref", &format!("refs/remotes/origin/{branch}"), "HEAD"])
-			.git(&["checkout", "-q", "main"])
-	}
-
-	fn remove(&self, rel: &str) -> &Tree {
-		let path = self.path().join(rel);
-		if path.is_dir() {
-			std::fs::remove_dir_all(path).expect("rm");
-		} else {
-			std::fs::remove_file(path).expect("rm");
-		}
-		self
-	}
-
-	fn branch(&self, path: &str) -> Vec<String> {
-		quest::branch::chain(self.path(), Path::new(path)).expect("branch")
-	}
-
-	fn branch_err(&self, path: &str) -> String {
-		quest::branch::chain(self.path(), Path::new(path))
-			.expect_err("expected no branch")
-			.to_string()
 	}
 
 	#[track_caller]
@@ -855,44 +798,6 @@ fn ready_listing_appends_unindexed_quests() {
 	assert_eq!(tree.ready(), ["quest/m0/line/one.md", "quest/m0/aaa.md"]);
 }
 
-/// The chain is the path: the leaf, its line's README, then `main`. Nothing
-/// consults git.
-#[test]
-fn branch_chain_of_a_quest() {
-	let tree = Tree::new();
-	assert_eq!(
-		tree.branch("quest/m0/line/one.md"),
-		["quest/m0/line/one", "quest/m0/line/README", "main"]
-	);
-	assert_eq!(
-		tree.branch("/quest/m0/line/README.md"),
-		["quest/m0/line/README", "main"]
-	);
-}
-
-/// Neither the root nor a milestone has a branch; their children merge into `main`.
-#[test]
-fn root_and_milestone_have_no_branch() {
-	let tree = Tree::new();
-	assert!(tree.branch_err("quest/README.md").contains("no branch"));
-	assert!(tree.branch_err("quest/m0/README.md").contains("no branch"));
-}
-
-/// Every milestone's work branches from `main`, whatever its priority: starting a
-/// quest never moves it.
-#[test]
-fn later_milestone_branches_from_main() {
-	let tree = Tree::new();
-	tree.write(
-		"quest/m2/README.md",
-		"# m2\n\n## Goal\n\nLater work.\n\n## Required\n\n- [Later](/quest/m2/later.md)\n",
-	);
-	tree.write("quest/m2/later.md", "# [S] Later\n\n## Goal\n\nNot started.\n");
-	tree.append("quest/README.md", "- [m2](/quest/m2/README.md)\n");
-	tree.accepts();
-	assert_eq!(tree.branch("quest/m2/later.md"), ["quest/m2/later", "main"]);
-}
-
 /// A milestone with nothing left is not its own work, so it needs no size and
 /// never lists as ready.
 #[test]
@@ -902,103 +807,4 @@ fn milestone_may_be_empty() {
 	std::fs::remove_dir_all(tree.path().join("quest/m0/line")).expect("rm");
 	tree.accepts();
 	assert!(tree.ready().is_empty(), "{:?}", tree.ready());
-}
-
-/// Lines nest to any depth: every branch ends in a leaf component (the quest
-/// or `README`), so no line's branch is a path prefix of its children's, which
-/// is the one shape git refuses.
-#[test]
-fn branch_chain_of_a_nested_line() {
-	let tree = Tree::new();
-	tree.write(
-		"quest/m0/line/sub/README.md",
-		"# Sub\n\n## Goal\n\nA nested line.\n\n## Required\n\n- [Three](/quest/m0/line/sub/three.md)\n",
-	);
-	tree.write(
-		"quest/m0/line/sub/three.md",
-		"# [S] Three\n\n## Goal\n\nA nested quest.\n",
-	);
-	tree.append("quest/m0/line/README.md", "- [Sub](/quest/m0/line/sub/README.md)\n");
-	tree.accepts();
-	assert_eq!(
-		tree.branch("quest/m0/line/sub/three.md"),
-		[
-			"quest/m0/line/sub/three",
-			"quest/m0/line/sub/README",
-			"quest/m0/line/README",
-			"main"
-		]
-	);
-}
-
-// Line branches: `--remote` reads each line from its branch, where its
-// children merge before the line reaches `main`.
-
-/// `one` finished on the line's branch, so `main` still lists it as ready and
-/// `two` as blocked. Read through the branch, the answer flips.
-#[test]
-fn line_branch_hides_quests_finished_there() {
-	let tree = Tree::new();
-	tree.init_git().push_line("quest/m0/line/README", |t| {
-		t.remove("quest/m0/line/one.md")
-			.write(
-				"quest/m0/line/README.md",
-				&LINE_README.replace("- [One](/quest/m0/line/one.md)\n", ""),
-			)
-			.write("quest/m0/line/two.md", "# [S] Two\n\n## Goal\n\nAnother quest.\n");
-	});
-	assert_eq!(tree.ready(), ["quest/m0/line/one.md"]);
-	assert_eq!(tree.ready_on(Some("origin")), ["quest/m0/line/two.md"]);
-	assert!(
-		quest::ready::blockers(tree.path(), Path::new("quest/m0/line/two.md"), Some("origin"))
-			.expect("blockers")
-			.is_empty()
-	);
-}
-
-/// The nested line's branch is newer for its own subtree than the outer
-/// line's, and once the outer branch completes the nested line, a branch left
-/// behind by it must not bring the finished work back.
-#[test]
-fn nested_line_branch_wins_until_its_line_completes() {
-	let tree = Tree::new();
-	tree.write(
-		"quest/m0/line/sub/README.md",
-		"# Sub\n\n## Goal\n\nA nested line.\n\n## Required\n\n- [Three](/quest/m0/line/sub/three.md)\n",
-	)
-	.write(
-		"quest/m0/line/sub/three.md",
-		"# [S] Three\n\n## Goal\n\nA nested quest.\n",
-	)
-	.append("quest/m0/line/README.md", "- [Sub](/quest/m0/line/sub/README.md)\n");
-	tree.accepts();
-	tree.init_git();
-
-	// Every child of `sub` merged: its README is the line's own remaining work.
-	tree.push_line("quest/m0/line/sub/README", |t| {
-		t.remove("quest/m0/line/sub/three.md").write(
-			"quest/m0/line/sub/README.md",
-			"# [S] Sub\n\n## Goal\n\nThe end-to-end test.\n",
-		);
-	});
-	assert_eq!(
-		tree.ready_on(Some("origin")),
-		["quest/m0/line/one.md", "quest/m0/line/sub/README.md"]
-	);
-
-	// Then `sub` itself landed on the outer line, whose branch has no `sub/`.
-	tree.push_line("quest/m0/line/README", |t| {
-		t.remove("quest/m0/line/sub")
-			.write("quest/m0/line/README.md", LINE_README);
-	});
-	assert_eq!(tree.ready_on(Some("origin")), ["quest/m0/line/one.md"]);
-}
-
-/// A remote that does not exist is a mistake, not a tree with no line branches.
-#[test]
-fn unknown_remote_is_an_error() {
-	let tree = Tree::new();
-	tree.init_git();
-	let err = quest::ready::quests(tree.path(), Some("upstream")).expect_err("unknown remote");
-	assert!(err.to_string().contains("remote"), "{err}");
 }

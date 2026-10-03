@@ -5,8 +5,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 /// The quest tree, the interlinked Markdown plans under quest/: validate its
-/// structure, report what blocks a quest, name the branches a quest lands on, and
-/// print the guide and skills agents follow.
+/// structure, report what blocks a quest, and print the guide and skills agents
+/// follow.
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
@@ -31,27 +31,6 @@ enum Command {
 	Ready {
 		/// Quest to explain. Omit to list every ready quest in tree order.
 		path: Option<PathBuf>,
-
-		/// Read each questline from its branch on this remote when that branch
-		/// exists: a line's children finish there before the line reaches the
-		/// working tree. Fetch first; this reads remote-tracking refs.
-		#[arg(long, default_value = "origin")]
-		remote: String,
-
-		/// Read only the working tree, ignoring line branches on the remote.
-		#[arg(long, conflicts_with = "remote")]
-		local: bool,
-	},
-
-	/// Print the branch carrying a quest, then every branch it merges through.
-	///
-	/// One per line, nearest first, ending at `main`: a quest merges into its
-	/// questline's branch, a questline into its parent's, and a milestone's
-	/// children into `main`. A line missing from the remote is created from the
-	/// one printed after it.
-	Branch {
-		/// Quest or questline to locate.
-		path: PathBuf,
 	},
 
 	/// Print the quest guide: the format, workflow, and rules agents follow.
@@ -92,13 +71,8 @@ fn main() -> Result<ExitCode> {
 			}
 			Ok(ExitCode::FAILURE)
 		}
-		Command::Ready {
-			path: Some(path),
-			remote,
-			local,
-		} => {
-			let remote = (!local).then_some(remote.as_str());
-			let blockers = quest::ready::blockers(&cli.root, &path, remote)?;
+		Command::Ready { path: Some(path) } => {
+			let blockers = quest::ready::blockers(&cli.root, &path)?;
 			for blocker in &blockers {
 				print!("{blocker}");
 			}
@@ -112,20 +86,9 @@ fn main() -> Result<ExitCode> {
 			}
 			Ok(ExitCode::SUCCESS)
 		}
-		Command::Ready {
-			path: None,
-			remote,
-			local,
-		} => {
-			let remote = (!local).then_some(remote.as_str());
-			for path in quest::ready::quests(&cli.root, remote)? {
+		Command::Ready { path: None } => {
+			for path in quest::ready::quests(&cli.root)? {
 				println!("{}", path.display());
-			}
-			Ok(ExitCode::SUCCESS)
-		}
-		Command::Branch { path } => {
-			for branch in quest::branch::chain(&cli.root, &path)? {
-				println!("{branch}");
 			}
 			Ok(ExitCode::SUCCESS)
 		}
