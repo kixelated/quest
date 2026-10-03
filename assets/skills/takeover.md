@@ -4,7 +4,7 @@ description: Adopt someone else's open PR and drive it to landable.
 
 Before you begin, run `quest guide` and `quest skill plan`, and read their output completely.
 
-Someone else opened this PR; you are now responsible for it.
+You are now responsible for this PR.
 Parse the arguments to determine the PR number. Any other text is the user's feedback on the PR; interpret it against the diff.
 If you cannot push to the PR's branch, stop and report.
 
