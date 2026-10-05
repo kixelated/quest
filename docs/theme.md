@@ -6,7 +6,8 @@ glossary, status markers, difficulty colours, palette, type, and mark. The
 board, landing page, CLI, and copy keep small tables that cite it.
 
 The theme is presentation only. Quest files, `quest check`, `quest guide`, and
-the skills keep the format's own terms.
+the skills keep the format's own terms. Its files live in `docs/theme/`, not
+`assets/`, which holds the agent contract embedded in the binary.
 
 ## Rules
 
@@ -61,7 +62,9 @@ A quest's size is its difficulty. Show the size label next to its colour.
 
 Markers use the same hues: yellow (`#f2d23c`, SGR `33`) for `!` Available and
 `?` Ready to turn in, and grey (`#9aa1ab`, SGR `90`) for a blocked `!`.
-Terminal colours are SGR codes so they follow the user's terminal palette.
+Terminal colours are SGR codes so they follow the user's terminal palette:
+named ANSI colours, plus 256-colour `208` for L and bright black `90` for XS
+and blocked.
 
 ## Palette
 
@@ -96,8 +99,8 @@ Every text colour meets WCAG AA (4.5:1) on `--ql-bg`, `--ql-panel`, and
 - Body: [Inter](https://fonts.google.com/specimen/Inter), weights 400 and 600.
 - Code: the system monospace font.
 
-Both fonts use the SIL Open Font License 1.1. Load them from Google Fonts or
-self-host them. `theme.css` has the fallback stacks.
+Both fonts use the SIL Open Font License 1.1. Load them from Google Fonts;
+do not commit font files. `theme.css` has the fallback stacks.
 
 ## Mark
 

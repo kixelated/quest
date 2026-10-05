@@ -13,6 +13,9 @@ data, exit codes, and contract described in `quest ready --help`.
 - Decided: themed stdout on a TTY, plain when piped. Agents and scripts read
   piped output, so tests must pin the plain form exactly and cover the TTY form
   separately.
+- Decided: start from the SGR codes in `docs/theme.md` (named ANSI colours,
+  `38;5;208` for L, and `90` for XS and blocked). If the CLI needs different
+  codes, change `docs/theme.md` first.
 - Honour `NO_COLOR`. Without colour, glyphs and wording may stay.
 - Keep the labels in a small table that cites `docs/theme.md`, not in the core
   rules the Worker loads as wasm.

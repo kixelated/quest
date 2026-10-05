@@ -3,8 +3,8 @@
  *
  * docs/theme.md is canonical. Change it first, then this file.
  *
- * Fonts are open-licensed (SIL Open Font License 1.1). Load them with, e.g.:
- * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600&display=swap">
+ * Fonts are open-licensed (SIL Open Font License 1.1). Load them from Google Fonts:
+ * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;600&display=swap">
  */
 
 :root {
