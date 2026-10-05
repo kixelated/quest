@@ -10,3 +10,9 @@ Hosted apps need the interest form or waitlist
 
 Waits on a human action and OpenAI. Apply, then check for a reply. Delete
 this quest once approved, or abandon it if denied.
+
+## Plan
+
+Deprioritized on 2026-10-05 behind the other m1 entries while hosted approval
+remains outstanding. Keep the quest ready so future triage checks for a reply;
+ChatGPT login and hosted runs still require its completion.
