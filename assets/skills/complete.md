@@ -29,3 +29,6 @@ Before finishing, refresh the open PR list and process any new PRs in scope.
 
 As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for its suggested follow-ups.
 Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.
+
+Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
+Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
