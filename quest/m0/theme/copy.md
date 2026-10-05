@@ -20,7 +20,3 @@ The GitHub repository has a description, topics, and a homepage link.
   skills (AGENTS.md); the agent-facing contract stays plain.
 - Setting the repository description, topics, and homepage is a maintainer
   action on GitHub; propose the values in the PR.
-
-## Required
-
-- [Identity](/quest/m0/theme/identity.md) - the logo and the glossary the copy uses

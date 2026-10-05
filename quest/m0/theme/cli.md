@@ -17,7 +17,3 @@ data, exit codes, and contract described in `quest ready --help`.
 - Keep the labels in a small table that cites `docs/theme.md`, not in the core
   rules the Worker loads as wasm.
 - Update README terminal examples and `--help` text to match.
-
-## Required
-
-- [Identity](/quest/m0/theme/identity.md) - the glossary and difficulty colours to use

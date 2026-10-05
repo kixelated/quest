@@ -23,4 +23,3 @@ from its page. A maintainer can release claims and promote issues.
 
 - [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - the app it lives in
 - [Core as wasm](/quest/m0/cloudflare/wasm.md) - check and ready in the Worker
-- [Identity](/quest/m0/theme/identity.md) - the palette, marks, and glossary the board renders
