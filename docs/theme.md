@@ -64,7 +64,9 @@ Markers use the same hues: yellow (`#f2d23c`, SGR `33`) for `!` Available and
 `?` Ready to turn in, and grey (`#9aa1ab`, SGR `90`) for a blocked `!`.
 Terminal colours are SGR codes so they follow the user's terminal palette:
 named ANSI colours, plus 256-colour `208` for L and bright black `90` for XS
-and blocked.
+and blocked. L has no 16-colour fallback: every 16-colour stand-in collides
+with M's yellow or XL's red, and the size label already tells them apart.
+Emit `38;5;208` without detecting terminal colour depth.
 
 ## Palette
 
