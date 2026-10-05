@@ -22,4 +22,4 @@ scope. The README and the landing page belong to
 ## Required
 
 - [Release proof](/quest/m0/release-proof.md) - the demo and docs describe the released tool
-- [Copy](/quest/m0/theme/copy.md) - the voice and README the posts build on
+- [Quest log theme](/quest/m0/theme/README.md) - the voice the posts build on, and the themed surfaces the demo records

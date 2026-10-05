@@ -21,3 +21,4 @@ paste.
 - [Identity](/quest/m0/theme/identity.md) - the logo, palette, and voice
 - [Quest board](/quest/m0/cloudflare/board.md) - the live tree the page embeds
 - [GitHub sync](/quest/m0/cloudflare/github-sync.md) - mirrors Quest's own repository into Artifacts
+- [GitHub onboarding](/quest/m0/cloudflare/onboard.md) - the flow the "onboard a repository" call to action leads to
