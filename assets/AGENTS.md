@@ -63,6 +63,21 @@ When the section is empty, delete it; the quest is now unblocked.
 `quest check` enforces this structure.
 Run it after creating or updating quests.
 
+## Questions
+
+Block on user decisions.
+Explain the quest or PR, the decision, and your recommendation, then ask synchronously with a blocking interactive question tool when available and allowed in the current mode.
+Do not use asynchronous question tools.
+
+If no blocking tool is available, or it returns without an answer, put the question and numbered choices in your final reply and end the turn.
+Resume when the user answers; do not bury the question in a progress update or replace the wait with sleeps or timed polls.
+Silence, elapsed time, and a preselected recommendation are not answers or approval.
+Do not advance the interview or act on an unanswered choice.
+Already authorized background work may continue while the foreground waits.
+
+A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
+Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
+
 ## Creation
 
 Quests are created in PRs and reviewed.
