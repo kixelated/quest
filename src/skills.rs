@@ -15,11 +15,11 @@ const SKILLS: [(&str, &str); 10] = [
 	("delete", include_str!("../assets/skills/delete.md")),
 	("export", include_str!("../assets/skills/export.md")),
 	("import", include_str!("../assets/skills/import.md")),
+	("iterate", include_str!("../assets/skills/iterate.md")),
 	("merge", include_str!("../assets/skills/merge.md")),
 	("plan", include_str!("../assets/skills/plan.md")),
 	("spawn", include_str!("../assets/skills/spawn.md")),
 	("start", include_str!("../assets/skills/start.md")),
-	("takeover", include_str!("../assets/skills/takeover.md")),
 ];
 
 /// Where an agent without the binary learns to install it.

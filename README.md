@@ -96,7 +96,7 @@ the version you pin decides what your agents follow:
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
 | `quest-spawn` | Triage ready quests and hand them to parallel agents. |
-| `quest-takeover` | Adopt someone else's open PR and drive it to landable. |
+| `quest-iterate` | Adopt someone else's open PR and drive it to landable. |
 | `quest-merge` | Land a quest's PR once CI and reviews pass. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |

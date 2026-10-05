@@ -43,7 +43,7 @@ for layout in claude agents; do
         echo 'Second init changed files' >&2
         exit 1
     }
-    for skill in audit complete delete export import merge plan spawn start takeover; do
+    for skill in audit complete delete export import iterate merge plan spawn start; do
         "$binary" skill "$skill" --stub >"$work/stub"
         assert_file "$work/stub" "$repo/.claude/skills/quest-$skill/SKILL.md"
         assert_file "$work/stub" "$repo/.agents/skills/quest-$skill/SKILL.md"
