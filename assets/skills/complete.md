@@ -8,7 +8,7 @@ The goal is to evaluate the open (non-draft) PRs in the repository and decide wh
 The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent.
 
-Interactively prompt the user with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), with your recommendation:
+Ask synchronously with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), following the guide's Questions section and including your recommendation:
 - `/quest-merge`: Only have minor outstanding issues.
 - `/quest-iterate`: Have significant issues and need decisions.
 - skip: Are not ready to be merged yet.
@@ -28,4 +28,4 @@ Keep going until all PRs have been decided then wait for all spawned sub-agents 
 Before finishing, refresh the open PR list and process any new PRs in scope.
 
 As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for its suggested follow-ups.
-Start any asynchronous tasks first before blocking on any prompt.
+Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.

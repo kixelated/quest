@@ -10,7 +10,7 @@ Use the argument (if provided) to filter to specific quests/questlines.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Present one quest at a time. Before its question, write a short paragraph explaining the problem, the quest's goal, and your recommendation, including any blockers or tradeoffs the user needs to decide.
-Ask one interactive question and wait for the answer before asking the next. Keep an asynchronous prompt active while waiting; do not end the turn while it awaits an answer.
+Ask one synchronous question and wait for the answer before asking the next, following the guide's Questions section.
 Offer these choices:
 
 - `/quest-start`: If the quest is well planned with no blockers.
@@ -43,4 +43,3 @@ Include quest context, as many quests are concurrently in flight.
 
 Run each selected `/quest-merge` or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
 Run selected `/quest-plan` sessions in the foreground.
-While awaiting the active prompt, continue independent research and already authorized background work.

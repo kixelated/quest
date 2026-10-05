@@ -10,7 +10,7 @@ A background agent that cannot prompt puts the problem in its report with a reco
 
 Work the tree in **rounds**.
 The **frontier** is every decision whose prerequisites are already settled.
-Ask the whole frontier in one round, interactively if supported.
+Ask the whole frontier in one synchronous round, following the guide's Questions section.
 Select at least one answer as (recommended) and wait for the user's answers (never guess) before the next round.
 
 Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them.
