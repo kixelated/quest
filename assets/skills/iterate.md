@@ -1,10 +1,10 @@
 ---
-description: Adopt someone else's open PR and drive it to landable.
+description: Iterate on an open PR to settle its open decisions, fix CI and review findings, and push.
 ---
 
 Before you begin, run `quest guide` and `quest skill plan`, and read their output completely.
 
-You are now responsible for this PR.
+You own this PR until it is landable.
 Parse the arguments to determine the PR number. Any other text is the user's feedback on the PR; interpret it against the diff.
 If you cannot push to the PR's branch, stop and report.
 

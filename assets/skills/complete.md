@@ -10,7 +10,7 @@ Each merge is performed in parallel by a sub-agent.
 
 Interactively prompt the user with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), with your recommendation:
 - `/quest-merge`: Only have minor outstanding issues.
-- `/quest-takeover`: Have significant issues and need decisions.
+- `/quest-iterate`: Have significant issues and need decisions.
 - skip: Are not ready to be merged yet.
 - `/quest-delete`: Should be deleted.
 
@@ -19,7 +19,7 @@ Act on a PR only after the user picks its action in this session, including PRs 
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
 
-Run each `/quest-merge` or `/quest-takeover` in its own sub-agent with its own isolated worktree.
+Run each `/quest-merge` or `/quest-iterate` in its own sub-agent with its own isolated worktree.
 Each sub-agent blocks on its own waits and reports back only when done or blocked.
 Limit the number of active agents to the CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
