@@ -43,6 +43,7 @@ Decided while planning on 2026-10-05:
 
 ## Required
 
+- [Social preview](/quest/m0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
 - [Copy](/quest/m0/theme/copy.md) - the README, docs, and GitHub repository metadata in the quest-log voice
 - [Themed CLI output](/quest/m0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/m0/theme/landing.md) - the Worker's front page pitches Quest over its own live quest board

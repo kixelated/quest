@@ -19,5 +19,5 @@ The GitHub repository has a description, topics, and a homepage link.
 - Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or the
   skills (AGENTS.md); the agent-facing contract stays plain.
 - Setting the repository description, topics, and homepage is a maintainer
-  action on GitHub; propose the values in the PR. Ask for
-  `docs/theme/og.png` to be uploaded as the social preview at the same time.
+  action on GitHub; propose the values in the PR. The social preview upload
+  is its own quest, [Social preview](/quest/m0/theme/social-preview.md).
