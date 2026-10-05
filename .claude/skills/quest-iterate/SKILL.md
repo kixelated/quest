@@ -1,6 +1,6 @@
 ---
 name: quest-iterate
-description: Adopt someone else's open PR and drive it to landable.
+description: Iterate on an open PR to settle its open decisions, fix CI and review findings, and push.
 ---
 
 Run `quest skill iterate` and follow its output.

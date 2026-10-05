@@ -106,6 +106,12 @@ mod tests {
 				skill.name
 			);
 			assert!(!skill.description().is_empty(), "{} description", skill.name);
+			// The stub copies the description as a plain YAML scalar, where ": " is invalid.
+			assert!(
+				!skill.description().contains(": "),
+				"{} description has \": \"",
+				skill.name
+			);
 			assert!(!skill.body().trim().is_empty(), "{} body", skill.name);
 		}
 	}
