@@ -43,3 +43,6 @@ Include quest context, as many quests are concurrently in flight.
 
 Run each selected `/quest-merge` or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
 Run selected `/quest-plan` sessions in the foreground.
+
+Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
+Leave the worktree you are running in and any holding uncommitted work; list those in your summary.

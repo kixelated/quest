@@ -19,6 +19,3 @@ A background agent that cannot prompt lists its decisions and suggested follow-u
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.
-
-Then clean up lingering local worktrees and branches whose PRs have merged, including this one if it already has.
-Leave the worktree you are running in, and any holding uncommitted work or commits the merged PR lacks; list those in your report.
