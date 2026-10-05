@@ -63,3 +63,4 @@ Decided while planning on 2026-10-01. Research sources:
 - [GitHub sync](/quest/m0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes
 - [GitHub onboarding](/quest/m0/cloudflare/onboard.md) - enter a GitHub repository and get Quest set up through a PR
 - [More logins](/quest/m0/cloudflare/logins.md) - Google and passkey sign-in
+- [Quest log theme](/quest/m0/theme/README.md) - the demo is recorded after the themed board, landing page, and README land
