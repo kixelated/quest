@@ -16,6 +16,8 @@ data, exit codes, and contract described in `quest ready --help`.
 - Decided: start from the SGR codes in `docs/theme.md` (named ANSI colours,
   `38;5;208` for L, and `90` for XS and blocked). If the CLI needs different
   codes, change `docs/theme.md` first.
+- Decided: no 16-colour fallback for L and no colour-depth detection. A
+  fallback would be too close to M or XL, and the size label carries the meaning.
 - Honour `NO_COLOR`. Without colour, glyphs and wording may stay.
 - Keep the labels in a small table that cites `docs/theme.md`, not in the core
   rules the Worker loads as wasm.
