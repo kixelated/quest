@@ -10,7 +10,7 @@ result as a change.
 ## Plan
 
 - This reverses m0's "the CLI stays offline" decision (2026-10-01): `run` lives
-  in the main crate.
+  in the main CLI package.
 - Sign in with ChatGPT is self-serve for open-source, locally run apps:
   OAuth with PKCE, a loopback `127.0.0.1` callback, and dynamic client
   registration. Drive Codex app-server with the token
@@ -25,5 +25,6 @@ result as a change.
 
 ## Required
 
+- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the CLI `run` is written in
 - [Fork intake](/quest/m0/cloudflare/intake.md) - forks, tokens, and claims
 - [Changes](/quest/m0/cloudflare/changes.md) - where the result lands

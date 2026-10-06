@@ -16,10 +16,10 @@ Decided while planning on 2026-10-06:
 
 - Built from the real tree rather than a hand-drawn illustration, so it is
   proof, never drifts, and needs no upkeep.
-- Parse the tree with the wasm core instead of a second parser in TypeScript,
-  so its rules match `quest check`.
+- Parse the tree with the shared TypeScript core, so its rules match
+  `quest check`.
 - Split from [Site](/quest/m0/theme/site.md) so the design isn't blocked on
-  the wasm core.
+  the core's port to TypeScript.
 - Keep it readable over decorative: the RPG feel stays semi-professional, as
   the theme questline decided.
 - Every status and size keeps its text label, since colour is never the only
@@ -28,4 +28,4 @@ Decided while planning on 2026-10-06:
 ## Required
 
 - [Site](/quest/m0/theme/site.md) - the home page section and identity the map draws into
-- [Core as wasm](/quest/m0/cloudflare/wasm.md) - the parser the build reuses
+- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the parser the build reuses

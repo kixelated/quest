@@ -28,7 +28,7 @@ Decided while planning on 2026-10-06:
 - One quest, not an identity quest followed by a site quest. The user accepted
   that the CLI and copy quests see the new tokens only once this lands.
 - The map is split into [Quest map](/quest/m0/theme/map.md), because it needs
-  the wasm core (still a draft) and the design shouldn't wait for it.
+  the core's port to TypeScript and the design shouldn't wait for it.
 - Direction B, "illuminated ledger", was chosen over refining today's slate
   window (A) and a modern dev-tool look (C, Space Grotesk and monospace with
   gold as the only accent). It replaces the theme questline's slate panels

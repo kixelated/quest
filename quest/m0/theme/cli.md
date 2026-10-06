@@ -19,6 +19,12 @@ data, exit codes, and contract described in `quest ready --help`.
 - Decided: no 16-colour fallback for L and no colour-depth detection. A
   fallback would be too close to M or XL, and the size label carries the meaning.
 - Honour `NO_COLOR`. Without colour, glyphs and wording may stay.
-- Keep the labels in a small table that cites `docs/theme.md`, not in the core
-  rules the Worker loads as wasm.
+- Keep the labels in a small table that cites `docs/theme.md`, in `src/cli`,
+  not in the shared core the Worker imports.
+- Waits for [the port](/quest/m0/cloudflare/typescript.md) (decided
+  2026-10-06), so the theme is written once, in TypeScript.
 - Update README terminal examples and `--help` text to match.
+
+## Required
+
+- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the CLI this themes

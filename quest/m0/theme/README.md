@@ -34,8 +34,7 @@ Decided while planning on 2026-10-05:
 - `docs/theme.md` is the human source of truth for the glossary, markers,
   colours, palette, type, and mark (`docs/theme/`). The CLI and the Worker
   each keep a small constant table that cites it. The roughly ten strings
-  are cheap to duplicate, and this keeps presentation out of the Rust core
-  that the Worker loads as wasm.
+  are cheap to duplicate, and this keeps presentation out of the shared core.
 - The look is dark only. There is no light mode. On 2026-10-06 the
   "illuminated ledger" direction (warm ink, parchment text, gold leaf,
   Cormorant Garamond headings) replaced the slate window and Cinzel; see
