@@ -2,7 +2,7 @@
 
 ## Goal
 
-Signed-out visitors to the Worker's root see the logo and the hook ("a quest
+Signed-out visitors to `https://kixel.quest` see the logo and the hook ("a quest
 log for your repo and your agents"), the substance lines, and then Quest's own
 quest tree rendered live from the board as proof. Calls to action ("Accept the
 quest") lead to sign-in, onboarding a GitHub repository, and the one-line SETUP
@@ -15,6 +15,8 @@ paste.
 - Same dark look as the board, from `docs/theme.md`. Reuse the board's
   components rather than restyling them.
 - Quest's own repository reaches Artifacts through GitHub sync.
+- Once `https://kixel.quest/setup` is live, the one-line paste in the README
+  and `docs/getting-started.md` uses it instead of the GitHub `SETUP.md` URL.
 
 ## Required
 

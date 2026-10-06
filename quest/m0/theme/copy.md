@@ -6,7 +6,8 @@ The README opens with the logo and the hook, "a quest log for your repo and
 your agents", then delivers the substance: readable plans, explicit
 dependencies, and reviewable Git changes. `docs/getting-started.md` and
 `cloudflare/README.md` (where it exists) use the glossary in `docs/theme.md`.
-The GitHub repository has a description, topics, and a homepage link.
+The GitHub repository has a description, topics, and `https://kixel.quest` as
+its homepage.
 
 ## Plan
 
