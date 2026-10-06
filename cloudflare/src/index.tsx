@@ -6,6 +6,8 @@ export { RepositoryCoordinator } from "./repository";
 const app = new Hono<{ Bindings: Env }>();
 app.use(secureHeaders());
 app.get("/health", (c) => c.json({ status: "ok" }));
+// Short link for the one-line setup paste.
+app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
 app.get("/", async (c) => {

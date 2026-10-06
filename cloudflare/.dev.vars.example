@@ -2,3 +2,5 @@
 AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters
 GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
 GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
+# Local development serves the app from Wrangler instead of https://kixel.quest.
+AUTH_URL=http://localhost:8787

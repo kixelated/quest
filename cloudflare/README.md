@@ -27,7 +27,8 @@ Fill in the local file with a random `AUTH_SECRET` (at least 32 characters) and
 GitHub OAuth app credentials. Configure the GitHub app's homepage as
 `http://localhost:8787` and callback as
 `http://localhost:8787/api/auth/callback/github`. The file is ignored by Git.
-Use a separate OAuth app for production.
+Its `AUTH_URL` overrides the production origin in `wrangler.jsonc`. Use a
+separate OAuth app for production.
 
 ```sh
 just worker-dev
@@ -35,8 +36,9 @@ just worker-dev
 
 This applies local D1 migrations and starts Wrangler. Open
 `http://localhost:8787`, sign in, and sign out. `/health` reports process health;
-it does not probe storage. D1 and the coordinator persist locally under
-`cloudflare/.wrangler/`.
+it does not probe storage. `/setup` redirects to `SETUP.md` on GitHub, so the
+one-line setup paste can use `https://kixel.quest/setup`. D1 and the
+coordinator persist locally under `cloudflare/.wrangler/`.
 
 Artifacts is remote-only, even in Wrangler local mode. Wrangler requires an
 account login (`cd cloudflare; npm exec -- wrangler login`) for that binding.
@@ -82,14 +84,17 @@ npm exec -- wrangler d1 create quest-auth
 ```
 
 Copy the returned database ID into `wrangler.jsonc`; the checked-in all-zero ID
-is a local placeholder. Set `AUTH_URL` to the Worker's public HTTPS origin and
-choose the Worker name, account, and Artifacts namespace for this deployment.
+is a local placeholder. The checked-in config deploys to `https://kixel.quest`
+as a Workers custom domain, which requires the `kixel.quest` zone in the same
+Cloudflare account; `workers.dev` is disabled so sign-in has one origin. For
+another deployment, change `routes`, `AUTH_URL`, the Worker name, account, and
+Artifacts namespace.
 The namespace may be created explicitly with Wrangler or is created on the
 first repository creation. Use different namespaces, databases, Workers, and
 OAuth credentials for each deployment environment.
 
 Register the production GitHub OAuth app with callback
-`https://YOUR_PUBLIC_ORIGIN/api/auth/callback/github`, then set secrets
+`https://kixel.quest/api/auth/callback/github`, then set secrets
 interactively:
 
 ```sh

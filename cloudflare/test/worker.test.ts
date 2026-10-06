@@ -11,6 +11,11 @@ describe("Worker", () => {
 		expect(await (await SELF.fetch(`${origin}/health`)).json()).toEqual({ status: "ok" });
 		expect((await SELF.fetch(`${origin}/missing`)).status).toBe(404);
 	});
+	it("redirects the setup short link to SETUP.md", async () => {
+		const response = await SELF.fetch(`${origin}/setup`, { redirect: "manual" });
+		expect(response.status).toBe(302);
+		expect(response.headers.get("location")).toBe("https://github.com/kixelated/quest/blob/main/SETUP.md");
+	});
 	it("renders a GitHub sign-in form without a session", async () => {
 		const response = await SELF.fetch(origin);
 		expect(response.status).toBe(200);

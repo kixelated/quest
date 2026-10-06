@@ -24,6 +24,7 @@ export default defineConfig({
 				),
 				bindings: {
 					...config.vars,
+					AUTH_URL: "http://localhost:8787",
 					AUTH_SECRET: "test-only-secret-that-is-at-least-32-characters",
 					GITHUB_CLIENT_ID: "test-client-id",
 					GITHUB_CLIENT_SECRET: "test-client-secret",
