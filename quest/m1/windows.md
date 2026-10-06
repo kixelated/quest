@@ -10,7 +10,7 @@ support them. This work is not required for the first public release.
 
 Provide native release binaries and documented installation and removal steps.
 Choose supported Windows versions and architectures when implementation starts,
-based on the Rust toolchain and agent support available then.
+based on Bun's compile targets and agent support available then.
 
 Audit filesystem paths, CRLF, process invocation, executable discovery, and Git
 worktree behavior. Skill discovery and installation must not assume that Windows

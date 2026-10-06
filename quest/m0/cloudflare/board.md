@@ -9,7 +9,7 @@ from its page. A maintainer can release claims and promote issues.
 
 ## Plan
 
-- Readiness comes from the wasm core, run over the tree read from Artifacts.
+- Readiness comes from the shared TypeScript core, run over the tree read from Artifacts.
 - This is the main surface for the demo, so ease of use counts for 25% of the
   judging.
 - Build it themed from the start, not restyled later (decided 2026-10-05 in
@@ -36,4 +36,4 @@ from its page. A maintainer can release claims and promote issues.
 ## Required
 
 - [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - the app it lives in
-- [Core as wasm](/quest/m0/cloudflare/wasm.md) - check and ready in the Worker
+- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - check and ready in the Worker
