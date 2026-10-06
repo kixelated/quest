@@ -4,9 +4,9 @@
 
 By the 2026-10-14 Cloudflare demo, Quest presents itself as an original
 MMO-style quest log for your repository and your agents: themed README and
-docs copy, a shared identity (logo, palette, social image), a themed quest
-board and landing page, and themed CLI output on a terminal. The quest format,
-`quest guide`, and the skills do not change.
+docs copy, a shared identity (logo, palette, social image), a themed site at
+`https://kixel.quest` (home, docs, and quest board), and themed CLI output on
+a terminal. The quest format, `quest guide`, and the skills do not change.
 
 This README owns the work no child does: a final pass over every surface for
 consistency with `docs/theme.md` before the demo is recorded.
@@ -36,17 +36,23 @@ Decided while planning on 2026-10-05:
   each keep a small constant table that cites it. The roughly ten strings
   are cheap to duplicate, and this keeps presentation out of the Rust core
   that the Worker loads as wasm.
-- The look is dark only: an in-game window with slate panels, gold borders,
-  and serif headings. There is no light mode.
-- The landing page on the Worker replaces launch.md's earlier "no website"
-  boundary.
+- The look is dark only. There is no light mode. On 2026-10-06 the
+  "illuminated ledger" direction (warm ink, parchment text, gold leaf,
+  Cormorant Garamond headings) replaced the slate window and Cinzel; see
+  [Site](/quest/m0/theme/site.md).
+- Lean into the RPG voice but stay semi-professional (decided 2026-10-06).
+  Tokens are gold coins, visually ("Offer gold"), as display only.
+- The site on the Worker (home, docs, and the hosted app under one shell)
+  replaces launch.md's earlier "no website" boundary.
 
 ## Required
 
+- [Site](/quest/m0/theme/site.md) - kixel.quest's refreshed identity, shared shell, home page, and rendered docs
+- [Quest map](/quest/m0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
 - [Social preview](/quest/m0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
 - [Copy](/quest/m0/theme/copy.md) - the README, docs, and GitHub repository metadata in the quest-log voice
 - [Themed CLI output](/quest/m0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
-- [Landing page](/quest/m0/theme/landing.md) - the Worker's front page pitches Quest over its own live quest board
+- [Landing page](/quest/m0/theme/landing.md) - the home page's map and calls to action link into the live board
 
 ## Related
 
