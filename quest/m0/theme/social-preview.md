@@ -16,8 +16,14 @@ delete this quest once it returns `true`.
   description, topics, and homepage stay in
   [Copy](/quest/m0/theme/copy.md), since an agent can set them with
   `gh repo edit` once their wording is approved.
-- Ranked first in the theme questline because the image already exists and
-  the upload takes a minute; as a human-action quest it stays ready and
-  resurfaces at every triage until done.
+- As a human-action quest it resurfaces at every triage once ready, and the
+  upload takes a minute.
+- Waits for [Site](/quest/m0/theme/site.md), which re-exports `og.png` in
+  the refreshed identity (2026-10-06). Uploading the old image first would
+  only be redone.
 - If `og.svg` changes, re-export `og.png` as `docs/theme.md` describes and
   upload it again.
+
+## Required
+
+- [Site](/quest/m0/theme/site.md) - re-exports `og.png` in the new identity

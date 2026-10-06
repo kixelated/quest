@@ -47,6 +47,8 @@ Decided while planning on 2026-10-01. Research sources:
   ([m1](/quest/m1/chatgpt-hosted.md)).
 - Only the extra login providers may slip past the demo. GitHub sync, hosted
   runs, and issue intake must ship.
+- Production lives at `https://kixel.quest` (bought 2026-10-05 on Porkbun),
+  a Workers custom domain, so its DNS moves to Cloudflare before deploying.
 - Agents run either locally or hosted. Watching an agent run live is a
   non-goal beyond showing its status. In v1, checks run `quest check` only.
 
