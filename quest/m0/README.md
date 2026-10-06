@@ -32,5 +32,6 @@ ownership-manifest design:
 
 - [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
+- [Spawn skips finished line children](/quest/m0/spawn-line-children.md) - `/quest-spawn` offers no quest already finished on its line branch, and spawned agents keep scratch files apart
 - [Release proof](/quest/m0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
