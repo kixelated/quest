@@ -83,9 +83,8 @@ npm exec -- wrangler login
 npm exec -- wrangler d1 create quest-auth
 ```
 
-Copy the returned database ID into `wrangler.jsonc`; the checked-in all-zero ID
-is a local placeholder. The checked-in config deploys to `https://kixel.quest`
-as a Workers custom domain, which requires the `kixel.quest` zone in the same
+The checked-in config deploys to `https://kixel.quest` with that deployment's
+D1 database ID, as a Workers custom domain, which requires the `kixel.quest` zone in the same
 Cloudflare account; `workers.dev` is disabled so sign-in has one origin. For
 another deployment, change `routes`, `AUTH_URL`, the Worker name, account, and
 Artifacts namespace.

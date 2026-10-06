@@ -14,7 +14,7 @@
 		{
 			"binding": "DB",
 			"database_name": "quest-auth",
-			"database_id": "00000000-0000-0000-0000-000000000000",
+			"database_id": "67aac614-20eb-4426-a501-6043238f486c",
 			"migrations_dir": "migrations",
 		},
 	],
