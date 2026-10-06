@@ -4,7 +4,9 @@ import { createAuth } from "./auth";
 export { RepositoryCoordinator } from "./repository";
 
 const app = new Hono<{ Bindings: Env }>();
-app.use(secureHeaders());
+// Browsers send `Origin: null` on form posts under the default "no-referrer"
+// policy, which would fail the origin check on /sign-in and /sign-out.
+app.use(secureHeaders({ referrerPolicy: "same-origin" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
 // Short link for the one-line setup paste.
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));

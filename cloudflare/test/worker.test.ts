@@ -20,6 +20,8 @@ describe("Worker", () => {
 		const response = await SELF.fetch(origin);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("cache-control")).toBe("no-store");
+		// The sign-in form's post must carry this origin, not `null`.
+		expect(response.headers.get("referrer-policy")).toBe("same-origin");
 		expect(await response.text()).toContain("Sign in with GitHub");
 	});
 	it("starts GitHub OAuth with persisted state and cookies", async () => {
