@@ -9,7 +9,7 @@ sign-in, onboarding a GitHub repository, and the one-line SETUP paste.
 ## Plan
 
 - Narrowed on 2026-10-06. The site quest built the design, the shell, and
-  the home page (`cloudflare/src/home.tsx`), and [Quest map](/quest/a0/theme/map.md) draws
+  the home page (`cloudflare/src/home.tsx`), and its quest map (`cloudflare/src/map.tsx`) draws
   the tree at build time. This quest adds only the live links once the board, sync, and
   onboarding exist. Before then, map nodes link to the quest files on GitHub.
 - The board's pages (`/repos/<name>/<quest path>`) landed on 2026-10-07 in
@@ -23,6 +23,5 @@ sign-in, onboarding a GitHub repository, and the one-line SETUP paste.
 
 ## Required
 
-- [Quest map](/quest/a0/theme/map.md) - the map whose nodes this links up
 - [GitHub sync](/quest/a0/cloudflare/github-sync.md) - mirrors Quest's own repository into Artifacts
 - [GitHub onboarding](/quest/a0/cloudflare/onboard.md) - the flow the "onboard a repository" call to action leads to

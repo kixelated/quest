@@ -5,7 +5,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { createAuth } from "./auth";
 import { type Board, findDoc as findQuest, readBoard } from "./board/model";
 import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
-import { type Project, findProject } from "./board/project";
+import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
 import { Layout, type Page, type User } from "./layout";
@@ -44,11 +44,21 @@ async function page(
 	);
 }
 
+// A project's board: its acts, epics, and quests with their statuses.
+const boards = new WeakMap<Project, Board>();
+function board(name: string): Board | null {
+	const project = findProject(name);
+	if (!project) return null;
+	if (!boards.has(project)) boards.set(project, readBoard(project));
+	return boards.get(project)!;
+}
+
+// The home page maps the site's own project.
 app.get("/", (c) =>
 	page(
 		c,
 		{ description: "Readable plans, explicit dependencies, and reviewable Git changes, for you and your agents." },
-		<Home setup={new URL("/setup", c.env.AUTH_URL).href} />,
+		<Home setup={new URL("/setup", c.env.AUTH_URL).href} board={board(home.name)!} />,
 	),
 );
 app.get("/docs", (c) => page(c, { title: "Docs", description: "How to use Quest in your repository." }, <DocIndex />));
@@ -60,13 +70,6 @@ app.get("/docs/:slug", (c) => {
 
 // The quest board: a project's acts, then each quest's page at its path
 // without `.md`, the way its branch is named.
-const boards = new WeakMap<Project, Board>();
-function board(name: string): Board | null {
-	const project = findProject(name);
-	if (!project) return null;
-	if (!boards.has(project)) boards.set(project, readBoard(project));
-	return boards.get(project)!;
-}
 app.get("/repos/:repository", (c) => {
 	const found = board(c.req.param("repository"));
 	if (!found) return c.notFound();
