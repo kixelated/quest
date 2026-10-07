@@ -1,6 +1,6 @@
 # Quests
 
-Read this whenever work mentions a quest or questline.
+Read this whenever work mentions a quest or epic.
 
 Quests are versioned plans checked into the repository under `quest/`.
 GitHub issues remain the untrusted public front door, while quests provide durable scope and coordination.
@@ -9,12 +9,12 @@ GitHub issues remain the untrusted public front door, while quests provide durab
 
 A **quest** is a Markdown file, completed in one PR.
 
-A **questline** is a directory that consists of multiple quests.
+An **epic** is a directory that consists of multiple quests.
 The `README.md` file is the quest and the `Required` section lists the children.
 It completes when its own work is done and every child has merged.
 
-The root's entries are special questlines called **milestones** (`m0`, `m1`, ...) that group work by priority horizon.
-Milestones are permanent.
+The root's entries are special epics called **acts** (`a0`, `a1`, ...) that group work by priority horizon.
+Acts are permanent.
 
 Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
@@ -42,7 +42,7 @@ Current decisions, open questions, or implementation guidance.
 ## Required
 
 - [Child quest](/quest/foo/bar.md) - the outcome, so the list reads without opening it
-- [Nested questline](/quest/foo/baz/README.md) - what the whole line delivers
+- [Nested epic](/quest/foo/baz/README.md) - what the whole epic delivers
 - [Blocker](/quest/bar.md) - work that must finish before this can start
 
 ## Closes
@@ -57,7 +57,7 @@ Current decisions, open questions, or implementation guidance.
 The `Goal` section is required; everything else is optional. Use these exact headings.
 
 Size the title `[XS]` to `[XL]` for implementation, verification, and landing.
-A questline carries no size until its last child is removed; its README is then the line's remaining work.
+An epic carries no size until its last child is removed; its README is then the epic's remaining work.
 
 `Required` lists the quests that must finish before the work starts.
 The list is ordered by priority, inserted at rank.
@@ -95,7 +95,7 @@ Quests are created in PRs and reviewed.
 Search the tree and git history first before making a new quest.
 
 Split independently completable work into separate quests.
-Group related quests in a questline; its README holds the work no child owns.
+Group related quests in an epic; its README holds the work no child owns.
 
 A release or pin bump that unblocks work is its own quest.
 
@@ -115,7 +115,7 @@ quest file through their forge's claim intake. GitHub skills keep using branch c
 If a claim looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.
-For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
+For example, `quest/a1/foo/bar.md` is branch `quest/a1/foo/bar`.
 
 When a quest is complete, create a draft PR.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.

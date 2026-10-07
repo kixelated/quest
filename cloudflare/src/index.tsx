@@ -52,7 +52,7 @@ app.get("/docs/:slug", (c) => {
 	return page(c, { title: doc.title, description: doc.summary }, <DocPage doc={doc} />);
 });
 
-// The quest board: a project's chapters, then each quest's page at its path
+// The quest board: a project's acts, then each quest's page at its path
 // without `.md`, the way its branch is named.
 const boards = new WeakMap<Project, Board>();
 function board(name: string): Board | null {

@@ -13,7 +13,7 @@ a second shell.
 The quest board at `/repos/<name>` opens on each act with its progress, then
 its epics and quests with their statuses, filtered by status with
 `?show=available` and the like. Each quest has a page at its path without
-`.md`, such as `/repos/quest/quest/m0/cloudflare/board`: its Markdown rendered
+`.md`, such as `/repos/quest/quest/a0/cloudflare/board`: its Markdown rendered
 with raw HTML escaped, its status, and what to do next. Readiness comes from
 `quest/core`, so the board agrees with `quest ready`. Progress counts finished
 quests, which merges delete, from Git history (`scripts/history.ts`), weighted

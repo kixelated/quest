@@ -9,7 +9,7 @@ result as a change.
 
 ## Plan
 
-- This reverses m0's "the CLI stays offline" decision (2026-10-01): `run` lives
+- This reverses a0's "the CLI stays offline" decision (2026-10-01): `run` lives
   in the main CLI package.
 - Sign in with ChatGPT is self-serve for open-source, locally run apps:
   OAuth with PKCE, a loopback `127.0.0.1` callback, and dynamic client
@@ -18,12 +18,12 @@ result as a change.
 - The app login is a browser device flow that returns the fork's remote and
   token.
 - Claiming is git-native: commit the `## Claim` to the fork and push, then let
-  [intake](/quest/m0/cloudflare/intake.md) pull it into main. If the claim
+  [intake](/quest/a0/cloudflare/intake.md) pull it into main. If the claim
   loses a race, stop.
 - Give the agent the quest-start workflow and push to the quest's branch on
   the fork. Each push keeps the claim alive.
 
 ## Required
 
-- [Fork intake](/quest/m0/cloudflare/intake.md) - forks, tokens, and claims
-- [Changes](/quest/m0/cloudflare/changes.md) - where the result lands
+- [Fork intake](/quest/a0/cloudflare/intake.md) - forks, tokens, and claims
+- [Changes](/quest/a0/cloudflare/changes.md) - where the result lands

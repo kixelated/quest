@@ -9,7 +9,7 @@ import {
 	children,
 	comparePaths,
 	entries,
-	isQuestline,
+	isEpic,
 	parse,
 	parseClaim,
 	permanent,
@@ -86,7 +86,7 @@ export function questHref(project: Project, path: string): string {
 	return `/repos/${project.name}/${page}`;
 }
 
-/** The document a page path names: `quest/m0/board`, `quest/m0/epic`, or `quest/m0/epic/README`. */
+/** The document a page path names: `quest/a0/board`, `quest/a0/epic`, or `quest/a0/epic/README`. */
 export function findDoc(board: Board, page: string): Doc | null {
 	for (const path of [`${page}.md`, `${page}/README.md`]) {
 		const doc = board.docs.get(path);
@@ -156,7 +156,7 @@ export function readBoard(project: Project): Board {
 
 	const progress = (path: string): Progress => {
 		const under = (p: string) => p.startsWith(`${dir(path)}/`);
-		const remaining = parsed.filter((doc) => under(doc.path) && !isQuestline(doc));
+		const remaining = parsed.filter((doc) => under(doc.path) && !isEpic(doc));
 		const done = finishedUnder(path);
 		const weigh = (titles: string[]) => titles.reduce((sum, text) => sum + WEIGHTS[title(text).size ?? "XS"], 0);
 		const weight = weigh(done.map((c) => c.title));
@@ -182,9 +182,7 @@ export function readBoard(project: Project): Board {
 			if (seen.has(path)) return [];
 			seen.add(path);
 			const child = docs.get(path)!;
-			return isQuestline(child)
-				? [{ kind: "epic", epic: group(child) }]
-				: [{ kind: "quest", quest: quest(child) }];
+			return isEpic(child) ? [{ kind: "epic", epic: group(child) }] : [{ kind: "quest", quest: quest(child) }];
 		});
 		return {
 			path: doc.path,
@@ -209,7 +207,7 @@ export function readBoard(project: Project): Board {
 	});
 
 	// Quests outside every act still show, in a group of their own.
-	const rest = parsed.filter((doc) => !seen.has(doc.path) && !isQuestline(doc)).map(quest);
+	const rest = parsed.filter((doc) => !seen.has(doc.path) && !isEpic(doc)).map(quest);
 	if (rest.length > 0) {
 		acts.push({
 			path: "quest",

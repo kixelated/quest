@@ -17,7 +17,7 @@ export {
 	entries,
 	has,
 	isQuest,
-	isQuestline,
+	isEpic,
 	owner,
 	parse,
 	permanent,

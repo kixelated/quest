@@ -3,11 +3,11 @@
 ## Goal
 
 The home page at `https://kixel.quest` shows Quest's own `quest/` tree as a
-map, read left to right like a video game world map. Milestones (chapters)
-are regions, questlines (quest chains) are paths, and quests are nodes marked
-with their status and difficulty, in the identity from `docs/theme.md`. The map
+map, read left to right like a video game world map. Acts are regions,
+epics are paths, and quests are nodes marked with their status and
+difficulty, in the identity from `docs/theme.md`. The map
 is generated at build time, so every deploy shows the real tree. Until
-[Landing page](/quest/m0/theme/landing.md) lands, nodes link to the quest
+[Landing page](/quest/a0/theme/landing.md) lands, nodes link to the quest
 files on GitHub.
 
 ## Plan
@@ -23,6 +23,9 @@ Decided while planning on 2026-10-06:
   section (`id="map"` in `cloudflare/src/home.tsx`), replacing its static
   placeholder.
 - Keep it readable over decorative: the RPG feel stays semi-professional, as
-  the theme questline decided.
+  the theme epic decided.
 - Every status and size keeps its text label, since colour is never the only
   signal.
+- Decided 2026-10-07 on the board's PR (kixelated/quest#74): the map lives
+  here, not on the board, and each act links to its board section
+  (`/repos/quest#a0`).

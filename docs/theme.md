@@ -27,7 +27,7 @@ then deliver the pitch: readable plans, explicit dependencies, and reviewable
 Git changes.
 
 Lean into the RPG voice but stay semi-professional: ledger, party, gold, and
-chapters, yes; pixel art, sound, and game interface chrome, no.
+acts, yes; pixel art, sound, and game interface chrome, no.
 
 ## Glossary
 
@@ -42,8 +42,6 @@ format term.
 | claimed | Accepted by @*name* | |
 | open PR or change | Ready to turn in | yellow `?` |
 | merged | Quest complete | |
-| questline | quest chain | |
-| milestone | chapter | |
 | `Goal` | Objectives | |
 | `Closes` | Rewards | |
 | contributors who donate tokens | the party | |

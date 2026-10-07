@@ -5,19 +5,19 @@ import { type Board, findGroup, only, readBoard, trail } from "../src/board/mode
 import type { Project } from "../src/board/project";
 
 const docs: Record<string, string> = {
-	"quest/README.md": "# Quests\n\n## Goal\n\nShip it.\n\n## Required\n\n- [C0](/quest/m0/README.md) - first\n",
-	"quest/m0/README.md":
-		"# First release\n\n## Goal\n\nThe *first* release.\n\n## Required\n\n- [Epic](/quest/m0/epic/README.md) - grouped\n- [Solo](/quest/m0/solo.md) - alone\n",
-	"quest/m0/epic/README.md":
-		"# An epic\n\n## Goal\n\nGrouped work.\n\n## Required\n\n- [Ready](/quest/m0/epic/ready.md) - first\n- [Blocked](/quest/m0/epic/blocked.md) - second\n- [Taken](/quest/m0/epic/taken.md) - third\n- [Turned](/quest/m0/epic/turned.md) - fourth\n",
-	"quest/m0/epic/ready.md": "# [S] Ready quest\n\n## Goal\n\nDo it.\n",
-	"quest/m0/epic/blocked.md":
-		"# [M] Blocked quest\n\n## Goal\n\nLater.\n\n## Required\n\n- [Ready](/quest/m0/epic/ready.md) - needs it\n",
-	"quest/m0/epic/taken.md":
+	"quest/README.md": "# Quests\n\n## Goal\n\nShip it.\n\n## Required\n\n- [A0](/quest/a0/README.md) - first\n",
+	"quest/a0/README.md":
+		"# First release\n\n## Goal\n\nThe *first* release.\n\n## Required\n\n- [Epic](/quest/a0/epic/README.md) - grouped\n- [Solo](/quest/a0/solo.md) - alone\n",
+	"quest/a0/epic/README.md":
+		"# An epic\n\n## Goal\n\nGrouped work.\n\n## Required\n\n- [Ready](/quest/a0/epic/ready.md) - first\n- [Blocked](/quest/a0/epic/blocked.md) - second\n- [Taken](/quest/a0/epic/taken.md) - third\n- [Turned](/quest/a0/epic/turned.md) - fourth\n",
+	"quest/a0/epic/ready.md": "# [S] Ready quest\n\n## Goal\n\nDo it.\n",
+	"quest/a0/epic/blocked.md":
+		"# [M] Blocked quest\n\n## Goal\n\nLater.\n\n## Required\n\n- [Ready](/quest/a0/epic/ready.md) - needs it\n",
+	"quest/a0/epic/taken.md":
 		"# [XL] Taken quest\n\n## Goal\n\nMine.\n\n## Claim\n\n- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02\n",
-	"quest/m0/epic/turned.md": "# [XS] Turned-in quest\n\n## Goal\n\nDone soon.\n",
-	"quest/m0/solo.md": "# [L] Solo quest\n\n## Goal\n\nAlone.\n",
-	"quest/m0/loose.md": "# [S] Loose quest\n\n## Goal\n\nListed nowhere.\n",
+	"quest/a0/epic/turned.md": "# [XS] Turned-in quest\n\n## Goal\n\nDone soon.\n",
+	"quest/a0/solo.md": "# [L] Solo quest\n\n## Goal\n\nAlone.\n",
+	"quest/a0/loose.md": "# [S] Loose quest\n\n## Goal\n\nListed nowhere.\n",
 };
 
 function project(overrides: Partial<Project> = {}): Project {
@@ -29,9 +29,9 @@ function project(overrides: Partial<Project> = {}): Project {
 		date: "2026-10-07",
 		documents: Object.entries(docs).map(([path, content]) => ({ path, content })),
 		completed: [
-			{ path: "quest/m0/epic/old.md", title: "[L] Old quest", date: "2026-10-01", commit: "b".repeat(40) },
+			{ path: "quest/a0/epic/old.md", title: "[L] Old quest", date: "2026-10-01", commit: "b".repeat(40) },
 		],
-		changes: [{ quest: "quest/m0/epic/turned.md", author: "@sam", href: "/repos/demo/changes/sam" }],
+		changes: [{ quest: "quest/a0/epic/turned.md", author: "@sam", href: "/repos/demo/changes/sam" }],
 		issues: [],
 		...overrides,
 	};
@@ -43,13 +43,13 @@ describe("board model", () => {
 	const board = readBoard(project());
 
 	it("shows each quest's most advanced status", () => {
-		expect(status(board, "quest/m0/epic/ready.md")).toEqual({ kind: "available" });
-		expect(status(board, "quest/m0/epic/blocked.md")).toEqual({
+		expect(status(board, "quest/a0/epic/ready.md")).toEqual({ kind: "available" });
+		expect(status(board, "quest/a0/epic/blocked.md")).toEqual({
 			kind: "blocked",
-			requires: [{ title: "Ready quest", href: "/repos/demo/quest/m0/epic/ready" }],
+			requires: [{ title: "Ready quest", href: "/repos/demo/quest/a0/epic/ready" }],
 		});
-		expect(status(board, "quest/m0/epic/taken.md")).toEqual({ kind: "accepted", by: "@jdoe", since: "2026-10-02" });
-		expect(status(board, "quest/m0/epic/turned.md")?.kind).toBe("turn-in");
+		expect(status(board, "quest/a0/epic/taken.md")).toEqual({ kind: "accepted", by: "@jdoe", since: "2026-10-02" });
+		expect(status(board, "quest/a0/epic/turned.md")?.kind).toBe("turn-in");
 		expect(board.counts).toEqual({ available: 3, blocked: 1, accepted: 1, "turn-in": 1 });
 	});
 
@@ -57,20 +57,20 @@ describe("board model", () => {
 		const [act] = board.acts;
 		expect(act).toMatchObject({ number: "0", title: "First release", summary: "The first release." });
 		expect(act.items.map((item) => (item.kind === "quest" ? item.quest.path : item.epic.path))).toEqual([
-			"quest/m0/epic/README.md",
-			"quest/m0/solo.md",
-			"quest/m0/loose.md",
+			"quest/a0/epic/README.md",
+			"quest/a0/solo.md",
+			"quest/a0/loose.md",
 		]);
-		expect(trail(board, "quest/m0/epic/ready.md").map((group) => group.title)).toEqual([
+		expect(trail(board, "quest/a0/epic/ready.md").map((group) => group.title)).toEqual([
 			"First release",
 			"An epic",
 		]);
-		expect(trail(board, "quest/m0/epic/README.md").map((group) => group.title)).toEqual(["First release"]);
+		expect(trail(board, "quest/a0/epic/README.md").map((group) => group.title)).toEqual(["First release"]);
 	});
 
 	it("weights progress by difficulty and counts finished quests from history", () => {
 		// Finished: L (5). Open: S 2, M 3, XL 8, XS 1 in the epic; L 5 and S 2 outside it.
-		expect(findGroup(board, "quest/m0/epic/README.md")!.progress).toEqual({
+		expect(findGroup(board, "quest/a0/epic/README.md")!.progress).toEqual({
 			done: 1,
 			total: 5,
 			weight: 5,
@@ -93,7 +93,7 @@ describe("quest markdown", () => {
 	it("escapes HTML and drops unsafe links and images", () => {
 		const [goal] = render(
 			project(),
-			"quest/m0/solo.md",
+			"quest/a0/solo.md",
 			'# T\n\n## Goal\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1)) ![pic](https://example.com/p.png) <b onclick="x">b</b>\n',
 			known,
 		);
@@ -108,17 +108,17 @@ describe("quest markdown", () => {
 	it("opens quest links on the board and other files where the repository is published", () => {
 		const [plan] = render(
 			project(),
-			"quest/m0/solo.md",
-			"## Plan\n\n[epic](/quest/m0/epic/README.md#goal) [ready](epic/ready.md) [docs](../../docs/a.md) [web](https://example.com)\n",
+			"quest/a0/solo.md",
+			"## Plan\n\n[epic](/quest/a0/epic/README.md#goal) [ready](epic/ready.md) [docs](../../docs/a.md) [web](https://example.com)\n",
 			known,
 		);
-		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic#goal"');
-		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic/ready"');
+		expect(plan.html).toContain('href="/repos/demo/quest/a0/epic#goal"');
+		expect(plan.html).toContain('href="/repos/demo/quest/a0/epic/ready"');
 		expect(plan.html).toContain('href="https://example.com/acme/demo/blob/main/docs/a.md"');
 		expect(plan.html).toContain('href="https://example.com"');
 		const [unpublished] = render(
 			project({ web: null }),
-			"quest/m0/solo.md",
+			"quest/a0/solo.md",
 			"## Plan\n\n[docs](/docs/a.md)\n",
 			known,
 		);

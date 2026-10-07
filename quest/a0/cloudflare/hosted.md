@@ -15,7 +15,7 @@ shows the run's status.
   into the run's environment, and the user can delete them. Spend caps stay
   with the provider.
 - ChatGPT plan funding is out of scope until OpenAI approves hosted use
-  ([m1](/quest/m1/chatgpt-hosted.md)).
+  ([a1](/quest/a1/chatgpt-hosted.md)).
 - The interface calls funding "Offer gold" and shows spend as gold coins
   (display only, from `docs/theme.md`); the API and data model keep plain
   terms.
@@ -24,5 +24,5 @@ shows the run's status.
 
 ## Required
 
-- [Fork intake](/quest/m0/cloudflare/intake.md) - forks and claims
-- [Changes](/quest/m0/cloudflare/changes.md) - where the result lands
+- [Fork intake](/quest/a0/cloudflare/intake.md) - forks and claims
+- [Changes](/quest/a0/cloudflare/changes.md) - where the result lands

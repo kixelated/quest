@@ -76,7 +76,7 @@ describe("Worker", () => {
 			const row = await env.DB.prepare("SELECT value FROM verification").first<{ value: string }>();
 			return JSON.parse(row!.value).callbackURL;
 		};
-		expect(await callback("/repos/quest/quest/m0")).toBe("/repos/quest/quest/m0");
+		expect(await callback("/repos/quest/quest/a0")).toBe("/repos/quest/quest/a0");
 		for (const next of ["//evil.example", "/\\evil.example", "https://evil.example"]) {
 			expect(await callback(next)).toBe("/");
 		}

@@ -16,16 +16,19 @@ from it.
   (`src/board/project.ts`) is the seam: an Artifacts-backed loader fills the
   same shape, with finished quests cached when sync runs
   (`scripts/history.ts` reads them from `git log`).
+- Decided 2026-10-07: the board is a list only. The map of the acts lives on
+  the home page ([quest map](/quest/a0/theme/map.md)), where each act links to
+  its board section.
+- Decided 2026-10-07: progress shows both "N of M quests" and a bar weighted
+  by size. A quest deleted in a commit that changes nothing outside `quest/`
+  counts as abandoned, not finished.
 - Who may see a project and who counts as its maintainer come from the
   repository registry that intake adds.
 - "Offer gold" shows on available quests; signed-in contributors see it
-  disabled until [hosted runs](/quest/m0/cloudflare/hosted.md) wire it.
-- Open question: whether the board also opens on a map of the acts, like
-  the home page's [quest map](/quest/m0/theme/map.md). A mock was shown to
-  the user on the board's PR; the list ships alone until they decide.
+  disabled until [hosted runs](/quest/a0/cloudflare/hosted.md) wire it.
 
 ## Required
 
-- [GitHub sync](/quest/m0/cloudflare/github-sync.md) - mirrors repositories into Artifacts and caches finished quests
-- [Fork intake](/quest/m0/cloudflare/intake.md) - the registry, claims, issues, and maintainer actions
-- [Changes](/quest/m0/cloudflare/changes.md) - the open changes shown as Ready to turn in
+- [GitHub sync](/quest/a0/cloudflare/github-sync.md) - mirrors repositories into Artifacts and caches finished quests
+- [Fork intake](/quest/a0/cloudflare/intake.md) - the registry, claims, issues, and maintainer actions
+- [Changes](/quest/a0/cloudflare/changes.md) - the open changes shown as Ready to turn in

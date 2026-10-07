@@ -7,22 +7,22 @@
 // coherent, and already done by some other PR - and answering it means asking
 // the forge, so it belongs to the flow that is already talking to it.
 
-import { type Doc, type Entry, children, entries, has, isQuestline, rooted } from "./doc";
+import { type Doc, type Entry, children, entries, has, isEpic, rooted } from "./doc";
 import { comparePaths, normalize } from "./path";
 import { ROOT } from "./rules";
 
 /** One thing standing between a quest and being started. */
 export interface Blocker {
 	/**
-	 * The quest or questline that has to finish first. `null` is an entry that
+	 * The quest or epic that has to finish first. `null` is an entry that
 	 * is not a quest, which `quest check` rejects and nothing here can clear.
 	 */
 	path: string | null;
 	/** The dependency or claim as written, whitespace collapsed. */
 	text: string;
 	/**
-	 * The still-open quests under a required questline, which is what a
-	 * questline blocker actually means. Empty for every other blocker: a
+	 * The still-open quests under a required epic, which is what an
+	 * epic blocker actually means. Empty for every other blocker: a
 	 * required quest's own blockers are its readiness, not this one's.
 	 */
 	blockers: Blocker[];
@@ -39,11 +39,11 @@ export function renderBlocker(blocker: Blocker, depth = 0): string[] {
 }
 
 /**
- * What blocks `path`, a required questline expanded into the quests it still
+ * What blocks `path`, a required epic expanded into the quests it still
  * holds. Empty means ready; `null` means `path` is not a quest document.
  *
- * `path` is the quest as the tree writes it (`/quest/m0/one.md`) or as the
- * shell completes it (`quest/m0/one.md`).
+ * `path` is the quest as the tree writes it (`/quest/a0/one.md`) or as the
+ * shell completes it (`quest/a0/one.md`).
  */
 export function blockers(docs: Doc[], path: string): Blocker[] | null {
 	const byPath = new Map(docs.map((d) => [d.path, d]));
@@ -54,10 +54,10 @@ export function blockers(docs: Doc[], path: string): Blocker[] | null {
 
 /**
  * Every quest that can be started now, in tree order: the root's `Required`
- * walked depth first, then any quest no questline lists, by path.
+ * walked depth first, then any quest no epic lists, by path.
  *
- * A questline is not listed while it still requires children; a README with
- * none left is the line's own remaining work and lists like any other quest.
+ * An epic is not listed while it still requires children; a README with
+ * none left is the epic's own remaining work and lists like any other quest.
  * A quest is ready when it has neither a `## Required` nor a `## Claim` heading.
  */
 export function ready(docs: Doc[]): string[] {
@@ -70,19 +70,19 @@ export function ready(docs: Doc[]): string[] {
 		const doc = remaining.get(path);
 		if (!doc) continue;
 		remaining.delete(path);
-		if (isQuestline(doc)) {
+		if (isEpic(doc)) {
 			pending.push(...children(doc).reverse());
 		} else if (open(doc)) {
 			found.push(path);
 		}
 	}
 	for (const doc of remaining.values()) {
-		if (!isQuestline(doc) && open(doc)) found.push(doc.path);
+		if (!isEpic(doc) && open(doc)) found.push(doc.path);
 	}
 	return found;
 }
 
-/** The blockers of one document: its `Required` entries, which for a questline include its children. */
+/** The blockers of one document: its `Required` entries, which for an epic include its children. */
 function expand(byPath: Map<string, Doc>, doc: Doc, stack: string[]): Blocker[] {
 	const found: Blocker[] = [];
 	if (has(doc, "Claim")) {
@@ -116,13 +116,13 @@ function blocker(byPath: Map<string, Doc>, entry: Entry, stack: string[]): Block
 	const target = entry.target === null ? null : rooted(entry.target);
 	const path = target !== null && byPath.has(target) ? target : null;
 
-	// Only a questline expands. A required QUEST is the blocker itself, and its
+	// Only an epic expands. A required QUEST is the blocker itself, and its
 	// own chain is the answer to running this on that quest instead; printing
 	// it here buries the entries that were asked for under a repeated subtree.
-	// The stack guard is for a tree nobody has run `quest check` on yet, where a
-	// questline listing an ancestor must print rather than recurse forever.
+	// The stack guard is for a tree nobody has run `quest check` on yet, where an
+	// epic listing an ancestor must print rather than recurse forever.
 	let nested: Blocker[] = [];
-	if (path !== null && isQuestline(byPath.get(path)!) && !stack.includes(path)) {
+	if (path !== null && isEpic(byPath.get(path)!) && !stack.includes(path)) {
 		stack.push(path);
 		nested = expand(byPath, byPath.get(path)!, stack);
 		stack.pop();

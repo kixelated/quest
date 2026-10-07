@@ -15,5 +15,5 @@ sync is on.
 
 ## Required
 
-- [GitHub sync](/quest/m0/cloudflare/github-sync.md) - the GitHub App and the sync this turns on
-- [Fork intake](/quest/m0/cloudflare/intake.md) - the hook config the PR includes
+- [GitHub sync](/quest/a0/cloudflare/github-sync.md) - the GitHub App and the sync this turns on
+- [Fork intake](/quest/a0/cloudflare/intake.md) - the hook config the PR includes
