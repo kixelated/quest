@@ -16,7 +16,7 @@ release a claim and promote an issue from it.
   same shape, with finished quests cached when sync runs
   (`scripts/history.ts` reads them from `git log`).
 - Decided 2026-10-07: the board is a list only. The map of the acts lives on
-  the home page ([quest map](/quest/a0/theme/map.md)), where each act links to
+  the home page (`cloudflare/src/map.tsx`), where each act links to
   its board section.
 - Decided 2026-10-07: progress shows both "N of M quests" and a bar weighted
   by size. A quest deleted in a commit that changes nothing outside `quest/`

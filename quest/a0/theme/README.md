@@ -17,7 +17,7 @@ The pass also renames the "difficulty" leftovers to "size": the Worker's
 `cloudflare/src/home.tsx` and `cloudflare/src/board/pages.tsx`), the board's
 "weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
 `cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
-wording in `quest/a0/theme/map.md` and this README's `Required` list.
+wording in this README's `Required` list.
 It also replaces the display aliases on the board, the home page, and
 `cloudflare/README.md` with format terms: Available and `?show=available`
 become ready, the Requires status and filter become blocked, Accepted by
@@ -93,10 +93,12 @@ Decided while planning on 2026-10-05:
   change is a token change in `design/theme/theme.css`.
 - Decided 2026-10-07: XL quests have no "Elite" tag. Purple XL and its size
   label already stand out.
+- Decided 2026-10-07 on the map's PR (kixelated/quest#78): the map already
+  uses these terms. A blocked waypoint's tooltip lists what it needs under
+  "Required:".
 
 ## Required
 
-- [Quest map](/quest/a0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
 - [Social image terms](/quest/a0/theme/og-terms.md) - `design/theme/og.svg` and `og.png` show format terms before the upload
 - [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
 - [Landing page](/quest/a0/theme/landing.md) - the home page's map and calls to action link into the live board
