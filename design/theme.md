@@ -79,8 +79,8 @@ Contrast as text on the three ink surfaces (WCAG AA needs 4.5:1):
 | XL | 7.0:1 | 6.6:1 | 5.9:1 |
 
 The `.ql-size` badge tints its background with 14% of the hue, which lowers
-these slightly; every size still passes on every surface, and the lowest is L
-on `--ql-raised`, at 4.6:1.
+these ratios. Every size still passes on every surface, and the lowest is L on
+`--ql-raised`, at 4.6:1.
 
 Markers use the same hues: yellow (`#f2d23c`, SGR `33`) for `!` Available and
 `?` Ready to turn in, and grey (`#a59f95`, SGR `90`) for a blocked `!`.
