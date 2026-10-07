@@ -107,7 +107,6 @@ Decided while planning on 2026-10-05:
 
 ## Required
 
-- [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
 - [Landing page](/quest/a0/theme/landing.md) - the home page's calls to action lead to sign-in, onboarding, and the setup paste
 
 ## Related

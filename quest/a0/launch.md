@@ -17,10 +17,9 @@ scope. The README and the landing page belong to
   work tracking for coding agents) and
   [OpenSpec](https://github.com/Fission-AI/OpenSpec) (spec-driven work), as
   checked on 2026-09-19. Re-check them before writing.
-- Use the release-proof transcript, kept in that quest's PR description, for
-  the demo.
+- Use the release rehearsal transcript in the description of
+  kixelated/quest#82 for the demo. v0.1.0 shipped on 2026-10-07.
 
 ## Required
 
-- [Release proof](/quest/a0/release-proof.md) - the demo and docs describe the released tool
 - [Quest log theme](/quest/a0/theme/README.md) - the voice the posts build on, and the themed surfaces the demo records
