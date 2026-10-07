@@ -23,6 +23,14 @@ describe("Worker", () => {
 			expect(html).toContain(`id="${section}"`);
 		}
 	});
+	it("maps the repository's own quest tree on the home page", async () => {
+		const html = await (await SELF.fetch(origin)).text();
+		// Acts open their section of the board; waypoints open the quest files.
+		expect(html).toContain('href="/repos/quest#a0"');
+		expect(html).toMatch(
+			/class="waypoint ql-(xs|s|m|l|xl) waypoint-[a-z-]+"><a href="https:\/\/github\.com\/kixelated\/quest\/blob\/main\/quest\/a0\//,
+		);
+	});
 	it("renders the repository's docs", async () => {
 		const index = await (await SELF.fetch(`${origin}/docs`)).text();
 		expect(index).toContain('href="/docs/getting-started"');
