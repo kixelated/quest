@@ -144,4 +144,17 @@ describe("finished quests from history", () => {
 			{ path: "quest/a0/epic/done.md", title: "[M] Done in the old act", date: "2026-10-07", commit: "old" },
 		]);
 	});
+
+	it("follows a rename made in the same commit that finishes a quest", () => {
+		// Git lists changes by path, so the deletion can come before the rename.
+		const log = commit(
+			"rename",
+			"2026-10-09",
+			"D\tquest/m0/a.md",
+			"R100\tquest/m0/b.md\tquest/a0/b.md",
+			"M\tsrc/a.ts",
+		);
+		const read = () => "# [S] Finished with the rename\n";
+		expect(finished(log, new Set(["quest", "quest/a0"]), read).map((c) => c.path)).toEqual(["quest/a0/a.md"]);
+	});
 });

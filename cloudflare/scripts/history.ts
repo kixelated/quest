@@ -43,13 +43,15 @@ export function finished(log: string, dirs: Set<string>, read: (commit: string, 
 		const [commit, date] = header.split(" ");
 		const changes = lines.filter(Boolean).map((line) => line.split("\t"));
 		const work = changes.some(([, ...paths]) => paths.some((path) => !path.startsWith("quest/")));
+		// Only a directory that no longer exists has moved; a quest that moved
+		// between two live epics says nothing about the rest of either. Renames
+		// come first, so a quest finished in the same commit follows them too.
 		for (const [status, from, to] of changes) {
-			// Only a directory that no longer exists has moved; a quest that moved
-			// between two live epics says nothing about the rest of either.
-			if (status.startsWith("R")) {
-				const [old, now] = [dirname(from), dirname(to)];
-				if (old !== now && !dirs.has(old) && !moved.has(old)) moved.set(old, now);
-			}
+			if (!status.startsWith("R")) continue;
+			const [old, now] = [dirname(from), dirname(to)];
+			if (old !== now && !dirs.has(old) && !moved.has(old)) moved.set(old, now);
+		}
+		for (const [status, from] of changes) {
 			if (status !== "D" || !work || !isQuest(from)) continue;
 			const title = /^# (.+)$/m.exec(read(`${commit}^`, from))?.[1] ?? from;
 			found.push({ path: current(from), title, date, commit });
