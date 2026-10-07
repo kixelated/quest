@@ -19,13 +19,16 @@ check:
     nixfmt --check flake.nix nix/*.nix
     just worker-check
 
-# Run tests, including the shell hooks and the built CLI's lifecycle.
+# Run tests, including the shell hooks and the lifecycle of both builds.
 test:
     npm test
     bash .claude/hooks/direnv.test.sh
     bash scripts/install-check.test.sh
+    bash scripts/installer.test.sh
     npm run build
     bash scripts/lifecycle-check.sh "$PWD/dist/quest.js"
+    npm run compile
+    bash scripts/lifecycle-check.sh "$PWD/dist/quest"
     just worker-test
 
 # Apply formatters without changing program behavior.
@@ -38,6 +41,10 @@ fix:
 # Build the bundled CLI into dist/quest.js.
 build:
     npm run build
+
+# Compile a standalone binary for this machine into dist/quest.
+compile:
+    npm run compile
 
 # Run the local CLI, for example `just run ready`.
 run *args:

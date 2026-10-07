@@ -1,10 +1,11 @@
 name: Check release installs
 
 on:
+  # The Release workflow calls this after publishing; dispatch it to recheck a tag.
   workflow_call:
     inputs:
-      plan:
-        description: cargo-dist manifest containing announcement_tag
+      tag:
+        description: Published release tag (for example v0.1.0)
         required: true
         type: string
   workflow_dispatch:
@@ -57,7 +58,6 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-          DIST_PLAN: ${{ inputs.plan }}
           MISE_GITHUB_TOKEN: ${{ github.token }}
           INSTALL_METHOD: ${{ matrix.method }}
           INSTALL_TARGET: ${{ matrix.target }}

@@ -5,9 +5,6 @@ set -euo pipefail
 method=${1:?usage: install-check.sh mise|shell target-triple}
 target=${2:?usage: install-check.sh mise|shell target-triple}
 tag=${RELEASE_TAG:-}
-if [[ -z $tag ]]; then
-    tag=$(jq -er '.announcement_tag | select(type == "string" and length > 0)' <<<"${DIST_PLAN:-}")
-fi
 if [[ ! $tag =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
     printf 'Invalid release tag: %s\n' "$tag" >&2
     exit 1
@@ -56,8 +53,7 @@ case "$method" in
         curl --proto '=https' --tlsv1.2 -fLsS \
             "https://github.com/kixelated/quest/releases/download/$tag/quest-installer.sh" \
             -o "$work/quest-installer.sh"
-        # Unmanaged mode installs to this exact directory without editing dotfiles.
-        QUEST_UNMANAGED_INSTALL="$work/shell" sh "$work/quest-installer.sh"
+        QUEST_INSTALL_DIR="$work/shell" sh "$work/quest-installer.sh"
         binary="$work/shell/quest"
         ;;
 esac

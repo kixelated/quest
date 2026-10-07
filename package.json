@@ -21,6 +21,7 @@
 	},
 	"scripts": {
 		"build": "esbuild src/cli/bin.ts --bundle --platform=node --format=esm --target=node22 --loader:.md=text --banner:js=\"#!/usr/bin/env node\" --outfile=dist/quest.js --log-level=warning && chmod +x dist/quest.js",
+		"compile": "bun build src/cli/bin.ts --compile --loader .md:text --outfile dist/quest",
 		"quest": "npm run --silent build && node dist/quest.js",
 		"check": "tsc && tsc -p src/core && prettier --check .",
 		"test": "vitest run",

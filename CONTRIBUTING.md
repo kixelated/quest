@@ -44,9 +44,13 @@ The package stays `private`; GitHub releases will ship the `quest` binary.
 
 ## Releases
 
-The cargo-dist pipeline was removed with the Rust code. Until
-[Compiled releases](/quest/m0/cloudflare/release.md) replaces it, there is no
-release process.
+Pushing a `vX.Y.Z` tag that matches `package.json`'s version runs the Release
+workflow. It compiles `quest` with Bun for macOS and Linux (arm64 and x64),
+runs the lifecycle check on each binary's native runner, and publishes the archives,
+`SHA256SUMS`, and `quest-installer.sh` to a GitHub release. It then checks that
+mise and the installer install the tag on every platform. A tag with a
+prerelease suffix publishes a prerelease. `just compile` builds a binary for
+this machine; the Bun in the Nix shell is the version releases use.
 
 Do not push release tags or publish GitHub releases from ordinary development
 work; that is a maintainer action after review.
