@@ -61,23 +61,23 @@
 	<path d="M640 345 L651 356 L640 367 L629 356 Z" fill="#c9a14a"/>
 	<circle cx="662" cy="356" r="2.6" fill="#c9a14a"/>
 
-	<!-- Sample entries, using the display glossary -->
+	<!-- Sample entries, using the format terms: ready, in review (an open PR), and blocked -->
 	<rect x="96" y="382" width="1108" height="56" rx="3" fill="#2a2118"/>
 	<use href="#bang" x="126" y="410" color="#f2d23c"/>
 	<rect x="158" y="395" width="48" height="30" rx="4" fill="#5ccf5c" fill-opacity="0.14" stroke="#5ccf5c" stroke-width="1.5"/>
 	<text x="182" y="417" class="body strong" font-size="20" text-anchor="middle" fill="#5ccf5c">S</text>
 	<text x="226" y="420" class="body strong" font-size="30" fill="#ede1c6">Add the CSV endpoint</text>
-	<text x="1184" y="419" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Available</text>
+	<text x="1184" y="419" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready</text>
 
 	<use href="#query" x="126" y="472" color="#f2d23c"/>
 	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff6b60" fill-opacity="0.14" stroke="#ff6b60" stroke-width="1.5"/>
 	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff6b60">L</text>
 	<text x="226" y="482" class="body strong" font-size="30" fill="#ede1c6">Build the quest board</text>
-	<text x="1184" y="481" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready to turn in</text>
+	<text x="1184" y="481" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">In review</text>
 
 	<use href="#bang" x="126" y="534" color="#a59f95"/>
 	<rect x="158" y="519" width="48" height="30" rx="4" fill="#f2d23c" fill-opacity="0.14" stroke="#f2d23c" stroke-width="1.5"/>
 	<text x="182" y="541" class="body strong" font-size="20" text-anchor="middle" fill="#f2d23c">M</text>
 	<text x="226" y="544" class="body strong" font-size="30" fill="#b2a487">Add a CSV download button</text>
-	<text x="1184" y="543" class="body" font-size="24" text-anchor="end" fill="#a59f95">Requires: CSV endpoint</text>
+	<text x="1184" y="543" class="body" font-size="24" text-anchor="end" fill="#a59f95">Blocked by CSV endpoint</text>
 </svg>
