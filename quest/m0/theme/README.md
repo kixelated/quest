@@ -49,7 +49,6 @@ Decided while planning on 2026-10-05:
 
 - [Quest map](/quest/m0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
 - [Social preview](/quest/m0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
-- [Repository metadata](/quest/m0/theme/metadata.md) - the GitHub description, topics, and homepage, once a maintainer approves them
 - [Themed CLI output](/quest/m0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/m0/theme/landing.md) - the home page's map and calls to action link into the live board
 

@@ -5,9 +5,9 @@
 **A quest log for your repo and your agents.**
 
 Readable plans, explicit dependencies, and reviewable Git changes. Quest keeps
-your plans in your repository, so you and your agents read, accept, and finish
+your plans in your repository, so you and your agents read, claim, and finish
 the same work. Each **quest** is a Markdown file scoped to one pull request: its
-objectives, what has been decided, and what stands in the way. A small
+goal, what has been decided, and what stands in the way. A small
 TypeScript CLI checks the links and dependencies. Skills help Claude Code and
 Codex plan the work and set out on it.
 
@@ -46,25 +46,23 @@ That file sits in your quest log, a tree under `quest/`:
 quest/
   README.md           # The roadmap
   m0/
-    README.md         # Chapter one, in priority order
-    export.md         # Available
-    download.md       # Requires: export.md
+    README.md         # First milestone, in priority order
+    export.md         # Ready
+    download.md       # Required: export.md
 ```
 
-Folders are **quest chains**. A README's `Required` lists its children in
+Folders are **questlines**. A README's `Required` lists its children in
 priority order, beside any other dependencies, and the README becomes its own
 quest once its children have landed. The top folders (`m0`, `m1`, ...) are
-**chapters** that give the work a delivery horizon. Quest files and
-`quest guide` call these questlines and milestones; this page uses the
-[quest log's display names](docs/theme.md#glossary).
+**milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
-on it, and the next quest becomes available. The finished plan stays in Git
+on it, and the next quest becomes ready. The finished plan stays in Git
 history, beside the code that completed it.
 
-An optional `Claim` section marks a quest as accepted. Its single bullet names
-who accepted it, their identity provider, fork or branch, and date; forges may
-append fields. Remove the section to release the quest. The CLI leaves expiry
+An optional `Claim` section marks a quest as claimed. Its single bullet names
+the claimant, their identity provider, fork or branch, and date; forges may
+append fields. Remove the section to release the claim. The CLI leaves expiry
 policy to the forge.
 
 ## Try it
@@ -96,12 +94,12 @@ $ quest --root examples/export ready quest/m0/download.md
 quest/m0/export.md
 ```
 
-With no path, `ready` lists every available quest. Given a path, it prints what
-that quest requires, with an explanation on stderr; no blockers means no
-stdout. It exits zero for both available and blocked quests; a nonzero exit
+With no path, `ready` lists every ready quest. Given a path, it prints what
+blocks that quest, with an explanation on stderr; no blockers means no
+stdout. It exits zero for both ready and blocked quests; a nonzero exit
 means the command failed. Run `check` first to catch malformed plans. `ready`
-skips quests accepted through a `Claim` section, but it does not look for
-branch claims or open PRs, so check those before you accept a quest someone
+skips quests claimed through a `Claim` section, but it does not look for
+branch claims or open PRs, so check those before you claim a quest someone
 else may already be on.
 
 ## Work with your agents
@@ -116,17 +114,16 @@ the version you pin decides what your agents follow:
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
-| `quest-start` | Accept an available quest, complete it, and turn it in as a draft PR. |
-| `quest-spawn` | Triage available quests and send several agents out in parallel. |
+| `quest-start` | Claim a ready quest, complete it, and open a draft PR. |
+| `quest-spawn` | Triage ready quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-merge` | Land a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
-within your agent session. A started quest stops when it is ready to turn in,
-as a pull request; merging is a separate invocation, so you review every
-change.
+within your agent session. A started quest stops at a pull request; merging is
+a separate invocation, so you review every change.
 
 To use Quest in your own repository, paste this into your agent:
 
@@ -146,14 +143,15 @@ pins its version, and your repository's instructions stay yours. macOS and Linux
 come first; [native Windows](quest/m1/windows.md) follows later.
 
 The release also brings a quest board to [kixel.quest](https://kixel.quest).
-Contributors sign in, accept an available quest, and offer gold, their own agent
+Contributors sign in, claim a ready quest, and offer gold, their own agent
 tokens, to run it; maintainers review and merge the result there, synced
-with GitHub. [Chapter one](quest/m0/README.md) lists the quests that remain.
+with GitHub. [The first milestone](quest/m0/README.md) lists the quests that
+remain.
 
 ## Join the party
 
 Quest is planned in the open with Quest itself: [its quest log](quest/README.md)
-is the backlog, and contributors accept quests from the same log their agents
+is the backlog, and contributors claim quests from the same log their agents
 read. To work on Quest:
 
 ```sh

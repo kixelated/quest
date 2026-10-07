@@ -23,8 +23,7 @@ line freely, since init and uninstall recognize it by the prefix.
 
 ## Start your quest log
 
-If `quest init` created an empty root, give it objectives in `quest/README.md`.
-The heading stays `Goal`, the format's name for them:
+If `quest init` created an empty root, give it a goal in `quest/README.md`:
 
 ```markdown
 # Quests
@@ -36,26 +35,25 @@ What this project is working toward.
 
 Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome you
 want to work toward. The skill helps settle the scope, then writes the quests,
-grouped into quest chains and chapters (questlines and milestones, in
-`quest guide`), with what each one requires. See the
+grouped into questlines and milestones, with what each one requires. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
-From your repository root, validate the result and list the available quests:
+From your repository root, validate the result and list the ready quests:
 
 ```sh
 quest check
 quest ready
 ```
 
-Review the plan before setting out. `/quest-start` accepts one quest and turns
-it in as a draft pull request; `/quest-spawn` sends several agents out in
+Review the plan before setting out. `/quest-start` claims one quest and opens a
+draft pull request; `/quest-spawn` sends several agents out in
 parallel when your session supports them. Use `$quest-start` and
-`$quest-spawn` in Codex. Check for quests someone has already accepted on a
+`$quest-spawn` in Codex. Check for quests someone has already claimed on a
 branch or in an open PR; `quest ready` does not look for them.
 
 You review each change, and `/quest-merge` lands it once checks and reviews
 pass. The quest is complete, its plan leaves the tree, and the next quest
-becomes available.
+becomes ready.
 
 ## Update or remove it
 
