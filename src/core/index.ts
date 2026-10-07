@@ -1,0 +1,28 @@
+// The quest tree, whose contract is the guide (`quest guide`): parsing its
+// documents, validating them, whether a given quest can be started, and its
+// claims.
+//
+// The core is pure: no filesystem, process, or Node APIs, so the CLI, the
+// Worker, and the site share one implementation. Callers load the documents
+// and say which paths exist.
+
+export { type Claim, parseClaim } from "./claim";
+export {
+	type Doc,
+	type Entry,
+	type Heading,
+	type Link,
+	type Position,
+	children,
+	entries,
+	has,
+	isQuest,
+	isQuestline,
+	owner,
+	parse,
+	permanent,
+	rooted,
+} from "./doc";
+export { comparePaths, normalize } from "./path";
+export { type Blocker, blockers, label, ready, renderBlocker } from "./ready";
+export { type Finding, ROOT, check, formatFinding } from "./rules";

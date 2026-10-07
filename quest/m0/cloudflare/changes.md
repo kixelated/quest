@@ -17,7 +17,3 @@ agent to resolve.
 - Diff, merge, and notes run real git in a Sandbox, because Artifacts has no
   merge or diff API. Checks run from a push-triggered Workflow.
 - Only the Worker writes to upstream.
-
-## Required
-
-- [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - repositories, sign-in, and the Durable Object

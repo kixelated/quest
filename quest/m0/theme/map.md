@@ -18,14 +18,11 @@ Decided while planning on 2026-10-06:
   proof, never drifts, and needs no upkeep.
 - Parse the tree with the shared TypeScript core, so its rules match
   `quest check`.
-- Split from [Site](/quest/m0/theme/site.md) so the design isn't blocked on
-  the core's port to TypeScript.
+- Split from the site quest so the design wasn't blocked on the core's port
+  to TypeScript. Draw into the home page's "Long-term plans, as a map"
+  section (`id="map"` in `cloudflare/src/home.tsx`), replacing its static
+  placeholder.
 - Keep it readable over decorative: the RPG feel stays semi-professional, as
   the theme questline decided.
 - Every status and size keeps its text label, since colour is never the only
   signal.
-
-## Required
-
-- [Site](/quest/m0/theme/site.md) - the home page section and identity the map draws into
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the parser the build reuses

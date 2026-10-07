@@ -21,10 +21,6 @@ data, exit codes, and contract described in `quest ready --help`.
 - Honour `NO_COLOR`. Without colour, glyphs and wording may stay.
 - Keep the labels in a small table that cites `docs/theme.md`, in `src/cli`,
   not in the shared core the Worker imports.
-- Waits for [the port](/quest/m0/cloudflare/typescript.md) (decided
-  2026-10-06), so the theme is written once, in TypeScript.
+- Written after the port to TypeScript (decided 2026-10-06), so the theme is
+  written once, in TypeScript.
 - Update README terminal examples and `--help` text to match.
-
-## Required
-
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the CLI this themes

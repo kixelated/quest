@@ -4,11 +4,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    crane.url = "github:ipetkov/crane";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
@@ -16,8 +11,6 @@
       self,
       nixpkgs,
       flake-utils,
-      crane,
-      rust-overlay,
       ...
     }:
     flake-utils.lib.eachSystem
@@ -30,26 +23,9 @@
       (
         system:
         let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ (import rust-overlay) ];
-          };
-          toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-          quest = craneLib.buildPackage {
-            # The guide and skills are compiled in, and a test compares this
-            # repository's installed stubs against them.
-            src = pkgs.lib.cleanSourceWith {
-              src = ./.;
-              filter =
-                path: type:
-                craneLib.filterCargoSources path type
-                || pkgs.lib.hasInfix "/assets" path
-                || pkgs.lib.hasSuffix "/.claude" path
-                || pkgs.lib.hasInfix "/.claude/skills" path;
-            };
-            strictDeps = true;
-          };
+          pkgs = import nixpkgs { inherit system; };
+          nodejs = pkgs.nodejs_24;
+          quest = pkgs.callPackage ./nix/package.nix { inherit nodejs; };
         in
         {
           packages = {
@@ -59,19 +35,17 @@
           apps.default = flake-utils.lib.mkApp { drv = quest; };
           devShells.default = pkgs.mkShell {
             packages = with pkgs; [
-              toolchain
+              nodejs
               just
               jq
               git
               gh
               direnv
-              cargo-nextest
-              cargo-dist
               actionlint
               shellcheck
               shfmt
-              taplo
               nixfmt
+              wrangler
             ];
           };
           formatter = pkgs.nixfmt;

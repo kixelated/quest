@@ -1,0 +1,142 @@
+# Quest Worker
+
+A deployable foundation for Quest on Cloudflare, and the site at
+`https://kixel.quest`. Hono serves HTML directly, so there is no client
+bundle. Every page renders inside the shared layout in `src/layout.tsx`, which
+follows [the quest log theme](../docs/theme.md): the home page (`src/home.tsx`),
+the docs under `/docs` (`src/docs.tsx`), sign-in in the nav, and the not-found
+page. Later pages, such as the board, use the same layout.
+
+`scripts/build.ts` runs before every check, test, dev server, and deploy. It
+renders the repository's `docs/*.md` into `build/docs.json`, so the Markdown
+stays the single source and its relative links keep working on GitHub: links to
+other docs become `/docs/<name>` and other repository paths point at GitHub. It
+also copies `docs/theme/` and `src/site.css` into `build/public/`, which the
+Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
+`/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
+
+Better Auth uses D1 for accounts and sessions;
+adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
+state, cookies, and callbacks. Form routes enforce the configured origin before
+calling Better Auth's server API.
+
+`ARTIFACTS` points at one namespace per deployment, with each project stored as
+an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
+SQLite Durable Object. The coordinator currently initializes its schema and
+exposes an internal status method. Repository authorization, creation, claims,
+changes, and the board belong to later quests; there are no public repository
+or token routes yet. `cloudflare/` is an npm workspace of the repository root,
+so the Worker imports the CLI's core as `quest/core` (`../src/core`), the same
+parser, checks, and readiness the CLI runs.
+
+## Development
+
+From the repository root:
+
+```sh
+nix develop
+just install
+cp cloudflare/.dev.vars.example cloudflare/.dev.vars
+```
+
+Fill in the local file with a random `AUTH_SECRET` (at least 32 characters) and
+GitHub OAuth app credentials. Configure the GitHub app's homepage as
+`http://localhost:8787` and callback as
+`http://localhost:8787/api/auth/callback/github`. The file is ignored by Git.
+Its `AUTH_URL` overrides the production origin in `wrangler.jsonc`. Use a
+separate OAuth app for production.
+
+```sh
+just worker-dev
+```
+
+This applies local D1 migrations and starts Wrangler. Open
+`http://localhost:8787`, sign in, and sign out. `/health` reports process health;
+it does not probe storage. `/setup` redirects to `SETUP.md` on GitHub, so the
+one-line setup paste can use `https://kixel.quest/setup`. D1 and the
+coordinator persist locally under `cloudflare/.wrangler/`.
+
+Artifacts is remote-only, even in Wrangler local mode. Wrangler requires an
+account login (`cd cloudflare; npm exec -- wrangler login`) for that binding.
+The scaffold does not call Artifacts yet. Use a separate development namespace
+before adding repository operations. Integration tests explicitly omit this
+binding so tests and CI never need Cloudflare credentials or call live services.
+
+To work on the site without a Cloudflare login, run
+`npm exec -- wrangler dev --local` from `cloudflare/` after the migrations.
+`--local` disables remote bindings, which the pages do not use. Wrangler
+reruns the build when `src/`, `scripts/`, or `docs/` change.
+
+## Checks
+
+```sh
+just check
+just test
+```
+
+These include the Worker and run in the existing Linux/macOS Nix CI jobs.
+`just worker-check` checks generated binding types, TypeScript, formatting, and
+`wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
+with real local D1 and SQLite Durable Objects. Tests cover the home page and
+rendered docs in the shared layout, the mocked GitHub OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
+and coordinator storage across eviction and repository boundaries. No OAuth
+credentials or Cloudflare account are required for checks.
+
+After changing bindings, regenerate types:
+
+```sh
+npm run types -w cloudflare
+```
+
+Nix provides Node and Wrangler for interactive use. Recipes use the newer
+Wrangler pinned in the root `package-lock.json`, which is also used by the test plugin.
+Use `npm exec -- wrangler` from `cloudflare/` for the documented deployment
+commands so generated types and deployment use that same version.
+
+## Deployment
+
+Deployment is manual. This scaffold does not provision resources or deploy
+from CI. In the Nix shell, enter `cloudflare/` and authenticate:
+
+```sh
+cd cloudflare
+npm exec -- wrangler login
+npm exec -- wrangler d1 create quest-auth
+```
+
+The checked-in config deploys to `https://kixel.quest` with that deployment's
+D1 database ID, as a Workers custom domain, which requires the `kixel.quest` zone in the same
+Cloudflare account; `workers.dev` is disabled so sign-in has one origin. For
+another deployment, change `routes`, `AUTH_URL`, the Worker name, account, and
+Artifacts namespace.
+The namespace may be created explicitly with Wrangler or is created on the
+first repository creation. Use different namespaces, databases, Workers, and
+OAuth credentials for each deployment environment.
+
+Register the production GitHub OAuth app with callback
+`https://kixel.quest/api/auth/callback/github`, then set secrets
+interactively:
+
+```sh
+npm exec -- wrangler secret put AUTH_SECRET
+npm exec -- wrangler secret put GITHUB_CLIENT_ID
+npm exec -- wrangler secret put GITHUB_CLIENT_SECRET
+npm exec -- wrangler d1 migrations apply DB --remote
+npm run types
+npm run check
+npm run deploy
+```
+
+Wrangler deploy applies the SQLite Durable Object class migration. D1 schema
+migrations are applied separately before deployment. After deploying, verify
+`/health` and complete sign-in/sign-out in the browser. No live deployment or
+provider registration was performed while creating this scaffold.
+
+The auth schema migration is checked in for review. When upgrading Better Auth
+or adding a plugin, generate/review its schema changes and add a D1 migration;
+do not migrate the production database on HTTP requests.
+
+References: [Artifacts binding](https://developers.cloudflare.com/artifacts/api/workers-binding/),
+[Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/),
+[Better Auth database](https://better-auth.com/docs/concepts/database), and
+[Hono integration](https://better-auth.com/docs/integrations/hono).

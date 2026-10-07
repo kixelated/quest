@@ -1,6 +1,0 @@
-exclude = ["**/target/**", "**/.direnv/**", "**/.worktrees/**"]
-
-[formatting]
-indent_string = "    "
-column_width = 150
-align_comments = false

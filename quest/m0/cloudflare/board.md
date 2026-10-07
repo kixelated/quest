@@ -28,12 +28,11 @@ from its page. A maintainer can release claims and promote issues.
 - Whether the board also opens on the home page's quest map is undecided.
   Build the list first, then mock [the home page's map](/quest/m0/theme/map.md) as an overview and ask the user
   with screenshots before shipping it.
-- Use the shared layout from [Site](/quest/m0/theme/site.md). If the board
-  lands first, the site quest moves it onto the shell.
+- Render inside the site's shared layout (`cloudflare/src/layout.tsx`), and
+  reuse its components and the ledger page from `docs/theme/theme.css`.
+- Where app pages need something the layout lacks (wider content, repository
+  context in the nav, breadcrumbs), extend `layout.tsx` in this quest's PR.
+  Never fork a second shell. Decided 2026-10-06 instead of a separate fit-check
+  quest, since this quest is the layout's first app page.
 - Show token spend as gold coins and the fund action as "Offer gold", per
   the glossary in `docs/theme.md`.
-
-## Required
-
-- [Worker scaffold](/quest/m0/cloudflare/scaffold.md) - the app it lives in
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - check and ready in the Worker

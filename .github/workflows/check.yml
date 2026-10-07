@@ -24,12 +24,12 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f
         with:
           determinate: false
+      - name: Install npm dependencies
+        run: nix develop --command just install
       - name: Check
         run: nix develop --command just check
       - name: Test
         run: nix develop --command just test
-        env:
-          NEXTEST_PROFILE: ci
       - name: Check Nix package
         run: nix flake check
 
@@ -45,8 +45,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install the checkout with the pinned Rust toolchain
-        run: cargo install --locked --path . --root "$RUNNER_TEMP/quest-lifecycle-install"
+      - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f
+        with:
+          determinate: false
+      - name: Install the checkout with the flake's source build
+        run: nix build --out-link "$RUNNER_TEMP/quest-lifecycle-install" .#quest
       - name: Verify the installed CLI lifecycle
         shell: bash
         run: bash scripts/lifecycle-check.sh "$RUNNER_TEMP/quest-lifecycle-install/bin/quest"

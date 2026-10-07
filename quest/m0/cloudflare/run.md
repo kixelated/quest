@@ -25,6 +25,5 @@ result as a change.
 
 ## Required
 
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the CLI `run` is written in
 - [Fork intake](/quest/m0/cloudflare/intake.md) - forks, tokens, and claims
 - [Changes](/quest/m0/cloudflare/changes.md) - where the result lands

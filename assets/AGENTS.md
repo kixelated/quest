@@ -35,6 +35,10 @@ The observable outcome and important boundaries.
 
 Current decisions, open questions, or implementation guidance.
 
+## Claim
+
+- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02
+
 ## Required
 
 - [Child quest](/quest/foo/bar.md) - the outcome, so the list reads without opening it
@@ -62,6 +66,13 @@ When the section is empty, delete it; the quest is now unblocked.
 
 `quest check` enforces this structure.
 Run it after creating or updating quests.
+
+`Claim` is one list item: `Name (provider:identity) on location since YYYY-MM-DD`.
+The location names the fork or branch; forges may append their own fields.
+A claimed quest is taken: `quest ready` excludes it, and `quest ready <path>`
+prints the claim as a blocker and names its claimant on stderr.
+The CLI never expires claims or reads the clock. The forge removes stale claims.
+Remove the section to release a claim.
 
 ## Questions
 
@@ -99,6 +110,8 @@ Start only ready quests.
 
 If you have push access, make an empty commit and push a branch to the remote.
 The remote branch claims the quest so other agents skip it.
+Contributors without push access can instead commit a `## Claim` section to the
+quest file through their forge's claim intake. GitHub skills keep using branch claims.
 If a claim looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.

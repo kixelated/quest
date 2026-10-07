@@ -1,60 +1,105 @@
 /*
- * Quest log theme: palette, type, and status tokens. Dark only.
+ * Quest log theme, "illuminated ledger": palette, type, and status tokens. Dark only.
  *
  * docs/theme.md is canonical. Change it first, then this file.
  *
  * Fonts are open-licensed (SIL Open Font License 1.1). Load them from Google Fonts:
- * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;600&display=swap">
+ * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Inter:wght@400;600&display=swap">
  */
 
 :root {
 	color-scheme: dark;
 
-	/* Surfaces */
-	--ql-bg: #0e1218;
-	--ql-panel: #19202a;
-	--ql-raised: #232c38;
-	--ql-rule: #313c4a;
+	/* Surfaces: warm ink */
+	--ql-bg: #14100b;
+	--ql-panel: #1d1711;
+	--ql-raised: #2a2118;
+	--ql-rule: #3d3125;
 
-	/* Gold trim */
-	--ql-gold: #d9ac48;
-	--ql-gold-dim: #8d6b22;
-	--ql-gold-bright: #f5c542;
+	/* Gold leaf */
+	--ql-gold: #c9a14a;
+	--ql-gold-dim: #7a6230;
+	--ql-gold-bright: #e6c063;
 
-	/* Text */
-	--ql-text: #ebe4d2;
-	--ql-muted: #a9a394;
-	--ql-link: #8fc3f2;
+	/* Text: parchment */
+	--ql-text: #ede1c6;
+	--ql-muted: #b2a487;
+	--ql-link: #9db9e8;
 
 	/* Status and difficulty hues */
-	--ql-grey: #9aa1ab;
+	--ql-grey: #a59f95;
 	--ql-green: #5ccf5c;
 	--ql-yellow: #f2d23c;
 	--ql-orange: #ff9838;
 	--ql-red: #ff5f52;
 
 	/* Type */
-	--ql-font-heading: "Cinzel", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+	--ql-font-heading: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
 	--ql-font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 	--ql-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* A quest log window: slate panel, gold border, thin inner trim. */
-.ql-window {
+/* A ledger page: ink panel, gold-leaf border with an inner trim, and a double margin rule. */
+.ql-ledger {
+	position: relative;
 	background: var(--ql-panel);
 	color: var(--ql-text);
 	font-family: var(--ql-font-body);
-	border: 2px solid var(--ql-gold);
-	border-radius: 6px;
+	border: 1px solid var(--ql-gold);
+	border-radius: 4px;
 	box-shadow:
 		inset 0 0 0 4px var(--ql-panel),
 		inset 0 0 0 5px var(--ql-gold-dim);
+	padding: 2rem 1.75rem 2rem 3rem;
 }
 
-.ql-window :is(h1, h2, h3) {
+.ql-ledger::before {
+	content: "";
+	position: absolute;
+	top: 5px;
+	bottom: 5px;
+	left: 1.75rem;
+	border-left: 3px double var(--ql-gold-dim);
+}
+
+:where(.ql-ledger) :is(h1, h2, h3) {
 	font-family: var(--ql-font-heading);
 	font-weight: 700;
 	color: var(--ql-gold-bright);
+}
+
+/* An illuminated first letter, three lines tall. */
+.ql-dropcap::first-letter {
+	float: left;
+	font-family: var(--ql-font-heading);
+	font-weight: 700;
+	font-size: 3.6em;
+	line-height: 0.8;
+	padding: 0.08em 0.1em 0 0;
+	color: var(--ql-gold-bright);
+}
+
+/*
+ * The ornamental divider: a gold rule broken by a lozenge between two dots.
+ * <div class="ql-divider"><svg viewBox="0 0 48 16">dot, lozenge, dot</svg></div>
+ */
+.ql-divider {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	color: var(--ql-gold);
+}
+
+.ql-divider::before,
+.ql-divider::after {
+	content: "";
+	flex: 1;
+	border-top: 1px solid var(--ql-gold-dim);
+}
+
+.ql-divider svg {
+	width: 48px;
+	height: 16px;
 }
 
 /* Status markers. Always pair the glyph with its label text. */
@@ -93,6 +138,19 @@
 	color: var(--ql-red);
 }
 
+/* A size label in its difficulty colour, for example <span class="ql-size ql-l">L</span>. */
+.ql-size {
+	display: inline-block;
+	min-width: 2.4em;
+	border: 1px solid currentColor;
+	border-radius: 3px;
+	padding: 0 0.35em;
+	font-size: 0.8em;
+	font-weight: 600;
+	text-align: center;
+	background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
 /* The "Elite" tag shown next to XL quests. */
 .ql-elite {
 	color: var(--ql-red);
@@ -104,4 +162,11 @@
 	font-weight: 700;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
+}
+
+/* Gold: agent tokens shown as coins. Display only. */
+.ql-gold {
+	color: var(--ql-gold-bright);
+	font-weight: 600;
+	white-space: nowrap;
 }

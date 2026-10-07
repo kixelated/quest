@@ -1,0 +1,7 @@
+# Prettier formats the root package's code; prose and the Worker are checked elsewhere.
+/*
+!/src
+!/test
+!/package.json
+!/tsconfig.json
+!/vitest.config.ts

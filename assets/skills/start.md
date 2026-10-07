@@ -10,6 +10,7 @@ The argument is the quest to work on.
 If you are unsure on the best course of action, ask the user for direction.
 
 Update your checkout, run `quest ready`, then confirm the quest is still ready and unclaimed.
+A `## Claim` section means the quest is taken, just like a branch claim.
 Confirm you can write in your worktree; if you cannot, stop and report without claiming.
 Claim it as `quest guide` describes.
 Delete a claim you cannot finish (remote branch and worktree).

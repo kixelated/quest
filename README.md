@@ -4,8 +4,8 @@ A backlog you can branch, review, and merge.
 
 Quest puts plans in your repository. Each **quest** is a Markdown file scoped to
 one pull request: what needs to happen, what has been decided, and what is in the
-way. A small Rust CLI checks the links and dependencies. Skills help Claude Code
-and Codex plan the work and pick it up.
+way. A small TypeScript CLI checks the links and dependencies. Skills help
+Claude Code and Codex plan the work and pick it up.
 
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
@@ -26,6 +26,10 @@ People can download their data as a CSV from the settings page.
 ## Plan
 
 Use the export endpoint. Show progress and let the user retry a failed download.
+
+## Claim
+
+- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02
 
 ## Required
 
@@ -52,15 +56,24 @@ When a quest lands, its PR removes the plan and the links that depended on it.
 The next task becomes ready. The finished plan stays in Git history, beside the
 code that completed it.
 
+An optional `Claim` section marks work taken. Its single bullet names the
+claimant, identity provider, fork or branch, and date; forges may append fields.
+Remove the section to release it. The CLI leaves expiry policy to the forge.
+
 ## Try it
 
-Install from source with Rust, or enter the pinned shell with `nix develop`:
+Build from source with Node 22.12 or newer (or enter the pinned shell with
+`nix develop`), then link the `quest` command:
 
 ```sh
 git clone https://github.com/kixelated/quest.git
 cd quest
-cargo install --locked --path .
+npm ci
+npm run build
+npm link
 ```
+
+With Nix, `nix run github:kixelated/quest -- --help` builds and runs it instead.
 
 The [CSV export example](examples/export/quest/README.md) is a small, working
 quest tree. From this checkout:
@@ -78,9 +91,10 @@ quest/m0/export.md
 
 `ready` prints blockers, with an explanation on stderr. No blockers means no
 stdout. It exits zero for both ready and blocked quests; a nonzero exit means
-the command failed. Run `check` first to catch malformed plans. `ready` does
-not look for claims or PRs, so check those before starting a quest someone else
-may already be working on.
+the command failed. Run `check` first to catch malformed plans. `ready`
+excludes quests with a `Claim` section. It does not look for branch claims or
+PRs, so check those before starting a quest someone else may already be working
+on.
 
 ## Work with an agent
 
@@ -128,6 +142,7 @@ The [first release plan](quest/m0/README.md) lists what is left.
 
 ```sh
 nix develop
+just install
 just check
 just test
 just build
