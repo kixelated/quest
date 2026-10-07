@@ -1,0 +1,41 @@
+{
+	"name": "quest",
+	"version": "0.1.0",
+	"description": "Versioned Markdown quests: validate plans, find ready work, and name the branches a quest lands on.",
+	"license": "MIT OR Apache-2.0",
+	"author": "Luke Curley",
+	"repository": "github:kixelated/quest",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"cloudflare"
+	],
+	"exports": {
+		"./core": "./src/core/index.ts"
+	},
+	"bin": {
+		"quest": "dist/quest.js"
+	},
+	"engines": {
+		"node": ">=22.12"
+	},
+	"scripts": {
+		"build": "esbuild src/cli/bin.ts --bundle --platform=node --format=esm --target=node22 --loader:.md=text --banner:js=\"#!/usr/bin/env node\" --outfile=dist/quest.js --log-level=warning",
+		"quest": "npm run --silent build && node dist/quest.js",
+		"check": "tsc && tsc -p src/core && prettier --check .",
+		"test": "vitest run",
+		"fix": "prettier --write ."
+	},
+	"dependencies": {
+		"commander": "15.0.0",
+		"mdast-util-from-markdown": "2.1.0"
+	},
+	"devDependencies": {
+		"@types/mdast": "4.0.4",
+		"@types/node": "26.6.4",
+		"esbuild": "0.28.1",
+		"prettier": "3.9.9",
+		"typescript": "7.0.2",
+		"vitest": "4.1.11"
+	}
+}

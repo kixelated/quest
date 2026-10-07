@@ -1,0 +1,9 @@
+{
+	// The core runs in Workers as well as Node: no ambient Node types here, so a
+	// stray `process` or `node:` import fails to type-check.
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"types": []
+	},
+	"include": ["."]
+}
