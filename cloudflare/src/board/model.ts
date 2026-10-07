@@ -86,6 +86,11 @@ export function questHref(project: Project, path: string): string {
 	return `/repos/${project.name}/${page}`;
 }
 
+/** An act's section on its board page: its directory name, such as `a0`. */
+export function actAnchor(act: Act): string {
+	return act.path.split("/")[1] ?? "unsorted";
+}
+
 /** The document a page path names: `quest/a0/board`, `quest/a0/epic`, or `quest/a0/epic/README`. */
 export function findDoc(board: Board, page: string): Doc | null {
 	for (const path of [`${page}.md`, `${page}/README.md`]) {
