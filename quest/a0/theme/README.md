@@ -65,5 +65,5 @@ Decided while planning on 2026-10-05:
 
 ## Related
 
-- [Quest board](/quest/a0/cloudflare/board.md) - built themed from the start, using the identity
+- [Quest board](/quest/a0/cloudflare/board.md) - the board shipped themed; this wires it to live projects
 - [Launch material](/quest/a0/launch.md) - posts, quickstart, demo, and comparison written in the same voice

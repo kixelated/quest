@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import { raw } from "hono/html";
 
 // The site shell: every HTML page the Worker serves renders inside Layout.
 // Colours, type, and glyphs follow docs/theme.md; tokens live in /theme/theme.css.
@@ -10,12 +11,18 @@ const fonts =
 
 export type User = { name: string };
 
+// A step in the breadcrumb trail; the last one is the current page.
+export type Crumb = { label: string; href: string };
+
 export type Page = {
 	// Omitted on the home page, which uses the full hook as its title.
 	title?: string;
 	description: string;
 	origin: string;
+	// The current path, where signing in returns.
+	path: string;
 	user: User | null;
+	crumbs?: Crumb[];
 };
 
 export function Layout(props: Page & { children: Child }) {
@@ -46,6 +53,7 @@ export function Layout(props: Page & { children: Child }) {
 							<img src="/theme/logo.svg" alt="" width="32" height="32" />
 							Quest
 						</a>
+						<a href="/repos/quest">Quests</a>
 						<a href="/docs">Docs</a>
 						<a href={repo}>GitHub</a>
 						<span class="account">
@@ -57,13 +65,12 @@ export function Layout(props: Page & { children: Child }) {
 									</form>
 								</>
 							) : (
-								<form method="post" action="/sign-in">
-									<button class="button quiet">Sign in with GitHub</button>
-								</form>
+								<SignIn path={props.path}>Sign in with GitHub</SignIn>
 							)}
 						</span>
 					</nav>
 				</header>
+				{props.crumbs && <Crumbs crumbs={props.crumbs} />}
 				<main>{props.children}</main>
 				<footer class="wrap site-footer">
 					<Divider />
@@ -71,10 +78,62 @@ export function Layout(props: Page & { children: Child }) {
 						<a href="/">Quest</a> · <a href="/docs">Docs</a> · <a href={repo}>GitHub</a> · MIT or Apache-2.0
 					</p>
 				</footer>
+				<script>{raw(copyScript)}</script>
 			</body>
 		</html>
 	);
 }
+
+// Signing in returns to `path`.
+export function SignIn(props: { path: string; primary?: boolean; children: Child }) {
+	return (
+		<form method="post" action="/sign-in">
+			<input type="hidden" name="next" value={props.path} />
+			<button class={`button ${props.primary ? "primary" : "quiet"}`}>{props.children}</button>
+		</form>
+	);
+}
+
+function Crumbs(props: { crumbs: Crumb[] }) {
+	return (
+		<nav class="wrap crumbs" aria-label="Breadcrumb">
+			<ol>
+				{props.crumbs.map((crumb, i) =>
+					i === props.crumbs.length - 1 ? (
+						<li aria-current="page">{crumb.label}</li>
+					) : (
+						<li>
+							<a href={crumb.href}>{crumb.label}</a>
+						</li>
+					),
+				)}
+			</ol>
+		</nav>
+	);
+}
+
+// A line to paste, such as into an agent, with a copy button.
+export function Paste(props: { id: string; text: string }) {
+	return (
+		<div class="paste-box">
+			<code id={props.id}>{props.text}</code>
+			<button class="button" type="button" data-copy={props.id} hidden>
+				Copy
+			</button>
+		</div>
+	);
+}
+
+// Progressive enhancement: reveal copy buttons only where the clipboard works.
+const copyScript = `for (const button of document.querySelectorAll("[data-copy]")) {
+	if (!navigator.clipboard) continue;
+	button.hidden = false;
+	button.addEventListener("click", async () => {
+		await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);
+		button.textContent = "Copied";
+		setTimeout(() => (button.textContent = "Copy"), 2000);
+	});
+}`;
 
 // The ornamental divider: a gold rule broken by a lozenge between two dots.
 export function Divider() {
@@ -128,6 +187,16 @@ export function Coin() {
 			<path d="M10 6.5 L13.5 10 L10 13.5 L6.5 10 Z" fill="#a5741d" />
 		</svg>
 	);
+}
+
+// A quest's status, per the glossary in docs/theme.md.
+export type Status = "available" | "blocked" | "accepted" | "turn-in";
+
+// A status glyph: a yellow `!` for Available, a grey one for Requires, and a
+// yellow `?` for Ready to turn in. Accepted has none. Always pair it with its label.
+export function Marker(props: { status: Status }) {
+	if (props.status === "accepted") return <span class="ql-marker" />;
+	return <span class={`ql-marker ql-${props.status}`}>{props.status === "turn-in" ? <Query /> : <Bang />}</span>;
 }
 
 export type Size = "XS" | "S" | "M" | "L" | "XL";
