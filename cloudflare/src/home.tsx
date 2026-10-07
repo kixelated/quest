@@ -1,5 +1,7 @@
 import type { Child } from "hono/jsx";
+import type { Board } from "./board/model";
 import { Bang, Coin, Difficulty, Divider, Marker, Paste, Query, repo, type Size, type Status } from "./layout";
+import { QuestMap } from "./map";
 
 // The home page. Display names follow the glossary in docs/theme.md.
 
@@ -49,7 +51,7 @@ function Section(props: { id: string; title: string; children: Child }) {
 	);
 }
 
-export function Home(props: { setup: string }) {
+export function Home(props: { setup: string; board: Board }) {
 	const paste = `Follow ${props.setup} to set up Quest here.`;
 	return (
 		<>
@@ -218,33 +220,11 @@ export function Home(props: { setup: string }) {
 			</Section>
 
 			<Section id="map" title="Long-term plans, as a map">
-				<div class="ql-ledger map-placeholder">
-					<svg class="map-route" viewBox="0 0 600 120" aria-hidden="true">
-						<path
-							d="M20 90 C110 20 170 110 260 60 S420 10 480 70 S560 100 580 40"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-dasharray="6 8"
-						/>
-						{[
-							[20, 90],
-							[260, 60],
-							[480, 70],
-							[580, 40],
-						].map(([x, y]) => (
-							<path
-								d={`M${x} ${y - 9} L${x + 9} ${y} L${x} ${y + 9} L${x - 9} ${y} Z`}
-								fill="currentColor"
-							/>
-						))}
-					</svg>
-					<p>
-						Acts become regions, epics become roads, and every quest is a waypoint marked with its status.
-						The map of Quest's own plans is still being charted. Until then, read{" "}
-						<a href={`${repo}/blob/main/quest/a0/README.md`}>the first act</a> on GitHub.
-					</p>
-				</div>
+				<p class="intro">
+					Quest is planned with Quest. Acts become regions, epics become paths, and every quest is a waypoint
+					coloured by its size. Each deploy charts the tree as it stands.
+				</p>
+				<QuestMap board={props.board} />
 			</Section>
 
 			<Section id="party" title="Join the party">

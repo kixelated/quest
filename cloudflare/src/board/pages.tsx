@@ -21,7 +21,7 @@ import {
 // The quest board. Display names follow the glossary in docs/theme.md.
 
 /** A status's display label, such as "Requires: Fork intake, Changes". */
-function label(status: Status, limit = Infinity): string {
+export function label(status: Status, limit = Infinity): string {
 	switch (status.kind) {
 		case "turn-in":
 			return "Ready to turn in";

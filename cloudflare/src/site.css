@@ -400,20 +400,184 @@ pre {
 	margin-top: 0.25rem !important;
 }
 
-.map-placeholder {
+/*
+ * The quest map. Regions and waypoints sit left to right and wrap rather than
+ * scroll; on a phone each path runs down the page instead.
+ * A waypoint's colour is its size, from the theme's .ql-<size> classes.
+ */
+
+.map-regions,
+.map-paths,
+.trail {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.map-regions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1.25rem;
+}
+
+.region {
+	flex: 1 1 auto;
+	min-width: 0;
+	background: var(--ql-bg);
+	border: 1px dashed var(--ql-gold-dim);
+	border-radius: 8px;
+	padding: 1rem 1.25rem 1.25rem;
+}
+
+.region-head h3 {
+	margin: 0.1rem 0 0;
+	font-size: 1.6rem;
+}
+
+.region-head h3 a {
+	color: var(--ql-gold-bright);
+	text-decoration: none;
+}
+
+.region-head h3 a:hover {
+	text-decoration: underline;
+}
+
+.region-count {
+	font-size: 0.88rem;
+}
+
+.map-paths {
+	display: grid;
+	gap: 1.25rem;
+	margin-top: 1rem;
+}
+
+.path-name {
+	margin: 0 0 0.5rem;
+	font-size: 0.88rem;
+	font-style: italic;
+}
+
+.path-name a {
+	color: var(--ql-text);
+}
+
+.trail {
+	display: flex;
+	flex-wrap: wrap;
+	row-gap: 1rem;
+}
+
+.waypoint {
+	position: relative;
+	width: 7.25rem;
+}
+
+/* The path itself: a dashed line through each waypoint's node. */
+.waypoint::before {
+	content: "";
+	position: absolute;
+	top: 1.25rem;
+	left: 0;
+	right: 0;
+	border-top: 2px dashed var(--ql-gold-dim);
+}
+
+.waypoint:first-child::before {
+	left: 50%;
+}
+
+.waypoint:last-child::before {
+	right: 50%;
+}
+
+.waypoint a {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding-inline: 0.3rem;
 	text-align: center;
+	text-decoration: none;
+	color: inherit;
 }
 
-.map-route {
-	width: 100%;
-	max-width: 36rem;
-	color: var(--ql-gold-dim);
+.waypoint-node {
+	position: relative;
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 2.5rem;
+	height: 2.5rem;
 }
 
-.map-placeholder p {
-	max-width: 40rem;
-	margin: 1rem auto 0;
-	color: var(--ql-muted);
+.waypoint-node::before {
+	content: "";
+	position: absolute;
+	inset: 0.4rem;
+	transform: rotate(45deg);
+	border: 2px solid currentColor;
+	border-radius: 2px;
+	background: color-mix(in srgb, currentColor 22%, var(--ql-bg));
+}
+
+/* Blocked waypoints are drawn dashed and unfilled: not yet reachable. */
+.waypoint-blocked .waypoint-node::before {
+	border-style: dashed;
+	background: var(--ql-bg);
+}
+
+.waypoint-size {
+	position: relative;
+	font-size: 0.72rem;
+	font-weight: 700;
+}
+
+.waypoint-text {
+	display: flex;
+	flex-direction: column;
+	align-items: inherit;
+	margin-top: 0.35rem;
+	color: var(--ql-text);
+}
+
+.waypoint-title {
+	font-size: 0.84rem;
+	line-height: 1.3;
+}
+
+.waypoint a:hover .waypoint-title {
+	color: var(--ql-gold-bright);
+	text-decoration: underline;
+}
+
+.waypoint-status {
+	font-size: 0.76rem;
+	font-weight: 600;
+	line-height: 1.4;
+}
+
+.waypoint .ql-elite {
+	align-self: center;
+	margin-top: 0.15rem;
+	font-size: 0.7rem;
+}
+
+.map-legend {
+	margin-top: 1.25rem;
+	font-size: 0.88rem;
+}
+
+.map-legend p {
+	margin: 0.25rem 0 0;
+}
+
+.legend-sizes {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
 }
 
 .offer-amount {
@@ -866,5 +1030,55 @@ a.entry-title:hover {
 
 	.ql-ledger::before {
 		left: 1.25rem;
+	}
+}
+
+/* On a phone the map turns a quarter: each path runs down the page. */
+@media (max-width: 40rem) {
+	.region {
+		padding: 0.75rem 0.75rem 1rem;
+	}
+
+	.trail {
+		flex-direction: column;
+		row-gap: 0;
+	}
+
+	.waypoint {
+		width: auto;
+	}
+
+	.waypoint a {
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 0.6rem;
+		padding: 0.3rem 0;
+		text-align: left;
+	}
+
+	.waypoint::before {
+		top: 0;
+		bottom: 0;
+		left: 1.25rem;
+		right: auto;
+		border-top: 0;
+		border-left: 2px dashed var(--ql-gold-dim);
+	}
+
+	.waypoint:first-child::before {
+		top: 1.55rem;
+		left: 1.25rem;
+	}
+
+	.waypoint:last-child::before {
+		bottom: calc(100% - 1.55rem);
+	}
+
+	.waypoint-text {
+		margin-top: 0.3rem;
+	}
+
+	.waypoint .ql-elite {
+		align-self: flex-start;
 	}
 }
