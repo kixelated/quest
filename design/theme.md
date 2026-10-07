@@ -2,22 +2,23 @@
 
 Quest presents itself as an original quest log for your repository and your
 agents. This page is the source of truth for that presentation: the display
-glossary, status markers, difficulty colours, palette, type, and mark. The
+glossary, status markers, size colours, palette, type, and mark. The
 site, board, CLI, and copy keep small tables that cite it.
 
 The theme is presentation only. Quest files, `quest check`, `quest guide`, and
-the skills keep the format's own terms. Its files live in `docs/theme/`, not
-`assets/`, which holds the agent contract embedded in the binary.
+the skills keep the format's own terms. Its files live in `design/theme/`, not
+`docs/`, which the site publishes as user documentation, or `assets/`, which
+holds the agent contract embedded in the binary.
 
 ## Rules
 
 - Original homage, not a parody. Use only genre conventions: `!` and `?`
-  markers, quest log pages, gold borders, and difficulty colours. Use no
+  markers, quest log pages, gold borders, and size colours. Use no
   Blizzard names, art, fonts, icons, or screenshots.
 - Hand-written SVG and CSS, and open-licensed fonts only.
 - Dark only. There is no light mode.
-- Never use colour as the only signal. Every marker and difficulty colour comes
-  with its text label.
+- Never use colour as the only signal. Every marker and size colour comes with
+  its text label.
 - No XP, levels, achievements, or leaderboards.
 
 ## Voice
@@ -54,28 +55,45 @@ Available or Requires.
 Gold is display only: a run's spend and donated tokens show as gold with a coin
 glyph. There is no pledge pool and no new state.
 
-## Difficulty
+## Size
 
-A quest's size is its difficulty. Show the size label next to its colour.
+Quests are coloured by size, from grey XS to purple XL, on every surface: the
+site, the board, the map, and the CLI. Show the size label next to its colour.
 
-| Size | Colour | Hex | Terminal SGR | Extra |
-| --- | --- | --- | --- | --- |
-| XS | grey | `#a59f95` | `90` | |
-| S | green | `#5ccf5c` | `32` | |
-| M | yellow | `#f2d23c` | `33` | |
-| L | orange | `#ff9838` | `38;5;208` | |
-| XL | red | `#ff5f52` | `31` | "Elite" tag |
+| Size | Colour | Hex | Terminal SGR |
+| --- | --- | --- | --- |
+| XS | grey | `#a59f95` | `90` |
+| S | green | `#5ccf5c` | `32` |
+| M | yellow | `#f2d23c` | `33` |
+| L | red | `#ff6b60` | `31` |
+| XL | purple | `#c77dff` | `35` |
+
+XL has no extra tag: its purple and its size label already stand out.
+
+Contrast as text on the three ink surfaces (WCAG AA needs 4.5:1):
+
+| Size | `--ql-bg` | `--ql-panel` | `--ql-raised` |
+| --- | --- | --- | --- |
+| XS | 7.2:1 | 6.8:1 | 6.0:1 |
+| S | 9.5:1 | 8.9:1 | 7.9:1 |
+| M | 12.7:1 | 11.9:1 | 10.6:1 |
+| L | 6.8:1 | 6.4:1 | 5.7:1 |
+| XL | 7.0:1 | 6.6:1 | 5.9:1 |
+
+The `.ql-size` badge tints its background with 14% of the hue, which lowers
+these ratios. Every size still passes on every surface, and the lowest is L on
+`--ql-raised`, at 4.6:1.
 
 Markers use the same hues: yellow (`#f2d23c`, SGR `33`) for `!` Available and
 `?` Ready to turn in, and grey (`#a59f95`, SGR `90`) for a blocked `!`.
-The grey is warm so it sits on the ink surfaces; the other hues already pass AA
-on them and are unchanged.
-Terminal colours are SGR codes so they follow the user's terminal palette:
-named ANSI colours, plus 256-colour `208` for L and bright black `90` for XS
-and blocked. L has no 16-colour fallback: the 16-colour palette has no orange,
-and every stand-in is too close to M's yellow or XL's red. The size label
-already tells them apart.
-Emit `38;5;208` without detecting terminal colour depth.
+The grey is warm so it sits on the ink surfaces. The purple is a cool violet,
+well clear of L's red and of the gold leaf, and more saturated than the lapis
+links.
+Terminal colours are named ANSI SGR codes, so they follow the user's terminal
+palette and work on any colour terminal: bright black `90` for XS and blocked,
+and the standard `32`, `33`, `31`, and `35` for S to XL. The scale has no
+orange, so every size has a 16-colour code and needs no colour-depth
+detection.
 
 ## Palette
 
@@ -98,11 +116,15 @@ properties.
 | `--ql-grey` | `#a59f95` | XS, blocked marker |
 | `--ql-green` | `#5ccf5c` | S |
 | `--ql-yellow` | `#f2d23c` | M, Available and Ready to turn in markers |
-| `--ql-orange` | `#ff9838` | L |
-| `--ql-red` | `#ff5f52` | XL, Elite tag |
+| `--ql-red` | `#ff6b60` | L |
+| `--ql-purple` | `#c77dff` | XL |
+
+Components colour sizes through `--ql-size-xs`, `--ql-size-s`, `--ql-size-m`,
+`--ql-size-l`, and `--ql-size-xl` (or the `.ql-xs` to `.ql-xl` classes), which
+point at the hues above, so a scale change is a token change.
 
 Every text colour meets WCAG AA (4.5:1) on `--ql-bg`, `--ql-panel`, and
-`--ql-raised`. The lowest is red on `--ql-raised`, at 5.3:1.
+`--ql-raised`. The lowest is red on `--ql-raised`, at 5.7:1.
 
 ## Type
 
@@ -125,8 +147,8 @@ do not commit font files. `theme.css` has the fallback stacks.
   three lines tall in gold Cormorant Garamond.
 - Divider (`.ql-divider`): a gold rule broken by a lozenge between two dots.
   It separates sections.
-- Markers, difficulty (`.ql-size`), the Elite tag, and gold amounts
-  (`.ql-gold`), each with its text label.
+- Markers, size colours (`.ql-size`), and gold amounts (`.ql-gold`), each
+  with its text label.
 
 ## Mark
 
@@ -144,8 +166,8 @@ access:
 
 ```sh
 google-chrome --headless=new --hide-scrollbars --virtual-time-budget=10000 \
-  --window-size=1280,640 --screenshot=docs/theme/og.png \
-  "file://$PWD/docs/theme/og.svg"
+  --window-size=1280,640 --screenshot=design/theme/og.png \
+  "file://$PWD/design/theme/og.svg"
 ```
 
 A maintainer uploads `og.png` by hand under the repository's Settings, General,

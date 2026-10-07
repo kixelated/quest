@@ -1,7 +1,7 @@
 // Build-time inputs for the Worker, written to build/ (ignored by Git):
 // - build/docs.json: the repository's docs/*.md rendered to HTML.
 // - build/board.json: this repository's quest tree and finished quests, for the board.
-// - build/public/: static assets, the theme from docs/theme/ and src/site.css.
+// - build/public/: static assets, the theme from design/theme/ and src/site.css.
 // Wrangler runs this before dev and deploy; the check and test scripts run it first.
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +14,7 @@ const repo = "https://github.com/kixelated/quest";
 const worker = join(import.meta.dirname, "..");
 const root = join(worker, "..");
 const docs = join(root, "docs");
+const design = join(root, "design");
 const build = join(worker, "build");
 
 // Docs link relative to their file so they work on GitHub. Other docs become
@@ -115,5 +116,5 @@ rmSync(build, { recursive: true, force: true });
 mkdirSync(join(build, "public"), { recursive: true });
 writeFileSync(join(build, "docs.json"), JSON.stringify(rendered));
 writeFileSync(join(build, "board.json"), JSON.stringify(snapshot));
-cpSync(join(docs, "theme"), join(build, "public", "theme"), { recursive: true });
+cpSync(join(design, "theme"), join(build, "public", "theme"), { recursive: true });
 cpSync(join(worker, "src", "site.css"), join(build, "public", "site.css"));

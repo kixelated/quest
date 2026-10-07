@@ -19,7 +19,7 @@ import type { Size } from "../layout";
 import type { Change, Completed, Project } from "./project";
 
 /**
- * A quest's most advanced state, per docs/theme.md: Ready to turn in, then
+ * A quest's most advanced state, per design/theme.md: Ready to turn in, then
  * Accepted by, then Available or Requires.
  */
 export type Status =

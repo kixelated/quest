@@ -1,7 +1,7 @@
 import type { Child } from "hono/jsx";
 import { Bang, Coin, Difficulty, Divider, Marker, Paste, Query, repo, type Size, type Status } from "./layout";
 
-// The home page. Display names follow the glossary in docs/theme.md.
+// The home page. Display names follow the glossary in design/theme.md.
 
 const log: { status: Status; label: string; size: Size; title: string }[] = [
 	{ status: "turn-in", label: "Ready to turn in", size: "S", title: "Add the CSV endpoint" },

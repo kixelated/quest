@@ -4,7 +4,7 @@ A deployable foundation for Quest on Cloudflare, and the site at
 `https://kixel.quest`: the quest log for your repo and your agents, on the web.
 Hono serves HTML directly, so there is no client bundle. Every page renders
 inside the shared layout in `src/layout.tsx`, which follows
-[the quest log theme](../docs/theme.md): the home page (`src/home.tsx`), the
+[the quest log theme](../design/theme.md): the home page (`src/home.tsx`), the
 docs under `/docs` (`src/docs.tsx`), the quest board under `/repos`
 (`src/board/`), sign-in in the nav, and the not-found page. App pages extend
 the layout (breadcrumbs, the status marker, the paste box) rather than adding
@@ -28,7 +28,7 @@ also snapshots this repository's `quest/` tree and finished quests into
 `build/board.json`, which is the board's only project until GitHub sync
 mirrors repositories into Artifacts. A shallow clone has no history, so its
 board shows no finished work. It
-also copies `docs/theme/` and `src/site.css` into `build/public/`, which the
+also copies `design/theme/` and `src/site.css` into `build/public/`, which the
 Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
 `/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
 

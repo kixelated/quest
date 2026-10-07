@@ -1,7 +1,7 @@
 /*
  * Quest log theme, "illuminated ledger": palette, type, and status tokens. Dark only.
  *
- * docs/theme.md is canonical. Change it first, then this file.
+ * design/theme.md is canonical. Change it first, then this file.
  *
  * Fonts are open-licensed (SIL Open Font License 1.1). Load them from Google Fonts:
  * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Inter:wght@400;600&display=swap">
@@ -26,12 +26,19 @@
 	--ql-muted: #b2a487;
 	--ql-link: #9db9e8;
 
-	/* Status and difficulty hues */
+	/* Status and size hues */
 	--ql-grey: #a59f95;
 	--ql-green: #5ccf5c;
 	--ql-yellow: #f2d23c;
-	--ql-orange: #ff9838;
-	--ql-red: #ff5f52;
+	--ql-red: #ff6b60;
+	--ql-purple: #c77dff;
+
+	/* Size colours: colour a size through these, not the hues. */
+	--ql-size-xs: var(--ql-grey);
+	--ql-size-s: var(--ql-green);
+	--ql-size-m: var(--ql-yellow);
+	--ql-size-l: var(--ql-red);
+	--ql-size-xl: var(--ql-purple);
 
 	/* Type */
 	--ql-font-heading: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
@@ -117,28 +124,28 @@
 	color: var(--ql-grey);
 }
 
-/* Difficulty by size. Always show the size label as well as the colour. */
+/* Size colours. Always show the size label as well as the colour. */
 .ql-xs {
-	color: var(--ql-grey);
+	color: var(--ql-size-xs);
 }
 
 .ql-s {
-	color: var(--ql-green);
+	color: var(--ql-size-s);
 }
 
 .ql-m {
-	color: var(--ql-yellow);
+	color: var(--ql-size-m);
 }
 
 .ql-l {
-	color: var(--ql-orange);
+	color: var(--ql-size-l);
 }
 
 .ql-xl {
-	color: var(--ql-red);
+	color: var(--ql-size-xl);
 }
 
-/* A size label in its difficulty colour, for example <span class="ql-size ql-l">L</span>. */
+/* A size label in its colour, for example <span class="ql-size ql-l">L</span>. */
 .ql-size {
 	display: inline-block;
 	min-width: 2.4em;
@@ -149,19 +156,6 @@
 	font-weight: 600;
 	text-align: center;
 	background: color-mix(in srgb, currentColor 14%, transparent);
-}
-
-/* The "Elite" tag shown next to XL quests. */
-.ql-elite {
-	color: var(--ql-red);
-	border: 1px solid currentColor;
-	border-radius: 3px;
-	padding: 0 0.35em;
-	font-family: var(--ql-font-heading);
-	font-size: 0.8em;
-	font-weight: 700;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
 }
 
 /* Gold: agent tokens shown as coins. Display only. */

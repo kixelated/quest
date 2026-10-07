@@ -5,7 +5,7 @@
 The home page at `https://kixel.quest` shows Quest's own `quest/` tree as a
 map, read left to right like a video game world map. Acts are regions,
 epics are paths, and quests are nodes marked with their status and
-difficulty, in the identity from `docs/theme.md`. The map
+difficulty, in the identity from `design/theme.md`. The map
 is generated at build time, so every deploy shows the real tree. Until
 [Landing page](/quest/a0/theme/landing.md) lands, nodes link to the quest
 files on GitHub.

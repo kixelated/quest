@@ -6,7 +6,10 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
 	// Renders docs/*.md, snapshots quest/ for the board, and stages the theme and site.css into build/.
-	"build": { "command": "node scripts/build.ts", "watch_dir": ["src", "scripts", "../docs", "../quest"] },
+	"build": {
+		"command": "node scripts/build.ts",
+		"watch_dir": ["src", "scripts", "../docs", "../design", "../quest"],
+	},
 	"assets": { "directory": "build/public" },
 	"routes": [{ "pattern": "kixel.quest", "custom_domain": true }],
 	"workers_dev": false,
