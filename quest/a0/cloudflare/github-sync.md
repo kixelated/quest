@@ -10,6 +10,6 @@ Claims, issues, quests, and reviews sync because they are files and notes.
 ## Plan
 
 - Triggers: Artifacts push events, and a GitHub webhook from a GitHub App.
-  The GitHub App is shared with [onboarding](/quest/m0/cloudflare/onboard.md).
+  The GitHub App is shared with [onboarding](/quest/a0/cloudflare/onboard.md).
 - Sync runs real git in a Sandbox, or uses isomorphic-git if that proves
   enough. Push to Artifacts uses receive-pack v1.

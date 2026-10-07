@@ -10,4 +10,4 @@ Use the export endpoint. Show progress and let the user retry a failed download.
 
 ## Required
 
-- [CSV endpoint](/quest/m0/export.md) - the button needs something to call
+- [CSV endpoint](/quest/a0/export.md) - the button needs something to call

@@ -27,7 +27,7 @@ people retry a failed download.
 
 ## Required
 
-- [CSV endpoint](/quest/m0/export.md) - the
+- [CSV endpoint](/quest/a0/export.md) - the
   button needs something to call
 
 ## Closes
@@ -37,8 +37,8 @@ people retry a failed download.
 
 const tree = `quest/
   README.md      # The roadmap
-  m0/
-    README.md    # Chapter one, in priority order
+  a0/
+    README.md    # First act, in priority order
     export.md    # Available
     download.md  # Requires: export.md`;
 
@@ -113,8 +113,7 @@ export function Home(props: { setup: string }) {
 					<div>
 						<p>
 							A quest is a Markdown file scoped to one pull request: its objectives, what has been
-							decided, and what stands in the way. Quest chains are folders, and chapters group them by
-							horizon.
+							decided, and what stands in the way. Epics are folders, and acts group them by horizon.
 						</p>
 						<p>
 							Any agent that can read your repository can find the work. No database, no tracker to sync,
@@ -171,7 +170,7 @@ export function Home(props: { setup: string }) {
 				<p class="intro">The same quest: the Markdown your agents edit, and the page you read.</p>
 				<div class="split sample">
 					<figure class="ql-ledger code-page">
-						<figcaption>quest/m0/download.md</figcaption>
+						<figcaption>quest/a0/download.md</figcaption>
 						<pre>
 							<code>{sample}</code>
 						</pre>
@@ -254,9 +253,9 @@ export function Home(props: { setup: string }) {
 						))}
 					</svg>
 					<p>
-						Chapters become regions, quest chains become roads, and every quest is a waypoint marked with
-						its status. The map of Quest's own plans is still being charted. Until then, read{" "}
-						<a href={`${repo}/blob/main/quest/m0/README.md`}>the first chapter</a> on GitHub.
+						Acts become regions, epics become roads, and every quest is a waypoint marked with its status.
+						The map of Quest's own plans is still being charted. Until then, read{" "}
+						<a href={`${repo}/blob/main/quest/a0/README.md`}>the first act</a> on GitHub.
 					</p>
 				</div>
 			</Section>

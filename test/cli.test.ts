@@ -13,28 +13,28 @@ test("check reports the document count", () => {
 });
 
 test("check prints findings on stderr and fails", () => {
-	const out = Tree.baseline().append("quest/m0/line/one.md", "\n## Requires\n").run("check");
+	const out = Tree.baseline().append("quest/a0/epic/one.md", "\n## Requires\n").run("check");
 	expect(out.code).toBe(1);
 	expect(out.stdout).toBe("");
-	expect(out.stderr).toContain("quest: quest/m0/line/one.md:7: unknown '## Requires'");
+	expect(out.stderr).toContain("quest: quest/a0/epic/one.md:7: unknown '## Requires'");
 });
 
 test("ready lists ready quests", () => {
-	expect(Tree.baseline().run("ready")).toEqual({ code: 0, stdout: "quest/m0/line/one.md\n", stderr: "" });
+	expect(Tree.baseline().run("ready")).toEqual({ code: 0, stdout: "quest/a0/epic/one.md\n", stderr: "" });
 });
 
 // Blocked or not, ready exits 0: the blocker list on stdout is the result.
 test("ready prints blockers on stdout and explains on stderr", () => {
-	const out = Tree.baseline().run("ready", "/quest/m0/line/two.md");
+	const out = Tree.baseline().run("ready", "/quest/a0/epic/two.md");
 	expect(out.code).toBe(0);
-	expect(out.stdout).toBe("quest/m0/line/one.md\n");
-	expect(out.stderr).toContain("quest: blocked by quest/m0/line/one.md\n");
-	expect(out.stderr).toContain("quest: /quest/m0/line/two.md is blocked;");
+	expect(out.stdout).toBe("quest/a0/epic/one.md\n");
+	expect(out.stderr).toContain("quest: blocked by quest/a0/epic/one.md\n");
+	expect(out.stderr).toContain("quest: /quest/a0/epic/two.md is blocked;");
 });
 
 test("ready accepts a filesystem path", () => {
 	const tree = Tree.baseline();
-	expect(tree.run("ready", `${tree.path}/quest/m0/line/two.md`).stdout).toBe("quest/m0/line/one.md\n");
+	expect(tree.run("ready", `${tree.path}/quest/a0/epic/two.md`).stdout).toBe("quest/a0/epic/one.md\n");
 });
 
 test("ready rejects a path that is not a quest", () => {
@@ -45,7 +45,7 @@ test("ready rejects a path that is not a quest", () => {
 
 test("the root option is accepted after the command", () => {
 	const tree = Tree.baseline();
-	expect(run("ready", "--root", tree.path).stdout).toBe("quest/m0/line/one.md\n");
+	expect(run("ready", "--root", tree.path).stdout).toBe("quest/a0/epic/one.md\n");
 });
 
 test("version", () => {
@@ -83,8 +83,8 @@ test("a missing tree names the directory as given", () => {
 
 test("a document that is not UTF-8 is an error", () => {
 	const tree = Tree.baseline();
-	writeFileSync(join(tree.path, "quest/m0/line/one.md"), Buffer.from([0x23, 0x20, 0xff, 0x0a]));
+	writeFileSync(join(tree.path, "quest/a0/epic/one.md"), Buffer.from([0x23, 0x20, 0xff, 0x0a]));
 	const out = tree.run("check");
 	expect(out.code).toBe(1);
-	expect(out.stderr).toMatch(/^quest: reading quest\/m0\/line\/one\.md: /);
+	expect(out.stderr).toMatch(/^quest: reading quest\/a0\/epic\/one\.md: /);
 });

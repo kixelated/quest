@@ -6,7 +6,7 @@ Before you begin, run `quest guide` and read its output completely.
 
 Your goal is to execute many quests in parallel.
 The scope consists of all ready quests that are not claimed.
-Use the argument (if provided) to filter to specific quests/questlines.
+Use the argument (if provided) to filter to specific quests/epics.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Present one quest at a time. Before its question, write a short paragraph explaining the problem, the quest's goal, and your recommendation, including any blockers or tradeoffs the user needs to decide.
