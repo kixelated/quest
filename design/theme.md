@@ -60,13 +60,15 @@ glyph. There is no pledge pool and no new state.
 Quests are coloured by size, from grey XS to purple XL, on every surface: the
 site, the board, the map, and the CLI. Show the size label next to its colour.
 
-| Size | Colour | Hex | Terminal SGR | Extra |
-| --- | --- | --- | --- | --- |
-| XS | grey | `#a59f95` | `90` | |
-| S | green | `#5ccf5c` | `32` | |
-| M | yellow | `#f2d23c` | `33` | |
-| L | red | `#ff6b60` | `31` | |
-| XL | purple | `#c77dff` | `35` | "Elite" tag |
+| Size | Colour | Hex | Terminal SGR |
+| --- | --- | --- | --- |
+| XS | grey | `#a59f95` | `90` |
+| S | green | `#5ccf5c` | `32` |
+| M | yellow | `#f2d23c` | `33` |
+| L | red | `#ff6b60` | `31` |
+| XL | purple | `#c77dff` | `35` |
+
+XL has no extra tag: its purple and its size label already stand out.
 
 Contrast as text on the three ink surfaces (WCAG AA needs 4.5:1):
 
@@ -115,7 +117,7 @@ properties.
 | `--ql-green` | `#5ccf5c` | S |
 | `--ql-yellow` | `#f2d23c` | M, Available and Ready to turn in markers |
 | `--ql-red` | `#ff6b60` | L |
-| `--ql-purple` | `#c77dff` | XL, Elite tag |
+| `--ql-purple` | `#c77dff` | XL |
 
 Components colour sizes through `--ql-size-xs`, `--ql-size-s`, `--ql-size-m`,
 `--ql-size-l`, and `--ql-size-xl` (or the `.ql-xs` to `.ql-xl` classes), which
@@ -145,8 +147,8 @@ do not commit font files. `theme.css` has the fallback stacks.
   three lines tall in gold Cormorant Garamond.
 - Divider (`.ql-divider`): a gold rule broken by a lozenge between two dots.
   It separates sections.
-- Markers, size colours (`.ql-size`), the Elite tag, and gold amounts
-  (`.ql-gold`), each with its text label.
+- Markers, size colours (`.ql-size`), and gold amounts (`.ql-gold`), each
+  with its text label.
 
 ## Mark
 

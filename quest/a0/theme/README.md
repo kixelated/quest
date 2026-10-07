@@ -13,9 +13,12 @@ epics.
 This README owns the work no child does: a final pass over every surface for
 consistency with `design/theme.md` before the demo is recorded.
 The pass also renames the "difficulty" leftovers to "size": the Worker's
-`Difficulty` component (`cloudflare/src/layout.tsx`, `cloudflare/src/home.tsx`)
-and the wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`,
-`quest/a0/cloudflare/board.md`, and this README's `Required` list.
+`Difficulty` component (`cloudflare/src/layout.tsx`, used by
+`cloudflare/src/home.tsx` and `cloudflare/src/board/pages.tsx`), the board's
+"weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
+`cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
+wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`, and this README's
+`Required` list.
 
 ## Plan
 
@@ -68,6 +71,8 @@ Decided while planning on 2026-10-05:
   256-colour code or colour-depth detection. The web hues pass WCAG AA on all
   three ink surfaces, and components use the `--ql-size-*` tokens, so a scale
   change is a token change in `design/theme/theme.css`.
+- Decided 2026-10-07: XL quests have no "Elite" tag. Purple XL and its size
+  label already stand out.
 
 ## Required
 

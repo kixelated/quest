@@ -189,7 +189,7 @@ export function Coin() {
 	);
 }
 
-// A quest's status, per the glossary in docs/theme.md.
+// A quest's status, per the glossary in design/theme.md.
 export type Status = "available" | "blocked" | "accepted" | "turn-in";
 
 // A status glyph: a yellow `!` for Available, a grey one for Requires, and a
@@ -201,12 +201,7 @@ export function Marker(props: { status: Status }) {
 
 export type Size = "XS" | "S" | "M" | "L" | "XL";
 
-// A size label in its difficulty colour, with the Elite tag on XL.
+// A size label in its size colour.
 export function Difficulty(props: { size: Size }) {
-	return (
-		<>
-			<span class={`ql-size ql-${props.size.toLowerCase()}`}>{props.size}</span>
-			{props.size === "XL" && <span class="ql-elite">Elite</span>}
-		</>
-	);
+	return <span class={`ql-size ql-${props.size.toLowerCase()}`}>{props.size}</span>;
 }
