@@ -3,9 +3,10 @@
 ## Goal
 
 `quest check` reports a tree that has both `<dir>/x.md` and `<dir>/x/README.md`.
-Both would get the branch `<dir>/x` and the same board page, so neither could
-be claimed or viewed on its own. The finding names both files, and a test
-covers it.
+Both map to the same board page, so the epic's page is unreachable. Git also
+can't hold `x.md`'s branch `<dir>/x` beside the branches of quests under `x/`
+(`<dir>/x/...`), so one side can't be claimed. The finding names both files,
+and a test covers it.
 
 ## Plan
 
