@@ -130,7 +130,7 @@ export function readBoard(project: Project): Board {
 			return { kind: "accepted", by, since: parsed.since };
 		}
 		if (open.has(doc.path)) return { kind: "available" };
-		const requires = (blockers(parsed, doc.path) ?? [])
+		const requires = blockers(parsed, doc)
 			.filter((blocker) => blocker.path !== null || !blocker.text.startsWith("claimed by "))
 			.map((blocker) =>
 				blocker.path === null

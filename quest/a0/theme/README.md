@@ -17,8 +17,7 @@ The pass also renames the "difficulty" leftovers to "size": the Worker's
 `cloudflare/src/home.tsx` and `cloudflare/src/board/pages.tsx`), the board's
 "weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
 `cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
-wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`, and this README's
-`Required` list.
+wording in `quest/a0/theme/map.md` and this README's `Required` list.
 
 ## Plan
 
@@ -78,7 +77,6 @@ Decided while planning on 2026-10-05:
 
 - [Quest map](/quest/a0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
 - [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
-- [Themed CLI output](/quest/a0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/a0/theme/landing.md) - the home page's map and calls to action link into the live board
 
 ## Related
