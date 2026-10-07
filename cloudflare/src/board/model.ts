@@ -86,7 +86,10 @@ export function questHref(project: Project, path: string): string {
 	return `/repos/${project.name}/${page}`;
 }
 
-/** A file on the project's forge, or `null` when the project has no web address. */
+/**
+ * A file on the project's forge, or `null` when the project has no web address.
+ * `path` is used as written: it may carry a `#fragment` and is not encoded.
+ */
 export function blobHref(project: Project, path: string): string | null {
 	return project.web ? `${project.web}/blob/main/${path}` : null;
 }

@@ -9,7 +9,7 @@ paste.
 ## Plan
 
 - Narrowed again on 2026-10-07: the map's quests link to their board pages
-  since its own quest landed, which needed neither sync nor onboarding. This
+  since kixelated/quest#84, which needed neither sync nor onboarding. This
   quest keeps only the calls to action.
 - Narrowed on 2026-10-06. The site quest built the design, the shell, and
   the home page (`cloudflare/src/home.tsx`), and its quest map (`cloudflare/src/map.tsx`) draws

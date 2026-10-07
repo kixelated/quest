@@ -55,6 +55,12 @@ describe("quest map", () => {
 	it("links waypoints to their board pages", () => {
 		expect(region.paths[1].waypoints[0].href).toBe("/repos/demo/quest/a0/solo");
 	});
+
+	it("links to the board without a web address", () => {
+		const [offline] = chart(readBoard({ ...project, web: null }));
+		expect(offline.paths[0].href).toBe("/repos/demo/quest/a0/epic");
+		expect(offline.paths[1].waypoints[0].href).toBe("/repos/demo/quest/a0/solo");
+	});
 });
 
 describe("waypoint status", () => {
