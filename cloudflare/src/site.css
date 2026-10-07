@@ -503,14 +503,359 @@ pre {
 	text-align: center;
 }
 
+/* Breadcrumbs */
+
+.crumbs ol {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.5rem;
+	list-style: none;
+	margin: 0;
+	padding: 1rem 0 0;
+	font-size: 0.92rem;
+	color: var(--ql-muted);
+}
+
+.crumbs li + li::before {
+	content: "›";
+	margin-right: 0.5rem;
+	color: var(--ql-gold-dim);
+}
+
+.crumbs a {
+	color: var(--ql-muted);
+}
+
+/* Board */
+
+.eyebrow {
+	display: block;
+	margin: 0;
+	font-family: var(--ql-font-body);
+	font-size: 0.78rem;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--ql-gold);
+}
+
+.board {
+	display: grid;
+	gap: 2rem;
+	padding-block: 2.5rem 1rem;
+}
+
+.board-head h1 {
+	margin: 0.25rem 0 0.5rem;
+}
+
+.board-head .lede {
+	max-width: 48rem;
+	margin: 0 0 1.25rem;
+}
+
+.tally {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.tally a {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-height: 2.25rem;
+	background: var(--ql-panel);
+	border: 1px solid var(--ql-rule);
+	border-radius: 4px;
+	padding: 0.3rem 0.8rem 0.3rem 0.5rem;
+	font-size: 0.95rem;
+	color: inherit;
+	text-decoration: none;
+}
+
+.tally li:first-child a {
+	padding-left: 0.8rem;
+	color: var(--ql-text);
+}
+
+.tally a:hover {
+	border-color: var(--ql-gold-dim);
+}
+
+.tally a[aria-current] {
+	border-color: var(--ql-gold);
+	background: var(--ql-raised);
+}
+
+.act-head h2 a {
+	color: var(--ql-gold-bright);
+	text-decoration: none;
+}
+
+.act-head h2 a:hover {
+	text-decoration: underline;
+}
+
+.tally .ql-marker {
+	min-width: 0.9rem;
+}
+
+.as-of {
+	margin: 1rem 0 0;
+	font-size: 0.9rem;
+}
+
+.board h2 {
+	margin: 0 0 0.25rem;
+}
+
+.board .log {
+	margin-top: 1rem;
+}
+
+.act-summary {
+	max-width: 48rem;
+	margin: 0.25rem 0 1rem;
+}
+
+.progress {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 1rem;
+	margin-block: 0.75rem;
+}
+
+.progress-bar {
+	flex: 1 1 14rem;
+	max-width: 32rem;
+	height: 0.75rem;
+	background: var(--ql-bg);
+	border: 1px solid var(--ql-gold-dim);
+	border-radius: 999px;
+	overflow: hidden;
+}
+
+.progress-bar span {
+	display: block;
+	height: 100%;
+	background: linear-gradient(180deg, #f0d48a, var(--ql-gold));
+}
+
+.progress-text {
+	margin: 0;
+	color: var(--ql-muted);
+	font-size: 0.95rem;
+}
+
+.progress-text strong {
+	color: var(--ql-gold-bright);
+}
+
+a.entry-title {
+	color: var(--ql-text);
+	text-decoration: none;
+}
+
+a.entry-title:hover {
+	color: var(--ql-gold-bright);
+	text-decoration: underline;
+}
+
+.entry-why {
+	grid-column: 2;
+	font-size: 0.92rem;
+}
+
+.epic {
+	border-top: 1px solid var(--ql-rule);
+	padding-top: 0.9rem;
+	margin-top: 0.25rem;
+}
+
+.epic-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.25rem 1rem;
+}
+
+.epic-head h3 {
+	margin: 0;
+	font-size: 1.4rem;
+}
+
+.epic-head h3 a {
+	color: var(--ql-gold-bright);
+	text-decoration: none;
+}
+
+.epic-head h3 a:hover {
+	text-decoration: underline;
+}
+
+.epic-count {
+	font-size: 0.9rem;
+}
+
+.epic > .log {
+	margin: 0.5rem 0 0.5rem 0.4rem;
+	padding-left: 1rem;
+	border-left: 1px solid var(--ql-gold-dim);
+}
+
+.epic > .log > .entry:first-child {
+	border-top: none;
+}
+
+.board-foot {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 2rem;
+	align-items: start;
+}
+
+/* Quest page */
+
+.quest-view {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 20rem;
+	gap: 2rem;
+	align-items: start;
+	padding-block: 1.25rem 1rem;
+}
+
+.quest-title {
+	grid-column: 1 / -1;
+}
+
+.quest-title h1 {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin: 0.5rem 0 0.25rem;
+	font-size: clamp(2.1rem, 5vw, 3rem);
+}
+
+.quest-title h1 .ql-marker:empty {
+	display: none;
+}
+
+.quest-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	margin: 0;
+	font-weight: 600;
+}
+
+.quest-page h2 {
+	font-size: 1.4rem;
+	margin: 1.75rem 0 0.5rem;
+	border-bottom: 1px solid var(--ql-rule);
+	padding-bottom: 0.15rem;
+}
+
+.quest-page h3,
+.quest-page h4 {
+	font-size: 1.2rem;
+	margin: 1.25rem 0 0.25rem;
+}
+
+.quest-page > h2:first-child {
+	margin-top: 0;
+}
+
+.quest-body > :first-child {
+	margin-top: 0;
+}
+
+.quest-body li + li {
+	margin-top: 0.35rem;
+}
+
+.quest-side {
+	display: grid;
+	gap: 1.25rem;
+}
+
+.panel {
+	padding: 1.5rem 1.25rem 1.5rem 2.5rem;
+}
+
+.panel::before {
+	left: 1.25rem;
+}
+
+.panel h2 {
+	margin: 0 0 0.5rem;
+	font-size: 1.4rem;
+}
+
+.panel p {
+	margin: 0 0 0.75rem;
+}
+
+.panel .button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.panel .button:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.panel form {
+	margin: 0;
+}
+
+.panel .paste-box {
+	flex-direction: column;
+	align-items: stretch;
+	padding: 0.75rem;
+}
+
+.note-small {
+	margin-top: 0.5rem !important;
+	font-size: 0.9rem;
+}
+
+.panel-links {
+	text-align: center;
+	font-size: 0.95rem;
+}
+
+.panel-links .ql-divider {
+	margin-bottom: 0.5rem;
+}
+
 @media (max-width: 52rem) {
 	.hero,
-	.split {
+	.split,
+	.board-foot,
+	.quest-view {
 		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.hero {
 		padding-top: 2.5rem;
+	}
+
+	/* What to do next comes before the quest's full text. */
+	.quest-title {
+		order: -2;
+	}
+
+	.quest-side {
+		order: -1;
 	}
 
 	.ql-ledger {
