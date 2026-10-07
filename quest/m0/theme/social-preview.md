@@ -18,12 +18,7 @@ delete this quest once it returns `true`.
   `gh repo edit` once their wording is approved.
 - As a human-action quest it resurfaces at every triage once ready, and the
   upload takes a minute.
-- Waits for [Site](/quest/m0/theme/site.md), which re-exports `og.png` in
-  the refreshed identity (2026-10-06). Uploading the old image first would
-  only be redone.
+- `og.png` was re-exported in the "illuminated ledger" identity on
+  2026-10-06, so it is ready to upload.
 - If `og.svg` changes, re-export `og.png` as `docs/theme.md` describes and
   upload it again.
-
-## Required
-
-- [Site](/quest/m0/theme/site.md) - re-exports `og.png` in the new identity

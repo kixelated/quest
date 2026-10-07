@@ -8,8 +8,9 @@
 		"strict": true,
 		"noEmit": true,
 		"skipLibCheck": true,
+		"resolveJsonModule": true,
 		"jsx": "react-jsx",
 		"jsxImportSource": "hono/jsx"
 	},
-	"include": ["src", "test", "vitest.config.ts", "worker-configuration.d.ts"]
+	"include": ["src", "scripts", "test", "vitest.config.ts", "worker-configuration.d.ts"]
 }

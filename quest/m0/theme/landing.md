@@ -8,8 +8,8 @@ sign-in, onboarding a GitHub repository, and the one-line SETUP paste.
 
 ## Plan
 
-- Narrowed on 2026-10-06. [Site](/quest/m0/theme/site.md) builds the design,
-  the shell, and the home page, and [Quest map](/quest/m0/theme/map.md) draws
+- Narrowed on 2026-10-06. The site quest built the design, the shell, and
+  the home page (`cloudflare/src/home.tsx`), and [Quest map](/quest/m0/theme/map.md) draws
   the tree at build time. This quest adds only the live links once the board, sync, and
   onboarding exist. Before then, map nodes link to the quest files on GitHub.
 - Earlier decision kept: Quest's own tree on the board is the most convincing

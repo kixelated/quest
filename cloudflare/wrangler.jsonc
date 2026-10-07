@@ -5,6 +5,9 @@
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// Renders docs/*.md and stages the theme and site.css into build/.
+	"build": { "command": "node scripts/build.ts", "watch_dir": ["src", "scripts", "../docs"] },
+	"assets": { "directory": "build/public" },
 	"routes": [{ "pattern": "kixel.quest", "custom_domain": true }],
 	"workers_dev": false,
 	"vars": { "AUTH_URL": "https://kixel.quest" },

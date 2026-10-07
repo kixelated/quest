@@ -1,0 +1,523 @@
+/* Site layout for kixel.quest. Identity tokens and components come from /theme/theme.css. */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	background: var(--ql-bg);
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	display: flex;
+	flex-direction: column;
+	background: radial-gradient(ellipse 80% 50% at 50% 0%, #2a1f12 0%, transparent 70%), var(--ql-bg);
+	color: var(--ql-text);
+	font-family: var(--ql-font-body);
+	font-size: 1.0625rem;
+	line-height: 1.65;
+}
+
+main {
+	flex: 1;
+}
+
+h1,
+h2,
+h3,
+h4 {
+	font-family: var(--ql-font-heading);
+	font-weight: 700;
+	color: var(--ql-gold-bright);
+	line-height: 1.15;
+	margin: 1.5em 0 0.5em;
+}
+
+h1 {
+	font-size: clamp(2.4rem, 5vw, 3.6rem);
+}
+
+h2 {
+	font-size: clamp(1.9rem, 3.5vw, 2.5rem);
+}
+
+h3 {
+	font-size: 1.55rem;
+}
+
+h4 {
+	font-size: 1.25rem;
+}
+
+a {
+	color: var(--ql-link);
+	text-underline-offset: 0.18em;
+}
+
+code,
+pre {
+	font-family: var(--ql-font-mono);
+	font-size: 0.88em;
+}
+
+:not(pre) > code {
+	background: var(--ql-raised);
+	border-radius: 3px;
+	padding: 0.1em 0.35em;
+}
+
+pre {
+	margin: 0;
+	overflow-x: auto;
+	line-height: 1.55;
+}
+
+:focus-visible {
+	outline: 2px solid var(--ql-gold-bright);
+	outline-offset: 2px;
+}
+
+.wrap {
+	width: min(72rem, 100% - 2rem);
+	margin-inline: auto;
+}
+
+.muted {
+	color: var(--ql-muted);
+}
+
+.glyph {
+	display: inline-block;
+	width: 0.7em;
+	height: 1.5em;
+	vertical-align: middle;
+}
+
+.glyph.coin {
+	width: 1.1em;
+	height: 1.1em;
+}
+
+/* Buttons */
+
+.button {
+	display: inline-block;
+	font: 600 0.95rem/1.2 var(--ql-font-body);
+	color: var(--ql-text);
+	background: var(--ql-raised);
+	border: 1px solid var(--ql-gold-dim);
+	border-radius: 4px;
+	padding: 0.6em 1.1em;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.button:hover {
+	border-color: var(--ql-gold);
+}
+
+.button.primary {
+	color: #1a1207;
+	background: linear-gradient(180deg, #f0d48a, var(--ql-gold));
+	border-color: var(--ql-gold-bright);
+}
+
+.button.primary:hover {
+	background: linear-gradient(180deg, #f7e2a8, var(--ql-gold-bright));
+}
+
+.button.quiet {
+	background: transparent;
+}
+
+/* Header and footer */
+
+.site-header {
+	border-bottom: 1px solid var(--ql-rule);
+}
+
+.nav {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 1.5rem;
+	padding-block: 0.75rem;
+}
+
+.nav a {
+	color: var(--ql-text);
+	text-decoration: none;
+}
+
+.nav a:hover {
+	color: var(--ql-gold-bright);
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-family: var(--ql-font-heading);
+	font-size: 1.6rem;
+	font-weight: 700;
+	color: var(--ql-gold-bright) !important;
+}
+
+.account {
+	margin-left: auto;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem;
+	font-size: 0.95rem;
+}
+
+.account form {
+	margin: 0;
+}
+
+.site-footer {
+	padding-block: 3rem 2rem;
+	text-align: center;
+	color: var(--ql-muted);
+	font-size: 0.95rem;
+}
+
+.site-footer a {
+	color: var(--ql-muted);
+}
+
+/* Home */
+
+.hero {
+	display: grid;
+	grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+	gap: 3rem;
+	align-items: center;
+	padding-block: 4rem 3rem;
+}
+
+.hero h1 {
+	margin-top: 0;
+}
+
+.lede {
+	font-size: 1.3rem;
+	font-weight: 600;
+	color: var(--ql-text);
+}
+
+.paste {
+	margin-block: 1.75rem;
+}
+
+.paste-label {
+	margin: 0 0 0.4rem;
+	color: var(--ql-muted);
+	font-size: 0.95rem;
+}
+
+.paste-box {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	background: var(--ql-panel);
+	border: 1px solid var(--ql-gold-dim);
+	border-radius: 4px;
+	padding: 0.6rem 0.6rem 0.6rem 1rem;
+}
+
+.paste-box code {
+	flex: 1;
+	background: none;
+	padding: 0;
+	overflow-wrap: anywhere;
+}
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+}
+
+.log-title {
+	margin: 0 0 1rem;
+	font-size: 1.6rem;
+}
+
+.log {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.entry {
+	display: grid;
+	grid-template-columns: 1.4rem 1fr;
+	column-gap: 0.5rem;
+	padding-block: 0.7rem;
+	border-top: 1px solid var(--ql-rule);
+}
+
+.entry-title {
+	font-weight: 600;
+}
+
+.entry-meta {
+	grid-column: 2;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.92rem;
+}
+
+.ql-marker {
+	display: inline-flex;
+	justify-content: center;
+	font-size: 1.1rem;
+	line-height: 1;
+}
+
+.section {
+	padding-block: 2rem;
+}
+
+.section > .ql-divider {
+	max-width: 24rem;
+	margin: 0 auto 1rem;
+}
+
+.section > h2 {
+	text-align: center;
+	margin-top: 0;
+}
+
+.intro {
+	max-width: 44rem;
+	margin: 0 auto 2rem;
+	text-align: center;
+	color: var(--ql-muted);
+}
+
+.split {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 2.5rem;
+	align-items: start;
+}
+
+.code-page {
+	margin: 0;
+}
+
+.code-page figcaption {
+	margin-bottom: 0.75rem;
+	color: var(--ql-muted);
+	font-family: var(--ql-font-mono);
+	font-size: 0.85rem;
+}
+
+.lifecycle,
+.steps {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+	gap: 1.5rem;
+	counter-reset: step;
+}
+
+.lifecycle li,
+.steps li {
+	background: var(--ql-panel);
+	border-top: 2px solid var(--ql-gold-dim);
+	border-radius: 0 0 4px 4px;
+	padding: 1rem 1.25rem;
+}
+
+.lifecycle p {
+	margin: 0.25rem 0;
+}
+
+.state {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-weight: 600;
+}
+
+.steps li {
+	counter-increment: step;
+}
+
+.steps h3 {
+	margin: 0 0 0.5rem;
+}
+
+.steps h3::before {
+	content: counter(step, upper-roman) ". ";
+	color: var(--ql-gold);
+}
+
+.note {
+	text-align: center;
+	color: var(--ql-muted);
+	font-size: 0.95rem;
+	margin-top: 1.5rem;
+}
+
+.quest-page h4 {
+	font-size: 1.15rem;
+	margin: 1.25rem 0 0.25rem;
+	border-bottom: 1px solid var(--ql-rule);
+	padding-bottom: 0.15rem;
+}
+
+.quest-page p,
+.quest-page ul {
+	margin: 0.5rem 0;
+}
+
+.quest-head {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+}
+
+.quest-head h3 {
+	flex: 1;
+	margin: 0;
+}
+
+.quest-status {
+	font-weight: 600;
+	margin-top: 0.25rem !important;
+}
+
+.map-placeholder {
+	text-align: center;
+}
+
+.map-route {
+	width: 100%;
+	max-width: 36rem;
+	color: var(--ql-gold-dim);
+}
+
+.map-placeholder p {
+	max-width: 40rem;
+	margin: 1rem auto 0;
+	color: var(--ql-muted);
+}
+
+.offer-amount {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-top: 0;
+	font-size: 1.4rem;
+}
+
+/* Docs */
+
+.docs {
+	padding-block: 2rem 1rem;
+}
+
+.doc-list {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	gap: 1rem;
+}
+
+.doc-card {
+	display: grid;
+	gap: 0.25rem;
+	text-decoration: none;
+	color: var(--ql-text);
+	padding-block: 1.25rem;
+}
+
+.doc-card:hover {
+	border-color: var(--ql-gold-bright);
+}
+
+.doc-title {
+	font-family: var(--ql-font-heading);
+	font-size: 1.5rem;
+	font-weight: 700;
+	color: var(--ql-gold-bright);
+}
+
+.doc-nav {
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 1rem;
+	font-size: 0.95rem;
+}
+
+.prose {
+	max-width: 52rem;
+	margin-inline: auto;
+}
+
+.prose > h1:first-child {
+	margin-top: 0;
+}
+
+.prose pre {
+	background: var(--ql-bg);
+	border: 1px solid var(--ql-rule);
+	border-radius: 4px;
+	padding: 0.9rem 1rem;
+	margin-block: 1rem;
+}
+
+.prose table {
+	border-collapse: collapse;
+	margin-block: 1rem;
+	display: block;
+	overflow-x: auto;
+}
+
+.prose th,
+.prose td {
+	border: 1px solid var(--ql-rule);
+	padding: 0.4rem 0.75rem;
+	text-align: left;
+}
+
+.prose th {
+	background: var(--ql-raised);
+}
+
+.lost {
+	padding-block: 4rem;
+	text-align: center;
+}
+
+@media (max-width: 52rem) {
+	.hero,
+	.split {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.hero {
+		padding-top: 2.5rem;
+	}
+
+	.ql-ledger {
+		padding: 1.5rem 1.25rem 1.5rem 2.5rem;
+	}
+
+	.ql-ledger::before {
+		left: 1.25rem;
+	}
+}

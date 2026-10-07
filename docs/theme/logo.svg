@@ -1,20 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="title">
 	<title id="title">Quest</title>
-	<!-- Hand-written mark: a gold exclamation point on a slate shield. See docs/theme.md. -->
+	<!-- Hand-written mark: a gold-leaf exclamation point on an ink shield. See docs/theme.md. -->
 	<defs>
-		<linearGradient id="slate" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#2c3644"/>
-			<stop offset="1" stop-color="#141a22"/>
+		<linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#33281c"/>
+			<stop offset="1" stop-color="#120e09"/>
 		</linearGradient>
-		<linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#fff0b3"/>
-			<stop offset="0.45" stop-color="#f5c542"/>
-			<stop offset="1" stop-color="#c98b17"/>
+		<linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#fbe9b0"/>
+			<stop offset="0.45" stop-color="#e6c063"/>
+			<stop offset="1" stop-color="#a5741d"/>
 		</linearGradient>
 	</defs>
-	<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#slate)" stroke="#d9ac48" stroke-width="3" stroke-linejoin="round"/>
-	<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#8d6b22" stroke-width="1.2" stroke-linejoin="round"/>
-	<g fill="url(#gold)" stroke="#231804" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
+	<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#ink)" stroke="#c9a14a" stroke-width="3" stroke-linejoin="round"/>
+	<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#7a6230" stroke-width="1.2" stroke-linejoin="round"/>
+	<g fill="url(#leaf)" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
 		<path d="M24.8 13 H39.2 L35 38.3 H29 Z"/>
 		<path d="M32 41 L37.5 46.5 L32 52 L26.5 46.5 Z"/>
 	</g>
