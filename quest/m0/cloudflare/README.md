@@ -51,7 +51,8 @@ Decided while planning on 2026-10-01. Research sources:
   a Workers custom domain, so its DNS moves to Cloudflare before deploying.
 - Quest moves from Rust to TypeScript (decided 2026-10-06): one language and
   one core for the CLI, Worker, site, and map, replacing the wasm bridge.
-  The port and its release pipeline land on this line's branch.
+  The port landed on this line's branch, which then folded into main
+  (#35, decided 2026-10-07). Remaining children target main, per #44.
 - Agents run either locally or hosted. Watching an agent run live is a
   non-goal beyond showing its status. In v1, checks run `quest check` only.
 
