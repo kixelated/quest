@@ -12,6 +12,10 @@ epics.
 
 This README owns the work no child does: a final pass over every surface for
 consistency with `design/theme.md` before the demo is recorded.
+The pass also renames the "difficulty" leftovers to "size": the Worker's
+`Difficulty` component (`cloudflare/src/layout.tsx`, `cloudflare/src/home.tsx`)
+and the wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`,
+`quest/a0/cloudflare/board.md`, and this README's `Required` list.
 
 ## Plan
 
@@ -55,9 +59,15 @@ Decided while planning on 2026-10-05:
 - The site on the Worker (home, docs, and the hosted app under one shell)
   replaces launch.md's earlier "no website" boundary.
 - Decided 2026-10-07: the size scale stays `[XS]`-`[XL]`, and quests are
-  coloured by size: XS grey, S green, M yellow, L orange, XL red.
+  coloured by size on every surface (site, board, map, and CLI).
   `design/theme.md` calls these size and size colours, not difficulty, so
   there is a single name.
+- Decided 2026-10-07: the size colours are XS grey, S green, M yellow, L red,
+  and XL purple, replacing L orange and XL red. Every size now has a named
+  ANSI colour (SGR `90`, `32`, `33`, `31`, `35`), so the CLI needs no
+  256-colour code or colour-depth detection. The web hues pass WCAG AA on all
+  three ink surfaces, and components use the `--ql-size-*` tokens, so a scale
+  change is a token change in `design/theme/theme.css`.
 
 ## Required
 

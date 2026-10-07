@@ -30,8 +30,15 @@
 	--ql-grey: #a59f95;
 	--ql-green: #5ccf5c;
 	--ql-yellow: #f2d23c;
-	--ql-orange: #ff9838;
-	--ql-red: #ff5f52;
+	--ql-red: #ff6b60;
+	--ql-purple: #c77dff;
+
+	/* Size colours: colour a size through these, not the hues. */
+	--ql-size-xs: var(--ql-grey);
+	--ql-size-s: var(--ql-green);
+	--ql-size-m: var(--ql-yellow);
+	--ql-size-l: var(--ql-red);
+	--ql-size-xl: var(--ql-purple);
 
 	/* Type */
 	--ql-font-heading: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
@@ -119,23 +126,23 @@
 
 /* Size colours. Always show the size label as well as the colour. */
 .ql-xs {
-	color: var(--ql-grey);
+	color: var(--ql-size-xs);
 }
 
 .ql-s {
-	color: var(--ql-green);
+	color: var(--ql-size-s);
 }
 
 .ql-m {
-	color: var(--ql-yellow);
+	color: var(--ql-size-m);
 }
 
 .ql-l {
-	color: var(--ql-orange);
+	color: var(--ql-size-l);
 }
 
 .ql-xl {
-	color: var(--ql-red);
+	color: var(--ql-size-xl);
 }
 
 /* A size label in its colour, for example <span class="ql-size ql-l">L</span>. */
@@ -153,7 +160,7 @@
 
 /* The "Elite" tag shown next to XL quests. */
 .ql-elite {
-	color: var(--ql-red);
+	color: var(--ql-size-xl);
 	border: 1px solid currentColor;
 	border-radius: 3px;
 	padding: 0 0.35em;

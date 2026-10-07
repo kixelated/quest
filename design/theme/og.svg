@@ -70,8 +70,8 @@
 	<text x="1184" y="419" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Available</text>
 
 	<use href="#query" x="126" y="472" color="#f2d23c"/>
-	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff9838" fill-opacity="0.14" stroke="#ff9838" stroke-width="1.5"/>
-	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff9838">L</text>
+	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff6b60" fill-opacity="0.14" stroke="#ff6b60" stroke-width="1.5"/>
+	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff6b60">L</text>
 	<text x="226" y="482" class="body strong" font-size="30" fill="#ede1c6">Build the quest board</text>
 	<text x="1184" y="481" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready to turn in</text>
 

@@ -57,27 +57,41 @@ glyph. There is no pledge pool and no new state.
 
 ## Size
 
-Quests are coloured by size, from grey XS to red XL. Show the size label next
-to its colour.
+Quests are coloured by size, from grey XS to purple XL, on every surface: the
+site, the board, the map, and the CLI. Show the size label next to its colour.
 
 | Size | Colour | Hex | Terminal SGR | Extra |
 | --- | --- | --- | --- | --- |
 | XS | grey | `#a59f95` | `90` | |
 | S | green | `#5ccf5c` | `32` | |
 | M | yellow | `#f2d23c` | `33` | |
-| L | orange | `#ff9838` | `38;5;208` | |
-| XL | red | `#ff5f52` | `31` | "Elite" tag |
+| L | red | `#ff6b60` | `31` | |
+| XL | purple | `#c77dff` | `35` | "Elite" tag |
+
+Contrast as text on the three ink surfaces (WCAG AA needs 4.5:1):
+
+| Size | `--ql-bg` | `--ql-panel` | `--ql-raised` |
+| --- | --- | --- | --- |
+| XS | 7.2:1 | 6.8:1 | 6.0:1 |
+| S | 9.5:1 | 8.9:1 | 7.9:1 |
+| M | 12.7:1 | 11.9:1 | 10.6:1 |
+| L | 6.8:1 | 6.4:1 | 5.7:1 |
+| XL | 7.0:1 | 6.6:1 | 5.9:1 |
+
+The `.ql-size` badge tints its background with 14% of the hue, which lowers
+these slightly; every size still passes on every surface, and the lowest is L
+on `--ql-raised`, at 4.6:1.
 
 Markers use the same hues: yellow (`#f2d23c`, SGR `33`) for `!` Available and
 `?` Ready to turn in, and grey (`#a59f95`, SGR `90`) for a blocked `!`.
-The grey is warm so it sits on the ink surfaces; the other hues already pass AA
-on them and are unchanged.
-Terminal colours are SGR codes so they follow the user's terminal palette:
-named ANSI colours, plus 256-colour `208` for L and bright black `90` for XS
-and blocked. L has no 16-colour fallback: the 16-colour palette has no orange,
-and every stand-in is too close to M's yellow or XL's red. The size label
-already tells them apart.
-Emit `38;5;208` without detecting terminal colour depth.
+The grey is warm so it sits on the ink surfaces. The purple is a cool violet,
+well clear of L's red and of the gold leaf, and more saturated than the lapis
+links.
+Terminal colours are named ANSI SGR codes, so they follow the user's terminal
+palette and work on any colour terminal: bright black `90` for XS and blocked,
+and the standard `32`, `33`, `31`, and `35` for S to XL. The scale has no
+orange, so every size has a 16-colour code and needs no colour-depth
+detection.
 
 ## Palette
 
@@ -100,11 +114,15 @@ properties.
 | `--ql-grey` | `#a59f95` | XS, blocked marker |
 | `--ql-green` | `#5ccf5c` | S |
 | `--ql-yellow` | `#f2d23c` | M, Available and Ready to turn in markers |
-| `--ql-orange` | `#ff9838` | L |
-| `--ql-red` | `#ff5f52` | XL, Elite tag |
+| `--ql-red` | `#ff6b60` | L |
+| `--ql-purple` | `#c77dff` | XL, Elite tag |
+
+Components colour sizes through `--ql-size-xs`, `--ql-size-s`, `--ql-size-m`,
+`--ql-size-l`, and `--ql-size-xl` (or the `.ql-xs` to `.ql-xl` classes), which
+point at the hues above, so a scale change is a token change.
 
 Every text colour meets WCAG AA (4.5:1) on `--ql-bg`, `--ql-panel`, and
-`--ql-raised`. The lowest is red on `--ql-raised`, at 5.3:1.
+`--ql-raised`. The lowest is red on `--ql-raised`, at 5.7:1.
 
 ## Type
 
