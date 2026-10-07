@@ -25,10 +25,16 @@ becomes claimed by, the Requires heading becomes `Required`, Ready to turn in
 becomes in review, Quest complete becomes complete, and Objectives and Rewards
 become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
 marker and palette notes to match, keeping only the flavour rows (the party,
-gold, Offer gold). The social image is fixed earlier, in
-[social image terms](/quest/a0/theme/og-terms.md).
-It pluralises `quest check`'s terminal summary ("1 documents checked")
-and keeps the piped `quest: N documents ok` contract unchanged.
+gold, Offer gold). The social image already uses the format terms.
+Decided 2026-10-07: the pass also pluralises `quest check`'s terminal
+summary ("1 documents checked") and keeps the piped `quest: N documents ok`
+contract unchanged.
+Decided 2026-10-07: the pass also fixes the CLI's column alignment for wide
+characters (CJK, emoji) in quest titles, whose widths count UTF-16 units
+(from the #77 review). It is cosmetic and low priority.
+Decided 2026-10-07: the pass also adds a note to the og export steps in
+`design/theme.md`: headless Chrome can silently fall back to system fonts on
+a cold font cache, so re-run the export if the fonts look wrong.
 
 ## Plan
 
@@ -101,7 +107,6 @@ Decided while planning on 2026-10-05:
 
 ## Required
 
-- [Social image terms](/quest/a0/theme/og-terms.md) - `design/theme/og.svg` and `og.png` show format terms before the upload
 - [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
 - [Landing page](/quest/a0/theme/landing.md) - the home page's map and calls to action link into the live board
 

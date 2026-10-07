@@ -13,7 +13,7 @@ Only the maintainer's v0.1.0 tag and its live verification remain:
 
 - Before tagging, confirm the EPIPE fix
   ([#81](https://github.com/kixelated/quest/pull/81)) has merged into `main`
-  (decided 2026-10-07).
+  (decided 2026-10-07; it merged the same day).
 - Tag v0.1.0 from `main` with the steps in
   [#82](https://github.com/kixelated/quest/pull/82). The Release workflow's
   install checks on that tag gate this quest, and it closes once they pass.

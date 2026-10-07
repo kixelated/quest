@@ -16,12 +16,8 @@ delete this quest once it returns `true`.
   were set with `gh repo edit` on 2026-10-07.
 - As a human-action quest it resurfaces at every triage once ready, and the
   upload takes a minute.
-- `og.png` was last re-exported on 2026-10-07 with the new size colours
-  (L red), but it still shows display aliases, so wait for
-  [social image terms](/quest/a0/theme/og-terms.md) before uploading.
+- `og.png` was last re-exported on 2026-10-07 with the size colours (L red)
+  and the format terms (Ready, In review, Blocked by), so it is ready to
+  upload.
 - If `og.svg` changes, re-export `og.png` as `design/theme.md` describes and
   upload it again.
-
-## Required
-
-- [Social image terms](/quest/a0/theme/og-terms.md) - `og.svg` and `og.png` show format terms before the upload
