@@ -1,10 +1,11 @@
 import { type Doc, entries, rooted } from "quest/core";
-import { type Act, type Board, type Progress, type Quest, type Status, flatten } from "./board/model";
-import { label } from "./board/pages";
+import { type Act, type Board, type Progress, type Quest, type Status, actAnchor, flatten } from "./board/model";
+import { Difficulty } from "./layout";
 
 // The home page's quest map: the project's own tree, read left to right like
 // a world map. Acts are regions, epics are paths, and quests are waypoints
-// coloured by size. Display names follow the glossary in docs/theme.md.
+// coloured by size. Statuses use the format's own terms, with no display
+// aliases (decided 2026-10-07 on kixelated/quest#78).
 
 /** A quest on the map and where its waypoint leads. */
 export type Waypoint = { quest: Quest; href: string };
@@ -39,7 +40,8 @@ function steps(docs: Map<string, Doc>): (path: string) => number {
 /** The board's acts as map regions, each path ordered by step, then priority. */
 export function chart(board: Board): Region[] {
 	const { project } = board;
-	// Until the board's quest pages are wired in, waypoints open the files on GitHub.
+	// Until the landing page (quest/a0/theme/landing.md) links waypoints to the
+	// board, they open the files on GitHub.
 	const file = (path: string) => (project.web ? `${project.web}/blob/main/${path}` : null);
 	const step = steps(board.docs);
 	const ordered = (quests: Quest[]): Waypoint[] =>
@@ -65,33 +67,49 @@ export function chart(board: Board): Region[] {
 				},
 			];
 		});
-		// Each act is a section of the board, anchored by its directory name.
-		const anchor = act.path.split("/")[1] ?? "unsorted";
-		return { act, href: `/repos/${project.name}#${anchor}`, paths };
+		return { act, href: `/repos/${project.name}#${actAnchor(act)}`, paths };
 	});
 }
 
-/** The short label a waypoint shows; the full one is its tooltip. */
-function short(status: Status): string {
-	return status.kind === "blocked" ? "Requires others" : label(status);
+/** A waypoint's status in the format's own terms. */
+function text(status: Status): string {
+	switch (status.kind) {
+		case "available":
+			return "ready";
+		case "blocked":
+			return "blocked";
+		case "accepted":
+			return `claimed by ${status.by}`;
+		case "turn-in":
+			return "in review";
+	}
+}
+
+/** The waypoint's tooltip: its title and status, and what a blocked quest requires. */
+function tooltip(quest: Quest): string {
+	const { status } = quest;
+	const line = `${quest.title}: ${text(status)}`;
+	if (status.kind !== "blocked" || status.requires.length === 0) return line;
+	return `${line}\nRequired: ${status.requires.map((ref) => ref.title).join(", ")}`;
 }
 
 function Stop(props: Waypoint) {
 	const { quest } = props;
 	const kind = quest.status.kind;
-	const size = quest.size?.toLowerCase() ?? "none";
+	const size = quest.size ? ` ql-${quest.size.toLowerCase()}` : "";
+	// Screen readers hear the title first, then the size and status.
+	const name = `${quest.title}, size ${quest.size ?? "unknown"}, ${text(quest.status)}`;
 	return (
-		<li class={`waypoint ql-${size} waypoint-${kind}`}>
-			<a href={props.href} title={`${quest.title}: ${label(quest.status)}`}>
+		<li class={`waypoint${size} waypoint-${kind}`}>
+			<a href={props.href} title={tooltip(quest)} aria-label={name}>
 				<span class="waypoint-node">
 					<span class="waypoint-size">{quest.size ?? "?"}</span>
 				</span>
 				<span class="waypoint-text">
 					<span class="waypoint-title">{quest.title}</span>
 					<span class={`waypoint-status ${kind === "accepted" ? "muted" : `ql-${kind}`}`}>
-						{short(quest.status)}
+						{text(quest.status)}
 					</span>
-					{quest.size === "XL" && <span class="ql-elite">Elite</span>}
 				</span>
 			</a>
 		</li>
@@ -104,7 +122,7 @@ export function QuestMap(props: { board: Board }) {
 	const regions = chart(board);
 	return (
 		<div class="ql-ledger map">
-			<ol class="map-regions">
+			<ol class="map-regions" role="list">
 				{regions.map(({ act, href, paths }) => (
 					<li class="region">
 						<header class="region-head">
@@ -113,10 +131,10 @@ export function QuestMap(props: { board: Board }) {
 								<a href={href}>{act.title}</a>
 							</h3>
 							<span class="muted region-count">
-								{act.progress.done} of {act.progress.total} quests done
+								{act.progress.done} of {act.progress.total} quests complete
 							</span>
 						</header>
-						<ol class="map-paths">
+						<ol class="map-paths" role="list">
 							{paths.map((path) => (
 								<li class="map-path">
 									<p class="path-name">
@@ -124,11 +142,11 @@ export function QuestMap(props: { board: Board }) {
 										{path.progress && (
 											<span class="muted">
 												{" "}
-												· {path.progress.done} of {path.progress.total} done
+												· {path.progress.done} of {path.progress.total} complete
 											</span>
 										)}
 									</p>
-									<ol class="trail">
+									<ol class="trail" role="list">
 										{path.waypoints.map((waypoint) => (
 											<Stop {...waypoint} />
 										))}
@@ -143,11 +161,11 @@ export function QuestMap(props: { board: Board }) {
 				<p class="legend-sizes">
 					<span class="muted">Size:</span>{" "}
 					{(["XS", "S", "M", "L", "XL"] as const).map((size) => (
-						<span class={`ql-size ql-${size.toLowerCase()}`}>{size}</span>
+						<Difficulty size={size} />
 					))}
 				</p>
 				<p class="muted">
-					A solid waypoint can be started or is under way; a dashed one requires others first.{" "}
+					A solid waypoint is ready, claimed, or in review; a dashed one is blocked.{" "}
 					{web && (
 						<>
 							Charted from <a href={`${web}/tree/${board.project.commit}/quest`}>quest/</a> on{" "}

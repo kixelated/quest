@@ -6,6 +6,7 @@ import { render } from "./markdown";
 import {
 	type Board,
 	type Act,
+	actAnchor,
 	type Finished,
 	type Group,
 	type Item,
@@ -18,10 +19,10 @@ import {
 	trail,
 } from "./model";
 
-// The quest board. Display names follow the glossary in docs/theme.md.
+// The quest board. Display names follow the glossary in design/theme.md.
 
 /** A status's display label, such as "Requires: Fork intake, Changes". */
-export function label(status: Status, limit = Infinity): string {
+function label(status: Status, limit = Infinity): string {
 	switch (status.kind) {
 		case "turn-in":
 			return "Ready to turn in";
@@ -119,7 +120,7 @@ function ActSection(props: { act: Act; items: Item[] }) {
 	const { act } = props;
 	const name = act.number === "" ? act.title : `Act ${act.number}`;
 	return (
-		<section class="ql-ledger act" id={act.path.split("/")[1] ?? "unsorted"}>
+		<section class="ql-ledger act" id={actAnchor(act)}>
 			<header class="act-head">
 				{act.number !== "" && <p class="eyebrow">{name}</p>}
 				<h2>

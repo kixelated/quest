@@ -558,12 +558,6 @@ pre {
 	line-height: 1.4;
 }
 
-.waypoint .ql-elite {
-	align-self: center;
-	margin-top: 0.15rem;
-	font-size: 0.7rem;
-}
-
 .map-legend {
 	margin-top: 1.25rem;
 	font-size: 0.88rem;
@@ -1076,9 +1070,5 @@ a.entry-title:hover {
 
 	.waypoint-text {
 		margin-top: 0.3rem;
-	}
-
-	.waypoint .ql-elite {
-		align-self: flex-start;
 	}
 }

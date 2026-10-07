@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readBoard } from "../src/board/model";
 import type { Project } from "../src/board/project";
-import { chart } from "../src/map";
+import { QuestMap, chart } from "../src/map";
 
 const docs: Record<string, string> = {
 	"quest/README.md": "# Quests\n\n## Goal\n\nShip it.\n\n## Required\n\n- [A0](/quest/a0/README.md) - first\n",
@@ -54,5 +54,54 @@ describe("quest map", () => {
 
 	it("links waypoints to the quest files", () => {
 		expect(region.paths[1].waypoints[0].href).toBe("https://example.com/acme/demo/blob/main/quest/a0/solo.md");
+	});
+});
+
+describe("waypoint status", () => {
+	const claimed = "\n## Claim\n\n- Sam (github:sam) on https://example.com/sam/demo since 2026-10-07\n";
+	const render = async (overrides: Partial<Project>) =>
+		String(await QuestMap({ board: readBoard({ ...project, ...overrides }) }));
+
+	it("uses the format's terms, listing what a blocked quest requires", async () => {
+		const html = await render({
+			documents: [
+				...project.documents.filter((doc) => doc.path !== "quest/a0/solo.md"),
+				{ path: "quest/a0/solo.md", content: `${docs["quest/a0/solo.md"]}${claimed}` },
+			],
+		});
+		const statuses = [...html.matchAll(/class="waypoint-status [^"]*">([^<]*)</g)].map((match) => match[1]);
+		expect(statuses.sort()).toEqual(["blocked", "blocked", "claimed by @sam", "ready", "ready"]);
+		expect(html).toContain('title="Later: blocked\nRequired: First" aria-label="Later, size M, blocked"');
+		expect(html).not.toMatch(/Available|Requires|Accepted|turn in|Elite/);
+	});
+
+	it("shows a quest with an open change as in review", async () => {
+		const html = await render({ changes: [{ quest: "quest/a0/epic/later.md", author: "@sam", href: "/x" }] });
+		expect(html).toContain('title="Later: in review"');
+	});
+
+	it("survives a Required cycle", async () => {
+		const html = await render({
+			documents: [
+				...project.documents.filter((doc) => doc.path !== "quest/a0/epic/first.md"),
+				{
+					path: "quest/a0/epic/first.md",
+					content:
+						"# [S] First\n\n## Goal\n\nFirst.\n\n## Required\n\n- [Later](/quest/a0/epic/later.md) - loop\n",
+				},
+			],
+		});
+		expect(html).toContain('aria-label="First, size S, blocked"');
+	});
+
+	it("escapes quest titles", async () => {
+		const html = await render({
+			documents: [
+				...project.documents.filter((doc) => doc.path !== "quest/a0/solo.md"),
+				{ path: "quest/a0/solo.md", content: '# [L] Keep a < b & "c" > d\n\n## Goal\n\nAlone.\n' },
+			],
+		});
+		expect(html).toContain('title="Keep a &lt; b &amp; &quot;c&quot; &gt; d: ready"');
+		expect(html).toContain("Keep a &lt; b &amp; &quot;c&quot; &gt; d</span>");
 	});
 });
