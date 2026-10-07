@@ -11,24 +11,24 @@ line in its root instructions.
 
 ## Install and pin
 
-Pin the latest [release](https://github.com/kixelated/quest/releases) tag. If
-there is no release yet, pin the latest commit on `main`, which builds from
-source and needs Rust 1.91 or newer.
+Pin the latest [release](https://github.com/kixelated/quest/releases) tag.
+Releases ship binaries for macOS and Linux on arm64 and x64. If there is no
+release yet, only a nix flake can pin Quest, to the latest commit on `main`,
+which it builds from source; otherwise tell the user Quest has no release to
+install yet and stop.
 
 Use the tool manager the repository already has:
 
 - **mise** (`mise.toml` or `.mise.toml`):
-  `mise use github:kixelated/quest@<tag>`, or without a release,
-  `mise use 'cargo:https://github.com/kixelated/quest@rev:<sha>'`.
+  `mise use github:kixelated/quest@<tag>`.
 - **nix flake** (`flake.nix`): add the input
   `quest.url = "github:kixelated/quest/<tag-or-sha>"`, put
   `quest.packages.${system}.default` in the dev shell, and update `flake.lock`.
 - **Neither:** ask the user before installing anything globally. With consent,
   run the release's shell installer,
   `curl -LsSf https://github.com/kixelated/quest/releases/download/<tag>/quest-installer.sh | sh`,
-  or without a release,
-  `cargo install --locked --git https://github.com/kixelated/quest --rev <sha>`.
-  Tell the user this install is unpinned.
+  which puts `quest` in `~/.local/bin` (set `QUEST_INSTALL_DIR` to change it)
+  and edits no shell configuration. Tell the user this install is unpinned.
 
 Confirm `quest --version` runs before continuing.
 
@@ -71,6 +71,7 @@ work or `/quest-import` to bring in open GitHub issues.
 2. Run `quest uninstall`. It removes only unmodified stubs and the `Quests: `
    line, and never deletes the quest tree.
 3. Remove the pin added above: the mise entry, or the flake input and dev
-   shell package. For an unpinned install, delete the `quest` binary.
+   shell package. For an unpinned install, delete the `quest` binary the
+   installer placed (`~/.local/bin/quest` by default).
 4. Ask the user whether to delete `quest/`. Git history keeps the plans either
    way.

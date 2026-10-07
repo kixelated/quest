@@ -59,13 +59,13 @@ cat > "$7" <<'INSTALLER'
 #!/bin/sh
 set -eu
 if [ "${INSTALL_TEST_MISSING:-0}" = 1 ]; then exit 0; fi
-mkdir -p "$QUEST_UNMANAGED_INSTALL"
-cat > "$QUEST_UNMANAGED_INSTALL/quest" <<'QUEST'
+mkdir -p "$QUEST_INSTALL_DIR"
+cat > "$QUEST_INSTALL_DIR/quest" <<'QUEST'
 #!/usr/bin/env bash
 [[ $1 == --version ]] || exit 1
 printf '%s\n' "$INSTALL_TEST_VERSION"
 QUEST
-chmod +x "$QUEST_UNMANAGED_INSTALL/quest"
+chmod +x "$QUEST_INSTALL_DIR/quest"
 INSTALLER
 MOCK
 # A system Quest must never be used as a substitute for a missing installation.
@@ -92,14 +92,11 @@ reject() {
     [[ -z $(ls -A "$work/tmp") ]]
 }
 
-# Each installer accepts an explicit tag or cargo-dist's reusable-workflow plan.
-export RELEASE_TAG=v0.1.0 DIST_PLAN='{"announcement_tag":"v9.9.9"}'
+# Each installer installs the requested tag.
+export RELEASE_TAG=v0.1.0
 check mise x86_64-unknown-linux-gnu
 check shell x86_64-unknown-linux-gnu
-export RELEASE_TAG='' DIST_PLAN='{"announcement_tag":"v0.1.0"}'
-check mise x86_64-unknown-linux-gnu
-check shell x86_64-unknown-linux-gnu
-(($(wc -l <"$work/log") == 4))
+(($(wc -l <"$work/log") == 2))
 
 # Incorrect/missing output and failed downloads must turn the job red.
 export INSTALL_TEST_VERSION='quest 0.0.9'
@@ -122,13 +119,10 @@ unset INSTALL_TEST_DOWNLOAD_FAIL
 
 # Invalid inputs fail before either installer is invoked.
 log_lines=$(wc -l <"$work/log")
-invalid_plans=('{}' 'null' '{"announcement_tag":7}' '{"announcement_tag":""}' 'invalid')
-for plan in "${invalid_plans[@]}"; do
-    export DIST_PLAN="$plan"
+for tag in '' '../v0.1.0' 'v0.1' 'latest'; do
+    export RELEASE_TAG="$tag"
     reject shell x86_64-unknown-linux-gnu
 done
-export RELEASE_TAG='../v0.1.0'
-reject shell x86_64-unknown-linux-gnu
 export RELEASE_TAG=v0.1.0
 reject unknown x86_64-unknown-linux-gnu
 reject shell aarch64-unknown-linux-gnu

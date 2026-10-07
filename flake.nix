@@ -36,6 +36,8 @@
           devShells.default = pkgs.mkShell {
             packages = with pkgs; [
               nodejs
+              # Compiles the release binaries; the Release workflow installs this version.
+              bun
               just
               jq
               git
