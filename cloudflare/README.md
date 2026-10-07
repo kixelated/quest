@@ -1,7 +1,21 @@
 # Quest Worker
 
-A deployable foundation for Quest on Cloudflare. Hono serves HTML directly, so
-there is no separate client build. Better Auth uses D1 for accounts and sessions;
+A deployable foundation for Quest on Cloudflare, and the site at
+`https://kixel.quest`. Hono serves HTML directly, so there is no client
+bundle. Every page renders inside the shared layout in `src/layout.tsx`, which
+follows [the quest log theme](../docs/theme.md): the home page (`src/home.tsx`),
+the docs under `/docs` (`src/docs.tsx`), sign-in in the nav, and the not-found
+page. Later pages, such as the board, use the same layout.
+
+`scripts/build.ts` runs before every check, test, dev server, and deploy. It
+renders the repository's `docs/*.md` into `build/docs.json`, so the Markdown
+stays the single source and its relative links keep working on GitHub: links to
+other docs become `/docs/<name>` and other repository paths point at GitHub. It
+also copies `docs/theme/` and `src/site.css` into `build/public/`, which the
+Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
+`/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
+
+Better Auth uses D1 for accounts and sessions;
 adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
 state, cookies, and callbacks. Form routes enforce the configured origin before
 calling Better Auth's server API.
@@ -46,6 +60,11 @@ The scaffold does not call Artifacts yet. Use a separate development namespace
 before adding repository operations. Integration tests explicitly omit this
 binding so tests and CI never need Cloudflare credentials or call live services.
 
+To work on the site without a Cloudflare login, run
+`npm exec -- wrangler dev --local` from `cloudflare/` after the migrations.
+`--local` disables remote bindings, which the pages do not use. Wrangler
+reruns the build when `src/`, `scripts/`, or `docs/` change.
+
 ## Checks
 
 ```sh
@@ -56,8 +75,8 @@ just test
 These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 `just worker-check` checks generated binding types, TypeScript, formatting, and
 `wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
-with real local D1 and SQLite Durable Objects. Tests cover the mocked GitHub
-OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
+with real local D1 and SQLite Durable Objects. Tests cover the home page and
+rendered docs in the shared layout, the mocked GitHub OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
 and coordinator storage across eviction and repository boundaries. No OAuth
 credentials or Cloudflare account are required for checks.
 

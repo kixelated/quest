@@ -1,6 +1,11 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import type { Child } from "hono/jsx";
 import { secureHeaders } from "hono/secure-headers";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { createAuth } from "./auth";
+import { DocIndex, DocPage, findDoc } from "./docs";
+import { Home } from "./home";
+import { Layout, type Page } from "./layout";
 export { RepositoryCoordinator } from "./repository";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -12,39 +17,49 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
-app.get("/", async (c) => {
-	const session = await createAuth(c.env).api.getSession({
-		headers: c.req.raw.headers,
-	});
+// Every HTML page renders in the shared layout, with the visitor's session in the nav.
+async function page(
+	c: Context<{ Bindings: Env }>,
+	props: Omit<Page, "origin" | "user">,
+	body: Child,
+	status: ContentfulStatusCode = 200,
+) {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	c.header("Cache-Control", "no-store");
 	return c.html(
-		<html lang="en">
-			<head>
-				<meta charset="utf-8" />
-				<meta name="viewport" content="width=device-width, initial-scale=1" />
-				<title>Quest</title>
-			</head>
-			<body>
-				<main>
-					<h1>Quest</h1>
-					<p>Plan repository work and collaborate with agents.</p>
-					{session ? (
-						<>
-							<p>Signed in as {session.user.name}.</p>
-							<form method="post" action="/sign-out">
-								<button>Sign out</button>
-							</form>
-						</>
-					) : (
-						<form method="post" action="/sign-in">
-							<button>Sign in with GitHub</button>
-						</form>
-					)}
-				</main>
-			</body>
-		</html>,
+		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} user={session?.user ?? null}>
+			{body}
+		</Layout>,
+		status,
 	);
+}
+
+app.get("/", (c) =>
+	page(
+		c,
+		{ description: "Readable plans, explicit dependencies, and reviewable Git changes, for you and your agents." },
+		<Home setup={new URL("/setup", c.env.AUTH_URL).href} />,
+	),
+);
+app.get("/docs", (c) => page(c, { title: "Docs", description: "How to use Quest in your repository." }, <DocIndex />));
+app.get("/docs/:slug", (c) => {
+	const doc = findDoc(c.req.param("slug"));
+	if (!doc) return c.notFound();
+	return page(c, { title: doc.title, description: doc.summary }, <DocPage doc={doc} />);
 });
+app.notFound((c) =>
+	page(
+		c,
+		{ title: "Not found", description: "This page is not on the map." },
+		<section class="wrap lost">
+			<h1>Uncharted territory</h1>
+			<p>
+				This page is not on the map. Head back <a href="/">home</a> or read <a href="/docs">the docs</a>.
+			</p>
+		</section>,
+		404,
+	),
+);
 
 // The server API bypasses Better Auth's HTTP middleware. Guard form routes
 // before calling it; the /api/auth/* handler enforces its own Origin/CSRF checks.

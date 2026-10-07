@@ -2,79 +2,82 @@
 	<title id="title">Quest: a quest log for your repo and your agents</title>
 	<!-- Hand-written social image. Colours and fonts follow docs/theme.md; export steps are there too. -->
 	<style>
-		@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@700&amp;family=Inter:wght@400;600&amp;display=block");
-		.heading { font-family: Cinzel, Georgia, serif; font-weight: 700; }
+		@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&amp;family=Inter:wght@400;600&amp;display=block");
+		.heading { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 700; }
 		.body { font-family: Inter, "Liberation Sans", sans-serif; }
 		.strong { font-weight: 600; }
 	</style>
 	<defs>
-		<radialGradient id="backdrop" cx="0.5" cy="0.35" r="0.8">
-			<stop offset="0" stop-color="#1a222d"/>
-			<stop offset="1" stop-color="#0e1218"/>
+		<radialGradient id="backdrop" cx="0.5" cy="0" r="0.9">
+			<stop offset="0" stop-color="#2a1f12"/>
+			<stop offset="1" stop-color="#14100b"/>
 		</radialGradient>
-		<linearGradient id="slate" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#2c3644"/>
-			<stop offset="1" stop-color="#141a22"/>
+		<linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#33281c"/>
+			<stop offset="1" stop-color="#120e09"/>
 		</linearGradient>
-		<linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#fff0b3"/>
-			<stop offset="0.45" stop-color="#f5c542"/>
-			<stop offset="1" stop-color="#c98b17"/>
+		<linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#fbe9b0"/>
+			<stop offset="0.45" stop-color="#e6c063"/>
+			<stop offset="1" stop-color="#a5741d"/>
 		</linearGradient>
 		<!-- Status markers, coloured with the color attribute on each use. -->
-		<g id="bang" fill="currentColor" stroke="#231804" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
+		<g id="bang" fill="currentColor" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
 			<path d="M-6.5 -19 H6.5 L3 4 H-3 Z"/>
 			<path d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z"/>
 		</g>
 		<g id="query" stroke-linecap="round" stroke-linejoin="round">
-			<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="#231804" stroke-width="9.5"/>
+			<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="#1a1207" stroke-width="9.5"/>
 			<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="currentColor" stroke-width="5"/>
-			<path d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z" fill="currentColor" stroke="#231804" stroke-width="2.4" paint-order="stroke"/>
+			<path d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z" fill="currentColor" stroke="#1a1207" stroke-width="2.4" paint-order="stroke"/>
 		</g>
 	</defs>
 
 	<rect width="1280" height="640" fill="url(#backdrop)"/>
 
-	<!-- Quest log window -->
-	<rect x="32" y="32" width="1216" height="576" rx="10" fill="#19202a" stroke="#d9ac48" stroke-width="4"/>
-	<rect x="44" y="44" width="1192" height="552" rx="6" fill="none" stroke="#8d6b22" stroke-width="1.5"/>
+	<!-- Ledger page: gold-leaf border, inner trim, and a double margin rule -->
+	<rect x="32" y="32" width="1216" height="576" rx="6" fill="#1d1711" stroke="#c9a14a" stroke-width="3"/>
+	<rect x="42" y="42" width="1196" height="556" rx="3" fill="none" stroke="#7a6230" stroke-width="1.5"/>
+	<path d="M70 42 V598 M75 42 V598" stroke="#7a6230" stroke-width="1.5"/>
 
 	<!-- Mark: a copy of docs/theme/logo.svg -->
-	<g transform="translate(92 92) scale(3.1)">
-		<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#slate)" stroke="#d9ac48" stroke-width="3" stroke-linejoin="round"/>
-		<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#8d6b22" stroke-width="1.2" stroke-linejoin="round"/>
-		<g fill="url(#gold)" stroke="#231804" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
+	<g transform="translate(104 84) scale(3.1)">
+		<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#ink)" stroke="#c9a14a" stroke-width="3" stroke-linejoin="round"/>
+		<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#7a6230" stroke-width="1.2" stroke-linejoin="round"/>
+		<g fill="url(#leaf)" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
 			<path d="M24.8 13 H39.2 L35 38.3 H29 Z"/>
 			<path d="M32 41 L37.5 46.5 L32 52 L26.5 46.5 Z"/>
 		</g>
 	</g>
 
 	<!-- Hook, then substance -->
-	<text x="336" y="206" class="heading" font-size="120" letter-spacing="4" fill="#f5c542">Quest</text>
-	<text x="342" y="274" class="body strong" font-size="36" fill="#ebe4d2">A quest log for your repo and your agents</text>
-	<text x="342" y="320" class="body" font-size="26" fill="#a9a394">Readable plans. Explicit dependencies. Reviewable Git changes.</text>
+	<text x="344" y="196" class="heading" font-size="132" letter-spacing="2" fill="#e6c063">Quest</text>
+	<text x="348" y="262" class="body strong" font-size="36" fill="#ede1c6">A quest log for your repo and your agents</text>
+	<text x="348" y="308" class="body" font-size="26" fill="#b2a487">Readable plans. Explicit dependencies. Reviewable Git changes.</text>
 
-	<!-- Divider -->
-	<path d="M96 362 H628 M652 362 H1184" stroke="#8d6b22" stroke-width="1.5"/>
-	<path d="M640 354 L648 362 L640 370 L632 362 Z" fill="#d9ac48"/>
+	<!-- Ornamental divider: a gold rule broken by a lozenge between two dots -->
+	<path d="M104 356 H604 M676 356 H1196" stroke="#7a6230" stroke-width="1.5"/>
+	<circle cx="618" cy="356" r="2.6" fill="#c9a14a"/>
+	<path d="M640 345 L651 356 L640 367 L629 356 Z" fill="#c9a14a"/>
+	<circle cx="662" cy="356" r="2.6" fill="#c9a14a"/>
 
 	<!-- Sample entries, using the display glossary -->
-	<rect x="84" y="386" width="1112" height="56" rx="4" fill="#232c38"/>
-	<use href="#bang" x="114" y="414" color="#f2d23c"/>
-	<rect x="146" y="399" width="48" height="30" rx="5" fill="#5ccf5c" fill-opacity="0.14" stroke="#5ccf5c" stroke-width="1.5"/>
-	<text x="170" y="421" class="body strong" font-size="20" text-anchor="middle" fill="#5ccf5c">S</text>
-	<text x="214" y="424" class="body strong" font-size="30" fill="#ebe4d2">Create the quest log identity</text>
-	<text x="1176" y="423" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Available</text>
+	<rect x="96" y="382" width="1108" height="56" rx="3" fill="#2a2118"/>
+	<use href="#bang" x="126" y="410" color="#f2d23c"/>
+	<rect x="158" y="395" width="48" height="30" rx="4" fill="#5ccf5c" fill-opacity="0.14" stroke="#5ccf5c" stroke-width="1.5"/>
+	<text x="182" y="417" class="body strong" font-size="20" text-anchor="middle" fill="#5ccf5c">S</text>
+	<text x="226" y="420" class="body strong" font-size="30" fill="#ede1c6">Add the CSV endpoint</text>
+	<text x="1184" y="419" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Available</text>
 
-	<use href="#query" x="114" y="476" color="#f2d23c"/>
-	<rect x="146" y="461" width="48" height="30" rx="5" fill="#ff9838" fill-opacity="0.14" stroke="#ff9838" stroke-width="1.5"/>
-	<text x="170" y="483" class="body strong" font-size="20" text-anchor="middle" fill="#ff9838">L</text>
-	<text x="214" y="486" class="body strong" font-size="30" fill="#ebe4d2">Build the quest board</text>
-	<text x="1176" y="485" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready to turn in</text>
+	<use href="#query" x="126" y="472" color="#f2d23c"/>
+	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff9838" fill-opacity="0.14" stroke="#ff9838" stroke-width="1.5"/>
+	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff9838">L</text>
+	<text x="226" y="482" class="body strong" font-size="30" fill="#ede1c6">Build the quest board</text>
+	<text x="1184" y="481" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready to turn in</text>
 
-	<use href="#bang" x="114" y="538" color="#9aa1ab"/>
-	<rect x="146" y="523" width="48" height="30" rx="5" fill="#f2d23c" fill-opacity="0.14" stroke="#f2d23c" stroke-width="1.5"/>
-	<text x="170" y="545" class="body strong" font-size="20" text-anchor="middle" fill="#f2d23c">M</text>
-	<text x="214" y="548" class="body strong" font-size="30" fill="#a9a394">Build the landing page</text>
-	<text x="1176" y="547" class="body" font-size="24" text-anchor="end" fill="#9aa1ab">Requires: Quest board</text>
+	<use href="#bang" x="126" y="534" color="#a59f95"/>
+	<rect x="158" y="519" width="48" height="30" rx="4" fill="#f2d23c" fill-opacity="0.14" stroke="#f2d23c" stroke-width="1.5"/>
+	<text x="182" y="541" class="body strong" font-size="20" text-anchor="middle" fill="#f2d23c">M</text>
+	<text x="226" y="544" class="body strong" font-size="30" fill="#b2a487">Add a CSV download button</text>
+	<text x="1184" y="543" class="body" font-size="24" text-anchor="end" fill="#a59f95">Requires: CSV endpoint</text>
 </svg>
