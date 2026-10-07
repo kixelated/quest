@@ -30,6 +30,10 @@ from its page. A maintainer can release claims and promote issues.
   with screenshots before shipping it.
 - Render inside the site's shared layout (`cloudflare/src/layout.tsx`), and
   reuse its components and the ledger page from `docs/theme/theme.css`.
+- Where app pages need something the layout lacks (wider content, repository
+  context in the nav, breadcrumbs), extend `layout.tsx` in this quest's PR.
+  Never fork a second shell. Decided 2026-10-06 instead of a separate fit-check
+  quest, since this quest is the layout's first app page.
 - Show token spend as gold coins and the fund action as "Offer gold", per
   the glossary in `docs/theme.md`.
 
