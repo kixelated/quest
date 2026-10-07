@@ -13,9 +13,9 @@ line in its root instructions.
 
 Pin the latest [release](https://github.com/kixelated/quest/releases) tag.
 Releases ship binaries for macOS and Linux on arm64 and x64. If there is no
-release yet and the repository uses a nix flake, pin the latest commit on
-`main`, which the flake builds from source; otherwise tell the user Quest has
-no release to install yet and stop.
+release yet and the repository uses a nix flake (not on Intel Macs), pin the
+latest commit on `main`, which the flake builds from source; otherwise tell the
+user Quest has no release to install yet and stop.
 
 Use the tool manager the repository already has:
 
@@ -24,6 +24,8 @@ Use the tool manager the repository already has:
 - **nix flake** (`flake.nix`): add the input
   `quest.url = "github:kixelated/quest/<tag-or-sha>"`, put
   `quest.packages.${system}.default` in the dev shell, and update `flake.lock`.
+  The flake doesn't build for Intel Macs (`x86_64-darwin`); use mise there, or
+  the shell installer as described below.
 - **Neither:** ask the user before installing anything globally. With consent,
   run the release's shell installer,
   `curl -LsSf https://github.com/kixelated/quest/releases/download/<tag>/quest-installer.sh | sh`,

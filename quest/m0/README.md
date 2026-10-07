@@ -33,6 +33,5 @@ ownership-manifest design:
 - [Rename milestones and questlines](/quest/m0/rename.md) - milestones become chapters (`c0`, `c1`), questlines become epics, everywhere, before the demo
 - [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
-- [Drop x86_64-darwin](/quest/m0/intel-mac.md) - the flake lists only systems nixpkgs builds; Intel Macs use the release binary
 - [Release proof](/quest/m0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
