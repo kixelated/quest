@@ -9,7 +9,33 @@ const origin = "http://localhost:8787";
 describe("Worker", () => {
 	it("serves health and handles unknown routes", async () => {
 		expect(await (await SELF.fetch(`${origin}/health`)).json()).toEqual({ status: "ok" });
-		expect((await SELF.fetch(`${origin}/missing`)).status).toBe(404);
+		const missing = await SELF.fetch(`${origin}/missing`);
+		expect(missing.status).toBe(404);
+		expect(await missing.text()).toContain("Uncharted territory");
+	});
+	it("renders the home page in the shared layout", async () => {
+		const html = await (await SELF.fetch(origin)).text();
+		expect(html).toContain("A quest log for your repo and your agents");
+		expect(html).toContain(`Follow ${origin}/setup to set up Quest here.`);
+		expect(html).toContain('href="/theme/theme.css"');
+		expect(html).toContain(`content="${origin}/theme/og.png"`);
+		for (const section of ["files", "git", "sample", "how", "map", "party"]) {
+			expect(html).toContain(`id="${section}"`);
+		}
+	});
+	it("renders the repository's docs", async () => {
+		const index = await (await SELF.fetch(`${origin}/docs`)).text();
+		expect(index).toContain('href="/docs/getting-started"');
+		expect(index).toContain("Use Quest in your repository");
+
+		const page = await SELF.fetch(`${origin}/docs/getting-started`);
+		expect(page.status).toBe(200);
+		const html = await page.text();
+		expect(html).toContain("<title>Use Quest in your repository · Quest</title>");
+		expect(html).toContain('<h2 id="set-it-up">');
+		// Relative links that work on GitHub point at GitHub from the site.
+		expect(html).toContain('href="https://github.com/kixelated/quest/blob/main/SETUP.md"');
+		expect((await SELF.fetch(`${origin}/docs/missing`)).status).toBe(404);
 	});
 	it("redirects the setup short link to SETUP.md", async () => {
 		const response = await SELF.fetch(`${origin}/setup`, { redirect: "manual" });

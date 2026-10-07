@@ -37,8 +37,9 @@ Decided while planning on 2026-10-05:
   are cheap to duplicate, and this keeps presentation out of the shared core.
 - The look is dark only. There is no light mode. On 2026-10-06 the
   "illuminated ledger" direction (warm ink, parchment text, gold leaf,
-  Cormorant Garamond headings) replaced the slate window and Cinzel; see
-  [Site](/quest/m0/theme/site.md).
+  Cormorant Garamond headings) replaced the slate window and Cinzel. It has
+  landed in `docs/theme.md` with the site's shared layout in
+  `cloudflare/src/layout.tsx`.
 - Lean into the RPG voice but stay semi-professional (decided 2026-10-06).
   Tokens are gold coins, visually ("Offer gold"), as display only.
 - The site on the Worker (home, docs, and the hosted app under one shell)
@@ -46,7 +47,6 @@ Decided while planning on 2026-10-05:
 
 ## Required
 
-- [Site](/quest/m0/theme/site.md) - kixel.quest's refreshed identity, shared shell, home page, and rendered docs
 - [Quest map](/quest/m0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
 - [Social preview](/quest/m0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
 - [Copy](/quest/m0/theme/copy.md) - the README, docs, and GitHub repository metadata in the quest-log voice
