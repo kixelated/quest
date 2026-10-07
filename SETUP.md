@@ -13,9 +13,9 @@ line in its root instructions.
 
 Pin the latest [release](https://github.com/kixelated/quest/releases) tag.
 Releases ship binaries for macOS and Linux on arm64 and x64. If there is no
-release yet, only a nix flake can pin Quest, to the latest commit on `main`,
-which it builds from source; otherwise tell the user Quest has no release to
-install yet and stop.
+release yet and the repository uses a nix flake, pin the latest commit on
+`main`, which the flake builds from source; otherwise tell the user Quest has
+no release to install yet and stop.
 
 Use the tool manager the repository already has:
 

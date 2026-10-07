@@ -1,15 +1,17 @@
 name: Release
 
-# A version tag compiles, publishes, and then install-checks the release. Pull
-# requests that change the pipeline and manual runs only build and check the
-# binaries.
+# A pushed version tag compiles, publishes, and then install-checks the release.
+# Pull requests that could change the compiled binaries, and manual runs (even
+# from a tag), only build and check them. Check runs the installer's own tests.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   pull_request:
     paths:
       - .github/workflows/release.yml
-      - scripts/installer.sh
+      - package.json
+      - package-lock.json
+      - scripts/lifecycle-check.sh
       - flake.lock
   workflow_dispatch:
 
@@ -91,14 +93,19 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: tar -xzf "release/quest-$TARGET.tar.gz" -C "$RUNNER_TEMP"
-      - name: Check the tag matches the version
-        if: github.ref_type == 'tag'
+      - name: Check the version
         shell: bash
         env:
+          REF_TYPE: ${{ github.ref_type }}
           TAG: ${{ github.ref_name }}
         run: |
           actual=$("$RUNNER_TEMP/quest" --version)
-          if [[ $actual != "quest ${TAG#v}" ]]; then
+          expected="quest $(jq -r .version package.json)"
+          if [[ $actual != "$expected" ]]; then
+            echo "::error::the binary reports $actual, not $expected"
+            exit 1
+          fi
+          if [[ $REF_TYPE == tag && $actual != "quest ${TAG#v}" ]]; then
             echo "::error::$TAG builds $actual; bump package.json first"
             exit 1
           fi
@@ -108,7 +115,7 @@ jobs:
 
   publish:
     needs: check
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

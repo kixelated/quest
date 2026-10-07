@@ -69,6 +69,19 @@ if grep -q 'to PATH' "$work/output"; then
     exit 1
 fi
 
+# A binary that doesn't run here leaves the earlier install in place.
+mkdir -p "$work/build/broken"
+printf '#!/bin/sh\nexit 3\n' >"$work/build/broken/quest"
+chmod +x "$work/build/broken/quest"
+cp "$work/release/quest-aarch64-apple-darwin.tar.gz" "$work/good.tar.gz"
+tar -czf "$work/release/quest-aarch64-apple-darwin.tar.gz" -C "$work/build/broken" quest
+(cd "$work/release" && sha256sum quest-*.tar.gz >SHA256SUMS)
+INSTALL_TEST_OS=Darwin INSTALL_TEST_ARCH=arm64 reject
+grep -qF 'the aarch64-apple-darwin binary does not run on this machine' "$work/output"
+[[ $("$QUEST_INSTALL_DIR/quest") == "quest 0.1.0 x86_64-unknown-linux-gnu" ]]
+mv "$work/good.tar.gz" "$work/release/quest-aarch64-apple-darwin.tar.gz"
+(cd "$work/release" && sha256sum quest-*.tar.gz >SHA256SUMS)
+
 # Unsupported platforms, bad checksums, and missing files install nothing.
 rm -rf "$QUEST_INSTALL_DIR"
 INSTALL_TEST_OS=FreeBSD reject
@@ -76,6 +89,11 @@ INSTALL_TEST_OS=Windows_NT reject
 cp "$work/release/quest-aarch64-apple-darwin.tar.gz" "$work/release/quest-x86_64-unknown-linux-gnu.tar.gz"
 reject
 grep -qF 'checksum mismatch for quest-x86_64-unknown-linux-gnu.tar.gz' "$work/output"
+cp "$work/release/SHA256SUMS" "$work/sums.all"
+grep -v ' quest-aarch64-unknown-linux-gnu.tar.gz$' "$work/sums.all" >"$work/release/SHA256SUMS"
+INSTALL_TEST_ARCH=aarch64 reject
+grep -qF 'checksum mismatch for quest-aarch64-unknown-linux-gnu.tar.gz' "$work/output"
+mv "$work/sums.all" "$work/release/SHA256SUMS"
 rm "$work/release/quest-x86_64-unknown-linux-gnu.tar.gz"
 reject
 rm "$work/release/SHA256SUMS"
@@ -88,7 +106,9 @@ reject
 grep -qF 'unreleased template' "$work/output"
 cat >"$work/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
-printf '%s\n' "$5" >>"$INSTALL_TEST_LOG"
+for arg; do
+  if [[ $arg == https://* ]]; then printf '%s\n' "$arg" >>"$INSTALL_TEST_LOG"; fi
+done
 exit 22
 MOCK
 chmod +x "$work/bin/curl"
