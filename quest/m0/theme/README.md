@@ -6,7 +6,8 @@ By the 2026-10-14 Cloudflare demo, Quest presents itself as an original
 MMO-style quest log for your repository and your agents: themed README and
 docs copy, a shared identity (logo, palette, social image), a themed site at
 `https://kixel.quest` (home, docs, and quest board), and themed CLI output on
-a terminal. The quest format, `quest guide`, and the skills do not change.
+a terminal. The quest format, `quest guide`, and the skills do not change,
+except for the [rename](/quest/m0/rename.md) of milestones and questlines.
 
 This README owns the work no child does: a final pass over every surface for
 consistency with `docs/theme.md` before the demo is recorded.
@@ -22,6 +23,8 @@ Decided while planning on 2026-10-05:
   `Required`, `[XS]`-`[XL]`) stay as they are because agents and `quest check`
   rely on them. The theme lives in presentation only. A renamed format would
   break the guide, skills, and existing trees before v0.1.0.
+  Amended 2026-10-07: [Rename milestones and questlines](/quest/m0/rename.md)
+  renames milestone to chapter and questline to epic in the format itself.
 - Hook, then substance. The headline and visuals sell "a quest log for your
   repo and your agents". The next lines deliver the existing pitch: readable
   plans, explicit dependencies, and reviewable Git changes.
