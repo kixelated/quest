@@ -4,8 +4,8 @@ A backlog you can branch, review, and merge.
 
 Quest puts plans in your repository. Each **quest** is a Markdown file scoped to
 one pull request: what needs to happen, what has been decided, and what is in the
-way. A small Rust CLI checks the links and dependencies. Skills help Claude Code
-and Codex plan the work and pick it up.
+way. A small TypeScript CLI checks the links and dependencies. Skills help
+Claude Code and Codex plan the work and pick it up.
 
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
@@ -62,13 +62,18 @@ Remove the section to release it. The CLI leaves expiry policy to the forge.
 
 ## Try it
 
-Install from source with Rust, or enter the pinned shell with `nix develop`:
+Build from source with Node 22.12 or newer (or enter the pinned shell with
+`nix develop`), then link the `quest` command:
 
 ```sh
 git clone https://github.com/kixelated/quest.git
 cd quest
-cargo install --locked --path .
+npm ci
+npm run build
+npm link
 ```
+
+With Nix, `nix run github:kixelated/quest -- --help` builds and runs it instead.
 
 The [CSV export example](examples/export/quest/README.md) is a small, working
 quest tree. From this checkout:
@@ -137,6 +142,7 @@ The [first release plan](quest/m0/README.md) lists what is left.
 
 ```sh
 nix develop
+just install
 just check
 just test
 just build

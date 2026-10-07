@@ -32,7 +32,3 @@ from its page. A maintainer can release claims and promote issues.
   reuse its components and the ledger page from `docs/theme/theme.css`.
 - Show token spend as gold coins and the fund action as "Offer gold", per
   the glossary in `docs/theme.md`.
-
-## Required
-
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - check and ready in the Worker

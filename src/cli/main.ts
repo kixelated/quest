@@ -33,6 +33,7 @@ export function main(argv: string[], out: Output): number {
 		.helpCommand("help [command]", "Print this message or the help of the given subcommand")
 		.option("--root <root>", "Repository root holding the quest/ directory", ".")
 		.configureOutput({ writeOut: out.stdout, writeErr: out.stderr })
+		.configureHelp({ showGlobalOptions: true })
 		.exitOverride();
 	const root = () => program.opts<{ root: string }>().root;
 
@@ -64,8 +65,9 @@ export function main(argv: string[], out: Output): number {
 				for (const quest of ready(docs)) print(quest);
 				return;
 			}
-			const found = blockers(docs, path) ?? blockers(docs, withinRoot(root(), path) ?? path);
-			if (found === null) throw new Error(`${path} is not a quest document under ${resolveQuest(root())}`);
+			const inside = withinRoot(root(), path);
+			const found = blockers(docs, path) ?? (inside === null ? null : blockers(docs, inside));
+			if (found === null) throw new Error(`${path} is not a quest document under ${questDir(root())}`);
 			for (const blocker of found) {
 				for (const line of renderBlocker(blocker)) print(line);
 				warn(`blocked by ${label(blocker)}`);
@@ -137,7 +139,7 @@ export function main(argv: string[], out: Output): number {
 }
 
 /** The quest directory under `root`, as a user would name it in an error. */
-function resolveQuest(root: string): string {
+function questDir(root: string): string {
 	return `${root.replace(/\/+$/, "")}/quest`;
 }
 

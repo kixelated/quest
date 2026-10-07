@@ -20,8 +20,8 @@ ownership-manifest design:
 - Nothing is vendored. The binary carries the skills and the quest contract;
   a repository gets static one-line skill stubs and one reference line in its
   root instructions. Upgrading never rewrites repository files.
-- The repository's own tool manager pins the version: mise (release binaries,
-  or a git rev for dogfooding) or a nix flake input. Quest ships no launcher
+- The repository's own tool manager pins the version: mise (release binaries)
+  or a nix flake input (any rev, built from source). Quest ships no launcher
   and no pin file; an install outside either is simply unpinned.
 - The CLI is offline except `quest run` (amended 2026-10-01 for Quest on
   Cloudflare). Anything touching GitHub (issue import and export, branch
