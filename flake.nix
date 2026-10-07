@@ -13,11 +13,11 @@
       flake-utils,
       ...
     }:
+    # The pinned nixpkgs no longer evaluates on x86_64-darwin; Intel Macs use the release binary.
     flake-utils.lib.eachSystem
       [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ]
       (
