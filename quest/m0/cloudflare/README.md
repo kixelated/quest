@@ -57,7 +57,6 @@ Decided while planning on 2026-10-01. Research sources:
 
 ## Required
 
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the CLI and core become TypeScript, which the Worker imports directly
 - [Compiled releases](/quest/m0/cloudflare/release.md) - Bun-compiled binaries replace cargo-dist
 - [Fork intake](/quest/m0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
 - [Changes](/quest/m0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks

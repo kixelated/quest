@@ -4,59 +4,54 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
+# Install the locked npm dependencies for the CLI and the Worker.
+install:
+    npm ci
+
 # Check code, repository tooling, and the quest tree.
 check:
-    cargo fmt --all -- --check
-    cargo clippy --locked --all-targets -- -D warnings
-    dist generate --check
-    cargo run --quiet --locked -- check
-    cargo run --quiet --locked -- --root examples/export check
+    npm run check
+    npm run --silent quest -- check
+    npm run --silent quest -- --root examples/export check
     actionlint
     shellcheck .claude/hooks/*.sh scripts/*.sh
     shfmt -d .claude/hooks/*.sh scripts/*.sh
-    taplo format --check
-    nixfmt --check flake.nix
+    nixfmt --check flake.nix nix/*.nix
     just worker-check
 
-# Run tests with bounded execution time, including documentation and shell hooks.
+# Run tests, including the shell hooks and the built CLI's lifecycle.
 test:
-    cargo nextest run --locked
-    cargo test --locked --doc
+    npm test
     bash .claude/hooks/direnv.test.sh
     bash scripts/install-check.test.sh
-    cargo build --locked
-    bash scripts/lifecycle-check.sh "$PWD/target/debug/quest"
+    npm run build
+    bash scripts/lifecycle-check.sh "$PWD/dist/quest.js"
     just worker-test
 
 # Apply formatters without changing program behavior.
 fix:
-    cargo fmt --all
+    npm run fix
     shfmt -w .claude/hooks/*.sh scripts/*.sh
-    taplo format
-    nixfmt flake.nix
-    npm --prefix cloudflare run fix
+    nixfmt flake.nix nix/*.nix
+    npm run fix -w cloudflare
 
-# Build the standalone release binary.
+# Build the bundled CLI into dist/quest.js.
 build:
-    cargo build --locked --release
+    npm run build
 
 # Run the local CLI, for example `just run ready`.
 run *args:
-    cargo run --quiet --locked -- {{args}}
-
-# Install the locked Worker tooling and dependencies.
-worker-install:
-    npm --prefix cloudflare ci
+    npm run --silent quest -- {{args}}
 
 # Check generated binding types, TypeScript, formatting, and deployment bundle.
 worker-check:
-    npm --prefix cloudflare run check
+    npm run check -w cloudflare
 
 # Run Worker integration tests in the Cloudflare runtime.
 worker-test:
-    npm --prefix cloudflare test
+    npm test -w cloudflare
 
 # Apply auth migrations locally and start the Worker.
 worker-dev:
-    npm --prefix cloudflare run migrate
-    npm --prefix cloudflare run dev
+    npm run migrate -w cloudflare
+    npm run dev -w cloudflare

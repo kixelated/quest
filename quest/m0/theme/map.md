@@ -26,7 +26,3 @@ Decided while planning on 2026-10-06:
   the theme questline decided.
 - Every status and size keeps its text label, since colour is never the only
   signal.
-
-## Required
-
-- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the parser the build reuses

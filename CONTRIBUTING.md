@@ -7,6 +7,7 @@ Use the pinned Nix development shell, shared with CI:
 
 ```sh
 nix develop
+just install  # Install the locked npm dependencies
 just check
 just test
 just fix  # Apply formatting
@@ -17,17 +18,17 @@ For automatic shell loading, install direnv and approve this checkout with
 `direnv allow`. The Claude SessionStart hook loads an already-approved environment;
 it does not grant approval. No background garbage collection runs on entry.
 
-`rust-toolchain.toml` pins Rust for both rustup and Nix. `flake.lock` pins the
-remaining developer tools. The package's declared minimum Rust version is
-separate from the development toolchain pin. Without Nix, install the tools
-listed in `flake.nix` and run the same just recipes.
+`flake.lock` pins Node and the developer tools; `package-lock.json` pins the npm
+dependencies. The package's declared minimum Node version (`engines` in
+`package.json`) is separate from the development pin. Without Nix, install the
+tools listed in `flake.nix` and run the same just recipes.
 
-`just test` uses nextest with bounded test execution, then runs documentation
-tests and the direnv hook regression suite. `just check` includes workflow,
-shell, TOML, and Nix checks in addition to Rust and quest validation.
+`just test` runs vitest, the shell hook suites, the built CLI's lifecycle check,
+and the Worker tests. `just check` includes TypeScript, formatting, workflow,
+shell, and Nix checks in addition to quest validation.
 
 `nix build` builds the package; `nix run -- --help` runs it. `nix flake check`
-builds and tests the Nix package and validates the repository's quest tree.
+builds the Nix package and validates the repository's quest tree.
 
 Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations. Start PRs as drafts
@@ -39,34 +40,13 @@ Quest execution stops at PR creation; it merges only when the user picks /quest-
 Every AI-authored GitHub post must end with `(written by <model>)`, naming the
 running model. This is separate from commit co-author trailers.
 
-The crate stays `publish = false` (the `quest` name on crates.io is taken). Tagged
-GitHub releases ship the `quest` binary instead.
+The package stays `private`; GitHub releases will ship the `quest` binary.
 
 ## Releases
 
-[cargo-dist](https://axodotdev.github.io/cargo-dist/) builds archives with
-checksums and a shell installer (`.github/workflows/release.yml`). Artifacts use
-the `quest-<target-triple>.tar.xz` layout so mise's `github:` backend can
-install without extra configuration, for example
-`mise use github:kixelated/quest@v0.1.0`.
-
-The version in `Cargo.toml` is the source of truth for releases and for the Nix
-package (`nix build` / `nix flake check` build that version from source).
-
-Maintainers cut a release after the version bump lands on `main`:
-
-1. Confirm `Cargo.toml` has the intended version and `dist plan` looks right
-   (`nix develop --command dist plan`).
-2. Run `just check` and `just test`.
-3. Push an annotated tag `vX.Y.Z` (for example `v0.1.0`). The Release workflow
-   builds macOS (arm64, x86_64) and Linux (x86_64, arm64) artifacts and opens
-   a GitHub Release.
-4. Wait for the Release workflow's install checks. After publication, it
-   installs the tag through both mise's `github:` backend and
-   `quest-installer.sh` on all four native targets and checks `quest --version`.
-   A failed check makes the release run red; fix it in the next patch release.
-   To rerun published installs, dispatch the Check release installs workflow
-   with that tag. The first real install check runs on v0.1.0; no rc is needed.
+The cargo-dist pipeline was removed with the Rust code. Until
+[Compiled releases](/quest/m0/cloudflare/release.md) replaces it, there is no
+release process.
 
 Do not push release tags or publish GitHub releases from ordinary development
 work; that is a maintainer action after review.

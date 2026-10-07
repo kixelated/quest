@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Load the project's direnv/nix dev shell into the Claude Code session so Bash
-# tool commands resolve flake-pinned tools (cargo, just, nixfmt, ...) instead of system
+# tool commands resolve flake-pinned tools (node, just, nixfmt, ...) instead of system
 # ones. No-op for anyone without direnv or an .envrc, so non-nix setups are
 # unaffected.
 #

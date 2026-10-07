@@ -1,0 +1,450 @@
+// Parsing one quest document into the facts every rule reads.
+//
+// This is a real Markdown AST rather than line matching. The shell version
+// that came before it was defeated by a fence longer than three backticks
+// (which inverted its fence tracking and silently skipped the rest of the
+// file), by a `Required` bullet that wrapped onto a second line (which moved
+// the link out of reach of the check that exists to catch it), and by
+// reference-style links (which produced a rendered dependency with no edge).
+// None of those are special cases here; the parser simply reports the
+// structure that Markdown actually has.
+
+import type { Nodes, Root } from "mdast";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
+import { gfmTable } from "micromark-extension-gfm-table";
+
+import { depth, fileName, normalize, parent } from "./path";
+
+/**
+ * Where a link sits inside its `## Section`, which is what separates a
+ * dependency edge from prose that merely mentions one.
+ *
+ * - `entry`: the link opens a list item, ignoring any emphasis around it. This
+ *   is the shape every `Required` entry must have.
+ * - `inside`: somewhere else inside a list item: a sentence that happens to link.
+ * - `prose`: outside any list item.
+ */
+export type Position = "entry" | "inside" | "prose";
+
+/** One Markdown link, located precisely enough to be a graph edge. */
+export interface Link {
+	/** 1-based source line, for findings. */
+	line: number;
+	/** The enclosing `## Heading`, or `null` above the first one. */
+	section: string | null;
+	/** The destination exactly as written, fragment included. */
+	target: string;
+	/** Where the link sits in its section. */
+	position: Position;
+}
+
+/** One top-level list entry: the shape a `Required` child or blocker has. */
+export interface Entry {
+	/** 1-based source line, for findings. */
+	line: number;
+	/** The enclosing `## Heading`, or `null` above the first one. */
+	section: string | null;
+	/**
+	 * The rendered text with whitespace collapsed, so a bullet that wrapped
+	 * onto a second line reads as the one line it renders as.
+	 */
+	text: string;
+	/**
+	 * The destination of the link that opens the entry, if one does. This is
+	 * the `entry` link, so it is a dependency rather than a sentence that
+	 * happens to mention one.
+	 */
+	target: string | null;
+}
+
+/** One `# ` or `## ` heading as the rules need to see it. */
+export interface Heading {
+	/** 1-based source line, for findings. */
+	line: number;
+	/** The rendered heading text, trimmed. */
+	text: string;
+	/**
+	 * The source really is `# Text` or `## Text` on its own line. Setext and
+	 * decorated headings render the same, but literal syntax is the contract.
+	 */
+	literal: boolean;
+}
+
+/** One parsed quest document: the structure the rules read, nothing else. */
+export interface Doc {
+	/** Repository-relative, e.g. `quest/m0/one.md`. */
+	path: string;
+	/** The document's `# ` title, used for a quest's t-shirt size. */
+	title: Heading | null;
+	/** `## ` headings only. Deeper levels are free-form prose structure. */
+	headings: Heading[];
+	/** Every link in the document, in source order. */
+	links: Link[];
+	/**
+	 * Every top-level list item, in source order. A heading left behind by its
+	 * last entry has none, and a `Required` blocker is one of these whether or
+	 * not it carries a link.
+	 */
+	entries: Entry[];
+	/**
+	 * Content outside the claim's one flat list item (prose, quotes, nested
+	 * lists, or other blocks). Claims have a deliberately small envelope.
+	 */
+	claimExtraContent: boolean;
+}
+
+/**
+ * Agent instructions are not quests, including the quest/AGENTS.md older
+ * versions installed and CLAUDE.md files in adopting repositories. Neither
+ * filename is indexed or validated.
+ */
+const NOT_QUESTS = ["AGENTS.md", "CLAUDE.md"];
+
+/** Whether a file under `quest/` is a quest document: Markdown other than agent instructions. */
+export function isQuest(path: string): boolean {
+	const name = fileName(path);
+	return name.endsWith(".md") && !NOT_QUESTS.includes(name);
+}
+
+/** Whether the document has this exact `## ` heading. */
+export function has(doc: Doc, heading: string): boolean {
+	return doc.headings.some((h) => h.text === heading);
+}
+
+/** The top-level entries under a `## ` section, in source order. */
+export function entries(doc: Doc, section: string): Entry[] {
+	return doc.entries.filter((e) => e.section === section);
+}
+
+function isReadme(path: string): boolean {
+	return fileName(path) === "README.md";
+}
+
+/**
+ * The root and the milestones outlive their quests, so an empty one is not a
+ * leaf. `quest/README.md` has two components and `quest/m0/README.md` has
+ * three; anything nested further is an ordinary line.
+ */
+export function permanent(path: string): boolean {
+	return isReadme(path) && depth(path) <= 3;
+}
+
+/**
+ * The questline directory this document belongs to. A questline is a
+ * DIRECTORY, so its own entry sits one level further out than a quest's:
+ * `quest/m2/drain/README.md` belongs to `quest/m2`, not to `quest/m2/drain`.
+ */
+export function owner(path: string): string {
+	return isReadme(path) ? parent(parent(path)) : parent(path);
+}
+
+/**
+ * The `Required` entries that sit directly under a README's directory: the
+ * line's children, in priority order. Every other entry is a blocker like any
+ * quest's, and a quest that is not a README has no children.
+ */
+export function children(doc: Doc): string[] {
+	if (!isReadme(doc.path)) return [];
+	const dir = parent(doc.path);
+	return entries(doc, "Required")
+		.map((entry) => (entry.target === null ? null : rooted(entry.target)))
+		.filter((child): child is string => child !== null && owner(child) === dir);
+}
+
+/**
+ * A questline is a `README.md` that still requires a child. Any other README is
+ * what a line becomes when its last child merges: the line's own remaining
+ * work, executed like any other quest. The root and the milestones are the
+ * exception.
+ */
+export function isQuestline(doc: Doc): boolean {
+	return isReadme(doc.path) && (children(doc).length > 0 || permanent(doc.path));
+}
+
+/**
+ * Strip a `#fragment`, which addresses a place inside a file rather than a
+ * different file. Leaving it on made a phantom graph node that no quest could
+ * ever match, so a cycle through an anchored link went unreported.
+ */
+export function withoutFragment(target: string): string {
+	const index = target.indexOf("#");
+	return index < 0 ? target : target.slice(0, index);
+}
+
+/**
+ * A root-absolute target as a repository-relative path, or `null` if it is not
+ * root-absolute. Fragment-stripped AND normalized: the index and the cycle walk
+ * both key on this, and a `..` left in one of them is a node nothing matches.
+ */
+export function rooted(target: string): string | null {
+	return target.startsWith("/") ? normalize(withoutFragment(target.slice(1))) : null;
+}
+
+/** Nodes that open and close like a pulldown-cmark tag, rather than arriving as one event. */
+const TAGS = new Set([
+	"paragraph",
+	"heading",
+	"blockquote",
+	"list",
+	"listItem",
+	"code",
+	"emphasis",
+	"strong",
+	"link",
+	"linkReference",
+	"image",
+	"imageReference",
+	"delete",
+	"table",
+	"tableRow",
+	"tableCell",
+]);
+
+/** Nodes whose children are blocks, so an `html` child is block HTML rather than inline. */
+const CONTAINERS = new Set(["root", "blockquote", "listItem"]);
+
+/** Block-level nodes, which separate the words of an entry that spans more than one. */
+const BLOCKS = new Set(["paragraph", "heading", "blockquote", "list", "listItem", "code", "table", "thematicBreak"]);
+
+/** Parse already-loaded Markdown. `path` stays repository-relative. */
+export function parse(path: string, text: string): Doc {
+	// GitHub renders strikethrough and tables, and the Rust parser this replaced
+	// enabled both. It enabled no other GFM syntax.
+	const tree = fromMarkdown(text, {
+		extensions: [gfmStrikethrough(), gfmTable()],
+		mdastExtensions: [gfmStrikethroughFromMarkdown(), gfmTableFromMarkdown()],
+	});
+	// Lines as grep sees them: a bare `\r` does not end one, so a CR-only file is
+	// one line and none of its headings are literal, which is what grep finds.
+	const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+	const definitions = collectDefinitions(tree);
+
+	let title: Heading | null = null;
+	const headings: Heading[] = [];
+	const links: Link[] = [];
+	const found: Entry[] = [];
+	let claimExtraContent = false;
+	let entry: Entry | null = null;
+	let section: string | null = null;
+
+	// Depth of nesting, so a sub-list inside an entry does not read as a
+	// second entry, and so `fresh` tracks the innermost item.
+	let itemDepth = 0;
+	// Entries are the flat, top-level list. A bullet nested under a prose
+	// lead-in, or one inside a block quote, is illustration - counting it
+	// would let `- evidence:` + an indented link become a real blocker.
+	let quoteDepth = 0;
+	// Nothing but emphasis has been seen since the current item opened, so a
+	// link here is the item's opening link. `**[Blocker](/quest/b.md)**` is
+	// still an opener; `A customer who justifies [b](/quest/b.md)` is not.
+	let fresh = false;
+	let heading: { depth: number; line: number; text: string } | null = null;
+
+	const lineOf = (node: Nodes) => node.position?.start.line ?? 1;
+
+	const addText = (value: string) => {
+		if (heading) {
+			// A setext heading's line endings add nothing, so a wrapped title
+			// stays on one line in a finding.
+			heading.text += value.replace(/\r\n|\r|\n/g, "");
+		} else if (entry) {
+			entry.text += value;
+		}
+		if (value.trim() !== "") fresh = false;
+	};
+
+	// Anything that is not a list item, an emphasis wrapper, or text ends the
+	// run of content an opening link may follow.
+	const other = () => {
+		if (itemDepth > 0) fresh = false;
+	};
+
+	const claim = (node: Nodes, inline: boolean) => {
+		if (TAGS.has(node.type)) {
+			if (node.type === "heading" && node.depth <= 2) return;
+			if (node.type === "list" && itemDepth > 0) claimExtraContent = true;
+			if (itemDepth === 0 && node.type !== "list" && node.type !== "listItem") claimExtraContent = true;
+		} else if (((node.type === "html" && !inline) || node.type === "thematicBreak") && itemDepth === 0) {
+			claimExtraContent = true;
+		}
+	};
+
+	const link = (node: Nodes, target: string) => {
+		// Reference-style links resolve to their definition, so they carry an
+		// edge like any other link. Only a top-level, unquoted item can hold an
+		// entry.
+		const position: Position =
+			itemDepth === 0 ? "prose" : fresh && itemDepth === 1 && quoteDepth === 0 ? "entry" : "inside";
+		fresh = false;
+		if (position === "entry" && entry) entry.target = target;
+		links.push({ line: lineOf(node), section, target, position });
+	};
+
+	const enter = (node: Nodes) => {
+		switch (node.type) {
+			case "heading":
+				if (node.depth <= 2) {
+					heading = { depth: node.depth, line: lineOf(node), text: "" };
+				} else {
+					other();
+				}
+				break;
+			case "blockquote":
+				quoteDepth++;
+				fresh = false;
+				break;
+			case "listItem":
+				if (itemDepth === 0 && quoteDepth === 0) {
+					entry = { line: lineOf(node), section, text: "", target: null };
+				}
+				itemDepth++;
+				fresh = true;
+				break;
+			case "link":
+				link(node, node.url);
+				break;
+			case "linkReference": {
+				const url = definitions.get(node.identifier);
+				if (url === undefined) {
+					other();
+				} else {
+					link(node, url);
+				}
+				break;
+			}
+			case "text":
+			case "inlineCode":
+				addText(node.value);
+				break;
+			case "break":
+				if (entry) entry.text += " ";
+				break;
+			// Emphasis wraps an opening link without displacing it, and so does
+			// the paragraph a LOOSE list puts around every item: clearing on its
+			// START would classify every entry in a blank-line-separated list as
+			// mid-sentence prose. Its END does clear, so a link that opens a
+			// SECOND paragraph is inside the item, not opening it.
+			case "emphasis":
+			case "strong":
+			case "paragraph":
+				break;
+			case "code":
+				other();
+				addText(node.value);
+				break;
+			case "image":
+				other();
+				addText(node.alt ?? "");
+				break;
+			case "imageReference":
+				other();
+				addText(node.alt ?? "");
+				break;
+			default:
+				other();
+		}
+	};
+
+	const exit = (node: Nodes) => {
+		switch (node.type) {
+			// Text is one leaf that `addText` already judged on entry: only
+			// non-blank text ends the run an opening link may follow.
+			case "text":
+			case "inlineCode":
+			case "break":
+				break;
+			case "heading":
+				if (node.depth <= 2 && heading) {
+					const done = heading;
+					heading = null;
+					const text = done.text.trim();
+					// Exact, not trimmed: `rg '^## Required$'` does not match a line
+					// with trailing spaces either, and this rule exists precisely so
+					// the two can never disagree.
+					const parsed: Heading = {
+						line: done.line,
+						text,
+						literal: lines[done.line - 1] === `${"#".repeat(done.depth)} ${text}`,
+					};
+					if (done.depth === 1) {
+						title = parsed;
+					} else {
+						section = text;
+						headings.push(parsed);
+					}
+					itemDepth = 0;
+					entry = null;
+					fresh = false;
+				} else {
+					other();
+				}
+				break;
+			case "blockquote":
+				quoteDepth = Math.max(0, quoteDepth - 1);
+				fresh = false;
+				break;
+			case "listItem":
+				if (itemDepth === 1 && entry) {
+					entry.text = collapse(entry.text);
+					found.push(entry);
+					entry = null;
+				}
+				itemDepth = Math.max(0, itemDepth - 1);
+				fresh = false;
+				break;
+			case "emphasis":
+			case "strong":
+				break;
+			case "paragraph":
+				fresh = false;
+				break;
+			default:
+				other();
+		}
+	};
+
+	const walk = (node: Nodes, inline: boolean) => {
+		// Definitions render as nothing; the links that use them carry their target.
+		if (node.type === "definition") return;
+		if (section === "Claim") claim(node, inline);
+		// A claim is one line, so its blocks run together unseparated: a space
+		// would let a block after the date pass as an opaque trailing field.
+		const block = section !== "Claim" && (BLOCKS.has(node.type) || (node.type === "html" && !inline));
+		if (block && entry && !heading) entry.text += " ";
+		enter(node);
+		if ("children" in node) {
+			const contains = CONTAINERS.has(node.type);
+			for (const child of node.children) walk(child, !contains);
+		}
+		exit(node);
+		if (block && entry && !heading) entry.text += " ";
+	};
+
+	for (const child of tree.children) walk(child, false);
+
+	return { path, title, headings, links, entries: found, claimExtraContent };
+}
+
+/** The first definition of each reference label, which is the one CommonMark uses. */
+function collectDefinitions(tree: Root): Map<string, string> {
+	const definitions = new Map<string, string>();
+	const visit = (node: Nodes) => {
+		if (node.type === "definition" && !definitions.has(node.identifier)) {
+			definitions.set(node.identifier, node.url);
+		}
+		if ("children" in node) for (const child of node.children) visit(child);
+	};
+	visit(tree);
+	return definitions;
+}
+
+/**
+ * One line of whitespace-separated words, so a wrapped or loosely indented
+ * bullet prints the way it renders.
+ */
+function collapse(text: string): string {
+	return text.split(/\s+/).filter(Boolean).join(" ");
+}

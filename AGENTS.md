@@ -13,9 +13,10 @@ Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
 
 - Run `quest guide` and read it completely before planning or executing quests.
 - Keep README examples consistent with the CLI's actual `--help` output.
-  In this checkout, `quest` means `cargo run --quiet --locked --`.
+  In this checkout, `quest` means `npm run --silent quest --`.
 - Use an isolated worktree under `.worktrees/`. Preserve existing changes.
 - Use the Nix shell so local tooling matches CI: `nix develop`
+- Run `just install` in a fresh checkout to install the locked npm dependencies.
 - Run `just check` and `just test` before handing off changes; `just fix` applies
   formatting. Missing tools are failures, not checks to silently skip.
 - Fix root causes. Do not mask fixable failures with retries, sleeps, or timeouts.

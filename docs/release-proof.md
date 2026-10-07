@@ -8,9 +8,9 @@ releases when this rehearsal ran.
 ## Automated proof
 
 `scripts/lifecycle-check.sh` accepts the absolute path of an installed Quest
-binary. The focused CI job installs the checkout with `cargo install --locked`
-on Linux and macOS, then runs the script. `just test` also runs the script
-against the local debug binary.
+binary. The focused CI job installs the checkout through the flake's source
+build (`nix build`) on Linux and macOS, then runs the script. `just test` also
+runs the script against the local bundle, `dist/quest.js`.
 
 The script exercises both real skill-directory layouts and both root instruction
 choices. It checks init idempotence, the installed stubs, a planned dependency,

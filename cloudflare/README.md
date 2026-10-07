@@ -25,7 +25,9 @@ an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
 SQLite Durable Object. The coordinator currently initializes its schema and
 exposes an internal status method. Repository authorization, creation, claims,
 changes, and the board belong to later quests; there are no public repository
-or token routes yet. The Rust CLI remains independent of the Worker.
+or token routes yet. `cloudflare/` is an npm workspace of the repository root,
+so the Worker imports the CLI's core as `quest/core` (`../src/core`), the same
+parser, checks, and readiness the CLI runs.
 
 ## Development
 
@@ -33,7 +35,7 @@ From the repository root:
 
 ```sh
 nix develop
-just worker-install
+just install
 cp cloudflare/.dev.vars.example cloudflare/.dev.vars
 ```
 
@@ -83,11 +85,11 @@ credentials or Cloudflare account are required for checks.
 After changing bindings, regenerate types:
 
 ```sh
-npm --prefix cloudflare run types
+npm run types -w cloudflare
 ```
 
 Nix provides Node and Wrangler for interactive use. Recipes use the newer
-Wrangler pinned in `package-lock.json`, which is also used by the test plugin.
+Wrangler pinned in the root `package-lock.json`, which is also used by the test plugin.
 Use `npm exec -- wrangler` from `cloudflare/` for the documented deployment
 commands so generated types and deployment use that same version.
 
