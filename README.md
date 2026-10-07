@@ -85,17 +85,36 @@ quest tree. From this checkout:
 
 ```console
 $ quest --root examples/export check
-quest: 4 documents ok
+The quest log is in order: 4 documents checked.
 
 $ quest --root examples/export ready
-quest/a0/export.md
+1 quest available
+! [S] Add a CSV export endpoint  quest/a0/export.md
 
 $ quest --root examples/export ready quest/a0/download.md
+! [S] Add a download button        quest/a0/download.md
+  Requires:
+    [S] Add a CSV export endpoint  quest/a0/export.md
+```
+
+With no path, `ready` lists every ready quest. Given a path, it shows what
+blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
+`!` a blocked one, and each size label takes its colour: XS grey, S green,
+M yellow, L red, and XL purple. Set `NO_COLOR` to keep the layout without
+colours.
+
+Scripts and agents read the piped form, which is plain text:
+
+```console
+$ quest --root examples/export ready | cat
+quest/a0/export.md
+
+$ quest --root examples/export ready quest/a0/download.md | cat
 quest/a0/export.md
 ```
 
-With no path, `ready` lists every ready quest. Given a path, it prints what
-blocks that quest, with an explanation on stderr; no blockers means no stdout.
+Piped, `ready` prints one path per line. Given a path, it prints that quest's
+blockers, with an explanation on stderr; no blockers means no stdout.
 It exits zero for both ready and blocked quests; a nonzero exit means the
 command failed. Run `check` first to catch malformed plans. `ready` skips
 quests claimed through a `Claim` section and reports the claim as the blocker

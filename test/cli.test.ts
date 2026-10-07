@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import { version } from "../package.json";
-import { Tree, run } from "./fixture";
+import { Tree, run, tempDir } from "./fixture";
 
 test("check reports the document count", () => {
 	expect(Tree.baseline().run("check")).toEqual({ code: 0, stdout: "quest: 5 documents ok\n", stderr: "" });
@@ -46,6 +46,17 @@ test("ready rejects a path that is not a quest", () => {
 test("the root option is accepted after the command", () => {
 	const tree = Tree.baseline();
 	expect(run("ready", "--root", tree.path).stdout).toBe("quest/a0/epic/one.md\n");
+});
+
+test("init and uninstall print each changed path and nothing else", () => {
+	const root = tempDir();
+	const init = run("--root", root, "init");
+	expect(init.code).toBe(0);
+	expect(init.stdout).toMatch(/^(\S+\n)+$/);
+	expect(init.stdout).toContain("quest/README.md\nAGENTS.md\n");
+	expect(run("--root", root, "init").stdout).toBe("");
+	expect(run("--root", root, "uninstall").stdout).toMatch(/^(\S+\n)+$/);
+	expect(run("--root", root, "uninstall").stdout).toBe("");
 });
 
 test("version", () => {

@@ -9,6 +9,7 @@ import { afterEach, expect } from "vitest";
 
 import { blockers, check, formatFinding, ready, renderBlocker } from "../src/core";
 import { type Output, main } from "../src/cli/main";
+import { type Terminal } from "../src/cli/theme";
 import { exists, load } from "../src/cli/tree";
 
 export const ROOT_README = `# Quests
@@ -128,6 +129,11 @@ export class Tree {
 		return run("--root", this.path, ...args);
 	}
 
+	/** Run the CLI against this tree with stdout on a terminal. */
+	runOn(terminal: Terminal, ...args: string[]): { code: number; stdout: string; stderr: string } {
+		return runOn(terminal, "--root", this.path, ...args);
+	}
+
 	accepts() {
 		expect(this.findings()).toEqual([]);
 	}
@@ -149,8 +155,16 @@ export class Tree {
 	}
 }
 
-/** Run the CLI in-process, capturing its output. */
+/** Run the CLI in-process with stdout piped, capturing its output. */
 export function run(...args: string[]): { code: number; stdout: string; stderr: string } {
+	return runOn(undefined, ...args);
+}
+
+/** Run the CLI in-process with stdout on `terminal`, or piped when `undefined`. */
+export function runOn(
+	terminal: Terminal | undefined,
+	...args: string[]
+): { code: number; stdout: string; stderr: string } {
 	let stdout = "";
 	let stderr = "";
 	const out: Output = {
@@ -160,6 +174,7 @@ export function run(...args: string[]): { code: number; stdout: string; stderr: 
 		stderr: (text) => {
 			stderr += text;
 		},
+		terminal,
 	};
 	const code = main(args, out);
 	return { code, stdout, stderr };

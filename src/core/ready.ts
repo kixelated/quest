@@ -46,10 +46,21 @@ export function renderBlocker(blocker: Blocker, depth = 0): string[] {
  * shell completes it (`quest/a0/one.md`).
  */
 export function blockers(docs: Doc[], path: string): Blocker[] | null {
-	const byPath = new Map(docs.map((d) => [d.path, d]));
-	const found = [normalize(path), normalize(path.replace(/^\//, ""))].find((p) => byPath.has(p));
-	if (found === undefined) return null;
-	return expand(byPath, byPath.get(found)!, [found]);
+	const doc = lookup(docs, path);
+	if (doc === null) return null;
+	return expand(new Map(docs.map((d) => [d.path, d])), doc, [doc.path]);
+}
+
+/**
+ * The quest document `path` names, written as the tree writes it
+ * (`/quest/a0/one.md`) or as the shell completes it (`quest/a0/one.md`).
+ */
+export function lookup(docs: Doc[], path: string): Doc | null {
+	for (const candidate of [normalize(path), normalize(path.replace(/^\//, ""))]) {
+		const doc = docs.find((d) => d.path === candidate);
+		if (doc) return doc;
+	}
+	return null;
 }
 
 /**
