@@ -32,6 +32,5 @@ ownership-manifest design:
 
 - [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
 - [Quest log theme](/quest/a0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
-- [Quiet EPIPE](/quest/a0/epipe.md) - `quest ready | head -1` exits without a stack trace
 - [Release proof](/quest/a0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
 - [Launch material](/quest/a0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
