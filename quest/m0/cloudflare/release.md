@@ -17,7 +17,8 @@ Decided while planning on 2026-10-06:
   and nix pins keep working. The cost is roughly 60 MB per binary.
 - Replaces cargo-dist, which the port to TypeScript removed along with Rust.
   Nothing is tagged yet, so no published pin breaks.
-- Lands on the Cloudflare questline's branch, where the TypeScript CLI lives.
+- Targets main. The Cloudflare questline's branch folded into main on
+  2026-10-07, after the TypeScript port landed.
 - Unreleased pins go through the nix flake's source build. There are no
   rolling prereleases. Remove the `cargo:` rev pin and `cargo install` from
   `SETUP.md`.
