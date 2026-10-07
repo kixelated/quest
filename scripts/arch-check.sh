@@ -16,7 +16,7 @@ case "$target" in
         exit 1
         ;;
 esac
-kind=$(file -b "$binary")
+kind=$(file -bL "$binary")
 if [[ $kind != "$format "* || $kind != *"$arch"* ]]; then
     printf '%s is not built for %s: %s\n' "$binary" "$target" "$kind" >&2
     exit 1

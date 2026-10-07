@@ -27,6 +27,8 @@ become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
 marker and palette notes to match, keeping only the flavour rows (the party,
 gold, Offer gold). The social image is fixed earlier, in
 [social image terms](/quest/a0/theme/og-terms.md).
+It pluralises `quest check`'s terminal summary ("1 documents checked")
+and keeps the piped `quest: N documents ok` contract unchanged.
 
 ## Plan
 

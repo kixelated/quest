@@ -71,7 +71,7 @@ MOCK
 # The installed binary's architecture: the runner's own unless a test overrides it.
 cat >"$work/bin/file" <<'MOCK'
 #!/usr/bin/env bash
-[[ $1 == -b ]]
+[[ $1 == -bL ]]
 case "$INSTALL_TEST_OS/${INSTALL_TEST_INSTALLED_ARCH:-$INSTALL_TEST_ARCH}" in
   Linux/x86_64) echo 'ELF 64-bit LSB executable, x86-64, version 1 (SYSV)' ;;
   Linux/aarch64) echo 'ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV)' ;;

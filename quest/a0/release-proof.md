@@ -11,12 +11,15 @@ installs through mise and the shell installer on macOS and Linux.
 
 Only the maintainer's v0.1.0 tag and its live verification remain:
 
+- Before tagging, confirm the EPIPE fix
+  ([#81](https://github.com/kixelated/quest/pull/81)) has merged into `main`
+  (decided 2026-10-07).
 - Tag v0.1.0 from `main` with the steps in
   [#82](https://github.com/kixelated/quest/pull/82). The Release workflow's
-  install checks on that tag gate this quest. There's no rc tag; a broken
-  install ships as a fixed v0.1.x (reaffirmed 2026-10-07).
-- Once it installs, run the export skill once against a scratch GitHub
-  repository with approval, the one agent step the rehearsal stopped short of.
+  install checks on that tag gate this quest, and it closes once they pass.
+  There's no rc tag; a broken install ships as a fixed v0.1.x (reaffirmed
+  2026-10-07).
+- Decided 2026-10-07: a live `/quest-export` run does not gate this quest.
 
 Done, and kept for the record:
 
