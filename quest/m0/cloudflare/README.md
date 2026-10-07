@@ -57,7 +57,6 @@ Decided while planning on 2026-10-01. Research sources:
 
 ## Required
 
-- [Compiled releases](/quest/m0/cloudflare/release.md) - Bun-compiled binaries replace cargo-dist
 - [Fork intake](/quest/m0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
 - [Changes](/quest/m0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
 - [Quest board](/quest/m0/cloudflare/board.md) - browse the tree and see what is ready, blocked, or claimed
