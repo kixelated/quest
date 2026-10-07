@@ -26,3 +26,6 @@ Decided while planning on 2026-10-06:
   the theme epic decided.
 - Every status and size keeps its text label, since colour is never the only
   signal.
+- Decided 2026-10-07 on the board's PR (kixelated/quest#74): the map lives
+  here, not on the board, and each act links to its board section
+  (`/repos/quest#a0`).

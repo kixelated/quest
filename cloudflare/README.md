@@ -5,13 +5,29 @@ A deployable foundation for Quest on Cloudflare, and the site at
 Hono serves HTML directly, so there is no client bundle. Every page renders
 inside the shared layout in `src/layout.tsx`, which follows
 [the quest log theme](../design/theme.md): the home page (`src/home.tsx`), the
-docs under `/docs` (`src/docs.tsx`), sign-in in the nav, and the not-found
-page. Later pages, such as the board, use the same layout.
+docs under `/docs` (`src/docs.tsx`), the quest board under `/repos`
+(`src/board/`), sign-in in the nav, and the not-found page. App pages extend
+the layout (breadcrumbs, the status marker, the paste box) rather than adding
+a second shell.
+
+The quest board at `/repos/<name>` opens on each act with its progress, then
+its epics and quests with their statuses, filtered by status with
+`?show=available` and the like. Each quest has a page at its path without
+`.md`, such as `/repos/quest/quest/a0/cloudflare/board`: its Markdown rendered
+with raw HTML escaped, its status, and what to do next. Readiness comes from
+`quest/core`, so the board agrees with `quest ready`. Progress counts finished
+quests, which merges delete, from Git history (`scripts/history.ts`), weighted
+by size. A deletion counts only when its commit changed something outside
+`quest/`, since deleting only plans abandons a quest.
 
 `scripts/build.ts` runs before every check, test, dev server, and deploy. It
 renders the repository's `docs/*.md` into `build/docs.json`, so the Markdown
 stays the single source and its relative links keep working on GitHub: links to
 other docs become `/docs/<name>` and other repository paths point at GitHub. It
+also snapshots this repository's `quest/` tree and finished quests into
+`build/board.json`, which is the board's only project until GitHub sync
+mirrors repositories into Artifacts. A shallow clone has no history, so its
+board shows no finished work. It
 also copies `design/theme/` and `src/site.css` into `build/public/`, which the
 Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
 `/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
@@ -25,8 +41,9 @@ calling Better Auth's server API.
 an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
 SQLite Durable Object. The coordinator currently initializes its schema and
 exposes an internal status method. Repository authorization and creation,
-claims, changes, and the quest board, where contributors offer gold (their own
-agent tokens) to fund runs, belong to later quests; there are no public repository or token routes yet.
+claims, changes, reading the board from Artifacts, and offering gold (their own
+agent tokens) to fund runs belong to later quests; there are no repository
+write or token routes yet.
 `cloudflare/` is an npm workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
 and readiness the CLI runs.
@@ -67,7 +84,7 @@ binding so tests and CI never need Cloudflare credentials or call live services.
 To work on the site without a Cloudflare login, run
 `npm exec -- wrangler dev --local` from `cloudflare/` after the migrations.
 `--local` disables remote bindings, which the pages do not use. Wrangler
-reruns the build when `src/`, `scripts/`, `docs/`, or `design/` change.
+reruns the build when `src/`, `scripts/`, or `docs/` change.
 
 ## Checks
 
@@ -80,7 +97,7 @@ These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 `just worker-check` checks generated binding types, TypeScript, formatting, and
 `wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
 with real local D1 and SQLite Durable Objects. Tests cover the home page and
-rendered docs in the shared layout, the mocked GitHub OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
+rendered docs in the shared layout, the board and quest pages, statuses, progress, safe Markdown, and finished quests from history, the mocked GitHub OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
 and coordinator storage across eviction and repository boundaries. No OAuth
 credentials or Cloudflare account are required for checks.
 

@@ -1,10 +1,7 @@
 import type { Child } from "hono/jsx";
-import { raw } from "hono/html";
-import { Bang, Coin, Difficulty, Divider, Query, repo, type Size } from "./layout";
+import { Bang, Coin, Difficulty, Divider, Marker, Paste, Query, repo, type Size, type Status } from "./layout";
 
 // The home page. Display names follow the glossary in design/theme.md.
-
-type Status = "available" | "blocked" | "accepted" | "turn-in";
 
 const log: { status: Status; label: string; size: Size; title: string }[] = [
 	{ status: "turn-in", label: "Ready to turn in", size: "S", title: "Add the CSV endpoint" },
@@ -42,11 +39,6 @@ const tree = `quest/
     export.md    # Available
     download.md  # Requires: export.md`;
 
-function Marker(props: { status: Status }) {
-	if (props.status === "accepted") return <span class="ql-marker marker-empty" />;
-	return <span class={`ql-marker ql-${props.status}`}>{props.status === "turn-in" ? <Query /> : <Bang />}</span>;
-}
-
 function Section(props: { id: string; title: string; children: Child }) {
 	return (
 		<section class="wrap section" id={props.id} aria-labelledby={`${props.id}-title`}>
@@ -71,12 +63,7 @@ export function Home(props: { setup: string }) {
 					</p>
 					<div class="paste">
 						<p class="paste-label">Paste this into Claude Code or Codex:</p>
-						<div class="paste-box">
-							<code id="paste">{paste}</code>
-							<button class="button" type="button" data-copy="paste" hidden>
-								Copy
-							</button>
-						</div>
+						<Paste id="paste" text={paste} />
 					</div>
 					<p class="actions">
 						<a class="button primary" href="/docs/getting-started">
@@ -293,19 +280,6 @@ export function Home(props: { setup: string }) {
 					</div>
 				</div>
 			</Section>
-
-			<script>{raw(copyScript)}</script>
 		</>
 	);
 }
-
-// Progressive enhancement: reveal the copy button only where the clipboard works.
-const copyScript = `for (const button of document.querySelectorAll("[data-copy]")) {
-	if (!navigator.clipboard) continue;
-	button.hidden = false;
-	button.addEventListener("click", async () => {
-		await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);
-		button.textContent = "Copied";
-		setTimeout(() => (button.textContent = "Copy"), 2000);
-	});
-}`;
