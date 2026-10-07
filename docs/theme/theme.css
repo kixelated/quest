@@ -1,0 +1,107 @@
+/*
+ * Quest log theme: palette, type, and status tokens. Dark only.
+ *
+ * docs/theme.md is canonical. Change it first, then this file.
+ *
+ * Fonts are open-licensed (SIL Open Font License 1.1). Load them from Google Fonts:
+ * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;600&display=swap">
+ */
+
+:root {
+	color-scheme: dark;
+
+	/* Surfaces */
+	--ql-bg: #0e1218;
+	--ql-panel: #19202a;
+	--ql-raised: #232c38;
+	--ql-rule: #313c4a;
+
+	/* Gold trim */
+	--ql-gold: #d9ac48;
+	--ql-gold-dim: #8d6b22;
+	--ql-gold-bright: #f5c542;
+
+	/* Text */
+	--ql-text: #ebe4d2;
+	--ql-muted: #a9a394;
+	--ql-link: #8fc3f2;
+
+	/* Status and difficulty hues */
+	--ql-grey: #9aa1ab;
+	--ql-green: #5ccf5c;
+	--ql-yellow: #f2d23c;
+	--ql-orange: #ff9838;
+	--ql-red: #ff5f52;
+
+	/* Type */
+	--ql-font-heading: "Cinzel", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+	--ql-font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	--ql-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* A quest log window: slate panel, gold border, thin inner trim. */
+.ql-window {
+	background: var(--ql-panel);
+	color: var(--ql-text);
+	font-family: var(--ql-font-body);
+	border: 2px solid var(--ql-gold);
+	border-radius: 6px;
+	box-shadow:
+		inset 0 0 0 4px var(--ql-panel),
+		inset 0 0 0 5px var(--ql-gold-dim);
+}
+
+.ql-window :is(h1, h2, h3) {
+	font-family: var(--ql-font-heading);
+	font-weight: 700;
+	color: var(--ql-gold-bright);
+}
+
+/* Status markers. Always pair the glyph with its label text. */
+.ql-marker {
+	font-family: var(--ql-font-heading);
+	font-weight: 700;
+}
+
+.ql-available,
+.ql-turn-in {
+	color: var(--ql-yellow);
+}
+
+.ql-blocked {
+	color: var(--ql-grey);
+}
+
+/* Difficulty by size. Always show the size label as well as the colour. */
+.ql-xs {
+	color: var(--ql-grey);
+}
+
+.ql-s {
+	color: var(--ql-green);
+}
+
+.ql-m {
+	color: var(--ql-yellow);
+}
+
+.ql-l {
+	color: var(--ql-orange);
+}
+
+.ql-xl {
+	color: var(--ql-red);
+}
+
+/* The "Elite" tag shown next to XL quests. */
+.ql-elite {
+	color: var(--ql-red);
+	border: 1px solid currentColor;
+	border-radius: 3px;
+	padding: 0 0.35em;
+	font-family: var(--ql-font-heading);
+	font-size: 0.8em;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}

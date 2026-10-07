@@ -31,7 +31,7 @@ Decided while planning on 2026-10-01. Research sources:
   and ease of use (25%). Locks are how concurrent donated runs avoid stepping
   on each other, so the demo should show that.
 - Code lives in this repository under `cloudflare/` as a TypeScript Worker,
-  kept apart from the Rust core. The Nix shell gains node and wrangler, and CI
+  importing the shared TypeScript core. The Nix shell gains node and wrangler, and CI
   gains a job.
 - Everything is git-based so it syncs with GitHub. Claims are a `## Claim`
   section in the quest (core), issues are files in a quarantined `issues/`
@@ -47,12 +47,18 @@ Decided while planning on 2026-10-01. Research sources:
   ([m1](/quest/m1/chatgpt-hosted.md)).
 - Only the extra login providers may slip past the demo. GitHub sync, hosted
   runs, and issue intake must ship.
+- Production lives at `https://kixel.quest` (bought 2026-10-05 on Porkbun),
+  a Workers custom domain, so its DNS moves to Cloudflare before deploying.
+- Quest moves from Rust to TypeScript (decided 2026-10-06): one language and
+  one core for the CLI, Worker, site, and map, replacing the wasm bridge.
+  The port and its release pipeline land on this line's branch.
 - Agents run either locally or hosted. Watching an agent run live is a
   non-goal beyond showing its status. In v1, checks run `quest check` only.
 
 ## Required
 
-- [Core as wasm](/quest/m0/cloudflare/wasm.md) - the Worker runs the same parse, check, and ready rules as the CLI
+- [Port to TypeScript](/quest/m0/cloudflare/typescript.md) - the CLI and core become TypeScript, which the Worker imports directly
+- [Compiled releases](/quest/m0/cloudflare/release.md) - Bun-compiled binaries replace cargo-dist
 - [Fork intake](/quest/m0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
 - [Changes](/quest/m0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
 - [Quest board](/quest/m0/cloudflare/board.md) - browse the tree and see what is ready, blocked, or claimed
@@ -61,3 +67,4 @@ Decided while planning on 2026-10-01. Research sources:
 - [GitHub sync](/quest/m0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes
 - [GitHub onboarding](/quest/m0/cloudflare/onboard.md) - enter a GitHub repository and get Quest set up through a PR
 - [More logins](/quest/m0/cloudflare/logins.md) - Google and passkey sign-in
+- [Quest log theme](/quest/m0/theme/README.md) - the demo is recorded after the themed board, landing page, and README land

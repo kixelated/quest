@@ -9,13 +9,13 @@ The argument is the quest to work on.
 
 If you are unsure on the best course of action, ask the user for direction.
 
-Run `git fetch` and `quest ready --remote origin`, then confirm the quest is still ready, unclaimed, and on origin's base branch.
+Update your checkout, run `quest ready`, then confirm the quest is still ready and unclaimed.
 A `## Claim` section means the quest is taken, just like a branch claim.
 Confirm you can write in your worktree; if you cannot, stop and report without claiming.
-Claim it as `quest guide` describes: `quest branch` names the branch and its bases, missing line branches get a draft PR, and the quest branch gets an empty commit.
+Claim it as `quest guide` describes.
 Delete a claim you cannot finish (remote branch and worktree).
 
-Implement the quest until it is complete, or some blocker is hit, then create a PR against the base.
+Implement the quest until it is complete, or some blocker is hit, then create a PR.
 Never write to or clean up a directory other agents share, such as a session scratchpad.
 
 When done, explain the result in a few lines and summarize any issues encountered.

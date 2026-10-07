@@ -14,7 +14,7 @@ The `README.md` file is the quest and the `Required` section lists the children.
 It completes when its own work is done and every child has merged.
 
 The root's entries are special questlines called **milestones** (`m0`, `m1`, ...) that group work by priority horizon.
-Milestones are permanent and have no branch; their direct children merge into `main`.
+Milestones are permanent.
 
 Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
@@ -74,13 +74,28 @@ prints the claim as a blocker and names its claimant on stderr.
 The CLI never expires claims or reads the clock. The forge removes stale claims.
 Remove the section to release a claim.
 
+## Questions
+
+Block on user decisions.
+Explain the quest or PR, the decision, and your recommendation, then ask synchronously with a blocking interactive question tool when available and allowed in the current mode.
+Do not use asynchronous question tools.
+
+If no blocking tool is available, or it returns without an answer, put the question and numbered choices in your final reply and end the turn.
+Resume when the user answers; do not bury the question in a progress update or replace the wait with sleeps or timed polls.
+Silence, elapsed time, and a preselected recommendation are not answers or approval.
+Do not advance the interview or act on an unanswered choice.
+Already authorized background work may continue while the foreground waits.
+
+A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
+Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
+
 ## Creation
 
 Quests are created in PRs and reviewed.
 Search the tree and git history first before making a new quest.
 
 Split independently completable work into separate quests.
-Group them in a questline only when they should ship together.
+Group related quests in a questline; its README holds the work no child owns.
 
 A release or pin bump that unblocks work is its own quest.
 
@@ -92,7 +107,6 @@ Unlike a blocked quest it stays ready, so it resurfaces every time ready work is
 
 Start only ready quests.
 `quest ready [<path>]` prints what blocks a quest, or every ready quest.
-It reads each questline from its branch on `origin`, so fetch first.
 
 If you have push access, make an empty commit and push a branch to the remote.
 The remote branch claims the quest so other agents skip it.
@@ -101,12 +115,7 @@ quest file through their forge's claim intake. GitHub skills keep using branch c
 If a claim looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.
-For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`, and its questline is `quest/m1/foo/README`.
-`quest branch` names the branch and its bases.
-
-If the questline doesn't have a PR, first make a draft PR against the base.
-It stays a draft until all required quests have been completed, then it's ready for one final review.
-Keep a questline current by merging its base in; never rebase a shared branch.
+For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 
 When a quest is complete, create a draft PR.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.

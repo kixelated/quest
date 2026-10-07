@@ -49,9 +49,8 @@ quest/
 
 Folders are **questlines**. A README's `Required` lists its children in
 priority order, beside any other dependencies. Milestones (`m0`, `m1`, ...)
-give the work a delivery horizon and have no branch of their own. A milestone's quests merge
-toward `main`. A nested line merges into its README's branch, and that README
-becomes the line's own quest once its children have landed.
+give the work a delivery horizon. A questline's README becomes its own quest
+once its children have landed.
 
 When a quest lands, its PR removes the plan and the links that depended on it.
 The next task becomes ready. The finished plan stays in Git history, beside the
@@ -83,23 +82,14 @@ quest/m0/export.md
 
 $ quest --root examples/export ready quest/m0/download.md
 quest/m0/export.md
-
-$ quest --root examples/export branch quest/m0/download.md
-quest/m0/download
-main
 ```
 
 `ready` prints blockers, with an explanation on stderr. No blockers means no
 stdout. It exits zero for both ready and blocked quests; a nonzero exit means
-the command failed. Run `check` first to catch malformed plans. `branch` prints
-the quest's branch, then each branch it merges through, nearest first and
-ending at `main`. A milestone has no branch, so its quests merge straight into
-`main`.
-
-`ready` reads each questline from its branch on `origin` (fetch first;
-`--local` skips this). It excludes quests with a `Claim` section. It does not
-look for branch claims or PRs, so check those before starting a quest someone
-else may already be working on.
+the command failed. Run `check` first to catch malformed plans. `ready`
+excludes quests with a `Claim` section. It does not look for branch claims or
+PRs, so check those before starting a quest someone else may already be working
+on.
 
 ## Work with an agent
 
@@ -115,6 +105,7 @@ the version you pin decides what your agents follow:
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
 | `quest-spawn` | Triage ready quests and hand them to parallel agents. |
+| `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-merge` | Land a quest's PR once CI and reviews pass. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |

@@ -9,12 +9,13 @@
 pub const GUIDE: &str = include_str!("../assets/AGENTS.md");
 
 /// Every skill, sorted by name.
-const SKILLS: [(&str, &str); 9] = [
+const SKILLS: [(&str, &str); 10] = [
 	("audit", include_str!("../assets/skills/audit.md")),
 	("complete", include_str!("../assets/skills/complete.md")),
 	("delete", include_str!("../assets/skills/delete.md")),
 	("export", include_str!("../assets/skills/export.md")),
 	("import", include_str!("../assets/skills/import.md")),
+	("iterate", include_str!("../assets/skills/iterate.md")),
 	("merge", include_str!("../assets/skills/merge.md")),
 	("plan", include_str!("../assets/skills/plan.md")),
 	("spawn", include_str!("../assets/skills/spawn.md")),
@@ -105,6 +106,12 @@ mod tests {
 				skill.name
 			);
 			assert!(!skill.description().is_empty(), "{} description", skill.name);
+			// The stub copies the description as a plain YAML scalar, where ": " is invalid.
+			assert!(
+				!skill.description().contains(": "),
+				"{} description has \": \"",
+				skill.name
+			);
 			assert!(!skill.body().trim().is_empty(), "{} body", skill.name);
 		}
 	}

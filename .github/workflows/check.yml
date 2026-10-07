@@ -15,11 +15,7 @@ concurrency:
 
 jobs:
   check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,3 +34,21 @@ jobs:
           NEXTEST_PROFILE: ci
       - name: Check Nix package
         run: nix flake check
+
+  lifecycle:
+    name: lifecycle (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the checkout with the pinned Rust toolchain
+        run: cargo install --locked --path . --root "$RUNNER_TEMP/quest-lifecycle-install"
+      - name: Verify the installed CLI lifecycle
+        shell: bash
+        run: bash scripts/lifecycle-check.sh "$RUNNER_TEMP/quest-lifecycle-install/bin/quest"
