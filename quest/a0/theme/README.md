@@ -17,7 +17,16 @@ The pass also renames the "difficulty" leftovers to "size": the Worker's
 `cloudflare/src/home.tsx` and `cloudflare/src/board/pages.tsx`), the board's
 "weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
 `cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
-wording in `quest/a0/theme/cli.md` and this README's `Required` list.
+wording in this README's `Required` list.
+It also replaces the display aliases on the board, the home page, and
+`cloudflare/README.md` with format terms: Available and `?show=available`
+become ready, the Requires status and filter become blocked, Accepted by
+becomes claimed by, the Requires heading becomes `Required`, Ready to turn in
+becomes in review, Quest complete becomes complete, and Objectives and Rewards
+become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
+marker and palette notes to match, keeping only the flavour rows (the party,
+gold, Offer gold). The social image is fixed earlier, in
+[social image terms](/quest/a0/theme/og-terms.md).
 
 ## Plan
 
@@ -39,8 +48,20 @@ Decided while planning on 2026-10-05:
   competition judging, so the
   [Cloudflare epic](/quest/a0/cloudflare/README.md) records its demo after
   this epic lands. Aim to merge by 2026-10-12.
-- One display glossary is shared by the site, board, and CLI. No XP, levels,
-  achievements, or leaderboards; they add state for little demo value.
+- Decided 2026-10-07: every surface (site, board, map, and CLI) names format
+  concepts with the format's own terms: ready, blocked, `Required`, and
+  claimed. There are no display aliases (Available, Requires, Accepted by,
+  Objectives, Rewards). Markers, size colours, the voice, and the flavour
+  (gold, the party) stay. The user weighed RPG replacements (unlocked/locked,
+  accepted, Objective/Prerequisites) and kept the current terms. Renaming
+  `## Required` to `## Requires` was considered and dropped, so `Required`
+  stays.
+- Decided 2026-10-07: a quest with an open PR is "in review" and a merged
+  one is "complete", since the format has no term for either. The final
+  pass renames the board's "Ready to turn in" to in review and "Quest
+  complete" to complete, and `design/theme.md`'s glossary rows follow.
+- No XP, levels, achievements, or leaderboards; they add state for little demo
+  value.
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
   `cloudflare/README.md` use the format's own terms (quest, epic,
   act, ready, blocked, `Required`, `Goal`, claim) with no display-name
@@ -72,17 +93,14 @@ Decided while planning on 2026-10-05:
   change is a token change in `design/theme/theme.css`.
 - Decided 2026-10-07: XL quests have no "Elite" tag. Purple XL and its size
   label already stand out.
-- Decided 2026-10-07 on the map's PR (kixelated/quest#78): the map's
-  waypoints show the format's terms with no display aliases: "ready",
-  "blocked" (the tooltip lists what is required under "Required:"),
-  "claimed by @name", and "in review" for a quest with an open PR, replacing
-  "Ready to turn in". Merged work is "complete". The final pass decides
-  whether the board and home page follow.
+- Decided 2026-10-07 on the map's PR (kixelated/quest#78): the map already
+  uses these terms. A blocked waypoint's tooltip lists what it needs under
+  "Required:".
 
 ## Required
 
+- [Social image terms](/quest/a0/theme/og-terms.md) - `design/theme/og.svg` and `og.png` show format terms before the upload
 - [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
-- [Themed CLI output](/quest/a0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/a0/theme/landing.md) - the home page's map and calls to action link into the live board
 
 ## Related
