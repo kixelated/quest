@@ -1,6 +1,6 @@
 // `quest init` and `quest uninstall` in temporary repositories.
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "vitest";
@@ -34,6 +34,18 @@ test("init refuses a skill that is not a stub", () => {
 	mkdirSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
 	writeFileSync(join(dir, ".claude/skills/quest-start/SKILL.md"), "# My workflow\n");
 	expect(() => init(dir)).toThrow("not a Quest stub");
+});
+
+test("a refused init writes nothing", () => {
+	const dir = tempDir();
+	writeFileSync(join(dir, "CLAUDE.md"), "# Claude\n");
+	mkdirSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
+	writeFileSync(join(dir, ".claude/skills/quest-start/SKILL.md"), "# My workflow\n");
+	expect(() => init(dir)).toThrow(".claude/skills/quest-start/SKILL.md is not a Quest stub");
+	expect(readdirSync(join(dir, ".claude/skills"))).toEqual(["quest-start"]);
+	expect(existsSync(join(dir, ".agents"))).toBe(false);
+	expect(existsSync(join(dir, "quest"))).toBe(false);
+	expect(read(dir, "CLAUDE.md")).toBe("# Claude\n");
 });
 
 test("init appends to AGENTS.md, not CLAUDE.md, when both exist", () => {
