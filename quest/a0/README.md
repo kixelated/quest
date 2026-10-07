@@ -35,4 +35,5 @@ ownership-manifest design:
 - [Release proof](/quest/a0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
 - [Release checks on CLI PRs](/quest/a0/release-pr-paths.md) - the Release workflow's native binary checks run on `src/**` pull requests
 - [Atomic init](/quest/a0/init-atomic.md) - init refuses before writing on path-type conflicts too
+- [Path collisions](/quest/a0/path-collision.md) - `quest check` flags a quest and an epic that share a path
 - [Launch material](/quest/a0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
