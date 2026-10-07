@@ -3,9 +3,12 @@ import type { Child } from "hono/jsx";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { createAuth } from "./auth";
+import { type Board, findDoc as findQuest, readBoard } from "./board/model";
+import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
+import { type Project, findProject } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
-import { Layout, type Page } from "./layout";
+import { Layout, type Page, type User } from "./layout";
 export { RepositoryCoordinator } from "./repository";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -17,18 +20,25 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
+// The page a visitor is on, still percent-encoded, to return to after signing in.
+function here(c: Context): string {
+	const url = new URL(c.req.url);
+	return url.pathname + url.search;
+}
+
 // Every HTML page renders in the shared layout, with the visitor's session in the nav.
 async function page(
 	c: Context<{ Bindings: Env }>,
-	props: Omit<Page, "origin" | "user">,
-	body: Child,
+	props: Omit<Page, "origin" | "path" | "user">,
+	body: Child | ((user: User | null) => Child),
 	status: ContentfulStatusCode = 200,
 ) {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	const user = session?.user ?? null;
 	c.header("Cache-Control", "no-store");
 	return c.html(
-		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} user={session?.user ?? null}>
-			{body}
+		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={here(c)} user={user}>
+			{typeof body === "function" ? body(user) : body}
 		</Layout>,
 		status,
 	);
@@ -47,6 +57,51 @@ app.get("/docs/:slug", (c) => {
 	if (!doc) return c.notFound();
 	return page(c, { title: doc.title, description: doc.summary }, <DocPage doc={doc} />);
 });
+
+// The quest board: a project's acts, then each quest's page at its path
+// without `.md`, the way its branch is named.
+const boards = new WeakMap<Project, Board>();
+function board(name: string): Board | null {
+	const project = findProject(name);
+	if (!project) return null;
+	if (!boards.has(project)) boards.set(project, readBoard(project));
+	return boards.get(project)!;
+}
+app.get("/repos/:repository", (c) => {
+	const found = board(c.req.param("repository"));
+	if (!found) return c.notFound();
+	const { project } = found;
+	const show = SHOWN.find(([kind]) => kind === c.req.query("show"))?.[0] ?? null;
+	return page(
+		c,
+		{
+			title: `${project.title} quest log`,
+			description: `What is available, in progress, and finished in ${project.title}.`,
+		},
+		<BoardPage board={found} show={show} />,
+	);
+});
+app.get("/repos/:repository/quest/*", (c) => {
+	const found = board(c.req.param("repository"));
+	const prefix = `/repos/${c.req.param("repository")}/`;
+	const doc = found && findQuest(found, c.req.path.slice(prefix.length));
+	if (!found || !doc) return c.notFound();
+	const href = `/repos/${found.project.name}`;
+	if (doc.path === "quest/README.md") return c.redirect(href);
+	const content = found.project.documents.find((d) => d.path === doc.path)!.content;
+	const crumbs = questCrumbs(found, doc);
+	return page(
+		c,
+		{
+			title: crumbs.at(-1)!.label,
+			description: `A quest in ${found.project.title}.`,
+			crumbs,
+		},
+		(user) => <QuestPage board={found} doc={doc} content={content} user={user} path={here(c)} />,
+	);
+});
+app.get("/repos/:repository/quest", (c) => c.redirect(`/repos/${c.req.param("repository")}`));
+
 app.notFound((c) =>
 	page(
 		c,
@@ -71,9 +126,23 @@ for (const path of ["/sign-in", "/sign-out"]) {
 		await next();
 	});
 }
+
+/**
+ * Whether `path` stays on this site. Calling the server API skips Better
+ * Auth's own callback checks, so this mirrors them: browsers drop control
+ * characters and read a backslash as a slash, and a decoded `%2F` or `%5C`
+ * is one too, any of which can turn `/` into `//` and another origin.
+ */
+function local(path: string): boolean {
+	return /^\/(?![/\\])[^\\\0-\x1f\x7f]*$/.test(path) && !/%(2f|5c)/i.test(path);
+}
+
 app.post("/sign-in", async (c) => {
+	// Return to the page that signed in, if it names a path on this site.
+	const { next } = await c.req.parseBody();
+	const callbackURL = typeof next === "string" && local(next) ? next : "/";
 	const response = await createAuth(c.env).api.signInSocial({
-		body: { provider: "github", callbackURL: "/" },
+		body: { provider: "github", callbackURL },
 		headers: c.req.raw.headers,
 		asResponse: true,
 	});
