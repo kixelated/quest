@@ -1,13 +1,18 @@
-# [S] Wire the home page to the live board
+# [S] Wire the home page's calls to action
 
 ## Goal
 
-On `https://kixel.quest`, every node on the home page's quest map opens that
-quest's live board page, and the calls to action ("Accept the quest") lead to
-sign-in, onboarding a GitHub repository, and the one-line SETUP paste.
+On `https://kixel.quest`, the home page's calls to action ("Accept the
+quest") lead to sign-in, onboarding a GitHub repository, and the one-line SETUP
+paste. The board serves Quest's own tree live from Artifacts, through GitHub
+sync.
 
 ## Plan
 
+- Narrowed again on 2026-10-07: linking the map's quests to their board pages
+  moved to [Map links](/quest/a0/theme/map-links.md), which needs neither sync
+  nor onboarding and lands before the demo. This quest keeps only the calls to
+  action.
 - Narrowed on 2026-10-06. The site quest built the design, the shell, and
   the home page (`cloudflare/src/home.tsx`), and its quest map (`cloudflare/src/map.tsx`) draws
   the tree at build time. This quest adds only the live links once the board, sync, and
