@@ -88,7 +88,7 @@ $ quest --root examples/export check
 The quest log is in order: 4 documents checked.
 
 $ quest --root examples/export ready
-1 quest available
+1 quest ready
 ! [S] Add a CSV export endpoint  quest/a0/export.md
 
 $ quest --root examples/export ready quest/a0/download.md

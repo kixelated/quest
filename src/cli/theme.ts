@@ -1,7 +1,8 @@
-// The quest log theme on a terminal: markers, size colours, display names, and
-// the quest-log voice. `docs/theme.md` is the source of truth for the codes and
-// names; this is the CLI's own copy of its small tables, kept out of the core so
-// the Worker never carries presentation it does not use.
+// The quest log theme on a terminal: markers, size colours, and the quest-log
+// voice. `docs/theme.md` is the source of truth for the codes; this is the CLI's
+// own copy of its small tables, kept out of the core so the Worker never carries
+// presentation it does not use. Statuses use the format's own terms (ready,
+// blocked, `Requires`, claimed), with no display aliases.
 //
 // Only a terminal sees any of this. Piped output is the plain contract agents
 // and scripts read, and `main.ts` prints it unchanged.
@@ -27,10 +28,10 @@ type Size = "XS" | "S" | "M" | "L" | "XL";
  */
 const SIZE_COLOURS: Record<Size, string> = { XS: "90", S: "32", M: "33", L: "31", XL: "35" };
 
-/** Marker colours, from `docs/theme.md` (Difficulty): a yellow `!` is available, a grey one blocked. */
-const MARKER_COLOURS = { available: "33", blocked: "90" } as const;
+/** Marker colours, from `docs/theme.md` (Difficulty): a yellow `!` is ready, a grey one blocked. */
+const MARKER_COLOURS = { ready: "33", blocked: "90" } as const;
 
-/** A status marker, or `null` for the blank column an accepted (claimed) quest shows. */
+/** A status marker, or `null` for the blank column a claimed quest shows. */
 type Marker = keyof typeof MARKER_COLOURS | null;
 
 /** A quest title split into its size label and name, as `quest check` requires it. */
@@ -53,32 +54,29 @@ interface Row {
 export class Theme {
 	constructor(private readonly terminal: Terminal) {}
 
-	/** `quest ready`: every available quest, under a count. */
+	/** `quest ready`: every ready quest, under a count. */
 	ready(docs: Map<string, Doc>, paths: string[]): string[] {
-		if (paths.length === 0) return ["No quests available: every open quest is blocked or accepted."];
-		const count = `${paths.length} ${paths.length === 1 ? "quest" : "quests"} available`;
-		return [
-			count,
-			...layout(paths.map((path) => ({ indent: 0, label: this.quest(docs, path, "available"), path }))),
-		];
+		if (paths.length === 0) return ["No quests ready: every open quest is blocked or claimed."];
+		const count = `${paths.length} ${paths.length === 1 ? "quest" : "quests"} ready`;
+		return [count, ...layout(paths.map((path) => ({ indent: 0, label: this.quest(docs, path, "ready"), path })))];
 	}
 
 	/**
-	 * `quest ready <path>`: the quest with its marker, then its status. A claim
-	 * shows as Accepted by, and the `Required` chain as Requires, with each
-	 * required epic expanded into the quests it still holds.
+	 * `quest ready <path>`: the quest with its marker, then its status: Ready,
+	 * Claimed by, and the `Required` chain under Requires, with each required
+	 * epic expanded into the quests it still holds.
 	 */
 	blockers(docs: Map<string, Doc>, doc: Doc, found: Blocker[]): string[] {
 		// The core lists a claim first, then the `Required` entries.
 		const claimed = has(doc, "Claim");
 		const required = claimed ? found.slice(1) : found;
-		const marker: Marker = claimed ? null : found.length === 0 ? "available" : "blocked";
+		const marker: Marker = claimed ? null : found.length === 0 ? "ready" : "blocked";
 		const rows: Row[] = [{ indent: 0, label: this.quest(docs, doc.path, marker), path: doc.path }];
 		const note = (text: string) => rows.push({ indent: 2, label: plain(text), path: null });
 
-		if (found.length === 0) note("Available");
+		if (found.length === 0) note("Ready");
 		// An empty `## Claim` section has no claimant; the core's text explains it.
-		if (claimed) note(entries(doc, "Claim").length === 0 ? found[0].text : accepted(doc));
+		if (claimed) note(entries(doc, "Claim").length === 0 ? found[0].text : claimant(doc));
 		if (required.length > 0) {
 			note("Requires:");
 			const add = (blocker: Blocker, indent: number) => {
@@ -145,13 +143,13 @@ function plain(text: string): Span {
 	return { text, width: text.length };
 }
 
-/** `Accepted by @jdoe since 2026-10-02`, naming a GitHub claimant by handle as the board does. */
-function accepted(doc: Doc): string {
+/** `Claimed by @jdoe since 2026-10-02`, naming a GitHub claimant by handle as the board does. */
+function claimant(doc: Doc): string {
 	const [claim] = entries(doc, "Claim");
 	const parsed = parseClaim(claim.text);
-	if (!parsed) return `Accepted by ${claim.text}`;
+	if (!parsed) return `Claimed by ${claim.text}`;
 	const by = parsed.provider === "github" ? `@${parsed.identity}` : parsed.name;
-	return `Accepted by ${by} since ${parsed.since}`;
+	return `Claimed by ${by} since ${parsed.since}`;
 }
 
 /** Rows as lines, with every path aligned two columns after the widest label. */

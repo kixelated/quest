@@ -43,12 +43,12 @@ describe("detect", () => {
 });
 
 describe("ready", () => {
-	test("lists available quests with a yellow marker and size colours", () => {
+	test("lists ready quests with a yellow marker and size colours", () => {
 		const bang = sgr("33", "!");
 		expect(sizes().runOn(COLOUR, "ready")).toEqual({
 			code: 0,
 			stdout:
-				"5 quests available\n" +
+				"5 quests ready\n" +
 				`${bang} ${sgr("90", "[XS]")} Tiny   quest/a0/epic/xs.md\n` +
 				`${bang} ${sgr("32", "[S]")} Small   quest/a0/epic/s.md\n` +
 				`${bang} ${sgr("33", "[M]")} Medium  quest/a0/epic/m.md\n` +
@@ -60,7 +60,7 @@ describe("ready", () => {
 
 	test("NO_COLOR keeps the layout and drops the escape codes", () => {
 		expect(sizes().runOn(NO_COLOUR, "ready").stdout).toBe(
-			"5 quests available\n" +
+			"5 quests ready\n" +
 				"! [XS] Tiny   quest/a0/epic/xs.md\n" +
 				"! [S] Small   quest/a0/epic/s.md\n" +
 				"! [M] Medium  quest/a0/epic/m.md\n" +
@@ -69,28 +69,28 @@ describe("ready", () => {
 		);
 	});
 
-	test("says so when nothing is available", () => {
+	test("says so when nothing is ready", () => {
 		const tree = Tree.baseline().append(
 			"quest/a0/epic/one.md",
 			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
 		);
 		expect(tree.runOn(NO_COLOUR, "ready").stdout).toBe(
-			"No quests available: every open quest is blocked or accepted.\n",
+			"No quests ready: every open quest is blocked or claimed.\n",
 		);
 	});
 
 	test("one quest reads in the singular", () => {
 		expect(Tree.baseline().runOn(NO_COLOUR, "ready").stdout).toBe(
-			"1 quest available\n! [S] One  quest/a0/epic/one.md\n",
+			"1 quest ready\n! [S] One  quest/a0/epic/one.md\n",
 		);
 	});
 });
 
 describe("ready <path>", () => {
-	test("an available quest", () => {
+	test("a ready quest", () => {
 		expect(Tree.baseline().runOn(COLOUR, "ready", "quest/a0/epic/one.md")).toEqual({
 			code: 0,
-			stdout: `${sgr("33", "!")} ${sgr("32", "[S]")} One  quest/a0/epic/one.md\n  Available\n`,
+			stdout: `${sgr("33", "!")} ${sgr("32", "[S]")} One  quest/a0/epic/one.md\n  Ready\n`,
 			stderr: "",
 		});
 	});
@@ -119,14 +119,14 @@ describe("ready <path>", () => {
 		);
 	});
 
-	test("a claimed quest is accepted, with no marker", () => {
+	test("a claimed quest names its claimant, with no marker", () => {
 		const tree = Tree.baseline().append(
 			"quest/a0/epic/two.md",
 			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
 		);
 		expect(tree.runOn(NO_COLOUR, "ready", "quest/a0/epic/two.md").stdout).toBe(
 			"  [S] Two    quest/a0/epic/two.md\n" +
-				"  Accepted by @jdoe since 2026-10-02\n" +
+				"  Claimed by @jdoe since 2026-10-02\n" +
 				"  Requires:\n" +
 				"    [S] One  quest/a0/epic/one.md\n",
 		);
@@ -138,7 +138,7 @@ describe("ready <path>", () => {
 			"\n## Claim\n\n- Jane Doe (forgejo:jane) on jane/quest since 2026-10-02\n",
 		);
 		expect(tree.runOn(NO_COLOUR, "ready", "quest/a0/epic/one.md").stdout).toBe(
-			"  [S] One  quest/a0/epic/one.md\n  Accepted by Jane Doe since 2026-10-02\n",
+			"  [S] One  quest/a0/epic/one.md\n  Claimed by Jane Doe since 2026-10-02\n",
 		);
 	});
 
