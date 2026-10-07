@@ -18,7 +18,7 @@ import {
 	trail,
 } from "./model";
 
-// The quest board. Display names follow the glossary in docs/theme.md.
+// The quest board. Display names follow the glossary in design/theme.md.
 
 /** A status's display label, such as "Requires: Fork intake, Changes". */
 function label(status: Status, limit = Infinity): string {

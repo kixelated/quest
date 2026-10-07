@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="title">
 	<title id="title">Quest: a quest log for your repo and your agents</title>
-	<!-- Hand-written social image. Colours and fonts follow docs/theme.md; export steps are there too. -->
+	<!-- Hand-written social image. Colours and fonts follow design/theme.md; export steps are there too. -->
 	<style>
 		@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&amp;family=Inter:wght@400;600&amp;display=block");
 		.heading { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 700; }
@@ -40,7 +40,7 @@
 	<rect x="42" y="42" width="1196" height="556" rx="3" fill="none" stroke="#7a6230" stroke-width="1.5"/>
 	<path d="M70 42 V598 M75 42 V598" stroke="#7a6230" stroke-width="1.5"/>
 
-	<!-- Mark: a copy of docs/theme/logo.svg -->
+	<!-- Mark: a copy of design/theme/logo.svg -->
 	<g transform="translate(104 84) scale(3.1)">
 		<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#ink)" stroke="#c9a14a" stroke-width="3" stroke-linejoin="round"/>
 		<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#7a6230" stroke-width="1.2" stroke-linejoin="round"/>
@@ -70,8 +70,8 @@
 	<text x="1184" y="419" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Available</text>
 
 	<use href="#query" x="126" y="472" color="#f2d23c"/>
-	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff9838" fill-opacity="0.14" stroke="#ff9838" stroke-width="1.5"/>
-	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff9838">L</text>
+	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff6b60" fill-opacity="0.14" stroke="#ff6b60" stroke-width="1.5"/>
+	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff6b60">L</text>
 	<text x="226" y="482" class="body strong" font-size="30" fill="#ede1c6">Build the quest board</text>
 	<text x="1184" y="481" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready to turn in</text>
 

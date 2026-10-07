@@ -1,5 +1,5 @@
 // The quest log theme on a terminal: markers, size colours, and the quest-log
-// voice. `docs/theme.md` is the source of truth for the codes; this is the CLI's
+// voice. `design/theme.md` is the source of truth for the codes; this is the CLI's
 // own copy of its small tables, kept out of the core so the Worker never carries
 // presentation it does not use. Statuses use the format's own terms (ready,
 // blocked, `Required`, claimed), with no display aliases.
@@ -22,13 +22,13 @@ export function detect(isTTY: boolean | undefined, env: Record<string, string | 
 type Size = "XS" | "S" | "M" | "L" | "XL";
 
 /**
- * Size colours as SGR parameters, from `docs/theme.md` (Difficulty): named ANSI
+ * Size colours as SGR parameters, from `design/theme.md` (Size): named ANSI
  * colours, so they follow the user's terminal palette. The size label always
  * prints beside its colour, so colour is never the only signal.
  */
 const SIZE_COLOURS: Record<Size, string> = { XS: "90", S: "32", M: "33", L: "31", XL: "35" };
 
-/** Marker colours, from `docs/theme.md` (Difficulty): a yellow `!` is ready, a grey one blocked. */
+/** Marker colours, from `design/theme.md` (Size): a yellow `!` is ready, a grey one blocked. */
 const MARKER_COLOURS = { ready: "33", blocked: "90" } as const;
 
 /** A status marker, or `null` for the blank column a claimed quest shows. */

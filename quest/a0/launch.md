@@ -4,7 +4,7 @@
 
 A quickstart, a recorded demo on a real repository other than MoQ, more
 examples, a comparison with alternatives, and launch-post drafts are ready, all
-in the quest-log voice from `docs/theme.md`. Publishing the posts is out of
+in the quest-log voice from `design/theme.md`. Publishing the posts is out of
 scope. The README and the landing page belong to
 [the theme epic](/quest/a0/theme/README.md).
 

@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/theme/logo.svg" alt="" width="96" height="96"></p>
+<p align="center"><img src="design/theme/logo.svg" alt="" width="96" height="96"></p>
 
 # Quest
 
