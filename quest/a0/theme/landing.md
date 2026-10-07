@@ -8,10 +8,9 @@ paste.
 
 ## Plan
 
-- Narrowed again on 2026-10-07: linking the map's quests to their board pages
-  moved to [Map links](/quest/a0/theme/map-links.md), which needs neither sync
-  nor onboarding and lands before the demo. This quest keeps only the calls to
-  action.
+- Narrowed again on 2026-10-07: the map's quests link to their board pages
+  since kixelated/quest#84, which needed neither sync nor onboarding. This
+  quest keeps only the calls to action.
 - Narrowed on 2026-10-06. The site quest built the design, the shell, and
   the home page (`cloudflare/src/home.tsx`), and its quest map (`cloudflare/src/map.tsx`) draws
   the tree at build time. This quest adds only the calls to action once

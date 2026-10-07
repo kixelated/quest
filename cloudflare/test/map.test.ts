@@ -41,19 +41,25 @@ describe("quest map", () => {
 
 	it("draws epics and the act's own quests as paths in priority order", () => {
 		expect(region.paths.map((path) => path.title)).toEqual(["An epic", "Main path"]);
-		expect(region.paths[0].href).toBe("https://example.com/acme/demo/blob/main/quest/a0/epic/README.md");
+		expect(region.paths[0].href).toBe("/repos/demo/quest/a0/epic");
 	});
 
 	it("orders each path by what it requires, then by priority", () => {
-		const titles = region.paths.map((path) => path.waypoints.map((w) => w.quest.title));
+		const titles = region.paths.map((path) => path.waypoints.map((quest) => quest.title));
 		expect(titles).toEqual([
 			["First", "Other", "Later"],
 			["Solo", "Finale"],
 		]);
 	});
 
-	it("links waypoints to the quest files", () => {
-		expect(region.paths[1].waypoints[0].href).toBe("https://example.com/acme/demo/blob/main/quest/a0/solo.md");
+	it("links waypoints to their board pages", () => {
+		expect(region.paths[1].waypoints[0].href).toBe("/repos/demo/quest/a0/solo");
+	});
+
+	it("links to the board without a web address", () => {
+		const [offline] = chart(readBoard({ ...project, web: null }));
+		expect(offline.paths[0].href).toBe("/repos/demo/quest/a0/epic");
+		expect(offline.paths[1].waypoints[0].href).toBe("/repos/demo/quest/a0/solo");
 	});
 });
 

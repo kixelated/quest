@@ -7,11 +7,11 @@ import { Difficulty } from "./layout";
 // coloured by size. Statuses use the format's own terms, with no display
 // aliases (decided 2026-10-07 on kixelated/quest#78).
 
-/** A quest on the map and where its waypoint leads. */
-export type Waypoint = { quest: Quest; href: string };
-
-/** One path through a region: an epic, or the quests an act lists directly. */
-export type Path = { title: string; href: string | null; progress: Progress | null; waypoints: Waypoint[] };
+/**
+ * One path through a region: an epic, or the quests an act lists directly.
+ * An epic's title and each waypoint open their board pages.
+ */
+export type Path = { title: string; href: string | null; progress: Progress | null; waypoints: Quest[] };
 
 export type Region = { act: Act; href: string; paths: Path[] };
 
@@ -39,16 +39,12 @@ function steps(docs: Map<string, Doc>): (path: string) => number {
 
 /** The board's acts as map regions, each path ordered by step, then priority. */
 export function chart(board: Board): Region[] {
-	const { project } = board;
-	// Until the landing page (quest/a0/theme/landing.md) links waypoints to the
-	// board, they open the files on GitHub.
-	const file = (path: string) => (project.web ? `${project.web}/blob/main/${path}` : null);
 	const step = steps(board.docs);
-	const ordered = (quests: Quest[]): Waypoint[] =>
+	const ordered = (quests: Quest[]): Quest[] =>
 		quests
 			.map((quest, rank) => ({ quest, rank, step: step(quest.path) }))
 			.sort((a, b) => a.step - b.step || a.rank - b.rank)
-			.map(({ quest }) => ({ quest, href: file(quest.path) ?? quest.href }));
+			.map(({ quest }) => quest);
 
 	return board.acts.map((act) => {
 		// Paths keep the act's priority order. The quests it lists directly share
@@ -61,13 +57,13 @@ export function chart(board: Board): Region[] {
 			return [
 				{
 					title: epic.title,
-					href: file(epic.path),
+					href: epic.href,
 					progress: epic.progress,
 					waypoints: ordered(flatten(epic.items)),
 				},
 			];
 		});
-		return { act, href: `/repos/${project.name}#${actAnchor(act)}`, paths };
+		return { act, href: `/repos/${board.project.name}#${actAnchor(act)}`, paths };
 	});
 }
 
@@ -93,7 +89,7 @@ function tooltip(quest: Quest): string {
 	return `${line}\nRequired: ${status.requires.map((ref) => ref.title).join(", ")}`;
 }
 
-function Stop(props: Waypoint) {
+function Stop(props: { quest: Quest }) {
 	const { quest } = props;
 	const kind = quest.status.kind;
 	const size = quest.size ? ` ql-${quest.size.toLowerCase()}` : "";
@@ -101,7 +97,7 @@ function Stop(props: Waypoint) {
 	const name = `${quest.title}, size ${quest.size ?? "unknown"}, ${text(quest.status)}`;
 	return (
 		<li class={`waypoint${size} waypoint-${kind}`}>
-			<a href={props.href} title={tooltip(quest)} aria-label={name}>
+			<a href={quest.href} title={tooltip(quest)} aria-label={name}>
 				<span class="waypoint-node">
 					<span class="waypoint-size">{quest.size ?? "?"}</span>
 				</span>
@@ -147,8 +143,8 @@ export function QuestMap(props: { board: Board }) {
 										)}
 									</p>
 									<ol class="trail" role="list">
-										{path.waypoints.map((waypoint) => (
-											<Stop {...waypoint} />
+										{path.waypoints.map((quest) => (
+											<Stop quest={quest} />
 										))}
 									</ol>
 								</li>
