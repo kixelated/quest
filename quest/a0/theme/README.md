@@ -18,7 +18,10 @@ The pass also renames the "difficulty" leftovers to "size": the Worker's
 "weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
 `cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
 wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`, and this README's
-`Required` list.
+`Required` list. It also replaces the board's display aliases with format
+terms: the "available" filter and label (`?show=available`) become ready,
+"Accepted by" becomes claimed by, and "Requires" becomes `Required`. It also
+removes the alias rows left in `design/theme.md`'s glossary.
 
 ## Plan
 
@@ -40,8 +43,16 @@ Decided while planning on 2026-10-05:
   competition judging, so the
   [Cloudflare epic](/quest/a0/cloudflare/README.md) records its demo after
   this epic lands. Aim to merge by 2026-10-12.
-- One display glossary is shared by the site, board, and CLI. No XP, levels,
-  achievements, or leaderboards; they add state for little demo value.
+- Decided 2026-10-07: every surface (site, board, map, and CLI) names format
+  concepts with the format's own terms: ready, blocked, `Required`, and
+  claimed. There are no display aliases (available, Requires, Accepted by,
+  turn in, Elite). Markers, size colours, the voice, and the flavour (gold,
+  the party) stay. The user weighed RPG replacements (unlocked/locked,
+  accepted, Objective/Prerequisites) and kept the current terms. Renaming
+  `## Required` to `## Requires` was considered and dropped, so `Required`
+  stays.
+- No XP, levels, achievements, or leaderboards; they add state for little demo
+  value.
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
   `cloudflare/README.md` use the format's own terms (quest, epic,
   act, ready, blocked, `Required`, `Goal`, claim) with no display-name
