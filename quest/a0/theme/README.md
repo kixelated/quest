@@ -17,15 +17,16 @@ The pass also renames the "difficulty" leftovers to "size": the Worker's
 `cloudflare/src/home.tsx` and `cloudflare/src/board/pages.tsx`), the board's
 "weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
 `cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
-wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`, and this README's
-`Required` list. It also replaces the display aliases on the board (and
-`cloudflare/README.md`'s `?show=available`), the home page, and the social
-image (`design/theme/og.svg`, re-exported to `og.png`) with format terms:
-Available and `?show=available` become ready, the Requires status and filter
-become blocked, Accepted by becomes claimed by, the Requires heading becomes
-`Required`, and Objectives and Rewards become `Goal` and `Closes`. It rewrites
-`design/theme.md`'s glossary and its marker and palette notes to match,
-keeping only the flavour rows (the party, gold, Offer gold).
+wording in `quest/a0/theme/map.md` and this README's `Required` list.
+It also replaces the display aliases on the board, the home page, and
+`cloudflare/README.md` with format terms: Available and `?show=available`
+become ready, the Requires status and filter become blocked, Accepted by
+becomes claimed by, the Requires heading becomes `Required`, Ready to turn in
+becomes in review, Quest complete becomes complete, and Objectives and Rewards
+become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
+marker and palette notes to match, keeping only the flavour rows (the party,
+gold, Offer gold). The social image is fixed earlier, in
+[social image terms](/quest/a0/theme/og-terms.md).
 
 ## Plan
 
@@ -55,9 +56,10 @@ Decided while planning on 2026-10-05:
   accepted, Objective/Prerequisites) and kept the current terms. Renaming
   `## Required` to `## Requires` was considered and dropped, so `Required`
   stays.
-- Open: the format has no term for a quest with an open PR, which the board
-  and `design/theme.md` call "Ready to turn in" (with "Quest complete" once
-  merged). Ask the user what these show before the final pass.
+- Decided 2026-10-07: a quest with an open PR is "in review" and a merged
+  one is "complete", since the format has no term for either. The final
+  pass renames the board's "Ready to turn in" to in review and "Quest
+  complete" to complete, and `design/theme.md`'s glossary rows follow.
 - No XP, levels, achievements, or leaderboards; they add state for little demo
   value.
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
@@ -95,8 +97,8 @@ Decided while planning on 2026-10-05:
 ## Required
 
 - [Quest map](/quest/a0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
+- [Social image terms](/quest/a0/theme/og-terms.md) - `design/theme/og.svg` and `og.png` show format terms before the upload
 - [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
-- [Themed CLI output](/quest/a0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/a0/theme/landing.md) - the home page's map and calls to action link into the live board
 
 ## Related

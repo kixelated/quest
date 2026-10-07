@@ -34,7 +34,8 @@ acts, yes; pixel art, sound, and game interface chrome, no.
 
 Use display names in prose and interfaces. Anything a reader must type or
 match, such as quest headings, CLI commands, and `--help` text, keeps the
-format term.
+format term. The CLI's terminal output keeps the format terms too (ready,
+blocked, `Required:`, and Claimed by), with the markers and size colours.
 
 | Format term | Display | Marker |
 | --- | --- | --- |

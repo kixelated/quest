@@ -38,18 +38,21 @@ export function renderBlocker(blocker: Blocker, depth = 0): string[] {
 	return [`${"  ".repeat(depth)}${label(blocker)}`, ...blocker.blockers.flatMap((b) => renderBlocker(b, depth + 1))];
 }
 
+/** What blocks `doc`, a required epic expanded into the quests it still holds. Empty means ready. */
+export function blockers(docs: Doc[], doc: Doc): Blocker[] {
+	return expand(new Map(docs.map((d) => [d.path, d])), doc, [doc.path]);
+}
+
 /**
- * What blocks `path`, a required epic expanded into the quests it still
- * holds. Empty means ready; `null` means `path` is not a quest document.
- *
- * `path` is the quest as the tree writes it (`/quest/a0/one.md`) or as the
- * shell completes it (`quest/a0/one.md`).
+ * The quest document `path` names, written as the tree writes it
+ * (`/quest/a0/one.md`) or as the shell completes it (`quest/a0/one.md`).
  */
-export function blockers(docs: Doc[], path: string): Blocker[] | null {
-	const byPath = new Map(docs.map((d) => [d.path, d]));
-	const found = [normalize(path), normalize(path.replace(/^\//, ""))].find((p) => byPath.has(p));
-	if (found === undefined) return null;
-	return expand(byPath, byPath.get(found)!, [found]);
+export function lookup(docs: Doc[], path: string): Doc | null {
+	for (const candidate of [normalize(path), normalize(path.replace(/^\//, ""))]) {
+		const doc = docs.find((d) => d.path === candidate);
+		if (doc) return doc;
+	}
+	return null;
 }
 
 /**

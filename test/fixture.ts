@@ -7,8 +7,9 @@ import { dirname, join } from "node:path";
 
 import { afterEach, expect } from "vitest";
 
-import { blockers, check, formatFinding, ready, renderBlocker } from "../src/core";
+import { blockers, check, formatFinding, lookup, ready, renderBlocker } from "../src/core";
 import { type Output, main } from "../src/cli/main";
+import { type Terminal } from "../src/cli/theme";
 import { exists, load } from "../src/cli/tree";
 
 export const ROOT_README = `# Quests
@@ -114,9 +115,10 @@ export class Tree {
 
 	/** The rendered blocker chain: one line per blocker, nesting indented. */
 	blockers(path: string): string[] {
-		const found = blockers(load(this.path), path);
-		if (found === null) throw new Error(`${path} is not a quest`);
-		return found.flatMap((blocker) => renderBlocker(blocker));
+		const docs = load(this.path);
+		const doc = lookup(docs, path);
+		if (doc === null) throw new Error(`${path} is not a quest`);
+		return blockers(docs, doc).flatMap((blocker) => renderBlocker(blocker));
 	}
 
 	ready(): string[] {
@@ -126,6 +128,11 @@ export class Tree {
 	/** Run the CLI against this tree. */
 	run(...args: string[]): { code: number; stdout: string; stderr: string } {
 		return run("--root", this.path, ...args);
+	}
+
+	/** Run the CLI against this tree with stdout on a terminal. */
+	runOn(terminal: Terminal, ...args: string[]): { code: number; stdout: string; stderr: string } {
+		return runOn(terminal, "--root", this.path, ...args);
 	}
 
 	accepts() {
@@ -149,8 +156,16 @@ export class Tree {
 	}
 }
 
-/** Run the CLI in-process, capturing its output. */
+/** Run the CLI in-process with stdout piped, capturing its output. */
 export function run(...args: string[]): { code: number; stdout: string; stderr: string } {
+	return runOn(undefined, ...args);
+}
+
+/** Run the CLI in-process with stdout on `terminal`, or piped when `undefined`. */
+export function runOn(
+	terminal: Terminal | undefined,
+	...args: string[]
+): { code: number; stdout: string; stderr: string } {
 	let stdout = "";
 	let stderr = "";
 	const out: Output = {
@@ -160,6 +175,7 @@ export function run(...args: string[]): { code: number; stdout: string; stderr: 
 		stderr: (text) => {
 			stderr += text;
 		},
+		terminal,
 	};
 	const code = main(args, out);
 	return { code, stdout, stderr };

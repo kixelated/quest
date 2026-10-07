@@ -6,15 +6,18 @@ import { relative, resolve, sep } from "node:path";
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
 import { description, version } from "../../package.json";
-import { blockers, check, formatFinding, label, ready, renderBlocker } from "../core";
+import { blockers, check, formatFinding, label, lookup, ready, renderBlocker } from "../core";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
+import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
 	stdout(text: string): void;
 	stderr(text: string): void;
+	/** Set when stdout is a terminal, which gets themed output. Piped output is plain. */
+	terminal?: Terminal;
 }
 
 /** A failure the user caused rather than the command, reported as a usage error. */
@@ -25,6 +28,7 @@ export function main(argv: string[], out: Output): number {
 	let code = 0;
 	const print = (line: string) => out.stdout(`${line}\n`);
 	const warn = (line: string) => out.stderr(`quest: ${line}\n`);
+	const theme = out.terminal ? new Theme(out.terminal) : null;
 
 	const program = new Command("quest")
 		.description(description)
@@ -38,6 +42,11 @@ export function main(argv: string[], out: Output): number {
 		)
 		.configureOutput({ writeOut: out.stdout, writeErr: out.stderr })
 		.configureHelp({ showGlobalOptions: true })
+		.addHelpText(
+			"after",
+			"\nOn a terminal, output is themed as a quest log; set NO_COLOR to drop the colours.\n" +
+				"Piped output is plain text for scripts and agents.",
+		)
 		.exitOverride();
 	const root = () => program.opts<{ root: string }>().root;
 
@@ -47,7 +56,8 @@ export function main(argv: string[], out: Output): number {
 		.action(() => {
 			const findings = check(load(root()), (path) => exists(root(), path));
 			if (findings.length === 0) {
-				print(`quest: ${collect(root()).length} documents ok`);
+				const count = collect(root()).length;
+				print(theme ? theme.checked(count) : `quest: ${count} documents ok`);
 				return;
 			}
 			for (const finding of findings) warn(formatFinding(finding));
@@ -59,22 +69,32 @@ export function main(argv: string[], out: Output): number {
 		.summary("Print what blocks a quest, or list every ready quest")
 		.description(
 			"Print what blocks a quest, or list every ready quest.\n\n" +
-				"Exits 0 either way: the blocker list on stdout is the result, so no output means ready and a caller " +
-				"tests that rather than parsing prose. A non-zero exit means the command itself failed.",
+				"Exits 0 either way; a non-zero exit means the command itself failed. Piped, the blocker list on " +
+				"stdout is the result, so no output means ready and a caller tests that rather than parsing prose.\n\n" +
+				"On a terminal, ready prints a quest log instead: a yellow ! for a ready quest, a grey ! for a " +
+				"blocked one, its size in its size colour, its title, and its path. Set NO_COLOR to drop the colours.",
 		)
 		.argument("[path]", "Quest to explain. Omit to list every ready quest in tree order")
 		.action((path?: string) => {
 			const docs = load(root());
+			const byPath = new Map(docs.map((doc) => [doc.path, doc]));
 			if (path === undefined) {
-				for (const quest of ready(docs)) print(quest);
+				const quests = ready(docs);
+				for (const line of theme ? theme.ready(byPath, quests) : quests) print(line);
 				return;
 			}
 			const inside = withinRoot(root(), path);
-			const found = blockers(docs, path) ?? (inside === null ? null : blockers(docs, inside));
-			if (found === null) throw new Error(`${path} is not a quest document under ${under(root(), "quest")}`);
-			for (const blocker of found) {
-				for (const line of renderBlocker(blocker)) print(line);
-				warn(`blocked by ${label(blocker)}`);
+			const doc = lookup(docs, path) ?? (inside === null ? null : lookup(docs, inside));
+			if (doc === null) throw new Error(`${path} is not a quest document under ${under(root(), "quest")}`);
+			const found = blockers(docs, doc);
+			if (theme) {
+				// The themed log already names every blocker; stderr keeps only the advice.
+				for (const line of theme.blockers(byPath, doc, found)) print(line);
+			} else {
+				for (const blocker of found) {
+					for (const line of renderBlocker(blocker)) print(line);
+					warn(`blocked by ${label(blocker)}`);
+				}
 			}
 			if (found.length > 0) {
 				// Blocked is not a verdict on the whole plan: the piece of it that
@@ -115,14 +135,16 @@ export function main(argv: string[], out: Output): number {
 		.command("init")
 		.description("Install skill stubs, a quest root, and agent pointers for this repository")
 		.action(() => {
-			for (const path of init(root())) print(path);
+			const changes = init(root());
+			for (const line of theme ? theme.init(changes) : changes) print(line);
 		});
 
 	program
 		.command("uninstall")
 		.description("Remove Quest stubs and markers installed by `quest init`")
 		.action(() => {
-			for (const path of uninstall(root())) print(path);
+			const changes = uninstall(root());
+			for (const line of theme ? theme.uninstall(changes) : changes) print(line);
 		});
 
 	try {

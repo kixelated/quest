@@ -17,7 +17,11 @@ delete this quest once it returns `true`.
 - As a human-action quest it resurfaces at every triage once ready, and the
   upload takes a minute.
 - `og.png` was last re-exported on 2026-10-07 with the new size colours
-  (L red), so it is ready to upload. An upload made before then shows the
-  old orange L; upload it again.
+  (L red), but it still shows display aliases, so wait for
+  [social image terms](/quest/a0/theme/og-terms.md) before uploading.
 - If `og.svg` changes, re-export `og.png` as `design/theme.md` describes and
   upload it again.
+
+## Required
+
+- [Social image terms](/quest/a0/theme/og-terms.md) - `og.svg` and `og.png` show format terms before the upload
