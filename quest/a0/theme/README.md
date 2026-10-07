@@ -18,10 +18,14 @@ The pass also renames the "difficulty" leftovers to "size": the Worker's
 "weighted by difficulty" wording (`cloudflare/src/board/pages.tsx`,
 `cloudflare/src/board/model.ts`, `cloudflare/test/board.test.ts`), and the
 wording in `quest/a0/theme/cli.md`, `quest/a0/theme/map.md`, and this README's
-`Required` list. It also replaces the board's display aliases with format
-terms: the "available" filter and label (`?show=available`) become ready,
-"Accepted by" becomes claimed by, and "Requires" becomes `Required`. It also
-removes the alias rows left in `design/theme.md`'s glossary.
+`Required` list. It also replaces the display aliases on the board (and
+`cloudflare/README.md`'s `?show=available`), the home page, and the social
+image (`design/theme/og.svg`, re-exported to `og.png`) with format terms:
+Available and `?show=available` become ready, the Requires status and filter
+become blocked, Accepted by becomes claimed by, the Requires heading becomes
+`Required`, and Objectives and Rewards become `Goal` and `Closes`. It rewrites
+`design/theme.md`'s glossary and its marker and palette notes to match,
+keeping only the flavour rows (the party, gold, Offer gold).
 
 ## Plan
 
@@ -45,12 +49,15 @@ Decided while planning on 2026-10-05:
   this epic lands. Aim to merge by 2026-10-12.
 - Decided 2026-10-07: every surface (site, board, map, and CLI) names format
   concepts with the format's own terms: ready, blocked, `Required`, and
-  claimed. There are no display aliases (available, Requires, Accepted by,
-  turn in, Elite). Markers, size colours, the voice, and the flavour (gold,
-  the party) stay. The user weighed RPG replacements (unlocked/locked,
+  claimed. There are no display aliases (Available, Requires, Accepted by,
+  Objectives, Rewards). Markers, size colours, the voice, and the flavour
+  (gold, the party) stay. The user weighed RPG replacements (unlocked/locked,
   accepted, Objective/Prerequisites) and kept the current terms. Renaming
   `## Required` to `## Requires` was considered and dropped, so `Required`
   stays.
+- Open: the format has no term for a quest with an open PR, which the board
+  and `design/theme.md` call "Ready to turn in" (with "Quest complete" once
+  merged). Ask the user what these show before the final pass.
 - No XP, levels, achievements, or leaderboards; they add state for little demo
   value.
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
