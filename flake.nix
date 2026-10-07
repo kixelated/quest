@@ -13,7 +13,7 @@
       flake-utils,
       ...
     }:
-    # nixpkgs-unstable no longer builds x86_64-darwin; Intel Macs use the release binary.
+    # The pinned nixpkgs no longer evaluates on x86_64-darwin; Intel Macs use the release binary.
     flake-utils.lib.eachSystem
       [
         "x86_64-linux"
