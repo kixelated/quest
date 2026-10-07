@@ -53,10 +53,12 @@ Decided while planning on 2026-10-05:
 
 ## Required
 
+- [Move the theme spec to design/](/quest/m0/theme/design-dir.md) - `docs/` holds only user docs; the spec and assets move to `design/`
 - [Quest map](/quest/m0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
 - [Social preview](/quest/m0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
 - [Themed CLI output](/quest/m0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/m0/theme/landing.md) - the home page's map and calls to action link into the live board
+- [Rename milestones and questlines](/quest/m0/rename.md) - the final consistency pass checks the final vocabulary
 
 ## Related
 

@@ -23,4 +23,6 @@ installs through mise and the shell installer on macOS and Linux.
 - Include a repository that already has an `AGENTS.md` or `CLAUDE.md` and
   a same-named skill, to prove init refuses rather than overwrites.
 - There's no rc tag. The Release workflow's install checks on v0.1.0 gate
-  this quest, and a broken install ships as a fixed v0.1.x.
+  this quest, and a broken install ships as a fixed v0.1.x. Reaffirmed on
+  2026-10-07, after the #70 review noted that a release publishes before its
+  install check runs.
