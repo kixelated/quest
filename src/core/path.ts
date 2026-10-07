@@ -50,9 +50,13 @@ export function depth(path: string): number {
 	return parts(path).length;
 }
 
-/** Whether the normalized `path` climbs above its root. */
+/**
+ * Whether the normalized `path` leaves its root: it climbs above it, or it is
+ * still absolute, as `//quest/a.md` is once its leading `/` is stripped.
+ * GitHub reads that as a link to the host `quest`, not to a file.
+ */
 export function escapes(path: string): boolean {
-	return path === ".." || path.startsWith("../");
+	return path === ".." || path.startsWith("../") || path.startsWith("/");
 }
 
 /**

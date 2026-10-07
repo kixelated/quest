@@ -11,6 +11,10 @@
 
 import type { Nodes, Root } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
+import { gfmTable } from "micromark-extension-gfm-table";
 
 import { depth, fileName, normalize, parent } from "./path";
 
@@ -193,18 +197,28 @@ const TAGS = new Set([
 	"linkReference",
 	"image",
 	"imageReference",
+	"delete",
+	"table",
+	"tableRow",
+	"tableCell",
 ]);
 
 /** Nodes whose children are blocks, so an `html` child is block HTML rather than inline. */
 const CONTAINERS = new Set(["root", "blockquote", "listItem"]);
 
 /** Block-level nodes, which separate the words of an entry that spans more than one. */
-const BLOCKS = new Set(["paragraph", "heading", "blockquote", "list", "listItem", "code", "thematicBreak"]);
+const BLOCKS = new Set(["paragraph", "heading", "blockquote", "list", "listItem", "code", "table", "thematicBreak"]);
 
 /** Parse already-loaded Markdown. `path` stays repository-relative. */
 export function parse(path: string, text: string): Doc {
-	const tree = fromMarkdown(text);
-	const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+	// GitHub renders strikethrough and tables, and the Rust parser this replaced
+	// enabled both. It enabled no other GFM syntax.
+	const tree = fromMarkdown(text, {
+		extensions: [gfmStrikethrough(), gfmTable()],
+		mdastExtensions: [gfmStrikethroughFromMarkdown(), gfmTableFromMarkdown()],
+	});
+	// Split the way micromark numbers lines, so `line` indexes the same line.
+	const lines = text.split(/\r\n|\r|\n/);
 	const definitions = collectDefinitions(tree);
 
 	let title: Heading | null = null;
@@ -232,7 +246,9 @@ export function parse(path: string, text: string): Doc {
 
 	const addText = (value: string) => {
 		if (heading) {
-			heading.text += value;
+			// A setext heading's line endings add nothing, so a wrapped title
+			// stays on one line in a finding.
+			heading.text += value.replace(/\r\n|\r|\n/g, "");
 		} else if (entry) {
 			entry.text += value;
 		}
@@ -333,6 +349,12 @@ export function parse(path: string, text: string): Doc {
 
 	const exit = (node: Nodes) => {
 		switch (node.type) {
+			// Text is one leaf that `addText` already judged on entry: only
+			// non-blank text ends the run an opening link may follow.
+			case "text":
+			case "inlineCode":
+			case "break":
+				break;
 			case "heading":
 				if (node.depth <= 2 && heading) {
 					const done = heading;
@@ -387,7 +409,9 @@ export function parse(path: string, text: string): Doc {
 		// Definitions render as nothing; the links that use them carry their target.
 		if (node.type === "definition") return;
 		if (section === "Claim") claim(node, inline);
-		const block = BLOCKS.has(node.type) || (node.type === "html" && !inline);
+		// A claim is one line, so its blocks run together unseparated: a space
+		// would let a block after the date pass as an opaque trailing field.
+		const block = section !== "Claim" && (BLOCKS.has(node.type) || (node.type === "html" && !inline));
 		if (block && entry && !heading) entry.text += " ";
 		enter(node);
 		if ("children" in node) {

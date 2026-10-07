@@ -1,5 +1,8 @@
 // The command line's own contract: output streams, exit codes, and arguments.
 
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, test } from "vitest";
 
 import { version } from "../package.json";
@@ -66,4 +69,22 @@ test("usage errors exit 2", () => {
 	expect(run("skill", "--stub").code).toBe(2);
 	expect(run("ready", "a", "b").code).toBe(2);
 	expect(run().code).toBe(2);
+});
+
+test("an empty root is a usage error", () => {
+	expect(run("--root", "", "check").code).toBe(2);
+});
+
+test("a missing tree names the directory as given", () => {
+	const out = run("--root", "./nonexistent", "check");
+	expect(out.code).toBe(1);
+	expect(out.stderr).toMatch(/^quest: scanning \.\/nonexistent\/quest: ENOENT/);
+});
+
+test("a document that is not UTF-8 is an error", () => {
+	const tree = Tree.baseline();
+	writeFileSync(join(tree.path, "quest/m0/line/one.md"), Buffer.from([0x23, 0x20, 0xff, 0x0a]));
+	const out = tree.run("check");
+	expect(out.code).toBe(1);
+	expect(out.stderr).toMatch(/^quest: reading quest\/m0\/line\/one\.md: /);
 });

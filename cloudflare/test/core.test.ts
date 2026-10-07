@@ -1,8 +1,8 @@
 import { check, parse, ready } from "quest/core";
 import { describe, expect, it } from "vitest";
 
-// The Worker shares the CLI's core. This runs it inside workerd, which has no
-// filesystem, to keep it free of Node APIs.
+// The Worker shares the CLI's core. This runs it inside workerd, the runtime
+// the Worker deploys to. `tsc -p src/core` is what keeps Node APIs out of it.
 describe("quest/core", () => {
 	it("checks a tree and finds ready work", () => {
 		const docs = [

@@ -3,13 +3,13 @@
 import { realpathSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
 import { description, version } from "../../package.json";
 import { blockers, check, formatFinding, label, ready, renderBlocker } from "../core";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
-import { collect, exists, load } from "./tree";
+import { collect, exists, load, under } from "./tree";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
@@ -31,7 +31,11 @@ export function main(argv: string[], out: Output): number {
 		.version(`quest ${version}`, "-V, --version", "Print version")
 		.helpOption("-h, --help", "Print help")
 		.helpCommand("help [command]", "Print this message or the help of the given subcommand")
-		.option("--root <root>", "Repository root holding the quest/ directory", ".")
+		.addOption(
+			new Option("--root <root>", "Repository root holding the quest/ directory")
+				.default(".")
+				.argParser(nonEmpty),
+		)
 		.configureOutput({ writeOut: out.stdout, writeErr: out.stderr })
 		.configureHelp({ showGlobalOptions: true })
 		.exitOverride();
@@ -67,7 +71,7 @@ export function main(argv: string[], out: Output): number {
 			}
 			const inside = withinRoot(root(), path);
 			const found = blockers(docs, path) ?? (inside === null ? null : blockers(docs, inside));
-			if (found === null) throw new Error(`${path} is not a quest document under ${questDir(root())}`);
+			if (found === null) throw new Error(`${path} is not a quest document under ${under(root(), "quest")}`);
 			for (const blocker of found) {
 				for (const line of renderBlocker(blocker)) print(line);
 				warn(`blocked by ${label(blocker)}`);
@@ -91,7 +95,7 @@ export function main(argv: string[], out: Output): number {
 		.summary("Print a skill's instructions, or list the skills with no name")
 		.description(
 			"Print a skill's instructions, or list the skills with no name.\n\n" +
-				"A repository installs only a stub per skill, which runs this, so the pinned version decides what " +
+				"A repository installs only a stub per skill, which runs this, so the pinned binary decides what " +
 				"every agent follows.",
 		)
 		.argument("[name]", "Skill to print")
@@ -138,9 +142,10 @@ export function main(argv: string[], out: Output): number {
 	}
 }
 
-/** The quest directory under `root`, as a user would name it in an error. */
-function questDir(root: string): string {
-	return `${root.replace(/\/+$/, "")}/quest`;
+/** An empty path names no directory, so it is a usage error rather than `.`. */
+function nonEmpty(value: string): string {
+	if (value === "") throw new InvalidArgumentError("a value is required");
+	return value;
 }
 
 /**

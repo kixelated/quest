@@ -633,3 +633,75 @@ describe("ready", () => {
 		expect(t.ready()).toEqual(["quest/m0/line/one.md", "quest/m0/aaa.md"]);
 	});
 });
+
+// Shapes the Rust parser handled that a plain CommonMark port would not. Each
+// was found by running both implementations over the same documents.
+describe("parser parity", () => {
+	// Blank text renders as nothing, so it does not displace an opening link.
+	test.each(["&nbsp;", "` ` "])("a link after blank text still opens its entry: %j", (lead) => {
+		tree()
+			.append("quest/m0/line/one.md", `\n## Required\n\n- ${lead}[Two](/quest/m0/line/two.md)\n`)
+			.rejects("Required cycle:");
+	});
+
+	test("a struck-through heading is the heading, and not literal", () => {
+		tree()
+			.append("quest/m0/line/one.md", "\n## ~~Required~~\n\n- [Two](/quest/m0/line/two.md)\n")
+			.rejects("'Required' must be written literally");
+	});
+
+	test("struck-through blocker text renders without its markers", () => {
+		const t = tree().append("quest/m0/line/one.md", "\n## Required\n\n- ~~Old~~ plain blocker\n");
+		expect(t.blockers("quest/m0/line/one.md")).toEqual(["Old plain blocker"]);
+	});
+
+	test("a link in a table cell does not open its entry", () => {
+		tree()
+			.append("quest/m0/line/one.md", "\n## Required\n\n- [Two](/quest/m0/line/two.md) | note\n  --- | ---\n")
+			.rejects("mid-sentence");
+	});
+
+	test("a wrapped setext heading reads as one line", () => {
+		const t = tree().append("quest/m0/line/one.md", "\nRe\nquired\n--------\n\n- [Two](/quest/m0/line/two.md)\n");
+		t.rejects("'Required' must be written literally");
+		expect(t.findings().every((f) => !f.includes("\n"))).toBe(true);
+	});
+
+	// `//host/path` is protocol-relative on GitHub, not a file in this tree.
+	test("a protocol-relative link does not resolve", () => {
+		tree()
+			.append("quest/m0/line/one.md", "\n## Related\n\n- [Two](//quest/m0/line/two.md) - same file, wrong link\n")
+			.rejects("link does not resolve: //quest/m0/line/two.md");
+	});
+
+	test("a claim with a block after its date is rejected", () => {
+		tree()
+			.append(
+				"quest/m0/line/one.md",
+				"\n## Claim\n\n- Jane Doe (github:jdoe) on fork since 2026-10-02\n\n  More.\n",
+			)
+			.rejects("claim must name a claimant");
+	});
+
+	test("CR-only documents preserve validation and readiness", () => {
+		const t = tree();
+		for (const path of collect(t.path)) t.write(path, t.read(path).replaceAll("\n", "\r"));
+		t.accepts();
+		expect(t.ready()).toEqual(["quest/m0/line/one.md"]);
+	});
+});
+
+// Intended changes from the Rust parser, listed in the TypeScript port's PR.
+describe("parser changes", () => {
+	test("blocker text separates the blocks it spans", () => {
+		const t = tree().append(
+			"quest/m0/line/one.md",
+			"\n## Required\n\n- Customer evidence:\n  - [The line](/quest/m0/line/README.md)\n",
+		);
+		expect(t.blockers("quest/m0/line/one.md")).toEqual(["Customer evidence: The line"]);
+	});
+
+	test("an email autolink is skipped like mailto:", () => {
+		tree().append("quest/m0/line/one.md", "\nWrite to <a@b.c>.\n").accepts();
+	});
+});
