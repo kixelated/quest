@@ -68,6 +68,18 @@ QUEST
 chmod +x "$QUEST_INSTALL_DIR/quest"
 INSTALLER
 MOCK
+# The installed binary's architecture: the runner's own unless a test overrides it.
+cat >"$work/bin/file" <<'MOCK'
+#!/usr/bin/env bash
+[[ $1 == -b ]]
+case "$INSTALL_TEST_OS/${INSTALL_TEST_INSTALLED_ARCH:-$INSTALL_TEST_ARCH}" in
+  Linux/x86_64) echo 'ELF 64-bit LSB executable, x86-64, version 1 (SYSV)' ;;
+  Linux/aarch64) echo 'ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV)' ;;
+  Darwin/arm64) echo 'Mach-O 64-bit executable arm64' ;;
+  Darwin/x86_64) echo 'Mach-O 64-bit executable x86_64' ;;
+  *) echo data ;;
+esac
+MOCK
 # A system Quest must never be used as a substitute for a missing installation.
 cat >"$work/bin/quest" <<'MOCK'
 #!/bin/sh
@@ -135,6 +147,18 @@ export INSTALL_TEST_OS=Darwin INSTALL_TEST_ARCH=arm64
 check shell aarch64-apple-darwin
 export INSTALL_TEST_ARCH=x86_64
 check shell x86_64-apple-darwin
+
+# A binary for the wrong architecture fails, even where Rosetta would run it.
+export INSTALL_TEST_ARCH=arm64 INSTALL_TEST_INSTALLED_ARCH=x86_64
+reject mise aarch64-apple-darwin
+grep -qF 'is not built for aarch64-apple-darwin: Mach-O 64-bit executable x86_64' "$work/output"
+reject shell aarch64-apple-darwin
+grep -qF 'is not built for' "$work/output"
+export INSTALL_TEST_OS=Linux INSTALL_TEST_ARCH=x86_64 INSTALL_TEST_INSTALLED_ARCH=aarch64
+reject mise x86_64-unknown-linux-gnu
+grep -qF 'is not built for' "$work/output"
+unset INSTALL_TEST_INSTALLED_ARCH
+check mise x86_64-unknown-linux-gnu
 export INSTALL_TEST_OS=Windows
 reject shell x86_64-apple-darwin
 

@@ -2,6 +2,7 @@
 # Check a published release without using an existing Quest or install cache.
 set -euo pipefail
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 method=${1:?usage: install-check.sh mise|shell target-triple}
 target=${2:?usage: install-check.sh mise|shell target-triple}
 tag=${RELEASE_TAG:-}
@@ -57,6 +58,7 @@ case "$method" in
         binary="$work/shell/quest"
         ;;
 esac
+bash "$script_dir/arch-check.sh" "$binary" "$target"
 actual=$("$binary" --version)
 expected="quest ${tag#v}"
 if [[ $actual != "$expected" ]]; then
