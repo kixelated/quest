@@ -2,7 +2,7 @@
 // voice. `docs/theme.md` is the source of truth for the codes; this is the CLI's
 // own copy of its small tables, kept out of the core so the Worker never carries
 // presentation it does not use. Statuses use the format's own terms (ready,
-// blocked, `Requires`, claimed), with no display aliases.
+// blocked, `Required`, claimed), with no display aliases.
 //
 // Only a terminal sees any of this. Piped output is the plain contract agents
 // and scripts read, and `main.ts` prints it unchanged.
@@ -34,6 +34,9 @@ const MARKER_COLOURS = { ready: "33", blocked: "90" } as const;
 /** A status marker, or `null` for the blank column a claimed quest shows. */
 type Marker = keyof typeof MARKER_COLOURS | null;
 
+/** C0 and C1 control characters, which a title could use to send escape sequences. */
+const CONTROL = /[\x00-\x1f\x7f-\x9f]/g;
+
 /** A quest title split into its size label and name, as `quest check` requires it. */
 const TITLE = /^\[(XS|S|M|L|XL)\] (.+)$/s;
 
@@ -56,15 +59,15 @@ export class Theme {
 
 	/** `quest ready`: every ready quest, under a count. */
 	ready(docs: Map<string, Doc>, paths: string[]): string[] {
-		if (paths.length === 0) return ["No quests ready: every open quest is blocked or claimed."];
+		if (paths.length === 0) return ["No quests ready."];
 		const count = `${paths.length} ${paths.length === 1 ? "quest" : "quests"} ready`;
 		return [count, ...layout(paths.map((path) => ({ indent: 0, label: this.quest(docs, path, "ready"), path })))];
 	}
 
 	/**
 	 * `quest ready <path>`: the quest with its marker, then its status: Ready,
-	 * Claimed by, and the `Required` chain under Requires, with each required
-	 * epic expanded into the quests it still holds.
+	 * Claimed by, and the `Required` chain, with each required epic expanded
+	 * into the quests it still holds.
 	 */
 	blockers(docs: Map<string, Doc>, doc: Doc, found: Blocker[]): string[] {
 		// The core lists a claim first, then the `Required` entries.
@@ -78,7 +81,7 @@ export class Theme {
 		// An empty `## Claim` section has no claimant; the core's text explains it.
 		if (claimed) note(entries(doc, "Claim").length === 0 ? found[0].text : claimant(doc));
 		if (required.length > 0) {
-			note("Requires:");
+			note("Required:");
 			const add = (blocker: Blocker, indent: number) => {
 				const label = blocker.path === null ? plain(blocker.text) : this.quest(docs, blocker.path, undefined);
 				rows.push({ indent, label, path: blocker.path });
@@ -123,7 +126,8 @@ export class Theme {
 		const parts: Span[] = [];
 		if (marker === null) parts.push(plain("  "));
 		if (marker) parts.push(this.paint(MARKER_COLOURS[marker], "!"), plain(" "));
-		const title = docs.get(path)?.title?.text ?? path;
+		// Titles come from contributors' Markdown: never let one drive the terminal.
+		const title = (docs.get(path)?.title?.text ?? path).replace(CONTROL, "\uFFFD");
 		const match = TITLE.exec(title);
 		if (match) {
 			const size = match[1] as Size;

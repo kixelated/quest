@@ -44,7 +44,7 @@ export function main(argv: string[], out: Output): number {
 		.configureHelp({ showGlobalOptions: true })
 		.addHelpText(
 			"after",
-			"\nOn a terminal, output is themed as a quest log; set NO_COLOR to drop the colours. " +
+			"\nOn a terminal, output is themed as a quest log; set NO_COLOR to drop the colours.\n" +
 				"Piped output is plain text for scripts and agents.",
 		)
 		.exitOverride();
@@ -69,10 +69,10 @@ export function main(argv: string[], out: Output): number {
 		.summary("Print what blocks a quest, or list every ready quest")
 		.description(
 			"Print what blocks a quest, or list every ready quest.\n\n" +
-				"Exits 0 either way: the blocker list on stdout is the result, so no output means ready and a caller " +
-				"tests that rather than parsing prose. A non-zero exit means the command itself failed.\n\n" +
-				"That is the piped output. On a terminal, ready prints a quest log instead: a yellow ! for a ready " +
-				"quest, a grey ! for a blocked one, its size in its size colour, its title, and its path.",
+				"Exits 0 either way; a non-zero exit means the command itself failed. Piped, the blocker list on " +
+				"stdout is the result, so no output means ready and a caller tests that rather than parsing prose.\n\n" +
+				"On a terminal, ready prints a quest log instead: a yellow ! for a ready quest, a grey ! for a " +
+				"blocked one, its size in its size colour, its title, and its path. Set NO_COLOR to drop the colours.",
 		)
 		.argument("[path]", "Quest to explain. Omit to list every ready quest in tree order")
 		.action((path?: string) => {
@@ -86,7 +86,7 @@ export function main(argv: string[], out: Output): number {
 			const inside = withinRoot(root(), path);
 			const doc = lookup(docs, path) ?? (inside === null ? null : lookup(docs, inside));
 			if (doc === null) throw new Error(`${path} is not a quest document under ${under(root(), "quest")}`);
-			const found = blockers(docs, doc.path)!;
+			const found = blockers(docs, doc);
 			if (theme) {
 				// The themed log already names every blocker; stderr keeps only the advice.
 				for (const line of theme.blockers(byPath, doc, found)) print(line);

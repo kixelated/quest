@@ -93,15 +93,15 @@ $ quest --root examples/export ready
 
 $ quest --root examples/export ready quest/a0/download.md
 ! [S] Add a download button        quest/a0/download.md
-  Requires:
+  Required:
     [S] Add a CSV export endpoint  quest/a0/export.md
 ```
 
 With no path, `ready` lists every ready quest. Given a path, it shows what
 blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
 `!` a blocked one, and each size label takes its colour: XS grey, S green,
-M yellow, L red, and XL purple. Set `NO_COLOR` to keep the layout without
-colours.
+M yellow, L red, and XL purple. A claimed quest has no marker and shows
+`Claimed by` its claimant. Set `NO_COLOR` to keep the layout without colours.
 
 Scripts and agents read the piped form, which is plain text:
 

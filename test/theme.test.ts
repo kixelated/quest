@@ -74,8 +74,16 @@ describe("ready", () => {
 			"quest/a0/epic/one.md",
 			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
 		);
+		expect(tree.runOn(NO_COLOUR, "ready").stdout).toBe("No quests ready.\n");
+	});
+
+	test("a title cannot send escape sequences to the terminal", () => {
+		const tree = Tree.baseline().write(
+			"quest/a0/epic/one.md",
+			"# [S] One \x1b]0;pwned\x07 \x1b[2J\n\n## Goal\n\nA quest.\n",
+		);
 		expect(tree.runOn(NO_COLOUR, "ready").stdout).toBe(
-			"No quests ready: every open quest is blocked or claimed.\n",
+			"1 quest ready\n! [S] One \uFFFD]0;pwned\uFFFD \uFFFD[2J  quest/a0/epic/one.md\n",
 		);
 	});
 
@@ -100,7 +108,7 @@ describe("ready <path>", () => {
 		expect(out.code).toBe(0);
 		expect(out.stdout).toBe(
 			`${sgr("90", "!")} ${sgr("32", "[S]")} Two    quest/a0/epic/two.md\n` +
-				"  Requires:\n" +
+				"  Required:\n" +
 				`    ${sgr("32", "[S]")} One  quest/a0/epic/one.md\n`,
 		);
 		// The log names the blockers, so stderr keeps only the advice.
@@ -112,7 +120,7 @@ describe("ready <path>", () => {
 		const out = Tree.baseline().runOn(NO_COLOUR, "ready", "quest/a0/README.md");
 		expect(out.stdout).toBe(
 			"! A0           quest/a0/README.md\n" +
-				"  Requires:\n" +
+				"  Required:\n" +
 				"    Epic       quest/a0/epic/README.md\n" +
 				"      [S] One  quest/a0/epic/one.md\n" +
 				"      [S] Two  quest/a0/epic/two.md\n",
@@ -127,7 +135,7 @@ describe("ready <path>", () => {
 		expect(tree.runOn(NO_COLOUR, "ready", "quest/a0/epic/two.md").stdout).toBe(
 			"  [S] Two    quest/a0/epic/two.md\n" +
 				"  Claimed by @jdoe since 2026-10-02\n" +
-				"  Requires:\n" +
+				"  Required:\n" +
 				"    [S] One  quest/a0/epic/one.md\n",
 		);
 	});
@@ -145,7 +153,7 @@ describe("ready <path>", () => {
 	test("an entry that is not a quest prints as written", () => {
 		const tree = Tree.baseline().append("quest/a0/epic/one.md", "\n## Required\n\n- the design review\n");
 		expect(tree.runOn(NO_COLOUR, "ready", "quest/a0/epic/one.md").stdout).toBe(
-			"! [S] One  quest/a0/epic/one.md\n  Requires:\n    the design review\n",
+			"! [S] One  quest/a0/epic/one.md\n  Required:\n    the design review\n",
 		);
 	});
 });

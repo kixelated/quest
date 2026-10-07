@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, expect } from "vitest";
 
-import { blockers, check, formatFinding, ready, renderBlocker } from "../src/core";
+import { blockers, check, formatFinding, lookup, ready, renderBlocker } from "../src/core";
 import { type Output, main } from "../src/cli/main";
 import { type Terminal } from "../src/cli/theme";
 import { exists, load } from "../src/cli/tree";
@@ -115,9 +115,10 @@ export class Tree {
 
 	/** The rendered blocker chain: one line per blocker, nesting indented. */
 	blockers(path: string): string[] {
-		const found = blockers(load(this.path), path);
-		if (found === null) throw new Error(`${path} is not a quest`);
-		return found.flatMap((blocker) => renderBlocker(blocker));
+		const docs = load(this.path);
+		const doc = lookup(docs, path);
+		if (doc === null) throw new Error(`${path} is not a quest`);
+		return blockers(docs, doc).flatMap((blocker) => renderBlocker(blocker));
 	}
 
 	ready(): string[] {
