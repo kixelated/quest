@@ -9,20 +9,25 @@ installs through mise and the shell installer on macOS and Linux.
 
 ## Plan
 
-- CLI lifecycle coverage runs in CI (`scripts/lifecycle-check.sh`). The
-  focused CI job installs this checkout on Linux and macOS; the full repository
-  check stays on Ubuntu. Live export publication and the maintainer's release
-  tag remain outstanding, so this quest stays open.
-- The Rust-era rehearsal record, `docs/release-proof.md`, was deleted on
-  2026-10-07. It went stale with the TypeScript port, and the site publishes
-  every `docs/*.md`. Re-run the setup/export-preparation rehearsal against the
-  compiled binaries, and keep the transcript in this quest's PR description.
-- The CLI half runs scripted in CI on macOS and Linux. The agent half (setup
-  guide, export skill) is verified once by hand against a scratch repository,
-  with the transcript kept for the launch demo.
-- Include a repository that already has an `AGENTS.md` or `CLAUDE.md` and
-  a same-named skill, to prove init refuses rather than overwrites.
-- There's no rc tag. The Release workflow's install checks on v0.1.0 gate
-  this quest, and a broken install ships as a fixed v0.1.x. Reaffirmed on
-  2026-10-07, after the #70 review noted that a release publishes before its
-  install check runs.
+Only the maintainer's v0.1.0 tag and its live verification remain:
+
+- Before tagging, confirm the EPIPE fix
+  ([#81](https://github.com/kixelated/quest/pull/81)) has merged into `main`
+  (decided 2026-10-07; it merged the same day).
+- Tag v0.1.0 from `main` with the steps in
+  [#82](https://github.com/kixelated/quest/pull/82). The Release workflow's
+  install checks on that tag gate this quest, and it closes once they pass.
+  There's no rc tag; a broken install ships as a fixed v0.1.x (reaffirmed
+  2026-10-07).
+- Decided 2026-10-07: a live `/quest-export` run does not gate this quest.
+
+Done, and kept for the record:
+
+- CLI lifecycle coverage runs in CI (`scripts/lifecycle-check.sh`): on Linux
+  and macOS from the flake's source build, and on every release target's
+  native runner from the Bun-compiled binary. The full repository check stays
+  on Ubuntu. Init refuses a same-named skill before writing anything.
+- The setup and export-preparation rehearsal against the compiled binaries,
+  installed through the shell installer and mise from a local copy of the
+  release, ran on 2026-10-07. Its transcript, for the launch demo, is the
+  description of [#82](https://github.com/kixelated/quest/pull/82).

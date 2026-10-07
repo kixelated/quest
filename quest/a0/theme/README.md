@@ -26,6 +26,9 @@ becomes in review, Quest complete becomes complete, and Objectives and Rewards
 become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
 marker and palette notes to match, keeping only the flavour rows (the party,
 gold, Offer gold). The social image already uses the format terms.
+Decided 2026-10-07: the pass also pluralises `quest check`'s terminal
+summary ("1 documents checked") and keeps the piped `quest: N documents ok`
+contract unchanged.
 Decided 2026-10-07: the pass also fixes the CLI's column alignment for wide
 characters (CJK, emoji) in quest titles, whose widths count UTF-16 units
 (from the #77 review). It is cosmetic and low priority.

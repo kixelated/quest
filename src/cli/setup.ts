@@ -33,22 +33,37 @@ const SKILL_DIRS = [".claude/skills", ".agents/skills"] as const;
 
 const QUEST_ROOT_README = "# Quests\n\n## Goal\n\nWhat this project is working toward.\n";
 
-/** Install Quest stubs and markers under `root`. Returns the paths it changed, relative to `root`. */
+/**
+ * Install Quest stubs and markers under `root`. Returns the paths it changed, relative to `root`.
+ * A conflict throws before anything is written, so a refused init leaves the repository as it was.
+ */
 export function init(root: string): string[] {
-	const changes: string[] = [];
-	const skills = linkSkillDirs(root, changes);
-	for (const skill of SKILLS) {
-		const dir = `${skills}/${skill.installed}`;
+	const { real, link } = skillDirs(root);
+	const missing = SKILLS.filter((skill) => {
+		const dir = `${real}/${skill.installed}`;
 		const path = `${dir}/SKILL.md`;
 		if (isFile(join(root, path))) {
-			if (read(root, path) === skill.stub) continue;
+			if (read(root, path) === skill.stub) return false;
 			throw new Error(`${path} is not a Quest stub; remove or rename it before running \`quest init\``);
 		} else if (existsSync(join(root, dir))) {
 			throw new Error(`${dir} exists without SKILL.md; remove or rename it before running \`quest init\``);
 		}
+		return true;
+	});
+
+	const changes: string[] = [];
+	mkdirSync(join(root, real), { recursive: true });
+	const linkPath = join(root, link);
+	if (!isSymlink(linkPath)) {
+		mkdirSync(dirname(linkPath), { recursive: true });
+		symlinkSync(join("..", real), linkPath);
+		changes.push(link);
+	}
+	for (const skill of missing) {
+		const dir = `${real}/${skill.installed}`;
 		mkdirSync(join(root, dir), { recursive: true });
-		writeFileSync(join(root, path), skill.stub);
-		changes.push(path);
+		writeFileSync(join(root, dir, "SKILL.md"), skill.stub);
+		changes.push(`${dir}/SKILL.md`);
 	}
 
 	const readme = "quest/README.md";
@@ -96,35 +111,23 @@ export function uninstall(root: string): string[] {
 }
 
 /**
- * Make one skill directory real and link the other to it, creating
- * `.claude/skills` when neither exists. Returns the real one.
+ * Which skill directory holds the stubs and which links to it: the one that is
+ * already a directory, or `.claude/skills` when neither exists. Writes nothing.
  */
-function linkSkillDirs(root: string, changes: string[]): string {
+function skillDirs(root: string): { real: string; link: string } {
 	const [claude, agents] = SKILL_DIRS.map((dir) => kind(join(root, dir)));
-	let real: string;
-	let link: string;
 	if (claude === "dir" && agents === "dir") {
 		throw new Error(
 			"both .claude/skills and .agents/skills are directories; merge them and link one to the other before running `quest init`",
 		);
 	} else if (claude === "dir" && (agents === null || agents === "symlink")) {
-		[real, link] = SKILL_DIRS;
+		return { real: SKILL_DIRS[0], link: SKILL_DIRS[1] };
 	} else if (agents === "dir" && (claude === null || claude === "symlink")) {
-		[link, real] = SKILL_DIRS;
+		return { real: SKILL_DIRS[1], link: SKILL_DIRS[0] };
 	} else if (claude === null && agents === null) {
-		mkdirSync(join(root, SKILL_DIRS[0]), { recursive: true });
-		[real, link] = SKILL_DIRS;
-	} else {
-		throw new Error("unexpected .claude/skills or .agents/skills layout; link one directory to the other");
+		return { real: SKILL_DIRS[0], link: SKILL_DIRS[1] };
 	}
-
-	const linkPath = join(root, link);
-	if (!isSymlink(linkPath)) {
-		mkdirSync(dirname(linkPath), { recursive: true });
-		symlinkSync(join("..", real), linkPath);
-		changes.push(link);
-	}
-	return real;
+	throw new Error("unexpected .claude/skills or .agents/skills layout; link one directory to the other");
 }
 
 /** What sits at `path` without following a symlink, or `null` for nothing. */

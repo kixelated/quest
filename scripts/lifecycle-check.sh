@@ -121,7 +121,7 @@ QUEST
     [[ ! -s $work/reuninstall ]]
 done
 
-# A same-named user skill must cause refusal, without losing existing content.
+# A same-named user skill must cause refusal before init writes anything.
 for instructions in AGENTS.md CLAUDE.md; do
     repo="$work/conflict-$instructions"
     mkdir -p "$repo/.claude/skills/quest-start"
@@ -134,6 +134,11 @@ for instructions in AGENTS.md CLAUDE.md; do
         exit 1
     fi
     grep -F '.claude/skills/quest-start/SKILL.md is not a Quest stub' "$work/conflict-output"
+    [[ $(ls -A "$repo/.claude/skills") == quest-start && ! -e $repo/.agents && ! -e $repo/quest ]] || {
+        echo 'Refused init left files behind' >&2
+        exit 1
+    }
+    assert_file "$work/conflict-instructions" "$repo/$instructions"
     "$binary" --root "$repo" uninstall
     assert_file "$work/conflict-instructions" "$repo/$instructions"
     assert_file "$work/conflict-skill" "$repo/.claude/skills/quest-start/SKILL.md"
