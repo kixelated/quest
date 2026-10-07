@@ -4,8 +4,8 @@
 
 A pull request that changes the CLI (`src/**`) runs the Release workflow's
 build and native binary checks on all four runners before it merges. Today the
-workflow's `pull_request.paths` skips `src/**`, so CLI changes reach the native
-binaries only through the pre-tag dry run.
+workflow's `pull_request.paths` skips `src/**`, so CLI changes reach the Bun-compiled
+release binaries only through the pre-tag dry run.
 
 ## Plan
 
