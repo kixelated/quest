@@ -683,11 +683,12 @@ describe("parser parity", () => {
 			.rejects("claim must name a claimant");
 	});
 
-	test("CR-only documents preserve validation and readiness", () => {
+	// grep sees a CR-only file as one line, so `^## Required$` matches nothing
+	// in it; the literal-heading rule has to agree.
+	test("a CR-only document's headings are not literal", () => {
 		const t = tree();
-		for (const path of collect(t.path)) t.write(path, t.read(path).replaceAll("\n", "\r"));
-		t.accepts();
-		expect(t.ready()).toEqual(["quest/m0/line/one.md"]);
+		t.write("quest/m0/line/two.md", t.read("quest/m0/line/two.md").replaceAll("\n", "\r"));
+		t.rejects("'Required' must be written literally");
 	});
 });
 

@@ -217,8 +217,9 @@ export function parse(path: string, text: string): Doc {
 		extensions: [gfmStrikethrough(), gfmTable()],
 		mdastExtensions: [gfmStrikethroughFromMarkdown(), gfmTableFromMarkdown()],
 	});
-	// Split the way micromark numbers lines, so `line` indexes the same line.
-	const lines = text.split(/\r\n|\r|\n/);
+	// Lines as grep sees them: a bare `\r` does not end one, so a CR-only file is
+	// one line and none of its headings are literal, which is what grep finds.
+	const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 	const definitions = collectDefinitions(tree);
 
 	let title: Heading | null = null;
