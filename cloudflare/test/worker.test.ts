@@ -37,6 +37,60 @@ describe("Worker", () => {
 		expect(html).toContain('href="https://github.com/kixelated/quest/blob/main/SETUP.md"');
 		expect((await SELF.fetch(`${origin}/docs/missing`)).status).toBe(404);
 	});
+	it("renders this repository's quest board", async () => {
+		const response = await SELF.fetch(`${origin}/repos/quest`);
+		expect(response.status).toBe(200);
+		const html = await response.text();
+		expect(html).toContain("<h1>Quest log</h1>");
+		expect(html).toContain("kixelated/quest");
+		expect(html).toMatch(/Act \d/);
+		expect(html).toContain('role="progressbar"');
+		expect(html).toContain('href="/repos/quest?show=available"');
+		const filtered = await (await SELF.fetch(`${origin}/repos/quest?show=available`)).text();
+		expect(filtered).not.toContain("Requires: ");
+		expect((await SELF.fetch(`${origin}/repos/missing`)).status).toBe(404);
+	});
+	it("renders a quest page with breadcrumbs and its next step", async () => {
+		const board = await (await SELF.fetch(`${origin}/repos/quest`)).text();
+		const href = /<a class="entry-title" href="(\/repos\/quest\/quest\/[^"]+)"/.exec(board)![1];
+		const page = await SELF.fetch(`${origin}${href}`);
+		expect(page.status).toBe(200);
+		const html = await page.text();
+		expect(html).toContain('aria-label="Breadcrumb"');
+		expect(html).toContain("<h2>Objectives</h2>");
+		expect((await SELF.fetch(`${origin}/repos/quest/quest/missing`)).status).toBe(404);
+		const root = await SELF.fetch(`${origin}/repos/quest/quest/README`, { redirect: "manual" });
+		expect(root.headers.get("location")).toBe("/repos/quest");
+	});
+	it("returns to a local page after signing in, and only a local page", async () => {
+		// Better Auth stores each sign-in's callback with its OAuth state.
+		const callback = async (next: string) => {
+			await env.DB.prepare("DELETE FROM verification").run();
+			const response = await SELF.fetch(`${origin}/sign-in`, {
+				method: "POST",
+				headers: { Origin: origin },
+				body: new URLSearchParams({ next }),
+				redirect: "manual",
+			});
+			expect(response.status).toBe(303);
+			const row = await env.DB.prepare("SELECT value FROM verification").first<{ value: string }>();
+			return JSON.parse(row!.value).callbackURL;
+		};
+		expect(await callback("/repos/quest/quest/a0")).toBe("/repos/quest/quest/a0");
+		expect(await callback("/repos/quest?show=available")).toBe("/repos/quest?show=available");
+		const unsafe = ["//evil.example", "/\\evil.example", "https://evil.example", "/\t/evil.example", "/\n/x"];
+		for (const next of [...unsafe, "/%2F/evil.example", "/%5cevil.example"]) {
+			expect(await callback(next)).toBe("/");
+		}
+	});
+	it("offers to return to the page as requested, still encoded", async () => {
+		const response = await SELF.fetch(`${origin}/%09/evil.example`);
+		expect(response.status).toBe(404);
+		expect(await response.text()).toContain('name="next" value="/%09/evil.example"');
+		for (const path of ["%E0", "%", "a0%2Fcloudflare%2Fboard"]) {
+			expect((await SELF.fetch(`${origin}/repos/quest/quest/${path}`)).status).toBe(404);
+		}
+	});
 	it("redirects the setup short link to SETUP.md", async () => {
 		const response = await SELF.fetch(`${origin}/setup`, { redirect: "manual" });
 		expect(response.status).toBe(302);
