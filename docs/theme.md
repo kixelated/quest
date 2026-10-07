@@ -42,8 +42,6 @@ format term.
 | claimed | Accepted by @*name* | |
 | open PR or change | Ready to turn in | yellow `?` |
 | merged | Quest complete | |
-| questline | quest chain | |
-| milestone | chapter | |
 | `Goal` | Objectives | |
 | `Closes` | Rewards | |
 | contributors who donate tokens | the party | |

@@ -50,7 +50,7 @@ for layout in claude agents; do
     done
     if [[ $layout == agents ]]; then [[ ! -e $repo/AGENTS.md ]]; fi
 
-    mkdir -p "$repo/quest/m0"
+    mkdir -p "$repo/quest/c0"
     cat >"$repo/quest/README.md" <<'QUEST'
 # Lifecycle repository
 
@@ -60,10 +60,10 @@ Exercise installation and removal without losing user content.
 
 ## Required
 
-- [First milestone](/quest/m0/README.md) - prove the planned lifecycle
+- [First chapter](/quest/c0/README.md) - prove the planned lifecycle
 QUEST
-    cat >"$repo/quest/m0/README.md" <<'QUEST'
-# First milestone
+    cat >"$repo/quest/c0/README.md" <<'QUEST'
+# First chapter
 
 ## Goal
 
@@ -71,17 +71,17 @@ Prove the planned lifecycle.
 
 ## Required
 
-- [Bootstrap](/quest/m0/bootstrap.md) - create the initial artifact
-- [Follow-up](/quest/m0/follow-up.md) - build on the artifact
+- [Bootstrap](/quest/c0/bootstrap.md) - create the initial artifact
+- [Follow-up](/quest/c0/follow-up.md) - build on the artifact
 QUEST
-    cat >"$repo/quest/m0/bootstrap.md" <<'QUEST'
+    cat >"$repo/quest/c0/bootstrap.md" <<'QUEST'
 # [S] Bootstrap
 
 ## Goal
 
 Create the initial artifact.
 QUEST
-    cat >"$repo/quest/m0/follow-up.md" <<'QUEST'
+    cat >"$repo/quest/c0/follow-up.md" <<'QUEST'
 # [S] Follow-up
 
 ## Goal
@@ -90,16 +90,16 @@ Use the initial artifact.
 
 ## Required
 
-- [Bootstrap](/quest/m0/bootstrap.md) - obtain the artifact first
+- [Bootstrap](/quest/c0/bootstrap.md) - obtain the artifact first
 QUEST
     "$binary" --root "$repo" check
     "$binary" --root "$repo" ready >"$work/ready"
-    printf 'quest/m0/bootstrap.md\n' >"$work/expected-ready"
+    printf 'quest/c0/bootstrap.md\n' >"$work/expected-ready"
     assert_file "$work/expected-ready" "$work/ready"
-    "$binary" --root "$repo" ready quest/m0/bootstrap.md >"$work/blockers"
+    "$binary" --root "$repo" ready quest/c0/bootstrap.md >"$work/blockers"
     [[ ! -s $work/blockers ]]
-    "$binary" --root "$repo" ready quest/m0/follow-up.md >"$work/blockers"
-    grep -F 'quest/m0/bootstrap.md' "$work/blockers"
+    "$binary" --root "$repo" ready quest/c0/follow-up.md >"$work/blockers"
+    grep -F 'quest/c0/bootstrap.md' "$work/blockers"
     cp -R "$repo/quest" "$work/plans-$layout"
 
     # Uninstall removes its stubs, but keeps edited stubs and extra user files.

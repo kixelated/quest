@@ -5,12 +5,12 @@ description: Audit outstanding quests for disagreements, conflicts, misaligned p
 Before you begin, run `quest guide` and `quest skill plan`, and read their output completely.
 
 The goal is a quest tree that agrees with itself and the code, ordered by priority.
-The scope is every outstanding quest; the argument (if provided) filters it to specific quests or questlines.
+The scope is every outstanding quest; the argument (if provided) filters it to specific quests or epics.
 
 Look for:
 - Disagreements: quests whose goals or plans contradict each other, the code, or the repository's docs.
 - Conflicts: quests that would change the same code or interface incompatibly, or that must land in order without a `Required` link.
-- Misaligned priorities: a quest ranked or placed in a milestone ahead of work it depends on, or behind work it blocks.
+- Misaligned priorities: a quest ranked or placed in a chapter ahead of work it depends on, or behind work it blocks.
 - Stale plans: work already done, blockers that have cleared, or references to code that no longer exists.
 
 The audit is read-only.

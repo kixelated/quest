@@ -13,5 +13,5 @@ controls.
 
 ## Required
 
-- [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - OpenAI must approve hosted use
-- [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - the app this extends
+- [ChatGPT approval](/quest/c1/chatgpt-waitlist.md) - OpenAI must approve hosted use
+- [Quest on Cloudflare](/quest/c0/cloudflare/README.md) - the app this extends

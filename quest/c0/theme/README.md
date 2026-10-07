@@ -6,8 +6,9 @@ By the 2026-10-14 Cloudflare demo, Quest presents itself as an original
 MMO-style quest log for your repository and your agents: themed README and
 docs copy, a shared identity (logo, palette, social image), a themed site at
 `https://kixel.quest` (home, docs, and quest board), and themed CLI output on
-a terminal. The quest format, `quest guide`, and the skills do not change,
-except for the [rename](/quest/m0/rename.md) of milestones and questlines.
+a terminal. The quest format, `quest guide`, and the skills do not change
+beyond the 2026-10-07 rename of milestones to chapters and questlines to
+epics.
 
 This README owns the work no child does: a final pass over every surface for
 consistency with `docs/theme.md` before the demo is recorded.
@@ -19,24 +20,23 @@ Decided while planning on 2026-10-05:
 - Original homage, not a WoW parody. Use only genre conventions (`!` and `?`
   markers, quest log windows, gold borders, difficulty colours). No Blizzard
   names, art, fonts, icons, or screenshots.
-- Flavour over the contract. The format's terms (quest, questline, milestone,
-  `Required`, `[XS]`-`[XL]`) stay as they are because agents and `quest check`
-  rely on them. The theme lives in presentation only. A renamed format would
-  break the guide, skills, and existing trees before v0.1.0.
-  Amended 2026-10-07: [Rename milestones and questlines](/quest/m0/rename.md)
-  renames milestone to chapter and questline to epic in the format itself.
+- Flavour over the contract. The format's terms (quest, epic, chapter,
+  `Required`, `[XS]`-`[XL]`) are the contract agents and `quest check` rely
+  on, and the theme adds no display aliases for them. Amended 2026-10-07: the
+  format itself renamed milestone to chapter and questline to epic before
+  v0.1.0, so every surface uses one set of terms.
 - Hook, then substance. The headline and visuals sell "a quest log for your
   repo and your agents". The next lines deliver the existing pitch: readable
   plans, explicit dependencies, and reviewable Git changes.
 - Land before the demo. Originality (50%) and ease of use (25%) dominate the
   competition judging, so the
-  [Cloudflare questline](/quest/m0/cloudflare/README.md) records its demo after
-  this line lands. Aim to merge by 2026-10-12.
+  [Cloudflare epic](/quest/c0/cloudflare/README.md) records its demo after
+  this epic lands. Aim to merge by 2026-10-12.
 - One display glossary is shared by the site, board, and CLI. No XP, levels,
   achievements, or leaderboards; they add state for little demo value.
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
-  `cloudflare/README.md` use the format's own terms (quest, questline,
-  milestone, ready, blocked, `Required`, `Goal`, claim) with no display-name
+  `cloudflare/README.md` use the format's own terms (quest, epic,
+  chapter, ready, blocked, `Required`, `Goal`, claim) with no display-name
   aliases. Their voice, hook, logo, and flavour (the party, gold) stay. The
   final pass aligns `docs/theme.md`, which still lists copy among the glossary
   users.
@@ -56,14 +56,13 @@ Decided while planning on 2026-10-05:
 
 ## Required
 
-- [Move the theme spec to design/](/quest/m0/theme/design-dir.md) - `docs/` holds only user docs; the spec and assets move to `design/`
-- [Quest map](/quest/m0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
-- [Social preview](/quest/m0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
-- [Themed CLI output](/quest/m0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
-- [Landing page](/quest/m0/theme/landing.md) - the home page's map and calls to action link into the live board
-- [Rename milestones and questlines](/quest/m0/rename.md) - the final consistency pass checks the final vocabulary
+- [Move the theme spec to design/](/quest/c0/theme/design-dir.md) - `docs/` holds only user docs; the spec and assets move to `design/`
+- [Quest map](/quest/c0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
+- [Social preview](/quest/c0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
+- [Themed CLI output](/quest/c0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
+- [Landing page](/quest/c0/theme/landing.md) - the home page's map and calls to action link into the live board
 
 ## Related
 
-- [Quest board](/quest/m0/cloudflare/board.md) - built themed from the start, using the identity
-- [Launch material](/quest/m0/launch.md) - posts, quickstart, demo, and comparison written in the same voice
+- [Quest board](/quest/c0/cloudflare/board.md) - built themed from the start, using the identity
+- [Launch material](/quest/c0/launch.md) - posts, quickstart, demo, and comparison written in the same voice

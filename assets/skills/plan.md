@@ -22,7 +22,7 @@ When a frontier question needs a fact from the environment (filesystem, tools, e
 Don't block on it, ask the rest of the frontier now.
 The *decisions* are the user's: put each to them and wait.
 
-Search other quests and questlines to keep the larger plan consistent.
+Search other quests and epics to keep the larger plan consistent.
 When the work changes what a user sees (a wire, an API, a flag, a dashboard), ask whether it needs documentation the feature quest cannot carry inline (a new page or guide), and recommend a quest for that; docs a change makes stale stay in that change.
 When the frontier disagrees with an existing quest, challenge the user and resolve the conflict.
 
@@ -32,11 +32,11 @@ If the goal contains independently completable outcomes, split them before plann
 Map the implementation plan as a design tree: every material decision branches into the decisions that hang off it.
 
 The session is done when the frontier is empty.
-The result may be one quest or multiple quests and questlines, split based on what can be completed independently.
+The result may be one quest or multiple quests and epics, split based on what can be completed independently.
 Prefix each quest title with `[XS]`, `[S]`, `[M]`, `[L]`, or `[XL]`, including implementation, verification, and landing work.
-Once complete, create, update, or delete the relevant quests and questlines.
+Once complete, create, update, or delete the relevant quests and epics.
 Record each settled decision and its reason in the quest's Plan, so later sessions don't ask it again.
-New work joins the milestone matching its priority, at its rank; a questline groups related quests, and its README holds the work no child owns (the end-to-end test, the docs page).
+New work joins the chapter matching its priority, at its rank; an epic groups related quests, and its README holds the work no child owns (the end-to-end test, the docs page).
 
 Include all of the decision prompts in the PR as a paper trail, with a ✅ next to the selected option.
 

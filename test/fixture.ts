@@ -1,5 +1,5 @@
-// A minimal but complete quest tree on disk: root questline -> milestone ->
-// questline -> two quests, one blocking the other.
+// A minimal but complete quest tree on disk: root epic -> chapter ->
+// epic -> two quests, one blocking the other.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,34 +15,34 @@ export const ROOT_README = `# Quests
 
 ## Goal
 
-The permanent root questline.
+The permanent root epic.
 
 ## Required
 
-- [M0](/quest/m0/README.md)
+- [C0](/quest/c0/README.md)
 `;
 
-export const M0_README = `# M0
+export const C0_README = `# C0
 
 ## Goal
 
-A milestone.
+A chapter.
 
 ## Required
 
-- [Line](/quest/m0/line/README.md)
+- [Epic](/quest/c0/epic/README.md)
 `;
 
-export const LINE_README = `# Line
+export const EPIC_README = `# Epic
 
 ## Goal
 
-A questline.
+An epic.
 
 ## Required
 
-- [One](/quest/m0/line/one.md)
-- [Two](/quest/m0/line/two.md)
+- [One](/quest/c0/epic/one.md)
+- [Two](/quest/c0/epic/two.md)
 `;
 
 export const ONE = `# [S] One
@@ -60,7 +60,7 @@ Another quest.
 
 ## Required
 
-- [One](/quest/m0/line/one.md) - must finish first
+- [One](/quest/c0/epic/one.md) - must finish first
 `;
 
 const dirs: string[] = [];
@@ -82,10 +82,10 @@ export class Tree {
 	static baseline(): Tree {
 		return new Tree()
 			.write("quest/README.md", ROOT_README)
-			.write("quest/m0/README.md", M0_README)
-			.write("quest/m0/line/README.md", LINE_README)
-			.write("quest/m0/line/one.md", ONE)
-			.write("quest/m0/line/two.md", TWO);
+			.write("quest/c0/README.md", C0_README)
+			.write("quest/c0/epic/README.md", EPIC_README)
+			.write("quest/c0/epic/one.md", ONE)
+			.write("quest/c0/epic/two.md", TWO);
 	}
 
 	write(rel: string, body: string): this {

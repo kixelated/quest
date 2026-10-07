@@ -37,7 +37,7 @@ Use the export endpoint. Show progress and let the user retry a failed download.
 
 ## Required
 
-- [CSV endpoint](/quest/m0/export.md) - the button needs something to call
+- [CSV endpoint](/quest/c0/export.md) - the button needs something to call
 ```
 
 That file sits in your quest log, a tree under `quest/`:
@@ -45,16 +45,16 @@ That file sits in your quest log, a tree under `quest/`:
 ```text
 quest/
   README.md           # The roadmap
-  m0/
-    README.md         # First milestone, in priority order
+  c0/
+    README.md         # First chapter, in priority order
     export.md         # Ready
     download.md       # Required: export.md
 ```
 
-Folders are **questlines**. A README's `Required` lists its children in
-priority order, beside any other dependencies. The README is the questline's
+Folders are **epics**. A README's `Required` lists its children in
+priority order, beside any other dependencies. The README is the epic's
 own quest, and it becomes ready once its children have merged. The top folders
-(`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
+(`c0`, `c1`, ...) are **chapters** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
 on it, so the quests that required it can become ready. The finished plan stays
@@ -88,10 +88,10 @@ $ quest --root examples/export check
 quest: 4 documents ok
 
 $ quest --root examples/export ready
-quest/m0/export.md
+quest/c0/export.md
 
-$ quest --root examples/export ready quest/m0/download.md
-quest/m0/export.md
+$ quest --root examples/export ready quest/c0/download.md
+quest/c0/export.md
 ```
 
 With no path, `ready` lists every ready quest. Given a path, it prints what
@@ -140,12 +140,12 @@ The first release should let you paste one line into your agent to set Quest up,
 bring in existing GitHub issues, work through quests, and leave again without
 losing your plans. The binary carries the skills, your tool manager (mise or nix)
 pins its version, and your repository's instructions stay yours. macOS and Linux
-come first; [native Windows](quest/m1/windows.md) follows later.
+come first; [native Windows](quest/c1/windows.md) follows later.
 
 The release also brings a quest board to [kixel.quest](https://kixel.quest).
 Contributors sign in, claim a ready quest, and offer gold, their own agent
 tokens, to run it; maintainers review and merge the result there, synced
-with GitHub. [The first milestone](quest/m0/README.md) lists the quests that
+with GitHub. [The first chapter](quest/c0/README.md) lists the quests that
 remain.
 
 ## Join the party

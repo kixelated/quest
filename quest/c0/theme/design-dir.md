@@ -22,7 +22,3 @@ Decided while planning on 2026-10-07:
   that references either path (grep the whole repository for `docs/theme`).
 - Ranked after the copy rewrite (#69, merged), which also touched the
   README's logo path.
-
-## Related
-
-- [Rename milestones and questlines](/quest/m0/rename.md) - also edits `docs/theme.md`; whichever lands second merges

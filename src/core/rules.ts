@@ -6,13 +6,13 @@
 // tree.
 //
 // The whole tree is validated on every run, never just the changed files: the
-// link graph and the questline index are global, so completing one quest breaks
+// link graph and the epic index are global, so completing one quest breaks
 // files the diff never mentions. That is not hypothetical - it is how the index
 // entry for a completed quest survived a rebase that produced no conflict at
 // all.
 
 import { parseClaim } from "./claim";
-import { type Doc, entries, has, isQuestline, children, owner, rooted, withoutFragment } from "./doc";
+import { type Doc, entries, has, isEpic, children, owner, rooted, withoutFragment } from "./doc";
 import { comparePaths, escapes, join, normalize, parent } from "./path";
 
 /**
@@ -30,7 +30,7 @@ const SIZES = ["XS", "S", "M", "L", "XL"];
  */
 const LIST_SECTIONS = ["Required", "Closes", "Related"];
 
-/** The permanent root questline; the one document nothing has to list. */
+/** The permanent root epic; the one document nothing has to list. */
 export const ROOT = "quest/README.md";
 
 /** One violation, addressed like a compiler diagnostic: `path:line: message`. */
@@ -102,7 +102,7 @@ function claim(found: Finding[], doc: Doc) {
 }
 
 function headings(found: Finding[], doc: Doc) {
-	if (!isQuestline(doc)) {
+	if (!isEpic(doc)) {
 		const title = doc.title;
 		const match = title ? /^\[([^\]]*?)\] (.*)$/s.exec(title.text) : null;
 		const valid = title !== null && match !== null && title.literal && SIZES.includes(match[1]) && match[2] !== "";
@@ -162,7 +162,7 @@ function links(found: Finding[], exists: (path: string) => boolean, known: Set<s
 			continue;
 		}
 
-		// Quests and questlines reference each other with root-absolute links. A
+		// Quests and epics reference each other with root-absolute links. A
 		// relative one still renders, so nothing else would notice - but it is
 		// invisible to the dependency graph below, which only speaks /quest/...
 		if (known.has(path) && !link.target.startsWith("/")) {
@@ -174,8 +174,8 @@ function links(found: Finding[], exists: (path: string) => boolean, known: Set<s
 		}
 
 		// A `Required` entry opens with its quest link. moq-dev/moq.pro#1170
-		// shipped a customer-gate sentence mentioning a questline mid-line, which
-		// reads as context but IS a blocker, and so silently required all of m2.
+		// shipped a customer-gate sentence mentioning an epic mid-line, which
+		// reads as context but IS a blocker, and so silently required all of c2.
 		if (link.section === "Required" && known.has(path) && link.position !== "entry") {
 			found.push({
 				path: doc.path,
@@ -187,7 +187,7 @@ function links(found: Finding[], exists: (path: string) => boolean, known: Set<s
 }
 
 /**
- * Every document is listed by the questline it sits under, as a child in that
+ * Every document is listed by the epic it sits under, as a child in that
  * README's `Required`, and every `Required` entry is a quest, required once.
  *
  * A condition outside the repository (a release, a customer, a person) is a
@@ -220,7 +220,7 @@ function index(found: Finding[], known: Set<string>, docs: Doc[]) {
 	}
 
 	for (const doc of docs) {
-		// The root questline is permanent and has nothing above it to list it.
+		// The root epic is permanent and has nothing above it to list it.
 		if (doc.path === ROOT || listed.has(doc.path)) continue;
 		found.push({
 			path: doc.path,
@@ -233,8 +233,8 @@ function index(found: Finding[], known: Set<string>, docs: Doc[]) {
 /**
  * `Required` must be acyclic. A cycle is a set of quests none of which can ever
  * start, and walking the links to rule one out is exactly the manual step an
- * author would otherwise take before adding a blocker. A questline requires its
- * children, so a quest requiring the line that holds it is a cycle too.
+ * author would otherwise take before adding a blocker. An epic requires its
+ * children, so a quest requiring the epic that holds it is a cycle too.
  */
 function cycles(found: Finding[], docs: Doc[]) {
 	const blockers = new Map<string, string[]>();

@@ -75,7 +75,7 @@ export interface Heading {
 
 /** One parsed quest document: the structure the rules read, nothing else. */
 export interface Doc {
-	/** Repository-relative, e.g. `quest/m0/one.md`. */
+	/** Repository-relative, e.g. `quest/c0/one.md`. */
 	path: string;
 	/** The document's `# ` title, used for a quest's t-shirt size. */
 	title: Heading | null;
@@ -124,18 +124,18 @@ function isReadme(path: string): boolean {
 }
 
 /**
- * The root and the milestones outlive their quests, so an empty one is not a
- * leaf. `quest/README.md` has two components and `quest/m0/README.md` has
- * three; anything nested further is an ordinary line.
+ * The root and the chapters outlive their quests, so an empty one is not a
+ * leaf. `quest/README.md` has two components and `quest/c0/README.md` has
+ * three; anything nested further is an ordinary epic.
  */
 export function permanent(path: string): boolean {
 	return isReadme(path) && depth(path) <= 3;
 }
 
 /**
- * The questline directory this document belongs to. A questline is a
+ * The epic directory this document belongs to. An epic is a
  * DIRECTORY, so its own entry sits one level further out than a quest's:
- * `quest/m2/drain/README.md` belongs to `quest/m2`, not to `quest/m2/drain`.
+ * `quest/c2/drain/README.md` belongs to `quest/c2`, not to `quest/c2/drain`.
  */
 export function owner(path: string): string {
 	return isReadme(path) ? parent(parent(path)) : parent(path);
@@ -143,7 +143,7 @@ export function owner(path: string): string {
 
 /**
  * The `Required` entries that sit directly under a README's directory: the
- * line's children, in priority order. Every other entry is a blocker like any
+ * epic's children, in priority order. Every other entry is a blocker like any
  * quest's, and a quest that is not a README has no children.
  */
 export function children(doc: Doc): string[] {
@@ -155,12 +155,12 @@ export function children(doc: Doc): string[] {
 }
 
 /**
- * A questline is a `README.md` that still requires a child. Any other README is
- * what a line becomes when its last child merges: the line's own remaining
- * work, executed like any other quest. The root and the milestones are the
+ * An epic is a `README.md` that still requires a child. Any other README is
+ * what an epic becomes when its last child merges: the epic's own remaining
+ * work, executed like any other quest. The root and the chapters are the
  * exception.
  */
-export function isQuestline(doc: Doc): boolean {
+export function isEpic(doc: Doc): boolean {
 	return isReadme(doc.path) && (children(doc).length > 0 || permanent(doc.path));
 }
 
