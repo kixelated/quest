@@ -359,7 +359,7 @@ describe("index", () => {
 		tree()
 			.write(
 				"quest/a0/epic/README.md",
-				"# Epic\n\n## Goal\n\nA epic.\n\n## Required\n\n- [One](/quest/a0/epic/one.md)\n\n- [Two](/quest/a0/epic/two.md)\n",
+				"# Epic\n\n## Goal\n\nAn epic.\n\n## Required\n\n- [One](/quest/a0/epic/one.md)\n\n- [Two](/quest/a0/epic/two.md)\n",
 			)
 			.accepts();
 	});
@@ -437,7 +437,7 @@ describe("Required", () => {
 			.rejects("Required cycle:");
 	});
 
-	// moq-dev/moq.pro#1170: a customer-gate sentence that happens to link a
+	// moq-dev/moq.pro#1170: a customer-gate sentence that happens to link an
 	// epic mid-sentence reads as context but IS a dependency edge.
 	test("a link mid-sentence", () => {
 		tree()
@@ -581,7 +581,7 @@ describe("ready", () => {
 		]);
 	});
 
-	// The listing is the query the start flow reproduces by grepping. A
+	// The listing is the query the start flow reproduces by grepping. An
 	// epic is absent while it still indexes children, and `two.md` is
 	// blocked.
 	test("the listing", () => {

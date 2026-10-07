@@ -21,7 +21,7 @@ export interface Blocker {
 	/** The dependency or claim as written, whitespace collapsed. */
 	text: string;
 	/**
-	 * The still-open quests under a required epic, which is what a
+	 * The still-open quests under a required epic, which is what an
 	 * epic blocker actually means. Empty for every other blocker: a
 	 * required quest's own blockers are its readiness, not this one's.
 	 */
@@ -119,7 +119,7 @@ function blocker(byPath: Map<string, Doc>, entry: Entry, stack: string[]): Block
 	// Only an epic expands. A required QUEST is the blocker itself, and its
 	// own chain is the answer to running this on that quest instead; printing
 	// it here buries the entries that were asked for under a repeated subtree.
-	// The stack guard is for a tree nobody has run `quest check` on yet, where a
+	// The stack guard is for a tree nobody has run `quest check` on yet, where an
 	// epic listing an ancestor must print rather than recurse forever.
 	let nested: Blocker[] = [];
 	if (path !== null && isEpic(byPath.get(path)!) && !stack.includes(path)) {
