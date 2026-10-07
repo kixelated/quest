@@ -4,7 +4,7 @@ A deployable foundation for Quest on Cloudflare, and the site at
 `https://kixel.quest`: the quest log for your repo and your agents, on the web.
 Hono serves HTML directly, so there is no client bundle. Every page renders
 inside the shared layout in `src/layout.tsx`, which follows
-[the quest log theme](../docs/theme.md): the home page (`src/home.tsx`), the
+[the quest log theme](../design/theme.md): the home page (`src/home.tsx`), the
 docs under `/docs` (`src/docs.tsx`), sign-in in the nav, and the not-found
 page. Later pages, such as the board, use the same layout.
 
@@ -12,7 +12,7 @@ page. Later pages, such as the board, use the same layout.
 renders the repository's `docs/*.md` into `build/docs.json`, so the Markdown
 stays the single source and its relative links keep working on GitHub: links to
 other docs become `/docs/<name>` and other repository paths point at GitHub. It
-also copies `docs/theme/` and `src/site.css` into `build/public/`, which the
+also copies `design/theme/` and `src/site.css` into `build/public/`, which the
 Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
 `/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
 
@@ -67,7 +67,7 @@ binding so tests and CI never need Cloudflare credentials or call live services.
 To work on the site without a Cloudflare login, run
 `npm exec -- wrangler dev --local` from `cloudflare/` after the migrations.
 `--local` disables remote bindings, which the pages do not use. Wrangler
-reruns the build when `src/`, `scripts/`, or `docs/` change.
+reruns the build when `src/`, `scripts/`, `docs/`, or `design/` change.
 
 ## Checks
 

@@ -2,7 +2,7 @@ import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 import { Bang, Coin, Difficulty, Divider, Query, repo, type Size } from "./layout";
 
-// The home page. Display names follow the glossary in docs/theme.md.
+// The home page. Display names follow the glossary in design/theme.md.
 
 type Status = "available" | "blocked" | "accepted" | "turn-in";
 

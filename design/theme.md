@@ -2,22 +2,23 @@
 
 Quest presents itself as an original quest log for your repository and your
 agents. This page is the source of truth for that presentation: the display
-glossary, status markers, difficulty colours, palette, type, and mark. The
+glossary, status markers, size colours, palette, type, and mark. The
 site, board, CLI, and copy keep small tables that cite it.
 
 The theme is presentation only. Quest files, `quest check`, `quest guide`, and
-the skills keep the format's own terms. Its files live in `docs/theme/`, not
-`assets/`, which holds the agent contract embedded in the binary.
+the skills keep the format's own terms. Its files live in `design/theme/`, not
+`docs/`, which the site publishes as user documentation, or `assets/`, which
+holds the agent contract embedded in the binary.
 
 ## Rules
 
 - Original homage, not a parody. Use only genre conventions: `!` and `?`
-  markers, quest log pages, gold borders, and difficulty colours. Use no
+  markers, quest log pages, gold borders, and size colours. Use no
   Blizzard names, art, fonts, icons, or screenshots.
 - Hand-written SVG and CSS, and open-licensed fonts only.
 - Dark only. There is no light mode.
-- Never use colour as the only signal. Every marker and difficulty colour comes
-  with its text label.
+- Never use colour as the only signal. Every marker and size colour comes with
+  its text label.
 - No XP, levels, achievements, or leaderboards.
 
 ## Voice
@@ -54,9 +55,10 @@ Available or Requires.
 Gold is display only: a run's spend and donated tokens show as gold with a coin
 glyph. There is no pledge pool and no new state.
 
-## Difficulty
+## Size
 
-A quest's size is its difficulty. Show the size label next to its colour.
+Quests are coloured by size, from grey XS to red XL. Show the size label next
+to its colour.
 
 | Size | Colour | Hex | Terminal SGR | Extra |
 | --- | --- | --- | --- | --- |
@@ -125,7 +127,7 @@ do not commit font files. `theme.css` has the fallback stacks.
   three lines tall in gold Cormorant Garamond.
 - Divider (`.ql-divider`): a gold rule broken by a lozenge between two dots.
   It separates sections.
-- Markers, difficulty (`.ql-size`), the Elite tag, and gold amounts
+- Markers, size colours (`.ql-size`), the Elite tag, and gold amounts
   (`.ql-gold`), each with its text label.
 
 ## Mark
@@ -144,8 +146,8 @@ access:
 
 ```sh
 google-chrome --headless=new --hide-scrollbars --virtual-time-budget=10000 \
-  --window-size=1280,640 --screenshot=docs/theme/og.png \
-  "file://$PWD/docs/theme/og.svg"
+  --window-size=1280,640 --screenshot=design/theme/og.png \
+  "file://$PWD/design/theme/og.svg"
 ```
 
 A maintainer uploads `og.png` by hand under the repository's Settings, General,

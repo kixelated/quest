@@ -17,7 +17,7 @@ shows the run's status.
 - ChatGPT plan funding is out of scope until OpenAI approves hosted use
   ([a1](/quest/a1/chatgpt-hosted.md)).
 - The interface calls funding "Offer gold" and shows spend as gold coins
-  (display only, from `docs/theme.md`); the API and data model keep plain
+  (display only, from `design/theme.md`); the API and data model keep plain
   terms.
 - Reuse the claim, branch, and change flow from `quest run`, so hosted and
   local runs behave the same.

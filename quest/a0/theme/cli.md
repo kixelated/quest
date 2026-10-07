@@ -13,13 +13,13 @@ data, exit codes, and contract described in `quest ready --help`.
 - Decided: themed stdout on a TTY, plain when piped. Agents and scripts read
   piped output, so tests must pin the plain form exactly and cover the TTY form
   separately.
-- Decided: start from the SGR codes in `docs/theme.md` (named ANSI colours,
+- Decided: start from the SGR codes in `design/theme.md` (named ANSI colours,
   `38;5;208` for L, and `90` for XS and blocked). If the CLI needs different
-  codes, change `docs/theme.md` first.
+  codes, change `design/theme.md` first.
 - Decided: no 16-colour fallback for L and no colour-depth detection. A
   fallback would be too close to M or XL, and the size label carries the meaning.
 - Honour `NO_COLOR`. Without colour, glyphs and wording may stay.
-- Keep the labels in a small table that cites `docs/theme.md`, in `src/cli`,
+- Keep the labels in a small table that cites `design/theme.md`, in `src/cli`,
   not in the shared core the Worker imports.
 - Written after the port to TypeScript (decided 2026-10-06), so the theme is
   written once, in TypeScript.

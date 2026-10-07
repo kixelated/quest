@@ -1,7 +1,7 @@
 import type { Child } from "hono/jsx";
 
 // The site shell: every HTML page the Worker serves renders inside Layout.
-// Colours, type, and glyphs follow docs/theme.md; tokens live in /theme/theme.css.
+// Colours, type, and glyphs follow design/theme.md; tokens live in /theme/theme.css.
 
 export const repo = "https://github.com/kixelated/quest";
 

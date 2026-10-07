@@ -11,14 +11,14 @@ beyond the 2026-10-07 rename of milestones to acts and questlines to
 epics.
 
 This README owns the work no child does: a final pass over every surface for
-consistency with `docs/theme.md` before the demo is recorded.
+consistency with `design/theme.md` before the demo is recorded.
 
 ## Plan
 
 Decided while planning on 2026-10-05:
 
 - Original homage, not a WoW parody. Use only genre conventions (`!` and `?`
-  markers, quest log windows, gold borders, difficulty colours). No Blizzard
+  markers, quest log windows, gold borders, size colours). No Blizzard
   names, art, fonts, icons, or screenshots.
 - Flavour over the contract. The format's terms (quest, epic, act,
   `Required`, `[XS]`-`[XL]`) are the contract agents and `quest check` rely
@@ -39,27 +39,30 @@ Decided while planning on 2026-10-05:
   `cloudflare/README.md` use the format's own terms (quest, epic,
   act, ready, blocked, `Required`, `Goal`, claim) with no display-name
   aliases. Their voice, hook, logo, and flavour (the party, gold) stay. The
-  final pass aligns `docs/theme.md`, which still lists copy among the glossary
+  final pass aligns `design/theme.md`, which still lists copy among the glossary
   users.
-- `docs/theme.md` is the human source of truth for the glossary, markers,
-  colours, palette, type, and mark (`docs/theme/`). The CLI and the Worker
+- `design/theme.md` is the human source of truth for the glossary, markers,
+  colours, palette, type, and mark (`design/theme/`). The CLI and the Worker
   each keep a small constant table that cites it. The roughly ten strings
   are cheap to duplicate, and this keeps presentation out of the shared core.
 - The look is dark only. There is no light mode. On 2026-10-06 the
   "illuminated ledger" direction (warm ink, parchment text, gold leaf,
   Cormorant Garamond headings) replaced the slate window and Cinzel. It has
-  landed in `docs/theme.md` with the site's shared layout in
+  landed in `design/theme.md` with the site's shared layout in
   `cloudflare/src/layout.tsx`.
 - Lean into the RPG voice but stay semi-professional (decided 2026-10-06).
   Tokens are gold coins, visually ("Offer gold"), as display only.
 - The site on the Worker (home, docs, and the hosted app under one shell)
   replaces launch.md's earlier "no website" boundary.
+- Decided 2026-10-07: the size scale stays `[XS]`-`[XL]`, and quests are
+  coloured by size: XS grey, S green, M yellow, L orange, XL red.
+  `design/theme.md` calls these size and size colours, not difficulty, so
+  there is a single name.
 
 ## Required
 
-- [Move the theme spec to design/](/quest/a0/theme/design-dir.md) - `docs/` holds only user docs; the spec and assets move to `design/`
 - [Quest map](/quest/a0/theme/map.md) - the home page draws Quest's own tree as a left-to-right world map
-- [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `docs/theme/og.png` as the GitHub social preview
+- [Social preview](/quest/a0/theme/social-preview.md) - a maintainer uploads `design/theme/og.png` as the GitHub social preview
 - [Themed CLI output](/quest/a0/theme/cli.md) - `!`/`?` markers and difficulty colours on a terminal; piped output unchanged
 - [Landing page](/quest/a0/theme/landing.md) - the home page's map and calls to action link into the live board
 
