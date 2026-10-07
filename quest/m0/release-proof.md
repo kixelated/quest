@@ -9,11 +9,14 @@ installs through mise and the shell installer on macOS and Linux.
 
 ## Plan
 
-- CLI lifecycle coverage and a local setup/export-preparation transcript are
-  implemented in [the release rehearsal](../../docs/release-proof.md). The
+- CLI lifecycle coverage runs in CI (`scripts/lifecycle-check.sh`). The
   focused CI job installs this checkout on Linux and macOS; the full repository
   check stays on Ubuntu. Live export publication and the maintainer's release
   tag remain outstanding, so this quest stays open.
+- The Rust-era rehearsal record, `docs/release-proof.md`, was deleted on
+  2026-10-07. It went stale with the TypeScript port, and the site publishes
+  every `docs/*.md`. Re-run the setup/export-preparation rehearsal against the
+  compiled binaries, and keep the transcript in this quest's PR description.
 - The CLI half runs scripted in CI on macOS and Linux. The agent half (setup
   guide, export skill) is verified once by hand against a scratch repository,
   with the transcript kept for the launch demo.

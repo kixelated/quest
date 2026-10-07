@@ -17,7 +17,8 @@ scope. The README and the landing page belong to
   work tracking for coding agents) and
   [OpenSpec](https://github.com/Fission-AI/OpenSpec) (spec-driven work), as
   checked on 2026-09-19. Re-check them before writing.
-- Use the release-proof transcript for the demo.
+- Use the release-proof transcript, kept in that quest's PR description, for
+  the demo.
 
 ## Required
 
