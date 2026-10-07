@@ -3,8 +3,21 @@
 
 import type { Completed } from "../src/board/project";
 
-/** The `git log` this reads: newest first, with renames, one NUL before each commit. */
-export const LOG = ["log", "-M", "--name-status", "--format=%x00%H %cs"];
+/**
+ * The `git log` this reads: the main line newest first, each merge as one
+ * change the way a squash merge is, with renames, unquoted paths, and one NUL
+ * before each commit.
+ */
+export const LOG = [
+	"-c",
+	"core.quotePath=false",
+	"log",
+	"--first-parent",
+	"--diff-merges=first-parent",
+	"-M",
+	"--name-status",
+	"--format=%x00%H %cs",
+];
 
 /** Quest documents, as the CLI collects them: Markdown other than agent instructions. */
 export function isQuest(path: string): boolean {
@@ -21,10 +34,14 @@ function dirname(path: string): string {
  * The quests that `log` (from `LOG`) shows finished. A deletion counts when
  * its commit also changed something outside `quest/`: deleting only plans
  * abandons a quest rather than finishing it. Paths follow later directory
- * renames, such as an act's, to where they live now; `dirs` is every
- * directory that exists now. `read` returns a file's text at a commit.
+ * renames, such as an act's, to where they live now; `paths` is every quest
+ * that exists now, and a deletion that resolves to one of them was a move Git
+ * did not pair up. `read` returns a file's text at a commit.
  */
-export function finished(log: string, dirs: Set<string>, read: (commit: string, path: string) => string): Completed[] {
+export function finished(log: string, paths: Set<string>, read: (commit: string, path: string) => string): Completed[] {
+	const dirs = new Set(
+		[...paths].flatMap((path) => path.split("/").map((_, i, parts) => parts.slice(0, i).join("/"))),
+	);
 	const moved = new Map<string, string>();
 	// A directory can move back to a name it left, so each one moves at most once.
 	const current = (path: string, seen = new Set<string>()): string => {
@@ -53,8 +70,10 @@ export function finished(log: string, dirs: Set<string>, read: (commit: string, 
 		}
 		for (const [status, from] of changes) {
 			if (status !== "D" || !work || !isQuest(from)) continue;
+			const path = current(from);
+			if (paths.has(path)) continue;
 			const title = /^# (.+)$/m.exec(read(`${commit}^`, from))?.[1] ?? from;
-			found.push({ path: current(from), title, date, commit });
+			found.push({ path, title, date, commit });
 		}
 	}
 	return found;

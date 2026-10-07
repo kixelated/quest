@@ -2,7 +2,7 @@
 // contributors' forks, so raw HTML shows as text, images as their alt text,
 // and only web and mail links survive. Links into the tree open board pages.
 
-import { Lexer, Marked, type Token } from "marked";
+import { Marked, type Token } from "marked";
 import { normalize } from "quest/core";
 import { questHref } from "./model";
 import type { Project } from "./project";
@@ -35,6 +35,10 @@ export function render(project: Project, path: string, content: string, known: (
 		renderer: {
 			html: ({ text }) => escape(text),
 			image: ({ text }) => escape(text),
+			// After an inline `<code>`, `<pre>`, or `<script>` tag, marked marks the
+			// following text as raw and passes it through unescaped. Raw HTML never
+			// renders here, so that text is escaped like any other.
+			text: (token) => ("escaped" in token && token.escaped ? escape(token.text) : false),
 			link({ href, tokens }) {
 				const inner = this.parser.parseInline(tokens);
 				const target = rewrite(project, path, href, known);
@@ -48,7 +52,7 @@ export function render(project: Project, path: string, content: string, known: (
 		},
 	});
 	const sections: { heading: string; tokens: Token[] }[] = [];
-	for (const token of Lexer.lex(content, { gfm: true })) {
+	for (const token of marked.lexer(content)) {
 		if (token.type === "heading" && token.depth === 1) continue;
 		if (token.type === "heading" && token.depth === 2) {
 			sections.push({ heading: token.text.trim(), tokens: [] });

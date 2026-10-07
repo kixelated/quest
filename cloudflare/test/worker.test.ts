@@ -77,8 +77,18 @@ describe("Worker", () => {
 			return JSON.parse(row!.value).callbackURL;
 		};
 		expect(await callback("/repos/quest/quest/a0")).toBe("/repos/quest/quest/a0");
-		for (const next of ["//evil.example", "/\\evil.example", "https://evil.example"]) {
+		expect(await callback("/repos/quest?show=available")).toBe("/repos/quest?show=available");
+		const unsafe = ["//evil.example", "/\\evil.example", "https://evil.example", "/\t/evil.example", "/\n/x"];
+		for (const next of [...unsafe, "/%2F/evil.example", "/%5cevil.example"]) {
 			expect(await callback(next)).toBe("/");
+		}
+	});
+	it("offers to return to the page as requested, still encoded", async () => {
+		const response = await SELF.fetch(`${origin}/%09/evil.example`);
+		expect(response.status).toBe(404);
+		expect(await response.text()).toContain('name="next" value="/%09/evil.example"');
+		for (const path of ["%E0", "%", "a0%2Fcloudflare%2Fboard"]) {
+			expect((await SELF.fetch(`${origin}/repos/quest/quest/${path}`)).status).toBe(404);
 		}
 	});
 	it("redirects the setup short link to SETUP.md", async () => {

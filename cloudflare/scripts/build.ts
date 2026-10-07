@@ -106,9 +106,9 @@ function questTree(dir: string, out: Snapshot["documents"] = []): Snapshot["docu
 }
 
 const tree = questTree("quest");
-const dirs = new Set(tree.flatMap(({ path }) => path.split("/").map((_, i, parts) => parts.slice(0, i).join("/"))));
 const [commit, date] = git("log", "-1", "--format=%H %cs").trim().split(" ");
-const completed = finished(git(...LOG), dirs, (rev, path) => git("show", `${rev}:${path}`));
+const paths = new Set(tree.map(({ path }) => path));
+const completed = finished(git(...LOG), paths, (rev, path) => git("show", `${rev}:${path}`));
 const snapshot: Snapshot = { commit, date, documents: tree, completed };
 
 rmSync(build, { recursive: true, force: true });

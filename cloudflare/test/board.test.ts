@@ -105,6 +105,20 @@ describe("quest markdown", () => {
 		expect(goal.html).toContain("&#60;script&#62;");
 	});
 
+	it("escapes text after an inline raw tag, closed or not", () => {
+		for (const tag of ["code", "pre", "kbd", "script"]) {
+			for (const close of [`</${tag}>`, ""]) {
+				const [goal] = render(
+					project(),
+					"quest/a0/solo.md",
+					`## Goal\n\na <${tag}> <img src=x onerror=alert(1)// ${close}\n\nlater <b>bold</b>\n`,
+					known,
+				);
+				expect(goal.html).not.toMatch(/<(img|b)\b/);
+			}
+		}
+	});
+
 	it("opens quest links on the board and other files where the repository is published", () => {
 		const [plan] = render(
 			project(),
@@ -140,7 +154,8 @@ describe("finished quests from history", () => {
 			commit("plan", "2026-10-08", "D\tquest/m0/dropped.md"),
 			commit("old", "2026-10-07", "D\tquest/m0/epic/done.md", "M\tsrc/b.ts", "D\tquest/AGENTS.md"),
 		].join("");
-		expect(finished(log, new Set(["quest", "quest/a0", "quest/a0/epic"]), read)).toEqual([
+		const now = new Set(["quest/README.md", "quest/a0/README.md", "quest/a0/epic/README.md"]);
+		expect(finished(log, now, read)).toEqual([
 			{ path: "quest/a0/epic/done.md", title: "[M] Done in the old act", date: "2026-10-07", commit: "old" },
 		]);
 	});
@@ -155,6 +170,12 @@ describe("finished quests from history", () => {
 			"M\tsrc/a.ts",
 		);
 		const read = () => "# [S] Finished with the rename\n";
-		expect(finished(log, new Set(["quest", "quest/a0"]), read).map((c) => c.path)).toEqual(["quest/a0/a.md"]);
+		expect(finished(log, new Set(["quest/a0/b.md"]), read).map((c) => c.path)).toEqual(["quest/a0/a.md"]);
+	});
+
+	it("skips a quest that still exists, moved too far for Git to pair the rename", () => {
+		const log = commit("move", "2026-10-09", "D\tquest/a0/a.md", "A\tquest/a0/epic/a.md", "M\tsrc/a.ts");
+		const read = () => "# [S] Moved\n";
+		expect(finished(log, new Set(["quest/a0/a.md"]), read)).toEqual([]);
 	});
 });

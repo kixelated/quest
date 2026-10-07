@@ -20,6 +20,12 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
+// The page a visitor is on, still percent-encoded, to return to after signing in.
+function here(c: Context): string {
+	const url = new URL(c.req.url);
+	return url.pathname + url.search;
+}
+
 // Every HTML page renders in the shared layout, with the visitor's session in the nav.
 async function page(
 	c: Context<{ Bindings: Env }>,
@@ -31,7 +37,7 @@ async function page(
 	const user = session?.user ?? null;
 	c.header("Cache-Control", "no-store");
 	return c.html(
-		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={c.req.path} user={user}>
+		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={here(c)} user={user}>
 			{typeof body === "function" ? body(user) : body}
 		</Layout>,
 		status,
@@ -78,7 +84,7 @@ app.get("/repos/:repository", (c) => {
 app.get("/repos/:repository/quest/*", (c) => {
 	const found = board(c.req.param("repository"));
 	const prefix = `/repos/${c.req.param("repository")}/`;
-	const doc = found && findQuest(found, decodeURIComponent(c.req.path.slice(prefix.length)));
+	const doc = found && findQuest(found, c.req.path.slice(prefix.length));
 	if (!found || !doc) return c.notFound();
 	const href = `/repos/${found.project.name}`;
 	if (doc.path === "quest/README.md") return c.redirect(href);
@@ -91,7 +97,7 @@ app.get("/repos/:repository/quest/*", (c) => {
 			description: `A quest in ${found.project.title}.`,
 			crumbs,
 		},
-		(user) => <QuestPage board={found} doc={doc} content={content} user={user} path={c.req.path} />,
+		(user) => <QuestPage board={found} doc={doc} content={content} user={user} path={here(c)} />,
 	);
 });
 app.get("/repos/:repository/quest", (c) => c.redirect(`/repos/${c.req.param("repository")}`));
@@ -120,10 +126,21 @@ for (const path of ["/sign-in", "/sign-out"]) {
 		await next();
 	});
 }
+
+/**
+ * Whether `path` stays on this site. Calling the server API skips Better
+ * Auth's own callback checks, so this mirrors them: browsers drop control
+ * characters and read a backslash as a slash, and a decoded `%2F` or `%5C`
+ * is one too, any of which can turn `/` into `//` and another origin.
+ */
+function local(path: string): boolean {
+	return /^\/(?![/\\])[^\\\0-\x1f\x7f]*$/.test(path) && !/%(2f|5c)/i.test(path);
+}
+
 app.post("/sign-in", async (c) => {
 	// Return to the page that signed in, if it names a path on this site.
 	const { next } = await c.req.parseBody();
-	const callbackURL = typeof next === "string" && /^\/(?![/\\])[^\\]*$/.test(next) ? next : "/";
+	const callbackURL = typeof next === "string" && local(next) ? next : "/";
 	const response = await createAuth(c.env).api.signInSocial({
 		body: { provider: "github", callbackURL },
 		headers: c.req.raw.headers,
