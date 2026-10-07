@@ -7,6 +7,7 @@ import {
 	type Board,
 	type Act,
 	actAnchor,
+	blobHref,
 	type Finished,
 	type Group,
 	type Item,
@@ -392,6 +393,7 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 	const group = findGroup(board, doc.path);
 	const quest = group ? undefined : board.quests.get(doc.path);
 	const heading = title(doc.title?.text ?? doc.path);
+	const markdown = blobHref(project, doc.path);
 	const required = entries(doc, "Required");
 	const childPaths = new Set(group?.items.map((item) => (item.kind === "quest" ? item.quest.path : item.epic.path)));
 	const external = required.filter((entry) => {
@@ -459,10 +461,10 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 					<Divider />
 					<p>
 						<a href={`/repos/${project.name}`}>Back to the quest log</a>
-						{project.web && (
+						{markdown && (
 							<>
 								{" · "}
-								<a href={`${project.web}/blob/main/${doc.path}`}>View the Markdown</a>
+								<a href={markdown}>View the Markdown</a>
 							</>
 						)}
 					</p>
