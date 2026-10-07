@@ -24,6 +24,8 @@ Use the tool manager the repository already has:
 - **nix flake** (`flake.nix`): add the input
   `quest.url = "github:kixelated/quest/<tag-or-sha>"`, put
   `quest.packages.${system}.default` in the dev shell, and update `flake.lock`.
+  The flake doesn't build for Intel Macs (`x86_64-darwin`); pin there with mise
+  or the shell installer instead.
 - **Neither:** ask the user before installing anything globally. With consent,
   run the release's shell installer,
   `curl -LsSf https://github.com/kixelated/quest/releases/download/<tag>/quest-installer.sh | sh`,
