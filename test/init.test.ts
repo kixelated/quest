@@ -57,12 +57,12 @@ test("init uses CLAUDE.md when only it exists", () => {
 test("an uninstall round trip preserves user content", () => {
 	const dir = tempDir();
 	writeFileSync(join(dir, "AGENTS.md"), "# Repo\n\nUser rule.\n");
-	mkdirSync(join(dir, "quest/c0"), { recursive: true });
-	writeFileSync(join(dir, "quest/c0/plan.md"), "# [S] Keep\n\n## Goal\n\nStay.\n");
+	mkdirSync(join(dir, "quest/a0"), { recursive: true });
+	writeFileSync(join(dir, "quest/a0/plan.md"), "# [S] Keep\n\n## Goal\n\nStay.\n");
 	init(dir);
 	uninstall(dir);
 	expect(read(dir, "AGENTS.md")).toBe("# Repo\n\nUser rule.\n");
-	expect(isFile(dir, "quest/c0/plan.md")).toBe(true);
+	expect(isFile(dir, "quest/a0/plan.md")).toBe(true);
 	expect(existsSync(join(dir, ".claude"))).toBe(false);
 	expect(existsSync(join(dir, ".agents"))).toBe(false);
 });

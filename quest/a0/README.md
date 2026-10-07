@@ -5,7 +5,7 @@
 Ship Quest v0.1.0. A developer using Claude Code or Codex with GitHub pastes one
 line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
-macOS and Linux (WSL) only; native Windows is c1.
+macOS and Linux (WSL) only; native Windows is a1.
 
 The launch includes Quest on Cloudflare. Outside contributors lock quests and
 donate agent tokens to run them, and the result is reviewed and merged in a
@@ -14,7 +14,7 @@ competition, due 2026-10-14.
 
 ## Plan
 
-Decided while planning c0 (2026-09-26), replacing the earlier copied-files and
+Decided while planning a0 (2026-09-26), replacing the earlier copied-files and
 ownership-manifest design:
 
 - Nothing is vendored. The binary carries the skills and the quest contract;
@@ -30,7 +30,7 @@ ownership-manifest design:
 
 ## Required
 
-- [Quest on Cloudflare](/quest/c0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
-- [Quest log theme](/quest/c0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
-- [Release proof](/quest/c0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
-- [Launch material](/quest/c0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
+- [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
+- [Quest log theme](/quest/a0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
+- [Release proof](/quest/a0/release-proof.md) - a fresh repository completes the whole lifecycle in CI, then v0.1.0 is tagged
+- [Launch material](/quest/a0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

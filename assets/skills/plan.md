@@ -36,7 +36,7 @@ The result may be one quest or multiple quests and epics, split based on what ca
 Prefix each quest title with `[XS]`, `[S]`, `[M]`, `[L]`, or `[XL]`, including implementation, verification, and landing work.
 Once complete, create, update, or delete the relevant quests and epics.
 Record each settled decision and its reason in the quest's Plan, so later sessions don't ask it again.
-New work joins the chapter matching its priority, at its rank; an epic groups related quests, and its README holds the work no child owns (the end-to-end test, the docs page).
+New work joins the act matching its priority, at its rank; an epic groups related quests, and its README holds the work no child owns (the end-to-end test, the docs page).
 
 Include all of the decision prompts in the PR as a paper trail, with a ✅ next to the selected option.
 

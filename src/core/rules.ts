@@ -175,7 +175,7 @@ function links(found: Finding[], exists: (path: string) => boolean, known: Set<s
 
 		// A `Required` entry opens with its quest link. moq-dev/moq.pro#1170
 		// shipped a customer-gate sentence mentioning an epic mid-line, which
-		// reads as context but IS a blocker, and so silently required all of c2.
+		// reads as context but IS a blocker, and so silently required all of a2.
 		if (link.section === "Required" && known.has(path) && link.position !== "entry") {
 			found.push({
 				path: doc.path,

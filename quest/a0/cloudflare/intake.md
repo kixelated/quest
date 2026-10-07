@@ -22,7 +22,7 @@ content is untrusted.
   a maintainer promotes an issue into `quest/`.
 - Warning hooks: Claude Code and Codex hook config that adds a warning
   whenever an agent reads `issues/**`. The app commits it to repositories it
-  creates, and [GitHub onboarding](/quest/c0/cloudflare/onboard.md) includes it
+  creates, and [GitHub onboarding](/quest/a0/cloudflare/onboard.md) includes it
   in its PR. Check Codex's hook support when starting.
 - A Durable Object per repository serializes claims, so two contributors
   racing for one quest get one winner.

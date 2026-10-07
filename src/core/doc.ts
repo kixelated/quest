@@ -75,7 +75,7 @@ export interface Heading {
 
 /** One parsed quest document: the structure the rules read, nothing else. */
 export interface Doc {
-	/** Repository-relative, e.g. `quest/c0/one.md`. */
+	/** Repository-relative, e.g. `quest/a0/one.md`. */
 	path: string;
 	/** The document's `# ` title, used for a quest's t-shirt size. */
 	title: Heading | null;
@@ -124,8 +124,8 @@ function isReadme(path: string): boolean {
 }
 
 /**
- * The root and the chapters outlive their quests, so an empty one is not a
- * leaf. `quest/README.md` has two components and `quest/c0/README.md` has
+ * The root and the acts outlive their quests, so an empty one is not a
+ * leaf. `quest/README.md` has two components and `quest/a0/README.md` has
  * three; anything nested further is an ordinary epic.
  */
 export function permanent(path: string): boolean {
@@ -135,7 +135,7 @@ export function permanent(path: string): boolean {
 /**
  * The epic directory this document belongs to. An epic is a
  * DIRECTORY, so its own entry sits one level further out than a quest's:
- * `quest/c2/drain/README.md` belongs to `quest/c2`, not to `quest/c2/drain`.
+ * `quest/a2/drain/README.md` belongs to `quest/a2`, not to `quest/a2/drain`.
  */
 export function owner(path: string): string {
 	return isReadme(path) ? parent(parent(path)) : parent(path);
@@ -157,7 +157,7 @@ export function children(doc: Doc): string[] {
 /**
  * An epic is a `README.md` that still requires a child. Any other README is
  * what an epic becomes when its last child merges: the epic's own remaining
- * work, executed like any other quest. The root and the chapters are the
+ * work, executed like any other quest. The root and the acts are the
  * exception.
  */
 export function isEpic(doc: Doc): boolean {

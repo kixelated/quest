@@ -13,8 +13,8 @@ An **epic** is a directory that consists of multiple quests.
 The `README.md` file is the quest and the `Required` section lists the children.
 It completes when its own work is done and every child has merged.
 
-The root's entries are special epics called **chapters** (`c0`, `c1`, ...) that group work by priority horizon.
-Chapters are permanent.
+The root's entries are special epics called **acts** (`a0`, `a1`, ...) that group work by priority horizon.
+Acts are permanent.
 
 Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
@@ -115,7 +115,7 @@ quest file through their forge's claim intake. GitHub skills keep using branch c
 If a claim looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.
-For example, `quest/c1/foo/bar.md` is branch `quest/c1/foo/bar`.
+For example, `quest/a1/foo/bar.md` is branch `quest/a1/foo/bar`.
 
 When a quest is complete, create a draft PR.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Maintainers scope quests and chapters in a repository hosted on Cloudflare
+Maintainers scope quests and acts in a repository hosted on Cloudflare
 Artifacts. Any outside contributor signs in, locks a ready quest, and donates
 their own agent tokens to run it, either locally (`quest run`, signed in with
 ChatGPT) or in a hosted Cloudflare Sandbox (their stored API key). The result
@@ -44,7 +44,7 @@ Decided while planning on 2026-10-01. Research sources:
 - Web login uses a pluggable auth layer: GitHub OAuth first, then Google and
   passkeys. ChatGPT web login and ChatGPT-funded hosted runs wait on OpenAI's
   hosted waitlist, because self-serve token sharing covers only local apps
-  ([c1](/quest/c1/chatgpt-hosted.md)).
+  ([a1](/quest/a1/chatgpt-hosted.md)).
 - Only the extra login providers may slip past the demo. GitHub sync, hosted
   runs, and issue intake must ship.
 - Production lives at `https://kixel.quest` (bought 2026-10-05 on Porkbun),
@@ -58,12 +58,12 @@ Decided while planning on 2026-10-01. Research sources:
 
 ## Required
 
-- [Fork intake](/quest/c0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
-- [Changes](/quest/c0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
-- [Quest board](/quest/c0/cloudflare/board.md) - browse the tree and see what is ready, blocked, or claimed
-- [Local runner](/quest/c0/cloudflare/run.md) - `quest run` claims a quest and runs Codex on the contributor's ChatGPT plan
-- [Hosted runs](/quest/c0/cloudflare/hosted.md) - fund a quest with a stored API key and run OpenCode in a Sandbox
-- [GitHub sync](/quest/c0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes
-- [GitHub onboarding](/quest/c0/cloudflare/onboard.md) - enter a GitHub repository and get Quest set up through a PR
-- [More logins](/quest/c0/cloudflare/logins.md) - Google and passkey sign-in
-- [Quest log theme](/quest/c0/theme/README.md) - the demo is recorded after the themed board, landing page, and README land
+- [Fork intake](/quest/a0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
+- [Changes](/quest/a0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
+- [Quest board](/quest/a0/cloudflare/board.md) - browse the tree and see what is ready, blocked, or claimed
+- [Local runner](/quest/a0/cloudflare/run.md) - `quest run` claims a quest and runs Codex on the contributor's ChatGPT plan
+- [Hosted runs](/quest/a0/cloudflare/hosted.md) - fund a quest with a stored API key and run OpenCode in a Sandbox
+- [GitHub sync](/quest/a0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes
+- [GitHub onboarding](/quest/a0/cloudflare/onboard.md) - enter a GitHub repository and get Quest set up through a PR
+- [More logins](/quest/a0/cloudflare/logins.md) - Google and passkey sign-in
+- [Quest log theme](/quest/a0/theme/README.md) - the demo is recorded after the themed board, landing page, and README land

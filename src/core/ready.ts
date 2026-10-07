@@ -42,8 +42,8 @@ export function renderBlocker(blocker: Blocker, depth = 0): string[] {
  * What blocks `path`, a required epic expanded into the quests it still
  * holds. Empty means ready; `null` means `path` is not a quest document.
  *
- * `path` is the quest as the tree writes it (`/quest/c0/one.md`) or as the
- * shell completes it (`quest/c0/one.md`).
+ * `path` is the quest as the tree writes it (`/quest/a0/one.md`) or as the
+ * shell completes it (`quest/a0/one.md`).
  */
 export function blockers(docs: Doc[], path: string): Blocker[] | null {
 	const byPath = new Map(docs.map((d) => [d.path, d]));
