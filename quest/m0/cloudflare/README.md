@@ -60,7 +60,7 @@ Decided while planning on 2026-10-01. Research sources:
 
 - [Fork intake](/quest/m0/cloudflare/intake.md) - contributor forks, the push gate, and claims and issues pulled into main
 - [Changes](/quest/m0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
-- [Quest board](/quest/m0/cloudflare/board.md) - browse the tree and see what is ready, blocked, or claimed
+- [Quest board](/quest/m0/cloudflare/board.md) - the board reads live projects from Artifacts, with changes, claims, issues, and maintainer actions
 - [Local runner](/quest/m0/cloudflare/run.md) - `quest run` claims a quest and runs Codex on the contributor's ChatGPT plan
 - [Hosted runs](/quest/m0/cloudflare/hosted.md) - fund a quest with a stored API key and run OpenCode in a Sandbox
 - [GitHub sync](/quest/m0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes

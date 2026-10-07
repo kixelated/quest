@@ -552,6 +552,8 @@ pre {
 .board-head .lede {
 	max-width: 48rem;
 	margin: 0 0 1.25rem;
+	font-size: 1.15rem;
+	font-weight: 400;
 }
 
 .tally {
