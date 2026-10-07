@@ -25,8 +25,8 @@ calling Better Auth's server API.
 an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
 SQLite Durable Object. The coordinator currently initializes its schema and
 exposes an internal status method. Repository authorization and creation,
-claims, changes, and the quest board, where the party offers gold to fund runs,
-belong to later quests; there are no public repository or token routes yet.
+claims, changes, and the quest board, where contributors offer gold (their own
+agent tokens) to fund runs, belong to later quests; there are no public repository or token routes yet.
 `cloudflare/` is an npm workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
 and readiness the CLI runs.

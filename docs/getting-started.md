@@ -46,14 +46,13 @@ quest ready
 ```
 
 Review the plan before setting out. `/quest-start` claims one quest and opens a
-draft pull request; `/quest-spawn` sends several agents out in
-parallel when your session supports them. Use `$quest-start` and
-`$quest-spawn` in Codex. Check for quests someone has already claimed on a
+draft pull request; `/quest-spawn` sends several agents out in parallel when
+your session supports them. Use `$quest-start` and `$quest-spawn` in Codex. Check for quests someone has already claimed on a
 branch or in an open PR; `quest ready` does not look for them.
 
-You review each change, and `/quest-merge` lands it once checks and reviews
-pass. The quest is complete, its plan leaves the tree, and the next quest
-becomes ready.
+You review each change, and `/quest-merge` (`$quest-merge` in Codex) merges it
+once checks and reviews pass. The quest is complete, its plan leaves the tree,
+and the quests that required it can become ready.
 
 ## Update or remove it
 

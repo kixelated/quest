@@ -29,8 +29,14 @@ Decided while planning on 2026-10-05:
   competition judging, so the
   [Cloudflare questline](/quest/m0/cloudflare/README.md) records its demo after
   this line lands. Aim to merge by 2026-10-12.
-- One display glossary is shared by every surface. No XP, levels,
+- One display glossary is shared by the site, board, and CLI. No XP, levels,
   achievements, or leaderboards; they add state for little demo value.
+- Decided 2026-10-07: README.md, `docs/getting-started.md`, and
+  `cloudflare/README.md` use the format's own terms (quest, questline,
+  milestone, ready, blocked, `Required`, `Goal`, claim) with no display-name
+  aliases. Their voice, hook, logo, and flavour (the party, gold) stay. The
+  final pass aligns `docs/theme.md`, which still lists copy among the glossary
+  users.
 - `docs/theme.md` is the human source of truth for the glossary, markers,
   colours, palette, type, and mark (`docs/theme/`). The CLI and the Worker
   each keep a small constant table that cites it. The roughly ten strings

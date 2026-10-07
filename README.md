@@ -7,9 +7,9 @@
 Readable plans, explicit dependencies, and reviewable Git changes. Quest keeps
 your plans in your repository, so you and your agents read, claim, and finish
 the same work. Each **quest** is a Markdown file scoped to one pull request: its
-goal, what has been decided, and what stands in the way. A small
-TypeScript CLI checks the links and dependencies. Skills help Claude Code and
-Codex plan the work and set out on it.
+goal, what has been decided, and what stands in the way. A small TypeScript CLI
+checks the links and dependencies. Skills help Claude Code and Codex plan the
+work and set out on it.
 
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
@@ -52,13 +52,13 @@ quest/
 ```
 
 Folders are **questlines**. A README's `Required` lists its children in
-priority order, beside any other dependencies, and the README becomes its own
-quest once its children have landed. The top folders (`m0`, `m1`, ...) are
-**milestones** that give the work a delivery horizon.
+priority order, beside any other dependencies. The README is the questline's
+own quest, and it becomes ready once its children have merged. The top folders
+(`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
-on it, and the next quest becomes ready. The finished plan stays in Git
-history, beside the code that completed it.
+on it, so the quests that required it can become ready. The finished plan stays
+in Git history, beside the code that completed it.
 
 An optional `Claim` section marks a quest as claimed. Its single bullet names
 the claimant, their identity provider, fork or branch, and date; forges may
@@ -95,12 +95,12 @@ quest/m0/export.md
 ```
 
 With no path, `ready` lists every ready quest. Given a path, it prints what
-blocks that quest, with an explanation on stderr; no blockers means no
-stdout. It exits zero for both ready and blocked quests; a nonzero exit
-means the command failed. Run `check` first to catch malformed plans. `ready`
-skips quests claimed through a `Claim` section, but it does not look for
-branch claims or open PRs, so check those before you claim a quest someone
-else may already be on.
+blocks that quest, with an explanation on stderr; no blockers means no stdout.
+It exits zero for both ready and blocked quests; a nonzero exit means the
+command failed. Run `check` first to catch malformed plans. `ready` skips
+quests claimed through a `Claim` section and reports the claim as the blocker
+for a claimed quest's path. It does not look for branch claims or open PRs, so
+check those before you claim a quest someone else may already be on.
 
 ## Work with your agents
 
@@ -117,7 +117,7 @@ the version you pin decides what your agents follow:
 | `quest-start` | Claim a ready quest, complete it, and open a draft PR. |
 | `quest-spawn` | Triage ready quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
-| `quest-merge` | Land a quest's PR once CI and reviews pass, completing the quest. |
+| `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 

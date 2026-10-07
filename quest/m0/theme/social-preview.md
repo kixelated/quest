@@ -12,9 +12,8 @@ delete this quest once it returns `true`.
 
 ## Plan
 
-- Decided on 2026-10-05: this quest covers only the upload. The repository
-  description, topics, and homepage were set separately with `gh repo edit`
-  on 2026-10-07.
+- This quest covers only the upload; the description, topics, and homepage
+  were set with `gh repo edit` on 2026-10-07.
 - As a human-action quest it resurfaces at every triage once ready, and the
   upload takes a minute.
 - `og.png` was re-exported in the "illuminated ledger" identity on
