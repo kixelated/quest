@@ -1,8 +1,8 @@
 # Quest Worker
 
 A deployable foundation for Quest on Cloudflare, and the site at
-`https://kixel.quest`. Hono serves HTML directly, so there is no client
-bundle. Every page renders inside the shared layout in `src/layout.tsx`, which
+`https://kixel.quest`: the quest log for your repo and your agents, on the web.
+Hono serves HTML directly, so there is no client bundle. Every page renders inside the shared layout in `src/layout.tsx`, which
 follows [the quest log theme](../docs/theme.md): the home page (`src/home.tsx`),
 the docs under `/docs` (`src/docs.tsx`), sign-in in the nav, and the not-found
 page. Later pages, such as the board, use the same layout.
@@ -23,9 +23,10 @@ calling Better Auth's server API.
 `ARTIFACTS` points at one namespace per deployment, with each project stored as
 an Artifacts repository. `REPOSITORIES.getByName(artifactsRepoName)` selects its
 SQLite Durable Object. The coordinator currently initializes its schema and
-exposes an internal status method. Repository authorization, creation, claims,
-changes, and the board belong to later quests; there are no public repository
-or token routes yet. `cloudflare/` is an npm workspace of the repository root,
+exposes an internal status method. Repository authorization and creation,
+accepting quests (claims), changes, and the quest board, where the party offers
+gold to fund runs, belong to later quests; there are no public repository or
+token routes yet. `cloudflare/` is an npm workspace of the repository root,
 so the Worker imports the CLI's core as `quest/core` (`../src/core`), the same
 parser, checks, and readiness the CLI runs.
 

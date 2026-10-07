@@ -1,5 +1,9 @@
 # Use Quest in your repository
 
+Give your repository a quest log that you and your agents share: plans as
+Markdown files, dependencies that `quest check` keeps honest, and work that
+arrives as pull requests you review.
+
 The binary carries the skills and the quest guide, so your repository only pins a
 version and installs small stubs that call it.
 
@@ -17,9 +21,10 @@ nix flake, run `quest init`, and fit Quest into your root `AGENTS.md` or
 starting with `Quests: ` in your root instructions; reword the rest of that
 line freely, since init and uninstall recognize it by the prefix.
 
-## Start a roadmap
+## Start your quest log
 
-If `quest init` created an empty root, edit `quest/README.md`:
+If `quest init` created an empty root, give it objectives in `quest/README.md`.
+The heading stays `Goal`, the format's name for them:
 
 ```markdown
 # Quests
@@ -30,21 +35,27 @@ What this project is working toward.
 ```
 
 Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome you
-want to work toward. The skill helps settle the scope, then creates milestones,
-quests, and dependencies. See the
+want to work toward. The skill helps settle the scope, then writes the quests,
+grouped into quest chains and chapters (questlines and milestones, in
+`quest guide`), with what each one requires. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
-From your repository root, validate the result and look for ready work:
+From your repository root, validate the result and list the available quests:
 
 ```sh
 quest check
 quest ready
 ```
 
-Review the plan before starting it. `/quest-start` works on one quest;
-`/quest-spawn` coordinates multiple agents when your session supports them.
-Use `$quest-start` and `$quest-spawn` in Codex. Existing branch claims and PRs
-still need checking; `quest ready` does not look for them.
+Review the plan before setting out. `/quest-start` accepts one quest and turns
+it in as a draft pull request; `/quest-spawn` sends several agents out in
+parallel when your session supports them. Use `$quest-start` and
+`$quest-spawn` in Codex. Check for quests someone has already accepted on a
+branch or in an open PR; `quest ready` does not look for them.
+
+You review each change, and `/quest-merge` lands it once checks and reviews
+pass. The quest is complete, its plan leaves the tree, and the next quest
+becomes available.
 
 ## Update or remove it
 

@@ -1,11 +1,15 @@
+<p align="center"><img src="docs/theme/logo.svg" alt="" width="96" height="96"></p>
+
 # Quest
 
-A backlog you can branch, review, and merge.
+**A quest log for your repo and your agents.**
 
-Quest puts plans in your repository. Each **quest** is a Markdown file scoped to
-one pull request: what needs to happen, what has been decided, and what is in the
-way. A small TypeScript CLI checks the links and dependencies. Skills help
-Claude Code and Codex plan the work and pick it up.
+Readable plans, explicit dependencies, and reviewable Git changes. Quest keeps
+your plans in your repository, so you and your agents read, accept, and finish
+the same work. Each **quest** is a Markdown file scoped to one pull request: its
+objectives, what has been decided, and what stands in the way. A small
+TypeScript CLI checks the links and dependencies. Skills help Claude Code and
+Codex plan the work and set out on it.
 
 It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
@@ -14,7 +18,7 @@ version, being built for use in other repositories.
 execution, merge, and export skills are here. Release binaries are still being
 built.
 
-## A quest is just a file
+## Every plan is a file
 
 ```markdown
 # [S] Add a download button
@@ -36,29 +40,32 @@ Use the export endpoint. Show progress and let the user retry a failed download.
 - [CSV endpoint](/quest/m0/export.md) - the button needs something to call
 ```
 
-That file sits in a tree:
+That file sits in your quest log, a tree under `quest/`:
 
 ```text
 quest/
   README.md           # The roadmap
   m0/
-    README.md         # First milestone, in priority order
-    export.md         # Ready to start
-    download.md       # Waiting on export.md
+    README.md         # Chapter one, in priority order
+    export.md         # Available
+    download.md       # Requires: export.md
 ```
 
-Folders are **questlines**. A README's `Required` lists its children in
-priority order, beside any other dependencies. Milestones (`m0`, `m1`, ...)
-give the work a delivery horizon. A questline's README becomes its own quest
-once its children have landed.
+Folders are **quest chains**. A README's `Required` lists its children in
+priority order, beside any other dependencies, and the README becomes its own
+quest once its children have landed. The top folders (`m0`, `m1`, ...) are
+**chapters** that give the work a delivery horizon. Quest files and
+`quest guide` call these questlines and milestones; this page uses the
+[quest log's display names](docs/theme.md#glossary).
 
-When a quest lands, its PR removes the plan and the links that depended on it.
-The next task becomes ready. The finished plan stays in Git history, beside the
-code that completed it.
+When a quest is complete, its PR removes the plan and the links that depended
+on it, and the next quest becomes available. The finished plan stays in Git
+history, beside the code that completed it.
 
-An optional `Claim` section marks work taken. Its single bullet names the
-claimant, identity provider, fork or branch, and date; forges may append fields.
-Remove the section to release it. The CLI leaves expiry policy to the forge.
+An optional `Claim` section marks a quest as accepted. Its single bullet names
+who accepted it, their identity provider, fork or branch, and date; forges may
+append fields. Remove the section to release the quest. The CLI leaves expiry
+policy to the forge.
 
 ## Try it
 
@@ -89,14 +96,15 @@ $ quest --root examples/export ready quest/m0/download.md
 quest/m0/export.md
 ```
 
-`ready` prints blockers, with an explanation on stderr. No blockers means no
-stdout. It exits zero for both ready and blocked quests; a nonzero exit means
-the command failed. Run `check` first to catch malformed plans. `ready`
-excludes quests with a `Claim` section. It does not look for branch claims or
-PRs, so check those before starting a quest someone else may already be working
-on.
+With no path, `ready` lists every available quest. Given a path, it prints what
+that quest requires, with an explanation on stderr; no blockers means no
+stdout. It exits zero for both available and blocked quests; a nonzero exit
+means the command failed. Run `check` first to catch malformed plans. `ready`
+skips quests accepted through a `Claim` section, but it does not look for
+branch claims or open PRs, so check those before you accept a quest someone
+else may already be on.
 
-## Work with an agent
+## Work with your agents
 
 Open this repository in Claude Code or Codex. The binary carries the skills;
 a repository installs only a stub per skill that runs `quest skill <name>`, so
@@ -108,16 +116,17 @@ the version you pin decides what your agents follow:
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
-| `quest-start` | Claim a ready quest, implement it, and prepare a PR. |
-| `quest-spawn` | Triage ready quests and hand them to parallel agents. |
+| `quest-start` | Accept an available quest, complete it, and turn it in as a draft PR. |
+| `quest-spawn` | Triage available quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
-| `quest-merge` | Land a quest's PR once CI and reviews pass. |
+| `quest-merge` | Land a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
-within your agent session. Starting work stops at a PR; merging is a separate
-invocation.
+within your agent session. A started quest stops when it is ready to turn in,
+as a pull request; merging is a separate invocation, so you review every
+change.
 
 To use Quest in your own repository, paste this into your agent:
 
@@ -136,9 +145,16 @@ losing your plans. The binary carries the skills, your tool manager (mise or nix
 pins its version, and your repository's instructions stay yours. macOS and Linux
 come first; [native Windows](quest/m1/windows.md) follows later.
 
-The [first release plan](quest/m0/README.md) lists what is left.
+The release also brings a quest board to [kixel.quest](https://kixel.quest).
+Contributors sign in, accept an available quest, and offer gold, their own agent
+tokens, to run it; maintainers review and merge the result there, synced
+with GitHub. [Chapter one](quest/m0/README.md) lists the quests that remain.
 
-## Hack on it
+## Join the party
+
+Quest is planned in the open with Quest itself: [its quest log](quest/README.md)
+is the backlog, and contributors accept quests from the same log their agents
+read. To work on Quest:
 
 ```sh
 nix develop
