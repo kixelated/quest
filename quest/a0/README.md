@@ -23,9 +23,10 @@ ownership-manifest design:
 - The repository's own tool manager pins the version: mise (release binaries)
   or a nix flake input (any rev, built from source). Quest ships no launcher
   and no pin file; an install outside either is simply unpinned.
-- The CLI is offline except `quest run` (amended 2026-10-01 for Quest on
-  Cloudflare). Anything touching GitHub (issue import and export, branch
-  claims, merging) lives in skills.
+- The CLI may call GitHub (amended 2026-10-07, replacing "offline except
+  `quest run`" after agents' hand-rolled polling tripped GitHub's rate
+  limits). Prefer offline, deterministic commands, and keep GitHub calls in
+  the CLI rather than skill prose.
 - Repository-specific rules stay in the repository's own root instructions.
 
 ## Required
@@ -36,4 +37,5 @@ ownership-manifest design:
 - [Atomic init](/quest/a0/init-atomic.md) - init refuses before writing on path-type conflicts too
 - [Path collisions](/quest/a0/path-collision.md) - `quest check` flags a quest and an epic that share a path
 - [Link decoding](/quest/a0/link-decode.md) - the core percent-decodes link targets, so names with `#`, `%`, or spaces can be linked
+- [PR waits](/quest/a0/wait.md) - `quest wait` blocks until a PR has new activity, replacing the skills' hand-rolled polling
 - [Launch material](/quest/a0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
