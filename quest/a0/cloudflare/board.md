@@ -3,9 +3,9 @@
 ## Goal
 
 The quest board at `/repos/<name>` reads each project's tree from Artifacts
-instead of the build-time snapshot of this repository. It shows open changes,
-branch claims, and the quarantined `issues/` files, and a maintainer can
-release a claim and promote an issue from it.
+instead of the build-time snapshot of this repository. It shows open changes
+and the quarantined `issues/` files, and a maintainer can promote an issue
+from it.
 
 ## Plan
 
@@ -24,10 +24,12 @@ release a claim and promote an issue from it.
 - Who may see a project and who counts as its maintainer come from the
   repository registry that intake adds.
 - "Offer gold" shows on ready quests; signed-in contributors see it
-  disabled until [hosted runs](/quest/a0/cloudflare/hosted.md) wire it.
+  disabled until the [Sandbox runner](/quest/a0/cloudflare/runners/sandbox.md) wires it.
+- Active work comes later from runner locks
+  ([protocol](/quest/a0/cloudflare/runners/protocol.md)), not claims.
 
 ## Required
 
 - [GitHub sync](/quest/a0/cloudflare/github-sync.md) - mirrors repositories into Artifacts and caches finished quests
-- [Fork intake](/quest/a0/cloudflare/intake.md) - the registry, claims, issues, and maintainer actions
+- [Fork intake](/quest/a0/cloudflare/intake.md) - the registry, issues, and maintainer actions
 - [Changes](/quest/a0/cloudflare/changes.md) - the open changes shown on the board
