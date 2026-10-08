@@ -16,7 +16,8 @@ the quest, or, on GitHub, the existing branch claim.
   The user wants no durable markers, because a crashed session's announcement
   clears itself while a claim needs expiry.
 - The user authorized editing `assets/` (the guide and skills) for this.
-- Same PR: shrink [fork intake](/quest/a0/cloudflare/intake.md) and
-  [changes](/quest/a0/cloudflare/changes.md) where they mention claims. Draft
-  PR #40 then drops its claim promotion, 48h expiry, and claim Durable Object
-  before it merges.
+- [Fork intake](/quest/a0/cloudflare/intake.md) already shrank to issues in
+  the planning PR. Confirm that draft PR #40 (head
+  `quest/m0/cloudflare/intake`) drops its claim promotion, 48h expiry, and
+  claim Durable Object before it merges, and remove any claim code that
+  already landed on main.

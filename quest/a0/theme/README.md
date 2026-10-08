@@ -21,7 +21,8 @@ wording in this README's `Required` list.
 It also replaces the display aliases on the board, the home page, and
 `cloudflare/README.md` with format terms: Available and `?show=available`
 become ready, the Requires status and filter become blocked, Accepted by
-becomes claimed by, the Requires heading becomes `Required`, Ready to turn in
+becomes active (a live runner lock, since claims are
+[removed](/quest/a0/cloudflare/remove-claims.md)), the Requires heading becomes `Required`, Ready to turn in
 becomes in review, Quest complete becomes complete, and Objectives and Rewards
 become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
 marker and palette notes to match, keeping only the flavour rows (the party,
@@ -57,8 +58,8 @@ Decided while planning on 2026-10-05:
   [Cloudflare epic](/quest/a0/cloudflare/README.md) records its demo after
   this epic lands. Aim to merge by 2026-10-12.
 - Decided 2026-10-07: every surface (site, board, map, and CLI) names format
-  concepts with the format's own terms: ready, blocked, `Required`, and
-  claimed. There are no display aliases (Available, Requires, Accepted by,
+  concepts with the format's own terms: ready, blocked, and `Required`
+  (claimed dropped 2026-10-07 with claims). There are no display aliases (Available, Requires, Accepted by,
   Objectives, Rewards). Markers, size colours, the voice, and the flavour
   (gold, the party) stay. The user weighed RPG replacements (unlocked/locked,
   accepted, Objective/Prerequisites) and kept the current terms. Renaming
@@ -72,7 +73,7 @@ Decided while planning on 2026-10-05:
   value.
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
   `cloudflare/README.md` use the format's own terms (quest, epic,
-  act, ready, blocked, `Required`, `Goal`, claim) with no display-name
+  act, ready, blocked, `Required`, `Goal`) with no display-name
   aliases. Their voice, hook, logo, and flavour (the party, gold) stay. The
   final pass aligns `design/theme.md`, which still lists copy among the glossary
   users.

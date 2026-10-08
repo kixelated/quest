@@ -67,6 +67,8 @@ hashes, so a change's build can't overwrite main's paths.
   fresh worktree under their own native sandbox (bubblewrap or Seatbelt).
   Runners require Nix 2.34.5 or later (CVE-2026-39860). microVMs for untrusted
   donors are [a1](/quest/a1/donor-isolation.md).
+- First projects: moq-dev/moq and kixelated/quest; any repository with a
+  flake works.
 - Both backends ship in a0, despite the 2026-10-14 deadline, because live
   multi-runner coordination is the demo's agent-collaboration story.
 

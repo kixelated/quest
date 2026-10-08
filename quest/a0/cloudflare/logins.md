@@ -3,4 +3,4 @@
 ## Goal
 
 People can sign in with Google or a passkey as well as GitHub. Attribution in
-claims and issues names the provider. This may slip past the competition demo.
+issues and changes names the provider. This may slip past the competition demo.

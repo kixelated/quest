@@ -30,3 +30,7 @@ any runner's.
 
 - [Runner daemon](/quest/a0/cloudflare/runners/daemon.md) - the job code the Sandbox reuses
 - [Changes](/quest/a0/cloudflare/changes.md) - where results land
+- [Flake checks](/quest/a0/cloudflare/runners/checks.md) - the check job it falls back for
+- [Agent reviews](/quest/a0/cloudflare/runners/review.md) - the review job it falls back for
+- [Runner merges](/quest/a0/cloudflare/runners/merge.md) - the merge job it falls back for
+- [Quest board](/quest/a0/cloudflare/board.md) - where "Offer gold" lives
