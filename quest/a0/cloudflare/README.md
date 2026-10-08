@@ -61,7 +61,6 @@ Decided while planning on 2026-10-01. Research sources:
 
 ## Required
 
-- [Remove claims](/quest/a0/cloudflare/remove-claims.md) - `## Claim` leaves the format; locks and open changes replace it
 - [Fork intake](/quest/a0/cloudflare/intake.md) - contributor forks, the push gate, and issues pulled into main
 - [Changes](/quest/a0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
 - [Board links](/quest/a0/cloudflare/board-links.md) - encoded board URLs and GitHub links pinned to the snapshot commit

@@ -34,71 +34,22 @@ test("an empty permanent root is valid and has no ready work", () => {
 
 const CLAIM = "\n## Claim\n\n- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02";
 
-describe("claims", () => {
-	test("a claim blocks readiness and the CLI reports the claimant", () => {
-		const t = tree().append("quest/a0/epic/one.md", CLAIM);
-		t.accepts();
-		expect(t.ready()).toEqual([]);
-		expect(t.blockers("quest/a0/epic/one.md")).toEqual([
-			"claimed by Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02",
-		]);
-		const out = t.run("ready", "quest/a0/epic/one.md");
-		expect(out.code).toBe(0);
-		expect(out.stdout).toContain("claimed by Jane Doe");
-		expect(out.stderr).toContain("claimed by Jane Doe");
-		t.write("quest/a0/epic/one.md", ONE);
-		expect(t.ready()).toEqual(["quest/a0/epic/one.md"]);
-	});
+describe("retired claims", () => {
+	test.each([CLAIM, "\n## Claim\n", "\n## Claim\n\n- Jane\n"])(
+		"a Claim section is unknown and does not block readiness: %j",
+		(claim) => {
+			const t = tree().append("quest/a0/epic/one.md", claim);
+			t.rejects("unknown '## Claim'");
+			expect(t.ready()).toEqual(["quest/a0/epic/one.md"]);
+			expect(t.blockers("quest/a0/epic/one.md")).toEqual([]);
+			expect(t.run("ready", "quest/a0/epic/one.md")).toEqual({ code: 0, stdout: "", stderr: "" });
+		},
+	);
 
-	test.each([
-		"- Jane Doe (gitlab:jdoe) on quest/a0/epic/one since 2024-02-29 expires=2024-03-01",
-		"- Jane (Team) Doe (github:jdoe) on fork since 2026-10-02",
-		'- Jane Doe (github:jdoe) on fork since 2026-10-02 note="running since yesterday"',
-		"- **Jane Doe** (custom-forge:user@host) on <https://example.com/fork>\n  since 1999-12-31 run=123",
-	])("the envelope is forge independent and extensible: %s", (claim) => {
-		const t = tree().append("quest/a0/epic/one.md", `\n## Claim\n\n${claim}\n`);
-		t.accepts();
-		expect(t.ready()).toEqual([]);
-	});
-
-	test.each([
-		"- Jane Doe on fork since 2026-10-02",
-		"- Jane Doe (:jdoe) on fork since 2026-10-02",
-		"- Jane Doe (github:) on fork since 2026-10-02",
-		"- Jane Doe (github:jdoe) on  since 2026-10-02",
-		"- Jane Doe (github:jdoe) on fork",
-		"- Jane Doe (github:jdoe) on fork since 2026-02-29",
-		"- Jane Doe (github:jdoe) on fork since 2026-13-01",
-		"- Jane Doe (github:jdoe) on fork since 2026-10-00",
-		"- Jane Doe (github:jdoe) on fork since 明日",
-	])("a malformed envelope is rejected but still blocks: %s", (claim) => {
-		const t = tree().append("quest/a0/epic/one.md", `\n## Claim\n\n${claim}\n`);
-		t.rejects("claim must name a claimant");
-		expect(t.ready()).toEqual([]);
-		expect(t.blockers("quest/a0/epic/one.md")).not.toEqual([]);
-	});
-
-	test.each([
-		"\n## Claim\n",
-		"\n## Claim\n\nClaimed by Jane\n",
-		"\n## Claim\n\n> - Jane (github:jane) on fork since 2026-10-02\n",
-		"\n## Claim\n\n- Jane\n- John\n",
-		"\n## Claim\n\n- Jane (github:jane) on fork since 2026-10-02\n  - John\n",
-		"\n## Claim\n\nProse\n\n- Jane (github:jane) on fork since 2026-10-02\n",
-		"\n## Claim\n\n- Jane\n\n## Claim\n\n- John\n",
-	])("a claim needs one list item in one section: %j", (claim) => {
-		const t = tree().append("quest/a0/epic/one.md", claim);
-		t.rejects("'## Claim' must contain exactly one list item");
-		expect(t.ready()).toEqual([]);
-		expect(t.blockers("quest/a0/epic/one.md")).not.toEqual([]);
-	});
-
-	test("a claim and dependencies both block", () => {
+	test("Required entries remain the only blockers when a legacy claim exists", () => {
 		const t = tree().append("quest/a0/epic/two.md", CLAIM);
-		t.accepts();
-		const found = t.blockers("quest/a0/epic/two.md");
-		expect(found).toHaveLength(2);
-		expect(found[1]).toBe("quest/a0/epic/one.md");
+		t.rejects("unknown '## Claim'");
+		expect(t.blockers("quest/a0/epic/two.md")).toEqual(["quest/a0/epic/one.md"]);
 	});
 });
 
@@ -672,15 +623,6 @@ describe("parser parity", () => {
 		tree()
 			.append("quest/a0/epic/one.md", "\n## Related\n\n- [Two](//quest/a0/epic/two.md) - same file, wrong link\n")
 			.rejects("link does not resolve: //quest/a0/epic/two.md");
-	});
-
-	test("a claim with a block after its date is rejected", () => {
-		tree()
-			.append(
-				"quest/a0/epic/one.md",
-				"\n## Claim\n\n- Jane Doe (github:jdoe) on fork since 2026-10-02\n\n  More.\n",
-			)
-			.rejects("claim must name a claimant");
 	});
 
 	// grep sees a CR-only file as one line, so `^## Required$` matches nothing

@@ -137,7 +137,7 @@ export function Home(props: { setup: string; board: Board }) {
 					</li>
 					<li>
 						<p class="state">Accepted by @agent</p>
-						<p>Pushing a quest's branch claims it, so the next agent picks something else.</p>
+						<p>A live runner lock takes active work. On GitHub, pushing the quest's branch claims it.</p>
 					</li>
 					<li>
 						<p class="state ql-turn-in">

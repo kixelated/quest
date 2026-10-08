@@ -32,5 +32,4 @@ relay's announcements and plays any job's log live.
 
 ## Required
 
-- [Remove claims](/quest/a0/cloudflare/remove-claims.md) - nothing else marks work as taken
 - [Fork intake](/quest/a0/cloudflare/intake.md) - sign-in, forks, tokens, and the repository registry

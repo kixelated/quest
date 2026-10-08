@@ -42,15 +42,15 @@ const status = (board: Board, path: string) => board.quests.get(path)?.status;
 describe("board model", () => {
 	const board = readBoard(project());
 
-	it("shows each quest's most advanced status", () => {
+	it("uses open changes and dependencies, ignoring legacy Claim sections", () => {
 		expect(status(board, "quest/a0/epic/ready.md")).toEqual({ kind: "available" });
 		expect(status(board, "quest/a0/epic/blocked.md")).toEqual({
 			kind: "blocked",
 			requires: [{ title: "Ready quest", href: "/repos/demo/quest/a0/epic/ready" }],
 		});
-		expect(status(board, "quest/a0/epic/taken.md")).toEqual({ kind: "accepted", by: "@jdoe", since: "2026-10-02" });
+		expect(status(board, "quest/a0/epic/taken.md")).toEqual({ kind: "available" });
 		expect(status(board, "quest/a0/epic/turned.md")?.kind).toBe("turn-in");
-		expect(board.counts).toEqual({ available: 3, blocked: 1, accepted: 1, "turn-in": 1 });
+		expect(board.counts).toEqual({ available: 4, blocked: 1, "turn-in": 1 });
 	});
 
 	it("groups acts and epics in priority order, then unlisted quests", () => {

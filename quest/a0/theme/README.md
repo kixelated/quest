@@ -21,8 +21,7 @@ wording in this README's `Required` list.
 It also replaces the display aliases on the board, the home page, and
 `cloudflare/README.md` with format terms: Available and `?show=available`
 become ready, the Requires status and filter become blocked, Accepted by
-becomes active (a live runner lock, since claims are
-[removed](/quest/a0/cloudflare/remove-claims.md)), the Requires heading becomes `Required`, Ready to turn in
+becomes active (a live runner lock), the Requires heading becomes `Required`, Ready to turn in
 becomes in review, Quest complete becomes complete, and Objectives and Rewards
 become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
 marker and palette notes to match, keeping only the flavour rows (the party,

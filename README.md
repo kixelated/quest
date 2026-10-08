@@ -31,10 +31,6 @@ People can download their data as a CSV from the settings page.
 
 Use the export endpoint. Show progress and let the user retry a failed download.
 
-## Claim
-
-- Jane Doe (github:jdoe) on https://example.com/jdoe/repo since 2026-10-02
-
 ## Required
 
 - [CSV endpoint](/quest/a0/export.md) - the button needs something to call
@@ -60,10 +56,10 @@ When a quest is complete, its PR removes the plan and the links that depended
 on it, so the quests that required it can become ready. The finished plan stays
 in Git history, beside the code that completed it.
 
-An optional `Claim` section marks a quest as claimed. Its single bullet names
-the claimant, their identity provider, fork or branch, and date; forges may
-append fields. Remove the section to release the claim. The CLI leaves expiry
-policy to the forge.
+Work is taken through a live runner lock or an open change on the forge.
+Quest on Cloudflare uses MoQ announcements to lock active work; crashed
+sessions clear their announcements automatically. On GitHub, a pushed quest
+branch claims the work. These states stay out of the plan file.
 
 ## Try it
 
@@ -100,8 +96,7 @@ $ quest --root examples/export ready quest/a0/download.md
 With no path, `ready` lists every ready quest. Given a path, it shows what
 blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
 `!` a blocked one, and each size label takes its colour: XS grey, S green,
-M yellow, L red, and XL purple. A claimed quest has no marker and shows
-`Claimed by` its claimant. Set `NO_COLOR` to keep the layout without colours.
+M yellow, L red, and XL purple. Set `NO_COLOR` to keep the layout without colours.
 
 Scripts and agents read the piped form, which is plain text:
 
@@ -116,10 +111,9 @@ quest/a0/export.md
 Piped, `ready` prints one path per line. Given a path, it prints that quest's
 blockers, with an explanation on stderr; no blockers means no stdout.
 It exits zero for both ready and blocked quests; a nonzero exit means the
-command failed. Run `check` first to catch malformed plans. `ready` skips
-quests claimed through a `Claim` section and reports the claim as the blocker
-for a claimed quest's path. It does not look for branch claims or open PRs, so
-check those before you claim a quest someone else may already be on.
+command failed. Run `check` first to catch malformed plans. `ready` reads
+dependencies in the quest tree; it does not inspect live runner locks, open changes, or GitHub branch
+claims. Check those before you start work someone else may already be on.
 
 ## Work with your agents
 
@@ -162,8 +156,8 @@ pins its version, and your repository's instructions stay yours. macOS and Linux
 come first; [native Windows](quest/a1/windows.md) follows later.
 
 The release also brings a quest board to [kixel.quest](https://kixel.quest).
-Contributors sign in, claim a ready quest, and offer gold, their own agent
-tokens, to run it; maintainers review and merge the result there, synced
+Contributors sign in, take a ready quest through a live runner lock, and offer
+gold, their own agent tokens, to run it; maintainers review and merge the result there, synced
 with GitHub. [The first act](quest/a0/README.md) lists the quests that
 remain.
 
