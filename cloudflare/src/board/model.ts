@@ -83,15 +83,20 @@ export function title(text: string): { size: Size | null; name: string } {
 export function questHref(project: Project, path: string): string {
 	if (path === ROOT) return `/repos/${project.name}`;
 	const page = path.replace(/\/README\.md$/, "").replace(/\.md$/, "");
-	return `/repos/${project.name}/${page}`;
+	return `/repos/${project.name}/${encodePath(page)}`;
 }
 
 /**
  * A file on the project's forge, or `null` when the project has no web address.
- * `path` is used as written: it may carry a `#fragment` and is not encoded.
+ * Paths are literal filenames; pass a `#fragment` separately so a filename's
+ * `#` is encoded and the fragment remains a fragment.
  */
-export function blobHref(project: Project, path: string): string | null {
-	return project.web ? `${project.web}/blob/main/${path}` : null;
+export function blobHref(project: Project, path: string, fragment = ""): string | null {
+	return project.web ? `${project.web}/blob/${project.commit}/${encodePath(path)}${fragment}` : null;
+}
+
+function encodePath(path: string): string {
+	return path.split("/").map(encodeURIComponent).join("/");
 }
 
 /** An act's section on its board page: its directory name, such as `a0`. */

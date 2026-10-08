@@ -25,7 +25,7 @@ export function rewrite(project: Project, from: string, href: string, known: (pa
 	const target = normalize(path.startsWith("/") ? path.slice(1) : `${from.slice(0, from.lastIndexOf("/"))}/${path}`);
 	if (target === "" || target.startsWith("..")) return null;
 	if (known(target)) return questHref(project, target) + hash;
-	return blobHref(project, `${target}${hash}`);
+	return blobHref(project, target, hash);
 }
 
 /** The document's `## ` sections in order, each rendered to HTML. The `# ` title is left to the page. */

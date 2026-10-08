@@ -86,8 +86,16 @@ app.get("/repos/:repository", (c) => {
 });
 app.get("/repos/:repository/quest/*", (c) => {
 	const found = board(c.req.param("repository"));
-	const prefix = `/repos/${c.req.param("repository")}/`;
-	const doc = found && findQuest(found, c.req.path.slice(prefix.length));
+	// Hono's routing path has already decoded some escapes. Start from the
+	// original URL so a literal percent escape in a filename is decoded once.
+	let segments: string[];
+	try {
+		segments = new URL(c.req.url).pathname.split("/").slice(3).map(decodeURIComponent);
+	} catch {
+		return c.notFound();
+	}
+	if (segments.some((segment) => segment.includes("/"))) return c.notFound();
+	const doc = found && findQuest(found, segments.join("/"));
 	if (!found || !doc) return c.notFound();
 	const href = `/repos/${found.project.name}`;
 	if (doc.path === "quest/README.md") return c.redirect(href);
