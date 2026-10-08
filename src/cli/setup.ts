@@ -38,10 +38,12 @@ const QUEST_ROOT_README = "# Quests\n\n## Goal\n\nWhat this project is working t
  * A conflict throws before anything is written, so a refused init leaves the repository as it was.
  */
 export function init(root: string): string[] {
+	for (const dir of SKILL_DIRS) checkPath(root, dirname(dir), "directory");
 	const { real, link } = skillDirs(root);
 	const missing = SKILLS.filter((skill) => {
 		const dir = `${real}/${skill.installed}`;
 		const path = `${dir}/SKILL.md`;
+		checkPath(root, path, "file");
 		if (isFile(join(root, path))) {
 			if (read(root, path) === skill.stub) return false;
 			throw new Error(`${path} is not a Quest stub; remove or rename it before running \`quest init\``);
@@ -50,6 +52,10 @@ export function init(root: string): string[] {
 		}
 		return true;
 	});
+	const readme = "quest/README.md";
+	checkPath(root, readme, "file");
+	const instructions = ["AGENTS.md", "CLAUDE.md"].find((name) => isFile(join(root, name))) ?? "AGENTS.md";
+	checkPath(root, instructions, "file");
 
 	const changes: string[] = [];
 	mkdirSync(join(root, real), { recursive: true });
@@ -66,16 +72,30 @@ export function init(root: string): string[] {
 		changes.push(`${dir}/SKILL.md`);
 	}
 
-	const readme = "quest/README.md";
 	if (!existsSync(join(root, readme))) {
 		mkdirSync(join(root, "quest"), { recursive: true });
 		writeFileSync(join(root, readme), QUEST_ROOT_README);
 		changes.push(readme);
 	}
 
-	const instructions = ["AGENTS.md", "CLAUDE.md"].find((name) => isFile(join(root, name))) ?? "AGENTS.md";
 	if (appendLine(root, instructions, REFERENCE_MARKER, REFERENCE_LINE)) changes.push(instructions);
 	return changes;
+}
+
+/** Check an install destination and its parents before any writes, following valid symlinks. */
+function checkPath(root: string, path: string, expected: "directory" | "file"): void {
+	const parent = dirname(path);
+	if (parent !== ".") checkPath(root, parent, "directory");
+	const absolute = join(root, path);
+	let stat;
+	try {
+		stat = statSync(absolute);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		if (kind(absolute) === null) return;
+	}
+	if (expected === "directory" ? stat?.isDirectory() : stat?.isFile()) return;
+	throw new Error(`${path} is not a ${expected}; remove or rename it before running \`quest init\``);
 }
 
 /** Remove Quest stubs and markers under `root`. Returns the paths it changed, relative to `root`. */

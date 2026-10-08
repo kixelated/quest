@@ -1,7 +1,16 @@
 // `quest init` and `quest uninstall` in temporary repositories.
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	readlinkSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 
 import { expect, test } from "vitest";
 
@@ -41,11 +50,59 @@ test("a refused init writes nothing", () => {
 	writeFileSync(join(dir, "CLAUDE.md"), "# Claude\n");
 	mkdirSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
 	writeFileSync(join(dir, ".claude/skills/quest-start/SKILL.md"), "# My workflow\n");
+	const before = snapshot(dir);
 	expect(() => init(dir)).toThrow(".claude/skills/quest-start/SKILL.md is not a Quest stub");
-	expect(readdirSync(join(dir, ".claude/skills"))).toEqual(["quest-start"]);
-	expect(existsSync(join(dir, ".agents"))).toBe(false);
-	expect(existsSync(join(dir, "quest"))).toBe(false);
-	expect(read(dir, "CLAUDE.md")).toBe("# Claude\n");
+	expect(snapshot(dir)).toEqual(before);
+});
+
+/** Capture paths, types, file bytes, and link targets without following symlinks. */
+function snapshot(dir: string): unknown[] {
+	return readdirSync(dir)
+		.sort()
+		.map((name) => {
+			const path = join(dir, name);
+			const stat = lstatSync(path);
+			if (stat.isSymbolicLink()) return [name, "symlink", readlinkSync(path)];
+			if (stat.isDirectory()) return [name, "directory", snapshot(path)];
+			return [name, "file", readFileSync(path)];
+		});
+}
+
+test.each([
+	["quest", "file"],
+	["quest", "symlink"],
+	["quest/README.md", "directory"],
+	["quest/README.md", "symlink"],
+	[".agents", "file"],
+	[".agents", "symlink"],
+	[".claude", "file"],
+	[".claude/skills/quest-start", "file"],
+	[".claude/skills/quest-start", "symlink"],
+	[".claude/skills/quest-start/SKILL.md", "directory"],
+	[".claude/skills/quest-start/SKILL.md", "symlink"],
+	["AGENTS.md", "directory"],
+	["AGENTS.md", "symlink"],
+])("init refuses %s as a %s before writing anything", (path, type) => {
+	const dir = tempDir();
+	const conflict = join(dir, path);
+	mkdirSync(dirname(conflict), { recursive: true });
+	if (type === "directory") mkdirSync(conflict);
+	else if (type === "symlink") symlinkSync("missing.md", conflict);
+	else writeFileSync(conflict, "Keep these bytes.\n");
+	const before = snapshot(dir);
+	expect(() => init(dir)).toThrow(`${path} is not a`);
+	expect(snapshot(dir)).toEqual(before);
+});
+
+test.each(["directory", "symlink"])("init uses CLAUDE.md when AGENTS.md is a %s", (type) => {
+	const dir = tempDir();
+	writeFileSync(join(dir, "CLAUDE.md"), "# Claude\n");
+	if (type === "directory") mkdirSync(join(dir, "AGENTS.md"));
+	else symlinkSync("missing.md", join(dir, "AGENTS.md"));
+	init(dir);
+	expect(read(dir, "CLAUDE.md")).toContain(REFERENCE_LINE);
+	expect(existsSync(join(dir, "missing.md"))).toBe(false);
+	expect(lstatSync(join(dir, "AGENTS.md")).isDirectory()).toBe(type === "directory");
 });
 
 test("init appends to AGENTS.md, not CLAUDE.md, when both exist", () => {
