@@ -217,6 +217,28 @@ describe("headings", () => {
 });
 
 describe("index", () => {
+	test("a quest and an epic cannot share a page and branch path", () => {
+		const t = tree().write("quest/a0/epic.md", ONE).append("quest/a0/README.md", "- [Quest](/quest/a0/epic.md)\n");
+		const finding =
+			"quest/a0/epic.md: quest path collides with quest/a0/epic/README.md; rename one of these documents";
+		expect(t.findings()).toEqual([finding]);
+		expect(t.run("check")).toEqual({ code: 1, stdout: "", stderr: `quest: ${finding}\n` });
+	});
+
+	test("a collision persists after the epic's last child completes", () => {
+		tree()
+			.write("quest/a0/epic/one/README.md", ONE)
+			.append("quest/a0/epic/README.md", "- [Remaining epic](/quest/a0/epic/one/README.md)\n")
+			.rejects("quest/a0/epic/one.md: quest path collides with quest/a0/epic/one/README.md");
+	});
+
+	test("a README-named directory has a distinct path from its parent README", () => {
+		tree()
+			.write("quest/a0/epic/README/README.md", ONE)
+			.append("quest/a0/epic/README.md", "- [Nested](/quest/a0/epic/README/README.md)\n")
+			.accepts();
+	});
+
 	// A README whose last child merged is the epic's own remaining work: a leaf
 	// quest, sized and listed as ready like any other.
 	test("a README without an index is a quest", () => {

@@ -13,4 +13,23 @@ describe("quest/core", () => {
 		expect(check(docs, (path) => paths.has(path))).toEqual([]);
 		expect(ready(docs)).toEqual(["quest/one.md"]);
 	});
+
+	it("reports a quest and an epic that share a path", () => {
+		const docs = [
+			parse(
+				"quest/README.md",
+				"# Quests\n\n## Goal\n\nShip it.\n\n## Required\n\n- [Quest](/quest/one.md)\n- [Epic](/quest/one/README.md)\n",
+			),
+			parse("quest/one.md", "# [S] One\n\n## Goal\n\nA quest.\n"),
+			parse("quest/one/README.md", "# [S] Epic\n\n## Goal\n\nAn epic's remaining work.\n"),
+		];
+		const paths = new Set(docs.map((doc) => doc.path));
+		expect(check(docs, (path) => paths.has(path))).toEqual([
+			{
+				path: "quest/one.md",
+				line: null,
+				message: "quest path collides with quest/one/README.md; rename one of these documents",
+			},
+		]);
+	});
 });

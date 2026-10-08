@@ -71,10 +71,27 @@ export function check(docs: Doc[], exists: (path: string) => boolean): Finding[]
 		links(found, exists, known, doc);
 	}
 
+	collisions(found, known, docs);
 	index(found, known, docs);
 	cycles(found, docs);
 
 	return found.sort(compareFindings);
+}
+
+/** A quest file and a directory's README cannot use the same quest path. */
+function collisions(found: Finding[], known: Set<string>, docs: Doc[]) {
+	for (const doc of docs) {
+		// A README already names its directory, including after its last child
+		// completes. A directory named README therefore has a distinct path.
+		if (doc.path.endsWith("/README.md")) continue;
+		const epic = `${doc.path.slice(0, -3)}/README.md`;
+		if (!known.has(epic)) continue;
+		found.push({
+			path: doc.path,
+			line: null,
+			message: `quest path collides with ${epic}; rename one of these documents`,
+		});
+	}
 }
 
 function headings(found: Finding[], doc: Doc) {
