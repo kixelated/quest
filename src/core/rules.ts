@@ -11,8 +11,8 @@
 // entry for a completed quest survived a rebase that produced no conflict at
 // all.
 
-import { type Doc, entries, has, isEpic, children, owner, rooted, withoutFragment } from "./doc";
-import { comparePaths, escapes, join, normalize, parent } from "./path";
+import { type Doc, entries, has, isEpic, children, owner, resolve, rooted, withoutFragment } from "./doc";
+import { comparePaths, join } from "./path";
 
 /**
  * The `## ` headings a quest document may use. Readiness greps `## Required`
@@ -135,10 +135,6 @@ function headings(found: Finding[], doc: Doc) {
 	}
 }
 
-function resolve(docPath: string, target: string): string {
-	return target.startsWith("/") ? normalize(target.slice(1)) : join(parent(docPath), target);
-}
-
 function links(found: Finding[], exists: (path: string) => boolean, known: Set<string>, doc: Doc) {
 	for (const link of doc.links) {
 		if (link.target.includes("://") || link.target.startsWith("mailto:")) continue;
@@ -150,7 +146,7 @@ function links(found: Finding[], exists: (path: string) => boolean, known: Set<s
 		// whatever sits beside the checkout, so the repo's own directory name (or
 		// a sibling worktree) could make a broken link pass.
 		const path = resolve(doc.path, target);
-		if (escapes(path) || !exists(path)) {
+		if (path === null || !exists(path)) {
 			found.push({ path: doc.path, line: link.line, message: `link does not resolve: ${link.target}` });
 			continue;
 		}

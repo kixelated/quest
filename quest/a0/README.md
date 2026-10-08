@@ -32,5 +32,4 @@ ownership-manifest design:
 
 - [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors donate tokens and machines that lock and run quests; maintainers review and merge in a web UI synced with GitHub
 - [Quest log theme](/quest/a0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
-- [Link decoding](/quest/a0/link-decode.md) - the core percent-decodes link targets, so names with `#`, `%`, or spaces can be linked
 - [Launch material](/quest/a0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

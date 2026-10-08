@@ -20,6 +20,7 @@ export {
 	owner,
 	parse,
 	permanent,
+	resolve,
 	rooted,
 } from "./doc";
 export { comparePaths, normalize } from "./path";
