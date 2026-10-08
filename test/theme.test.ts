@@ -72,7 +72,7 @@ describe("ready", () => {
 	test("says so when nothing is ready", () => {
 		const tree = Tree.baseline().append(
 			"quest/a0/epic/one.md",
-			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
+			"\n## Required\n\n- [Two](/quest/a0/epic/two.md)\n",
 		);
 		expect(tree.runOn(NO_COLOUR, "ready").stdout).toBe("No quests ready.\n");
 	});
@@ -127,26 +127,13 @@ describe("ready <path>", () => {
 		);
 	});
 
-	test("a claimed quest names its claimant, with no marker", () => {
-		const tree = Tree.baseline().append(
-			"quest/a0/epic/two.md",
-			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
-		);
-		expect(tree.runOn(NO_COLOUR, "ready", "quest/a0/epic/two.md").stdout).toBe(
-			"  [S] Two    quest/a0/epic/two.md\n" +
-				"  Claimed by @jdoe since 2026-10-02\n" +
-				"  Required:\n" +
-				"    [S] One  quest/a0/epic/one.md\n",
-		);
-	});
-
-	test("a claimant outside GitHub is named", () => {
+	test("a legacy Claim section has no terminal status", () => {
 		const tree = Tree.baseline().append(
 			"quest/a0/epic/one.md",
-			"\n## Claim\n\n- Jane Doe (forgejo:jane) on jane/quest since 2026-10-02\n",
+			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
 		);
 		expect(tree.runOn(NO_COLOUR, "ready", "quest/a0/epic/one.md").stdout).toBe(
-			"  [S] One  quest/a0/epic/one.md\n  Claimed by Jane Doe since 2026-10-02\n",
+			"! [S] One  quest/a0/epic/one.md\n  Ready\n",
 		);
 	});
 

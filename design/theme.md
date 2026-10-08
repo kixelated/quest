@@ -35,13 +35,13 @@ acts, yes; pixel art, sound, and game interface chrome, no.
 Use display names in prose and interfaces. Anything a reader must type or
 match, such as quest headings, CLI commands, and `--help` text, keeps the
 format term. The CLI's terminal output keeps the format terms too (ready,
-blocked, `Required:`, and Claimed by), with the markers and size colours.
+blocked and `Required:`), with the markers and size colours.
 
 | Format term | Display | Marker |
 | --- | --- | --- |
 | ready | Available | yellow `!` |
 | blocked | Requires: *titles* | grey `!` |
-| claimed | Accepted by @*name* | |
+| live runner lock | Accepted by @*name* | |
 | open PR or change | Ready to turn in | yellow `?` |
 | merged | Quest complete | |
 | `Goal` | Objectives | |
@@ -51,7 +51,10 @@ blocked, `Required:`, and Claimed by), with the markers and size colours.
 | fund a quest | Offer gold | coin glyph |
 
 A quest shows its most advanced state: Ready to turn in, then Accepted by, then
-Available or Requires.
+Available or Requires. Accepted by comes from a live runner lock on Quest on
+Cloudflare, which clears when its MoQ announcement disappears; open changes
+carry Ready to turn in. GitHub uses the pushed quest branch to claim work.
+None of these states adds a section to the quest file.
 
 Gold is display only: a run's spend and donated tokens show as gold with a coin
 glyph. There is no pledge pool and no new state.
