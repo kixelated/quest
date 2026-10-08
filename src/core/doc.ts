@@ -16,7 +16,7 @@ import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import { gfmTable } from "micromark-extension-gfm-table";
 
-import { depth, fileName, normalize, parent } from "./path";
+import { depth, escapes, fileName, join, normalize, parent } from "./path";
 
 /**
  * Where a link sits inside its `## Section`, which is what separates a
@@ -170,12 +170,28 @@ export function withoutFragment(target: string): string {
 }
 
 /**
+ * A Markdown link's repository-relative path, or `null` when its escapes are
+ * malformed or it leaves the repository. Strip the fragment before decoding:
+ * `%23` is part of the filename, while a literal `#` starts the fragment.
+ */
+export function resolve(docPath: string, target: string): string | null {
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(withoutFragment(target));
+	} catch {
+		return null;
+	}
+	const path = target.startsWith("/") ? normalize(decoded.slice(1)) : join(parent(docPath), decoded);
+	return escapes(path) ? null : path;
+}
+
+/**
  * A root-absolute target as a repository-relative path, or `null` if it is not
- * root-absolute. Fragment-stripped AND normalized: the index and the cycle walk
- * both key on this, and a `..` left in one of them is a node nothing matches.
+ * root-absolute or cannot resolve safely. The index and cycle walk use the same
+ * decoded, normalized path as link validation.
  */
 export function rooted(target: string): string | null {
-	return target.startsWith("/") ? normalize(withoutFragment(target.slice(1))) : null;
+	return target.startsWith("/") ? resolve("", target) : null;
 }
 
 /** Nodes whose children are blocks, so an `html` child is block HTML rather than inline. */
