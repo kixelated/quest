@@ -15,10 +15,9 @@ GitHub, and `rooted` returns `null` for it.
 
 ## Plan
 
-Decided on 2026-10-07, after the review of kixelated/quest#85. The user chose
-to encode board URLs so that any quest name works
-([Board links](/quest/a0/cloudflare/board-links.md)). Without decoding in the
-core, such names still can't be linked, so this completes that choice.
+Decided on 2026-10-07, after the review of kixelated/quest#85. Board URLs are
+encoded so that any quest name works. Without decoding in the core, such
+names still can't be linked, so this completes that choice.
 
 GitHub decodes the whole path, so `%2F` acts as a separator rather than part
 of a name. A raw `%` (`[x](/quest/a0/100%.md)`) resolves today and stops

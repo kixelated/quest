@@ -1,5 +1,5 @@
-// Whether a quest can be started, read from the same `Required` and `Claim`
-// sections the rules validate.
+// Whether a quest can be started, read from the same `Required` section
+// the rules validate.
 //
 // Readiness is a property of the tree alone, which is what makes it cheap and
 // deterministic: a finished quest is deleted, so a blocker that still resolves
@@ -18,7 +18,7 @@ export interface Blocker {
 	 * is not a quest, which `quest check` rejects and nothing here can clear.
 	 */
 	path: string | null;
-	/** The dependency or claim as written, whitespace collapsed. */
+	/** The dependency as written, whitespace collapsed. */
 	text: string;
 	/**
 	 * The still-open quests under a required epic, which is what an
@@ -61,12 +61,12 @@ export function lookup(docs: Doc[], path: string): Doc | null {
  *
  * An epic is not listed while it still requires children; a README with
  * none left is the epic's own remaining work and lists like any other quest.
- * A quest is ready when it has neither a `## Required` nor a `## Claim` heading.
+ * A quest is ready when it has no `## Required` heading.
  */
 export function ready(docs: Doc[]): string[] {
 	const sorted = [...docs].sort((a, b) => comparePaths(a.path, b.path));
 	const remaining = new Map(sorted.map((doc) => [doc.path, doc]));
-	const open = (doc: Doc) => !has(doc, "Required") && !has(doc, "Claim");
+	const open = (doc: Doc) => !has(doc, "Required");
 	const pending = [ROOT];
 	const found: string[] = [];
 	for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
@@ -88,16 +88,6 @@ export function ready(docs: Doc[]): string[] {
 /** The blockers of one document: its `Required` entries, which for an epic include its children. */
 function expand(byPath: Map<string, Doc>, doc: Doc, stack: string[]): Blocker[] {
 	const found: Blocker[] = [];
-	if (has(doc, "Claim")) {
-		const [claim] = entries(doc, "Claim");
-		found.push({
-			path: null,
-			text: claim
-				? `claimed by ${claim.text}`
-				: "an empty '## Claim' section, which blocks the quest until the heading is removed",
-			blockers: [],
-		});
-	}
 	// A heading left standing after its last blocker still reads as blocked to
 	// everything that greps for it, including `quest check`, which reports it.
 	// Calling it ready here would make this the one tool that disagrees.

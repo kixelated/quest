@@ -2,31 +2,15 @@
 // status and progress. Readiness comes from the shared core, so the board
 // always agrees with `quest ready`.
 
-import {
-	type Doc,
-	ROOT,
-	blockers,
-	children,
-	comparePaths,
-	entries,
-	isEpic,
-	parse,
-	parseClaim,
-	permanent,
-	ready,
-} from "quest/core";
+import { type Doc, ROOT, blockers, children, comparePaths, entries, isEpic, parse, permanent, ready } from "quest/core";
 import type { Size } from "../layout";
 import type { Change, Completed, Project } from "./project";
 
 /**
  * A quest's most advanced state, per design/theme.md: Ready to turn in, then
- * Accepted by, then Available or Requires.
+ * Available or Requires.
  */
-export type Status =
-	| { kind: "turn-in"; change: Change }
-	| { kind: "accepted"; by: string; since: string | null }
-	| { kind: "available" }
-	| { kind: "blocked"; requires: Ref[] };
+export type Status = { kind: "turn-in"; change: Change } | { kind: "available" } | { kind: "blocked"; requires: Ref[] };
 
 /** A link to another quest, or a blocker's own words when it names none. */
 export type Ref = { title: string; href: string | null };
@@ -83,15 +67,20 @@ export function title(text: string): { size: Size | null; name: string } {
 export function questHref(project: Project, path: string): string {
 	if (path === ROOT) return `/repos/${project.name}`;
 	const page = path.replace(/\/README\.md$/, "").replace(/\.md$/, "");
-	return `/repos/${project.name}/${page}`;
+	return `/repos/${project.name}/${encodePath(page)}`;
 }
 
 /**
  * A file on the project's forge, or `null` when the project has no web address.
- * `path` is used as written: it may carry a `#fragment` and is not encoded.
+ * Paths are literal filenames; pass a `#fragment` separately so a filename's
+ * `#` is encoded and the fragment remains a fragment.
  */
-export function blobHref(project: Project, path: string): string | null {
-	return project.web ? `${project.web}/blob/main/${path}` : null;
+export function blobHref(project: Project, path: string, fragment = ""): string | null {
+	return project.web ? `${project.web}/blob/${project.commit}/${encodePath(path)}${fragment}` : null;
+}
+
+function encodePath(path: string): string {
+	return path.split("/").map(encodeURIComponent).join("/");
 }
 
 /** An act's section on its board page: its directory name, such as `a0`. */
@@ -135,21 +124,12 @@ export function readBoard(project: Project): Board {
 	const status = (doc: Doc): Status => {
 		const change = changes.get(doc.path);
 		if (change) return { kind: "turn-in", change };
-		const [claim] = entries(doc, "Claim");
-		if (claim) {
-			const parsed = parseClaim(claim.text);
-			if (!parsed) return { kind: "accepted", by: claim.text, since: null };
-			const by = parsed.provider === "github" ? `@${parsed.identity}` : parsed.name;
-			return { kind: "accepted", by, since: parsed.since };
-		}
 		if (open.has(doc.path)) return { kind: "available" };
-		const requires = blockers(parsed, doc)
-			.filter((blocker) => blocker.path !== null || !blocker.text.startsWith("claimed by "))
-			.map((blocker) =>
-				blocker.path === null
-					? { title: blocker.text, href: null }
-					: { title: name(blocker.path), href: questHref(project, blocker.path) },
-			);
+		const requires = blockers(parsed, doc).map((blocker) =>
+			blocker.path === null
+				? { title: blocker.text, href: null }
+				: { title: name(blocker.path), href: questHref(project, blocker.path) },
+		);
 		return { kind: "blocked", requires };
 	};
 
@@ -234,7 +214,7 @@ export function readBoard(project: Project): Board {
 	}
 
 	const all = acts.flatMap((act) => flatten(act.items));
-	const counts = { "turn-in": 0, accepted: 0, available: 0, blocked: 0 };
+	const counts = { "turn-in": 0, available: 0, blocked: 0 };
 	for (const q of all) counts[q.status.kind]++;
 
 	const actOf = (path: string) => acts.find((c) => c.number !== "" && path.startsWith(`${dir(c.path)}/`));

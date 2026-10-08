@@ -74,8 +74,6 @@ function text(status: Status): string {
 			return "ready";
 		case "blocked":
 			return "blocked";
-		case "accepted":
-			return `claimed by ${status.by}`;
 		case "turn-in":
 			return "in review";
 	}
@@ -103,9 +101,7 @@ function Stop(props: { quest: Quest }) {
 				</span>
 				<span class="waypoint-text">
 					<span class="waypoint-title">{quest.title}</span>
-					<span class={`waypoint-status ${kind === "accepted" ? "muted" : `ql-${kind}`}`}>
-						{text(quest.status)}
-					</span>
+					<span class={`waypoint-status ql-${kind}`}>{text(quest.status)}</span>
 				</span>
 			</a>
 		</li>
@@ -161,7 +157,7 @@ export function QuestMap(props: { board: Board }) {
 					))}
 				</p>
 				<p class="muted">
-					A solid waypoint is ready, claimed, or in review; a dashed one is blocked.{" "}
+					A solid waypoint is ready or in review; a dashed one is blocked.{" "}
 					{web && (
 						<>
 							Charted from <a href={`${web}/tree/${board.project.commit}/quest`}>quest/</a> on{" "}

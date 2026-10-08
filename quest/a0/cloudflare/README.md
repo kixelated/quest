@@ -61,10 +61,8 @@ Decided while planning on 2026-10-01. Research sources:
 
 ## Required
 
-- [Remove claims](/quest/a0/cloudflare/remove-claims.md) - `## Claim` leaves the format; locks and open changes replace it
 - [Fork intake](/quest/a0/cloudflare/intake.md) - contributor forks, the push gate, and issues pulled into main
 - [Changes](/quest/a0/cloudflare/changes.md) - review and merge fork branches with diffs, git-note reviews, and checks
-- [Board links](/quest/a0/cloudflare/board-links.md) - encoded board URLs and GitHub links pinned to the snapshot commit
 - [Quest board](/quest/a0/cloudflare/board.md) - the board reads live projects from Artifacts, with changes, issues, and maintainer actions
 - [Runners](/quest/a0/cloudflare/runners/README.md) - self-hosted and Sandbox runners lock jobs over MoQ and do runs, checks, reviews, merges, and cache builds
 - [GitHub sync](/quest/a0/cloudflare/github-sync.md) - two-way fast-forward sync of main, quest branches, and notes

@@ -11,7 +11,6 @@
 // entry for a completed quest survived a rebase that produced no conflict at
 // all.
 
-import { parseClaim } from "./claim";
 import { type Doc, entries, has, isEpic, children, owner, rooted, withoutFragment } from "./doc";
 import { comparePaths, escapes, join, normalize, parent } from "./path";
 
@@ -20,7 +19,7 @@ import { comparePaths, escapes, join, normalize, parent } from "./path";
  * literally, so a typo turns a blocked quest ready and fails nowhere else: the
  * closed vocabulary is what catches it.
  */
-const HEADINGS = ["Goal", "Plan", "Claim", "Required", "Closes", "Related"];
+const HEADINGS = ["Goal", "Plan", "Required", "Closes", "Related"];
 const SIZES = ["XS", "S", "M", "L", "XL"];
 
 /**
@@ -69,7 +68,6 @@ export function check(docs: Doc[], exists: (path: string) => boolean): Finding[]
 
 	for (const doc of docs) {
 		headings(found, doc);
-		claim(found, doc);
 		links(found, exists, known, doc);
 	}
 
@@ -92,28 +90,6 @@ function collisions(found: Finding[], known: Set<string>, docs: Doc[]) {
 			path: doc.path,
 			line: null,
 			message: `quest path collides with ${epic}; rename one of these documents`,
-		});
-	}
-}
-
-function claim(found: Finding[], doc: Doc) {
-	const claims = doc.headings.filter((heading) => heading.text === "Claim");
-	if (claims.length === 0) return;
-	const listed = entries(doc, "Claim");
-	if (claims.length !== 1 || listed.length !== 1 || doc.claimExtraContent) {
-		found.push({
-			path: doc.path,
-			line: claims[0].line,
-			message: "'## Claim' must contain exactly one list item in one section",
-		});
-		return;
-	}
-	if (!parseClaim(listed[0].text)) {
-		found.push({
-			path: doc.path,
-			line: listed[0].line,
-			message:
-				"claim must name a claimant, (provider:identity), fork or branch, and date: Name (provider:identity) on location since YYYY-MM-DD",
 		});
 	}
 }

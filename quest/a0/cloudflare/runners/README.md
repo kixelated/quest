@@ -74,7 +74,6 @@ hashes, so a change's build can't overwrite main's paths.
 
 ## Required
 
-- [Remove claims](/quest/a0/cloudflare/remove-claims.md) - `## Claim` leaves the format; locks and open changes replace it
 - [Questions section](/quest/a0/cloudflare/runners/questions.md) - `## Questions` blocks a quest until a maintainer answers
 - [Locks and live work](/quest/a0/cloudflare/runners/protocol.md) - job derivation from git, runner sign-in and trust tiers, and moq.pro announce locks with live status
 - [Runner daemon](/quest/a0/cloudflare/runners/daemon.md) - `quest runner` and `quest run` lock jobs and drive the owner's logged-in agents

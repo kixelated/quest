@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { finished } from "../scripts/history";
 import { render } from "../src/board/markdown";
-import { type Board, findGroup, only, readBoard, trail } from "../src/board/model";
+import { type Board, blobHref, findGroup, only, questHref, readBoard, trail } from "../src/board/model";
 import type { Project } from "../src/board/project";
 
 const docs: Record<string, string> = {
@@ -42,15 +42,15 @@ const status = (board: Board, path: string) => board.quests.get(path)?.status;
 describe("board model", () => {
 	const board = readBoard(project());
 
-	it("shows each quest's most advanced status", () => {
+	it("uses open changes and dependencies, ignoring legacy Claim sections", () => {
 		expect(status(board, "quest/a0/epic/ready.md")).toEqual({ kind: "available" });
 		expect(status(board, "quest/a0/epic/blocked.md")).toEqual({
 			kind: "blocked",
 			requires: [{ title: "Ready quest", href: "/repos/demo/quest/a0/epic/ready" }],
 		});
-		expect(status(board, "quest/a0/epic/taken.md")).toEqual({ kind: "accepted", by: "@jdoe", since: "2026-10-02" });
+		expect(status(board, "quest/a0/epic/taken.md")).toEqual({ kind: "available" });
 		expect(status(board, "quest/a0/epic/turned.md")?.kind).toBe("turn-in");
-		expect(board.counts).toEqual({ available: 3, blocked: 1, accepted: 1, "turn-in": 1 });
+		expect(board.counts).toEqual({ available: 4, blocked: 1, "turn-in": 1 });
 	});
 
 	it("groups acts and epics in priority order, then unlisted quests", () => {
@@ -84,6 +84,20 @@ describe("board model", () => {
 		const items = only(board.acts[0].items, "blocked");
 		expect(items).toHaveLength(1);
 		expect(items[0].kind === "epic" && items[0].epic.items.length).toBe(1);
+	});
+
+	it("encodes each board and forge path segment", () => {
+		const source = project();
+		const path = "quest/a0/an epic#/name#?%.md";
+		expect(questHref(source, path)).toBe("/repos/demo/quest/a0/an%20epic%23/name%23%3F%25");
+		expect(questHref(source, "quest/a0/an epic#/README.md")).toBe("/repos/demo/quest/a0/an%20epic%23");
+		expect(blobHref(source, path)).toBe(
+			`https://example.com/acme/demo/blob/${source.commit}/quest/a0/an%20epic%23/name%23%3F%25.md`,
+		);
+		expect(blobHref(source, path, "#goal")).toBe(
+			`https://example.com/acme/demo/blob/${source.commit}/quest/a0/an%20epic%23/name%23%3F%25.md#goal`,
+		);
+		expect(blobHref(project({ web: null }), path)).toBeNull();
 	});
 });
 
@@ -128,7 +142,7 @@ describe("quest markdown", () => {
 		);
 		expect(plan.html).toContain('href="/repos/demo/quest/a0/epic#goal"');
 		expect(plan.html).toContain('href="/repos/demo/quest/a0/epic/ready"');
-		expect(plan.html).toContain('href="https://example.com/acme/demo/blob/main/docs/a.md"');
+		expect(plan.html).toContain(`href="https://example.com/acme/demo/blob/${project().commit}/docs/a.md"`);
 		expect(plan.html).toContain('href="https://example.com"');
 		const [unpublished] = render(
 			project({ web: null }),
@@ -137,6 +151,12 @@ describe("quest markdown", () => {
 			known,
 		);
 		expect(unpublished.html).toBe("<p>docs</p>\n");
+	});
+
+	it("keeps fragments on forge links at the snapshot commit", () => {
+		const source = project();
+		const [plan] = render(source, "quest/a0/solo.md", "## Plan\n\n[docs](/docs/a.md#goal)\n", known);
+		expect(plan.html).toContain(`href="https://example.com/acme/demo/blob/${source.commit}/docs/a.md#goal"`);
 	});
 });
 

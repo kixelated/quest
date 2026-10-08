@@ -15,8 +15,7 @@ read `issues/**` see a warning that its content is untrusted.
 - The gate is deterministic: allowed paths only, a size cap, and plain
   Markdown. The Worker re-authors the commit onto main, credited to the
   contributor.
-- Claims are out (decided 2026-10-07,
-  [remove claims](/quest/a0/cloudflare/remove-claims.md)): draft PR #40 drops
+- Claims are out (decided 2026-10-07): draft PR #40 drops
   its claim promotion, 48h expiry, and claim Durable Object.
 - `issues/` is quarantined. Skills treat it as data, never instructions, and
   a maintainer promotes an issue into `quest/`.

@@ -27,8 +27,6 @@ function label(status: Status, limit = Infinity): string {
 	switch (status.kind) {
 		case "turn-in":
 			return "Ready to turn in";
-		case "accepted":
-			return `Accepted by ${status.by}`;
 		case "available":
 			return "Available";
 		case "blocked": {
@@ -40,7 +38,7 @@ function label(status: Status, limit = Infinity): string {
 }
 
 function StatusLabel(props: { status: Status; limit?: number }) {
-	const tone = props.status.kind === "accepted" ? "muted" : `ql-${props.status.kind}`;
+	const tone = `ql-${props.status.kind}`;
 	return <span class={`entry-status ${tone}`}>{label(props.status, props.limit)}</span>;
 }
 
@@ -158,7 +156,6 @@ function FinishedList(props: { finished: Finished[] }) {
 /** The statuses a visitor can filter the board by, in the order a contributor asks about them. */
 export const SHOWN: [Status["kind"], string][] = [
 	["available", "Available"],
-	["accepted", "Accepted"],
 	["turn-in", "Ready to turn in"],
 	["blocked", "Requires others"],
 ];
@@ -175,7 +172,7 @@ function Tally(props: { board: Board; show: Status["kind"] | null }) {
 					</a>
 				</li>
 				{SHOWN.map(([kind, name]) => (
-					<li class={kind === "accepted" ? "" : `ql-${kind}`}>
+					<li class={`ql-${kind}`}>
 						<a href={`${base}?show=${kind}`} aria-current={props.show === kind ? "page" : undefined}>
 							<Marker status={kind} />
 							<strong>{props.board.counts[kind]}</strong> {name}
@@ -324,19 +321,6 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 			</Panel>
 		);
 	}
-	if (status.kind === "accepted") {
-		return (
-			<Panel title={`Accepted by ${status.by}`}>
-				<p class="muted">
-					{status.since ? `Since ${status.since}. ` : ""}Another member of the party is on it. Pick an
-					available quest instead.
-				</p>
-				<p>
-					<a href={`/repos/${board.project.name}?show=available`}>Available quests</a>
-				</p>
-			</Panel>
-		);
-	}
 	if (status.kind === "blocked") {
 		return (
 			<Panel title="Not yet available">
@@ -419,7 +403,6 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 			</header>
 			<article class="ql-ledger quest-page">
 				{sections.map((section) => {
-					if (section.heading === "Claim") return null;
 					if (section.heading === "Required") {
 						return (
 							<>
