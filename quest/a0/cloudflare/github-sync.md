@@ -5,7 +5,7 @@
 A project can be paired with a GitHub repository. `main`, quest branches, and
 `refs/notes/quest` mirror both ways, fast-forward only. When the two sides
 have diverged, the UI flags it instead of either side overwriting the other.
-Claims, issues, quests, and reviews sync because they are files and notes.
+Issues, quests, reviews, and checks sync because they are files and notes.
 
 ## Plan
 

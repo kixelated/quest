@@ -7,8 +7,8 @@ line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
 macOS and Linux (WSL) only; native Windows is a1.
 
-The launch includes Quest on Cloudflare. Outside contributors lock quests and
-donate agent tokens to run them, and the result is reviewed and merged in a
+The launch includes Quest on Cloudflare. Outside contributors donate agent
+tokens and machines to run quests, and the result is reviewed and merged in a
 web UI that syncs with GitHub. It is also the entry for Cloudflare's
 competition, due 2026-10-14.
 
@@ -23,14 +23,14 @@ ownership-manifest design:
 - The repository's own tool manager pins the version: mise (release binaries)
   or a nix flake input (any rev, built from source). Quest ships no launcher
   and no pin file; an install outside either is simply unpinned.
-- The CLI is offline except `quest run` (amended 2026-10-01 for Quest on
-  Cloudflare). Anything touching GitHub (issue import and export, branch
-  claims, merging) lives in skills.
+- The CLI is offline except `quest run` and `quest runner` (amended
+  2026-10-01 and 2026-10-07 for Quest on Cloudflare). Anything touching GitHub
+  (issue import and export, branch claims, merging) lives in skills.
 - Repository-specific rules stay in the repository's own root instructions.
 
 ## Required
 
-- [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
+- [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors donate tokens and machines that lock and run quests; maintainers review and merge in a web UI synced with GitHub
 - [Quest log theme](/quest/a0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [Release checks on CLI PRs](/quest/a0/release-pr-paths.md) - the Release workflow's native binary checks run on `src/**` pull requests
 - [Atomic init](/quest/a0/init-atomic.md) - init refuses before writing on path-type conflicts too
