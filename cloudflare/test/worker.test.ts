@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { SELF, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as projects from "../src/board/project";
+import app from "../src/index";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -73,6 +75,33 @@ describe("Worker", () => {
 		expect((await SELF.fetch(`${origin}/repos/quest/quest/missing`)).status).toBe(404);
 		const root = await SELF.fetch(`${origin}/repos/quest/quest/README`, { redirect: "manual" });
 		expect(root.headers.get("location")).toBe("/repos/quest");
+	});
+	it("opens encoded quest paths and pins Markdown links to the snapshot", async () => {
+		const path = "quest/a0/space #?%/literal%23#?%.md";
+		const project = {
+			...projects.home,
+			commit: "a".repeat(40),
+			documents: [
+				...projects.home.documents,
+				{ path, content: "# [XS] Reserved filename\n\n## Goal\n\n[docs](/docs/a.md#goal)\n" },
+			],
+		};
+		vi.spyOn(projects, "findProject").mockReturnValue(project);
+		const href = "/repos/quest/quest/a0/space%20%23%3F%25/literal%2523%23%3F%25";
+		for (const page of ["/", "/repos/quest"]) {
+			const rendered = await app.fetch(new Request(`${origin}${page}`), env);
+			expect(await rendered.text()).toContain(`href="${href}"`);
+		}
+		const response = await app.fetch(new Request(`${origin}${href}`), env);
+		expect(response.status).toBe(200);
+		const html = await response.text();
+		expect(html).toContain("Reserved filename");
+		expect(html).toContain(
+			`href="https://github.com/kixelated/quest/blob/${project.commit}/quest/a0/space%20%23%3F%25/literal%2523%23%3F%25.md"`,
+		);
+		expect(html).toContain(`href="https://github.com/kixelated/quest/blob/${project.commit}/docs/a.md#goal"`);
+		const separator = await app.fetch(new Request(`${origin}${href.replace("/a0/", "/a0%2F")}`), env);
+		expect(separator.status).toBe(404);
 	});
 	it("returns to a local page after signing in, and only a local page", async () => {
 		// Better Auth stores each sign-in's callback with its OAuth state.
