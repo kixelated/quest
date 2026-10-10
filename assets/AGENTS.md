@@ -104,6 +104,14 @@ If a claim looks stale (old, with no open PR), offer the user to take it over.
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 
+For every claim and update push, name the source and destination explicitly:
+`git push origin refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
+Never use a bare branch name or let the upstream or Git's push configuration
+choose the destination: a quest branch may track the base branch for comparisons.
+Before the first push, run the same explicit refspec with `--dry-run` and
+confirm it updates only the intended quest branch. Afterwards, verify that
+the remote quest ref names the local quest branch's commit.
+
 When a quest is complete, create a draft PR.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.
 Add a closing keyword for every issue under `Closes`.

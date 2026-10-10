@@ -12,6 +12,7 @@ If you are unsure on the best course of action, ask the user for direction.
 Update your checkout, run `quest ready`, then confirm the quest is still ready and unclaimed.
 Confirm you can write in your worktree; if you cannot, stop and report without claiming.
 Claim it as `quest guide` describes.
+Verify the remote quest branch names your claim commit before implementing.
 Delete a claim you cannot finish (remote branch and worktree).
 
 Implement the quest until it is complete, or some blocker is hit, then create a PR.
