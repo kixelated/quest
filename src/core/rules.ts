@@ -11,16 +11,15 @@
 // entry for a completed quest survived a rebase that produced no conflict at
 // all.
 
-import { parseClaim } from "./claim";
-import { type Doc, entries, has, isEpic, children, owner, rooted, withoutFragment } from "./doc";
-import { comparePaths, escapes, join, normalize, parent } from "./path";
+import { type Doc, entries, has, isEpic, children, owner, resolve, rooted, withoutFragment } from "./doc";
+import { comparePaths, join } from "./path";
 
 /**
  * The `## ` headings a quest document may use. Readiness greps `## Required`
  * literally, so a typo turns a blocked quest ready and fails nowhere else: the
  * closed vocabulary is what catches it.
  */
-const HEADINGS = ["Goal", "Plan", "Claim", "Required", "Closes", "Related"];
+const HEADINGS = ["Goal", "Plan", "Required", "Closes", "Related"];
 const SIZES = ["XS", "S", "M", "L", "XL"];
 
 /**
@@ -69,34 +68,28 @@ export function check(docs: Doc[], exists: (path: string) => boolean): Finding[]
 
 	for (const doc of docs) {
 		headings(found, doc);
-		claim(found, doc);
 		links(found, exists, known, doc);
 	}
 
+	collisions(found, known, docs);
 	index(found, known, docs);
 	cycles(found, docs);
 
 	return found.sort(compareFindings);
 }
 
-function claim(found: Finding[], doc: Doc) {
-	const claims = doc.headings.filter((heading) => heading.text === "Claim");
-	if (claims.length === 0) return;
-	const listed = entries(doc, "Claim");
-	if (claims.length !== 1 || listed.length !== 1 || doc.claimExtraContent) {
+/** A quest file and a directory's README cannot use the same quest path. */
+function collisions(found: Finding[], known: Set<string>, docs: Doc[]) {
+	for (const doc of docs) {
+		// A README already names its directory, including after its last child
+		// completes. A directory named README therefore has a distinct path.
+		if (doc.path.endsWith("/README.md")) continue;
+		const epic = `${doc.path.slice(0, -3)}/README.md`;
+		if (!known.has(epic)) continue;
 		found.push({
 			path: doc.path,
-			line: claims[0].line,
-			message: "'## Claim' must contain exactly one list item in one section",
-		});
-		return;
-	}
-	if (!parseClaim(listed[0].text)) {
-		found.push({
-			path: doc.path,
-			line: listed[0].line,
-			message:
-				"claim must name a claimant, (provider:identity), fork or branch, and date: Name (provider:identity) on location since YYYY-MM-DD",
+			line: null,
+			message: `quest path collides with ${epic}; rename one of these documents`,
 		});
 	}
 }
@@ -142,10 +135,6 @@ function headings(found: Finding[], doc: Doc) {
 	}
 }
 
-function resolve(docPath: string, target: string): string {
-	return target.startsWith("/") ? normalize(target.slice(1)) : join(parent(docPath), target);
-}
-
 function links(found: Finding[], exists: (path: string) => boolean, known: Set<string>, doc: Doc) {
 	for (const link of doc.links) {
 		if (link.target.includes("://") || link.target.startsWith("mailto:")) continue;
@@ -157,7 +146,7 @@ function links(found: Finding[], exists: (path: string) => boolean, known: Set<s
 		// whatever sits beside the checkout, so the repo's own directory name (or
 		// a sibling worktree) could make a broken link pass.
 		const path = resolve(doc.path, target);
-		if (escapes(path) || !exists(path)) {
+		if (path === null || !exists(path)) {
 			found.push({ path: doc.path, line: link.line, message: `link does not resolve: ${link.target}` });
 			continue;
 		}

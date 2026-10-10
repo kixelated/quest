@@ -7,8 +7,8 @@ line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
 macOS and Linux (WSL) only; native Windows is a1.
 
-The launch includes Quest on Cloudflare. Outside contributors lock quests and
-donate agent tokens to run them, and the result is reviewed and merged in a
+The launch includes Quest on Cloudflare. Outside contributors donate agent
+tokens and machines to run quests, and the result is reviewed and merged in a
 web UI that syncs with GitHub. It is also the entry for Cloudflare's
 competition, due 2026-10-14.
 
@@ -31,11 +31,7 @@ ownership-manifest design:
 
 ## Required
 
-- [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors lock quests and donate tokens to run them; maintainers review and merge in a web UI synced with GitHub
+- [Quest on Cloudflare](/quest/a0/cloudflare/README.md) - contributors donate tokens and machines that lock and run quests; maintainers review and merge in a web UI synced with GitHub
 - [Quest log theme](/quest/a0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
-- [Release checks on CLI PRs](/quest/a0/release-pr-paths.md) - the Release workflow's native binary checks run on `src/**` pull requests
-- [Atomic init](/quest/a0/init-atomic.md) - init refuses before writing on path-type conflicts too
-- [Path collisions](/quest/a0/path-collision.md) - `quest check` flags a quest and an epic that share a path
-- [Link decoding](/quest/a0/link-decode.md) - the core percent-decodes link targets, so names with `#`, `%`, or spaces can be linked
 - [PR waits](/quest/a0/wait.md) - `quest wait` blocks until a PR has new activity, replacing the skills' hand-rolled polling
 - [Launch material](/quest/a0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

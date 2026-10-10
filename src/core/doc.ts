@@ -16,7 +16,7 @@ import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import { gfmTable } from "micromark-extension-gfm-table";
 
-import { depth, fileName, normalize, parent } from "./path";
+import { depth, escapes, fileName, join, normalize, parent } from "./path";
 
 /**
  * Where a link sits inside its `## Section`, which is what separates a
@@ -89,11 +89,6 @@ export interface Doc {
 	 * not it carries a link.
 	 */
 	entries: Entry[];
-	/**
-	 * Content outside the claim's one flat list item (prose, quotes, nested
-	 * lists, or other blocks). Claims have a deliberately small envelope.
-	 */
-	claimExtraContent: boolean;
 }
 
 /**
@@ -175,33 +170,29 @@ export function withoutFragment(target: string): string {
 }
 
 /**
- * A root-absolute target as a repository-relative path, or `null` if it is not
- * root-absolute. Fragment-stripped AND normalized: the index and the cycle walk
- * both key on this, and a `..` left in one of them is a node nothing matches.
+ * A Markdown link's repository-relative path, or `null` when its escapes are
+ * malformed or it leaves the repository. Strip the fragment before decoding:
+ * `%23` is part of the filename, while a literal `#` starts the fragment.
  */
-export function rooted(target: string): string | null {
-	return target.startsWith("/") ? normalize(withoutFragment(target.slice(1))) : null;
+export function resolve(docPath: string, target: string): string | null {
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(withoutFragment(target));
+	} catch {
+		return null;
+	}
+	const path = target.startsWith("/") ? normalize(decoded.slice(1)) : join(parent(docPath), decoded);
+	return escapes(path) ? null : path;
 }
 
-/** Nodes that open and close like a pulldown-cmark tag, rather than arriving as one event. */
-const TAGS = new Set([
-	"paragraph",
-	"heading",
-	"blockquote",
-	"list",
-	"listItem",
-	"code",
-	"emphasis",
-	"strong",
-	"link",
-	"linkReference",
-	"image",
-	"imageReference",
-	"delete",
-	"table",
-	"tableRow",
-	"tableCell",
-]);
+/**
+ * A root-absolute target as a repository-relative path, or `null` if it is not
+ * root-absolute or cannot resolve safely. The index and cycle walk use the same
+ * decoded, normalized path as link validation.
+ */
+export function rooted(target: string): string | null {
+	return target.startsWith("/") ? resolve("", target) : null;
+}
 
 /** Nodes whose children are blocks, so an `html` child is block HTML rather than inline. */
 const CONTAINERS = new Set(["root", "blockquote", "listItem"]);
@@ -226,7 +217,6 @@ export function parse(path: string, text: string): Doc {
 	const headings: Heading[] = [];
 	const links: Link[] = [];
 	const found: Entry[] = [];
-	let claimExtraContent = false;
 	let entry: Entry | null = null;
 	let section: string | null = null;
 
@@ -260,16 +250,6 @@ export function parse(path: string, text: string): Doc {
 	// run of content an opening link may follow.
 	const other = () => {
 		if (itemDepth > 0) fresh = false;
-	};
-
-	const claim = (node: Nodes, inline: boolean) => {
-		if (TAGS.has(node.type)) {
-			if (node.type === "heading" && node.depth <= 2) return;
-			if (node.type === "list" && itemDepth > 0) claimExtraContent = true;
-			if (itemDepth === 0 && node.type !== "list" && node.type !== "listItem") claimExtraContent = true;
-		} else if (((node.type === "html" && !inline) || node.type === "thematicBreak") && itemDepth === 0) {
-			claimExtraContent = true;
-		}
 	};
 
 	const link = (node: Nodes, target: string) => {
@@ -409,10 +389,7 @@ export function parse(path: string, text: string): Doc {
 	const walk = (node: Nodes, inline: boolean) => {
 		// Definitions render as nothing; the links that use them carry their target.
 		if (node.type === "definition") return;
-		if (section === "Claim") claim(node, inline);
-		// A claim is one line, so its blocks run together unseparated: a space
-		// would let a block after the date pass as an opaque trailing field.
-		const block = section !== "Claim" && (BLOCKS.has(node.type) || (node.type === "html" && !inline));
+		const block = BLOCKS.has(node.type) || (node.type === "html" && !inline);
 		if (block && entry && !heading) entry.text += " ";
 		enter(node);
 		if ("children" in node) {
@@ -425,7 +402,7 @@ export function parse(path: string, text: string): Doc {
 
 	for (const child of tree.children) walk(child, false);
 
-	return { path, title, headings, links, entries: found, claimExtraContent };
+	return { path, title, headings, links, entries: found };
 }
 
 /** The first definition of each reference label, which is the one CommonMark uses. */

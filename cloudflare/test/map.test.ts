@@ -76,7 +76,7 @@ describe("waypoint status", () => {
 			],
 		});
 		const statuses = [...html.matchAll(/class="waypoint-status [^"]*">([^<]*)</g)].map((match) => match[1]);
-		expect(statuses.sort()).toEqual(["blocked", "blocked", "claimed by @sam", "ready", "ready"]);
+		expect(statuses.sort()).toEqual(["blocked", "blocked", "ready", "ready", "ready"]);
 		expect(html).toContain('title="Later: blocked\nRequired: First" aria-label="Later, size M, blocked"');
 		expect(html).not.toMatch(/Available|Requires|Accepted|turn in|Elite/);
 	});

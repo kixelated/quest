@@ -3,7 +3,7 @@
 // and only web and mail links survive. Links into the tree open board pages.
 
 import { Marked, type Token } from "marked";
-import { normalize } from "quest/core";
+import { resolve } from "quest/core";
 import { blobHref, questHref } from "./model";
 import type { Project } from "./project";
 
@@ -21,11 +21,12 @@ export function rewrite(project: Project, from: string, href: string, known: (pa
 	if (/^(https?|mailto):/i.test(href)) return href;
 	if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//")) return null;
 	if (href.startsWith("#")) return href;
-	const [path, hash = ""] = href.split(/(?=#)/);
-	const target = normalize(path.startsWith("/") ? path.slice(1) : `${from.slice(0, from.lastIndexOf("/"))}/${path}`);
-	if (target === "" || target.startsWith("..")) return null;
+	const fragment = href.indexOf("#");
+	const hash = fragment < 0 ? "" : href.slice(fragment);
+	const target = resolve(from, href);
+	if (target === null || target === "") return null;
 	if (known(target)) return questHref(project, target) + hash;
-	return blobHref(project, `${target}${hash}`);
+	return blobHref(project, target, hash);
 }
 
 /** The document's `## ` sections in order, each rendered to HTML. The `# ` title is left to the page. */
