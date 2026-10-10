@@ -13,6 +13,7 @@ Update your checkout, run `quest ready`, then confirm the quest is still ready a
 Check the forge for a live runner lock or an open change; on GitHub, check the quest's remote branch and open PRs.
 Confirm you can write in your worktree; if you cannot, stop and report without claiming.
 Claim it as `quest guide` describes.
+Verify the remote quest branch names your claim commit before implementing.
 Release work you cannot finish; on GitHub, delete its branch claim and your isolated worktree.
 
 Implement the quest until it is complete, or some blocker is hit, then create a PR.
