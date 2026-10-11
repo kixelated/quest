@@ -4,7 +4,8 @@ description: Decide which open PRs to merge, then merge them in parallel.
 
 Before starting, run `quest guide`, `quest skill merge`, and `quest skill plan`.
 
-The goal is to evaluate the open (non-draft) PRs in the repository and decide which ones to merge.
+The goal is to evaluate the open PRs in the repository, drafts included, and decide which ones to merge.
+A draft may be a finished quest awaiting review; note whether its body marks it unfinished or another agent is still pushing to it.
 The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent.
 
