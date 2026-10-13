@@ -111,7 +111,9 @@ If a branch looks stale (old, with no open PR), offer the user to take it over.
 A quest's branch is its path without `.md`.
 For example, `quest/a1/foo/bar.md` is branch `quest/a1/foo/bar`.
 
-When a quest is complete, create a draft PR.
+When a quest is complete with no open decisions, open its PR ready for review.
+Otherwise open a draft and list its open decisions, or what remains unfinished, in the body.
+A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.
 Add a closing keyword for every issue under `Closes`.
 Fix any merge conflicts.

@@ -27,15 +27,15 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-When done, each agent opens a draft PR.
+When done, each agent opens a PR, a draft if decisions remain.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
 
-- `/quest-merge`: If the PR is ready to be merged.
-- `/quest-iterate`: If the PR has significant issues or needs decisions.
-- skip: If the PR should stay a draft.
+- `/quest-merge`: If the PR is ready for review with no significant issues.
+- `/quest-iterate`: If the PR is a draft, has significant issues, or needs decisions.
+- skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
 Also offer `/quest-plan` for its suggested follow-ups.
