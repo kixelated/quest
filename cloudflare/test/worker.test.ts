@@ -27,8 +27,8 @@ describe("Worker", () => {
 	});
 	it("maps the repository's own quest tree on the home page", async () => {
 		const html = await (await SELF.fetch(origin)).text();
-		// Acts open their section of the board; epics and waypoints open their pages.
-		expect(html).toContain('href="/repos/quest#a0"');
+		// Milestones open their section of the board; epics and waypoints open their pages.
+		expect(html).toContain('href="/repos/quest#m0"');
 		expect(html).not.toContain('href="https://github.com/kixelated/quest/blob/main/quest/');
 		const waypoints = [...html.matchAll(/class="waypoint [^"]+"><a href="(\/repos\/quest\/quest\/[^"]+)"/g)];
 		const epics = [...html.matchAll(/<p class="path-name"><a href="(\/repos\/quest\/quest\/[^"]+)"/g)];
@@ -57,7 +57,7 @@ describe("Worker", () => {
 		const html = await response.text();
 		expect(html).toContain("<h1>Quest log</h1>");
 		expect(html).toContain("kixelated/quest");
-		expect(html).toMatch(/Act \d/);
+		expect(html).toMatch(/Milestone \d/);
 		expect(html).toContain('role="progressbar"');
 		expect(html).toContain('href="/repos/quest?show=available"');
 		const filtered = await (await SELF.fetch(`${origin}/repos/quest?show=available`)).text();
@@ -77,7 +77,7 @@ describe("Worker", () => {
 		expect(root.headers.get("location")).toBe("/repos/quest");
 	});
 	it("opens encoded quest paths and pins Markdown links to the snapshot", async () => {
-		const path = "quest/a0/space #?%/literal%23#?%.md";
+		const path = "quest/m0/space #?%/literal%23#?%.md";
 		const project = {
 			...projects.home,
 			commit: "a".repeat(40),
@@ -87,7 +87,7 @@ describe("Worker", () => {
 			],
 		};
 		vi.spyOn(projects, "findProject").mockReturnValue(project);
-		const href = "/repos/quest/quest/a0/space%20%23%3F%25/literal%2523%23%3F%25";
+		const href = "/repos/quest/quest/m0/space%20%23%3F%25/literal%2523%23%3F%25";
 		for (const page of ["/", "/repos/quest"]) {
 			const rendered = await app.fetch(new Request(`${origin}${page}`), env);
 			expect(await rendered.text()).toContain(`href="${href}"`);
@@ -97,10 +97,10 @@ describe("Worker", () => {
 		const html = await response.text();
 		expect(html).toContain("Reserved filename");
 		expect(html).toContain(
-			`href="https://github.com/kixelated/quest/blob/${project.commit}/quest/a0/space%20%23%3F%25/literal%2523%23%3F%25.md"`,
+			`href="https://github.com/kixelated/quest/blob/${project.commit}/quest/m0/space%20%23%3F%25/literal%2523%23%3F%25.md"`,
 		);
 		expect(html).toContain(`href="https://github.com/kixelated/quest/blob/${project.commit}/docs/a.md#goal"`);
-		const separator = await app.fetch(new Request(`${origin}${href.replace("/a0/", "/a0%2F")}`), env);
+		const separator = await app.fetch(new Request(`${origin}${href.replace("/m0/", "/m0%2F")}`), env);
 		expect(separator.status).toBe(404);
 	});
 	it("returns to a local page after signing in, and only a local page", async () => {
@@ -117,7 +117,7 @@ describe("Worker", () => {
 			const row = await env.DB.prepare("SELECT value FROM verification").first<{ value: string }>();
 			return JSON.parse(row!.value).callbackURL;
 		};
-		expect(await callback("/repos/quest/quest/a0")).toBe("/repos/quest/quest/a0");
+		expect(await callback("/repos/quest/quest/m0")).toBe("/repos/quest/quest/m0");
 		expect(await callback("/repos/quest?show=available")).toBe("/repos/quest?show=available");
 		const unsafe = ["//evil.example", "/\\evil.example", "https://evil.example", "/\t/evil.example", "/\n/x"];
 		for (const next of [...unsafe, "/%2F/evil.example", "/%5cevil.example"]) {
@@ -128,7 +128,7 @@ describe("Worker", () => {
 		const response = await SELF.fetch(`${origin}/%09/evil.example`);
 		expect(response.status).toBe(404);
 		expect(await response.text()).toContain('name="next" value="/%09/evil.example"');
-		for (const path of ["%E0", "%", "a0%2Fcloudflare%2Fboard"]) {
+		for (const path of ["%E0", "%", "m0%2Fcloudflare%2Fboard"]) {
 			expect((await SELF.fetch(`${origin}/repos/quest/quest/${path}`)).status).toBe(404);
 		}
 	});

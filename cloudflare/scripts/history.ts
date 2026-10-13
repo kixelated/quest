@@ -34,7 +34,7 @@ function dirname(path: string): string {
  * The quests that `log` (from `LOG`) shows finished. A deletion counts when
  * its commit also changed something outside `quest/`: deleting only plans
  * abandons a quest rather than finishing it. Paths follow later directory
- * renames, such as an act's, to where they live now; `paths` is every quest
+ * renames, such as a milestone's, to where they live now; `paths` is every quest
  * that exists now, and a deletion that resolves to one of them was a move Git
  * did not pair up. `read` returns a file's text at a commit.
  */

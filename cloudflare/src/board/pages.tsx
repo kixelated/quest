@@ -5,8 +5,8 @@ import { Coin, type Crumb, Difficulty, Divider, Marker, Paste, SignIn, type User
 import { render } from "./markdown";
 import {
 	type Board,
-	type Act,
-	actAnchor,
+	type Milestone,
+	milestoneAnchor,
 	blobHref,
 	type Finished,
 	type Group,
@@ -115,18 +115,18 @@ function EpicRow(props: { epic: Group }) {
 	);
 }
 
-function ActSection(props: { act: Act; items: Item[] }) {
-	const { act } = props;
-	const name = act.number === "" ? act.title : `Act ${act.number}`;
+function MilestoneSection(props: { milestone: Milestone; items: Item[] }) {
+	const { milestone } = props;
+	const name = milestone.number === "" ? milestone.title : `Milestone ${milestone.number}`;
 	return (
-		<section class="ql-ledger act" id={actAnchor(act)}>
-			<header class="act-head">
-				{act.number !== "" && <p class="eyebrow">{name}</p>}
+		<section class="ql-ledger milestone" id={milestoneAnchor(milestone)}>
+			<header class="milestone-head">
+				{milestone.number !== "" && <p class="eyebrow">{name}</p>}
 				<h2>
-					<a href={act.href}>{act.title}</a>
+					<a href={milestone.href}>{milestone.title}</a>
 				</h2>
-				{act.summary && <p class="muted act-summary">{act.summary}</p>}
-				<ProgressBar progress={act.progress} name={name} />
+				{milestone.summary && <p class="muted milestone-summary">{milestone.summary}</p>}
+				<ProgressBar progress={milestone.progress} name={name} />
 			</header>
 			<Items items={props.items} />
 		</section>
@@ -144,7 +144,7 @@ function FinishedList(props: { finished: Finished[] }) {
 						{quest.size && <Difficulty size={quest.size} />}
 						<span class="entry-status muted">
 							Quest complete {quest.href ? <a href={quest.href}>{quest.date}</a> : quest.date}
-							{quest.act && ` · ${quest.act}`}
+							{quest.milestone && ` · ${quest.milestone}`}
 						</span>
 					</span>
 				</li>
@@ -188,8 +188,8 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 	const { board, show } = props;
 	const { project } = board;
 	const recent = board.finished.slice(0, 8);
-	const acts = board.acts
-		.map((act) => ({ act, items: show ? only(act.items, show) : act.items }))
+	const milestones = board.milestones
+		.map((milestone) => ({ milestone, items: show ? only(milestone.items, show) : milestone.items }))
 		.filter(({ items }) => !show || items.length > 0);
 	return (
 		<div class="wrap board">
@@ -210,10 +210,10 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 				</p>
 			</header>
 
-			{acts.map(({ act, items }) => (
-				<ActSection act={act} items={items} />
+			{milestones.map(({ milestone, items }) => (
+				<MilestoneSection milestone={milestone} items={items} />
 			))}
-			{acts.length === 0 && (
+			{milestones.length === 0 && (
 				<p class="ql-ledger muted">
 					No quests are {SHOWN.find(([kind]) => kind === show)![1].toLowerCase()} right now.{" "}
 					<a href={`/repos/${project.name}`}>Show every quest</a>.
@@ -252,13 +252,13 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 /** A section's display heading: `Goal` is Objectives and `Closes` is Rewards. */
 const HEADINGS: Record<string, string> = { Goal: "Objectives", Closes: "Rewards" };
 
-/** The breadcrumb trail to a document: the project, its act, its epics, then itself. */
+/** The breadcrumb trail to a document: the project, its milestone, its epics, then itself. */
 export function questCrumbs(board: Board, doc: Doc): Crumb[] {
-	const act = (group: Group) => board.acts.find((c) => c.path === group.path && c.number !== "");
+	const milestone = (group: Group) => board.milestones.find((c) => c.path === group.path && c.number !== "");
 	return [
 		{ label: board.project.title, href: `/repos/${board.project.name}` },
 		...trail(board, doc.path).map((group) => ({
-			label: act(group) ? `Act ${act(group)!.number}` : group.title,
+			label: milestone(group) ? `Milestone ${milestone(group)!.number}` : group.title,
 			href: group.href,
 		})),
 		{ label: title(doc.title?.text ?? doc.path).name, href: "" },

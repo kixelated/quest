@@ -26,7 +26,7 @@ people retry a failed download.
 
 ## Required
 
-- [CSV endpoint](/quest/a0/export.md) - the
+- [CSV endpoint](/quest/m0/export.md) - the
   button needs something to call
 
 ## Closes
@@ -36,8 +36,8 @@ people retry a failed download.
 
 const tree = `quest/
   README.md      # The roadmap
-  a0/
-    README.md    # First act, in priority order
+  m0/
+    README.md    # First milestone, in priority order
     export.md    # Available
     download.md  # Requires: export.md`;
 
@@ -102,7 +102,8 @@ export function Home(props: { setup: string; board: Board }) {
 					<div>
 						<p>
 							A quest is a Markdown file scoped to one pull request: its objectives, what has been
-							decided, and what stands in the way. Epics are folders, and acts group them by horizon.
+							decided, and what stands in the way. Epics are folders, and milestones group them by
+							horizon.
 						</p>
 						<p>
 							Any agent that can read your repository can find the work. No database, no tracker to sync,
@@ -159,7 +160,7 @@ export function Home(props: { setup: string; board: Board }) {
 				<p class="intro">The same quest: the Markdown your agents edit, and the page you read.</p>
 				<div class="split sample">
 					<figure class="ql-ledger code-page">
-						<figcaption>quest/a0/download.md</figcaption>
+						<figcaption>quest/m0/download.md</figcaption>
 						<pre>
 							<code>{sample}</code>
 						</pre>
@@ -221,8 +222,8 @@ export function Home(props: { setup: string; board: Board }) {
 
 			<Section id="map" title="Long-term plans, as a map">
 				<p class="intro">
-					Quest is planned with Quest. Acts become regions, epics become paths, and every quest is a waypoint
-					coloured by its size. Each deploy charts the tree as it stands.
+					Quest is planned with Quest. Milestones become regions, epics become paths, and every quest is a
+					waypoint coloured by its size. Each deploy charts the tree as it stands.
 				</p>
 				<QuestMap board={props.board} />
 			</Section>

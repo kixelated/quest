@@ -45,7 +45,7 @@ export function blockers(docs: Doc[], doc: Doc): Blocker[] {
 
 /**
  * The quest document `path` names, written as the tree writes it
- * (`/quest/a0/one.md`) or as the shell completes it (`quest/a0/one.md`).
+ * (`/quest/m0/one.md`) or as the shell completes it (`quest/m0/one.md`).
  */
 export function lookup(docs: Doc[], path: string): Doc | null {
 	for (const candidate of [normalize(path), normalize(path.replace(/^\//, ""))]) {
