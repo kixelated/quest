@@ -127,7 +127,7 @@ the version you pin decides what your agents follow:
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
-| `quest-start` | Claim a ready quest, complete it, and open a draft PR. |
+| `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-spawn` | Triage ready quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
