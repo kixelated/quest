@@ -35,7 +35,7 @@ What this project is working toward.
 
 Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome you
 want to work toward. The skill helps settle the scope, then writes the quests,
-grouped into epics and acts, with what each one requires. See the
+grouped into epics and milestones, with what each one requires. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
 From your repository root, validate the result and list the ready quests:
@@ -46,7 +46,7 @@ quest ready
 ```
 
 Review the plan before setting out. `/quest-start` claims one quest and opens a
-draft pull request; `/quest-spawn` sends several agents out in parallel when
+pull request; `/quest-spawn` sends several agents out in parallel when
 your session supports them. Use `$quest-start` and `$quest-spawn` in Codex.
 Check the forge for a live runner lock or an open change before starting. Quest
 on Cloudflare locks active work with MoQ announcements that clear when a session

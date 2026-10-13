@@ -1,4 +1,4 @@
-// The board's reading of a project: acts, epics, and quests, each with its
+// The board's reading of a project: milestones, epics, and quests, each with its
 // status and progress. Readiness comes from the shared core, so the board
 // always agrees with `quest ready`.
 
@@ -26,7 +26,7 @@ export type Quest = {
 /** Finished work out of all work, by count and weighted by difficulty. */
 export type Progress = { done: number; total: number; weight: number; totalWeight: number };
 
-/** An act or epic: a directory of quests, listed in priority order. */
+/** A milestone or epic: a directory of quests, listed in priority order. */
 export type Group = {
 	path: string;
 	href: string;
@@ -37,14 +37,14 @@ export type Group = {
 
 export type Item = { kind: "quest"; quest: Quest } | { kind: "epic"; epic: Group };
 
-export type Act = Group & { number: string; summary: string };
+export type Milestone = Group & { number: string; summary: string };
 
-export type Finished = Completed & { href: string | null; name: string; size: Size | null; act: string | null };
+export type Finished = Completed & { href: string | null; name: string; size: Size | null; milestone: string | null };
 
 export type Board = {
 	project: Project;
 	summary: string;
-	acts: Act[];
+	milestones: Milestone[];
 	counts: Record<Status["kind"], number>;
 	finished: Finished[];
 	docs: Map<string, Doc>;
@@ -83,12 +83,12 @@ function encodePath(path: string): string {
 	return path.split("/").map(encodeURIComponent).join("/");
 }
 
-/** An act's section on its board page: its directory name, such as `a0`. */
-export function actAnchor(act: Act): string {
-	return act.path.split("/")[1] ?? "unsorted";
+/** A milestone's section on its board page: its directory name, such as `m0`. */
+export function milestoneAnchor(milestone: Milestone): string {
+	return milestone.path.split("/")[1] ?? "unsorted";
 }
 
-/** The document a page path names: `quest/a0/board`, `quest/a0/epic`, or `quest/a0/epic/README`. */
+/** The document a page path names: `quest/m0/board`, `quest/m0/epic`, or `quest/m0/epic/README`. */
 export function findDoc(board: Board, page: string): Doc | null {
 	for (const path of [`${page}.md`, `${page}/README.md`]) {
 		const doc = board.docs.get(path);
@@ -187,10 +187,10 @@ export function readBoard(project: Project): Board {
 	};
 
 	const root = docs.get(ROOT);
-	const actPaths = [...(root ? children(root) : []), ...parsed.map((doc) => doc.path)].filter(
+	const milestonePaths = [...(root ? children(root) : []), ...parsed.map((doc) => doc.path)].filter(
 		(path, i, all) => path !== ROOT && permanent(path) && docs.has(path) && all.indexOf(path) === i,
 	);
-	const acts = actPaths.map((path): Act => {
+	const milestones = milestonePaths.map((path): Milestone => {
 		const segment = path.split("/")[1];
 		return {
 			...group(docs.get(path)!),
@@ -199,33 +199,33 @@ export function readBoard(project: Project): Board {
 		};
 	});
 
-	// Quests outside every act still show, in a group of their own.
+	// Quests outside every milestone still show, in a group of their own.
 	const rest = parsed.filter((doc) => !seen.has(doc.path) && !isEpic(doc)).map(quest);
 	if (rest.length > 0) {
-		acts.push({
+		milestones.push({
 			path: "quest",
 			href: questHref(project, ROOT),
 			title: "Unsorted",
 			number: "",
-			summary: "Quests that no act lists.",
+			summary: "Quests that no milestone lists.",
 			progress: { done: 0, total: rest.length, weight: 0, totalWeight: 0 },
 			items: rest.map((quest) => ({ kind: "quest", quest })),
 		});
 	}
 
-	const all = acts.flatMap((act) => flatten(act.items));
+	const all = milestones.flatMap((milestone) => flatten(milestone.items));
 	const counts = { "turn-in": 0, available: 0, blocked: 0 };
 	for (const q of all) counts[q.status.kind]++;
 
-	const actOf = (path: string) => acts.find((c) => c.number !== "" && path.startsWith(`${dir(c.path)}/`));
+	const milestoneOf = (path: string) => milestones.find((c) => c.number !== "" && path.startsWith(`${dir(c.path)}/`));
 	const finished = project.completed.map((c): Finished => {
 		const parsed = title(c.title);
-		const act = actOf(c.path);
+		const milestone = milestoneOf(c.path);
 		return {
 			...c,
 			name: parsed.name,
 			size: parsed.size,
-			act: act ? `Act ${act.number}` : null,
+			milestone: milestone ? `Milestone ${milestone.number}` : null,
 			href: project.web ? `${project.web}/commit/${c.commit}` : null,
 		};
 	});
@@ -233,7 +233,7 @@ export function readBoard(project: Project): Board {
 	return {
 		project,
 		summary: lead(contents.get(ROOT) ?? "", "Goal"),
-		acts,
+		milestones,
 		counts,
 		finished,
 		docs,
@@ -262,7 +262,7 @@ export function flatten(items: Item[]): Quest[] {
 	return items.flatMap((item) => (item.kind === "quest" ? [item.quest] : flatten(item.epic.items)));
 }
 
-/** The groups that hold a document, outermost first: its act, then any epics. */
+/** The groups that hold a document, outermost first: its milestone, then any epics. */
 export function trail(board: Board, path: string): Group[] {
 	const found: Group[] = [];
 	const visit = (group: Group): boolean =>
@@ -273,11 +273,11 @@ export function trail(board: Board, path: string): Group[] {
 			found.unshift(item.epic);
 			return true;
 		});
-	const act = board.acts.find((act) => act.path !== path && visit(act));
-	return act ? [act, ...found] : [];
+	const milestone = board.milestones.find((milestone) => milestone.path !== path && visit(milestone));
+	return milestone ? [milestone, ...found] : [];
 }
 
-/** The group a document heads, if it is an act or an epic. */
+/** The group a document heads, if it is a milestone or an epic. */
 export function findGroup(board: Board, path: string): Group | null {
 	const search = (groups: Group[]): Group | null => {
 		for (const group of groups) {
@@ -288,5 +288,5 @@ export function findGroup(board: Board, path: string): Group | null {
 		}
 		return null;
 	};
-	return search(board.acts);
+	return search(board.milestones);
 }
