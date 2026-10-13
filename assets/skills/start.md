@@ -21,7 +21,7 @@ Never write to or clean up a directory other agents share, such as a session scr
 When done, explain the result in a few lines and summarize any issues encountered.
 Prompt the user interactively for any open decisions, including your recommendation.
 Record the outcome as a PR comment as a paper-trail.
-Once no decisions remain, mark a draft PR ready for review.
+Once the quest is complete and no decisions remain, mark a draft PR ready for review.
 
 Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
 

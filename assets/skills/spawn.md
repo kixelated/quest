@@ -27,7 +27,7 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-When done, each agent opens a PR, a draft if decisions remain.
+When done, each agent opens a PR, a draft if decisions or unfinished work remain.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
