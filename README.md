@@ -33,7 +33,7 @@ Use the export endpoint. Show progress and let the user retry a failed download.
 
 ## Required
 
-- [CSV endpoint](/quest/a0/export.md) - the button needs something to call
+- [CSV endpoint](/quest/m0/export.md) - the button needs something to call
 ```
 
 That file sits in your quest log, a tree under `quest/`:
@@ -41,8 +41,8 @@ That file sits in your quest log, a tree under `quest/`:
 ```text
 quest/
   README.md           # The roadmap
-  a0/
-    README.md         # First act, in priority order
+  m0/
+    README.md         # First milestone, in priority order
     export.md         # Ready
     download.md       # Required: export.md
 ```
@@ -50,7 +50,7 @@ quest/
 Folders are **epics**. A README's `Required` lists its children in
 priority order, beside any other dependencies. The README is the epic's
 own quest, and it becomes ready once its children have merged. The top folders
-(`a0`, `a1`, ...) are **acts** that give the work a delivery horizon.
+(`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
 on it, so the quests that required it can become ready. The finished plan stays
@@ -85,12 +85,12 @@ The quest log is in order: 4 documents checked.
 
 $ quest --root examples/export ready
 1 quest ready
-! [S] Add a CSV export endpoint  quest/a0/export.md
+! [S] Add a CSV export endpoint  quest/m0/export.md
 
-$ quest --root examples/export ready quest/a0/download.md
-! [S] Add a download button        quest/a0/download.md
+$ quest --root examples/export ready quest/m0/download.md
+! [S] Add a download button        quest/m0/download.md
   Required:
-    [S] Add a CSV export endpoint  quest/a0/export.md
+    [S] Add a CSV export endpoint  quest/m0/export.md
 ```
 
 With no path, `ready` lists every ready quest. Given a path, it shows what
@@ -102,10 +102,10 @@ Scripts and agents read the piped form, which is plain text:
 
 ```console
 $ quest --root examples/export ready | cat
-quest/a0/export.md
+quest/m0/export.md
 
-$ quest --root examples/export ready quest/a0/download.md | cat
-quest/a0/export.md
+$ quest --root examples/export ready quest/m0/download.md | cat
+quest/m0/export.md
 ```
 
 Piped, `ready` prints one path per line. Given a path, it prints that quest's
@@ -153,12 +153,12 @@ The first release should let you paste one line into your agent to set Quest up,
 bring in existing GitHub issues, work through quests, and leave again without
 losing your plans. The binary carries the skills, your tool manager (mise or nix)
 pins its version, and your repository's instructions stay yours. macOS and Linux
-come first; [native Windows](quest/a1/windows.md) follows later.
+come first; [native Windows](quest/m1/windows.md) follows later.
 
 The release also brings a quest board to [kixel.quest](https://kixel.quest).
 Contributors sign in, take a ready quest through a live runner lock, and offer
 gold, their own agent tokens, to run it; maintainers review and merge the result there, synced
-with GitHub. [The first act](quest/a0/README.md) lists the quests that
+with GitHub. [The first milestone](quest/m0/README.md) lists the quests that
 remain.
 
 ## Join the party

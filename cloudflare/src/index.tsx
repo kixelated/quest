@@ -44,7 +44,7 @@ async function page(
 	);
 }
 
-// A project's board: its acts, epics, and quests with their statuses.
+// A project's board: its milestones, epics, and quests with their statuses.
 const boards = new WeakMap<Project, Board>();
 function board(name: string): Board | null {
 	const project = findProject(name);
@@ -68,7 +68,7 @@ app.get("/docs/:slug", (c) => {
 	return page(c, { title: doc.title, description: doc.summary }, <DocPage doc={doc} />);
 });
 
-// The quest board: a project's acts, then each quest's page at its path
+// The quest board: a project's milestones, then each quest's page at its path
 // without `.md`, the way its branch is named.
 app.get("/repos/:repository", (c) => {
 	const found = board(c.req.param("repository"));

@@ -1,19 +1,27 @@
 import { type Doc, entries, rooted } from "quest/core";
-import { type Act, type Board, type Progress, type Quest, type Status, actAnchor, flatten } from "./board/model";
+import {
+	type Milestone,
+	type Board,
+	type Progress,
+	type Quest,
+	type Status,
+	milestoneAnchor,
+	flatten,
+} from "./board/model";
 import { Difficulty } from "./layout";
 
 // The home page's quest map: the project's own tree, read left to right like
-// a world map. Acts are regions, epics are paths, and quests are waypoints
+// a world map. Milestones are regions, epics are paths, and quests are waypoints
 // coloured by size. Statuses use the format's own terms, with no display
 // aliases (decided 2026-10-07 on kixelated/quest#78).
 
 /**
- * One path through a region: an epic, or the quests an act lists directly.
+ * One path through a region: an epic, or the quests a milestone lists directly.
  * An epic's title and each waypoint open their board pages.
  */
 export type Path = { title: string; href: string | null; progress: Progress | null; waypoints: Quest[] };
 
-export type Region = { act: Act; href: string; paths: Path[] };
+export type Region = { milestone: Milestone; href: string; paths: Path[] };
 
 /**
  * How far along its path a quest sits: 0 with nothing in the tree before it,
@@ -37,7 +45,7 @@ function steps(docs: Map<string, Doc>): (path: string) => number {
 	return step;
 }
 
-/** The board's acts as map regions, each path ordered by step, then priority. */
+/** The board's milestones as map regions, each path ordered by step, then priority. */
 export function chart(board: Board): Region[] {
 	const step = steps(board.docs);
 	const ordered = (quests: Quest[]): Quest[] =>
@@ -46,12 +54,12 @@ export function chart(board: Board): Region[] {
 			.sort((a, b) => a.step - b.step || a.rank - b.rank)
 			.map(({ quest }) => quest);
 
-	return board.acts.map((act) => {
-		// Paths keep the act's priority order. The quests it lists directly share
+	return board.milestones.map((milestone) => {
+		// Paths keep the milestone's priority order. The quests it lists directly share
 		// one main path, placed where the first of them is listed.
-		const loose = act.items.flatMap((item) => (item.kind === "quest" ? [item.quest] : []));
+		const loose = milestone.items.flatMap((item) => (item.kind === "quest" ? [item.quest] : []));
 		const main: Path = { title: "Main path", href: null, progress: null, waypoints: ordered(loose) };
-		const paths = act.items.flatMap((item): Path[] => {
+		const paths = milestone.items.flatMap((item): Path[] => {
 			if (item.kind === "quest") return item.quest === loose[0] ? [main] : [];
 			const { epic } = item;
 			return [
@@ -63,7 +71,7 @@ export function chart(board: Board): Region[] {
 				},
 			];
 		});
-		return { act, href: `/repos/${board.project.name}#${actAnchor(act)}`, paths };
+		return { milestone, href: `/repos/${board.project.name}#${milestoneAnchor(milestone)}`, paths };
 	});
 }
 
@@ -115,15 +123,15 @@ export function QuestMap(props: { board: Board }) {
 	return (
 		<div class="ql-ledger map">
 			<ol class="map-regions" role="list">
-				{regions.map(({ act, href, paths }) => (
+				{regions.map(({ milestone, href, paths }) => (
 					<li class="region">
 						<header class="region-head">
-							{act.number !== "" && <span class="eyebrow">Act {act.number}</span>}
+							{milestone.number !== "" && <span class="eyebrow">Milestone {milestone.number}</span>}
 							<h3>
-								<a href={href}>{act.title}</a>
+								<a href={href}>{milestone.title}</a>
 							</h3>
 							<span class="muted region-count">
-								{act.progress.done} of {act.progress.total} quests complete
+								{milestone.progress.done} of {milestone.progress.total} quests complete
 							</span>
 						</header>
 						<ol class="map-paths" role="list">
