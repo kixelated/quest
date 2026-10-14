@@ -44,5 +44,4 @@ and donor machines never receive the App's credentials.
 
 ## Required
 
-- [GitHub App](/quest/m0/kix/github.md) - bot credentials and scoped GitHub operations
 - [Job coordination](/quest/m0/kix/jobs.md) - current action and publication authorization
