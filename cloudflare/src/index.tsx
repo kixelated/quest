@@ -8,6 +8,7 @@ import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
 import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
+import { canonicalRedirect } from "./origin";
 import { Layout, type Page, type User } from "./layout";
 export { RepositoryCoordinator } from "./repository";
 
@@ -15,6 +16,18 @@ const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
 // policy, which would fail the origin check on /sign-in and /sign-out.
 app.use(secureHeaders({ referrerPolicy: "same-origin" }));
+// Run before auth and assets: a legacy URL must not perform a second action.
+app.use(async (c, next) => {
+	const redirect = canonicalRedirect(c.req.raw, c.env.AUTH_URL);
+	if (redirect) return redirect;
+	await next();
+});
+// Worker-first routing makes old-domain asset URLs redirect too.
+app.on(["GET", "HEAD"], ["/theme/*", "/site.css"], async (c) => {
+	const response = await c.env.ASSETS.fetch(c.req.raw);
+	// Fetch responses have immutable headers; secureHeaders adds the site's policy.
+	return new Response(response.body, response);
+});
 app.get("/health", (c) => c.json({ status: "ok" }));
 // Short link for the one-line setup paste.
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));

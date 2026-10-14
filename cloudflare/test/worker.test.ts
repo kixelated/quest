@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { SELF, evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as projects from "../src/board/project";
 import app from "../src/index";
@@ -232,18 +232,5 @@ describe("Worker", () => {
 		expect(response.headers.get("location")).toContain("error=");
 		const users = await env.DB.prepare("SELECT count(*) AS count FROM user").first<{ count: number }>();
 		expect(users?.count).toBe(before?.count);
-	});
-});
-
-describe("Repository coordinator", () => {
-	it("initializes SQLite once and retains per-repository state after eviction", async () => {
-		const first = env.REPOSITORIES.getByName("repo-a");
-		expect(await first.status()).toEqual({ schemaVersion: 1 });
-		await runInDurableObject(first, (_object, state) => {
-			state.storage.sql.exec("UPDATE metadata SET schema_version = 2 WHERE id = 1");
-		});
-		await evictDurableObject(first);
-		expect(await env.REPOSITORIES.getByName("repo-a").status()).toEqual({ schemaVersion: 2 });
-		expect(await env.REPOSITORIES.getByName("repo-b").status()).toEqual({ schemaVersion: 1 });
 	});
 });

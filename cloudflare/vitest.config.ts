@@ -1,29 +1,16 @@
-import { parse } from "jsonc-parser";
-import { readFileSync } from "node:fs";
-import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import { buildPagesASSETSBinding, cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
-// Artifacts is remote-only, including Wrangler local mode. Build local test
-// bindings from the deploy config without Artifacts so CI never authenticates
-// or connects to a Cloudflare account. No repository operations exist yet.
-const config = parse(readFileSync("./wrangler.jsonc", "utf8"));
+// Read deployed bindings locally. The Vitest plugin omits Workers assets,
+// so use its file-backed ASSETS helper without contacting a Cloudflare account.
 export default defineConfig({
 	plugins: [
 		cloudflareTest(async () => ({
-			main: config.main,
+			wrangler: { configPath: "./wrangler.jsonc" },
 			remoteBindings: false,
 			miniflare: {
-				compatibilityDate: config.compatibility_date,
-				compatibilityFlags: config.compatibility_flags,
-				d1Databases: config.d1_databases.map((db: { binding: string }) => db.binding),
-				durableObjects: Object.fromEntries(
-					config.durable_objects.bindings.map((binding: { name: string; class_name: string }) => [
-						binding.name,
-						{ className: binding.class_name, useSQLite: true },
-					]),
-				),
+				serviceBindings: { ASSETS: await buildPagesASSETSBinding("./build/public") },
 				bindings: {
-					...config.vars,
 					AUTH_URL: "http://localhost:8787",
 					AUTH_SECRET: "test-only-secret-that-is-at-least-32-characters",
 					GITHUB_CLIENT_ID: "test-client-id",

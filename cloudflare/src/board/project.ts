@@ -2,8 +2,8 @@
 // quests history shows finished, and the open changes and issues around it.
 //
 // Today the only project is this repository, snapshotted at build time by
-// scripts/build.ts. Projects stored in Artifacts fill the same shape once
-// GitHub sync mirrors them and caches their finished quests.
+// scripts/build.ts. Enrolled GitHub repositories fill the same shape once
+// the GitHub project-state integration loads snapshots and finished quests.
 
 import snapshot from "../../build/board.json";
 import { repo } from "../layout";

@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
-// Address with REPOSITORIES.getByName(the Artifacts repo name). Later quests
-// add coordination operations here; quest state remains in the Git repository.
+// Unbound legacy class retained to preserve deployed storage and migration history.
+// Remove only after the operator verifies and approves permanent storage cleanup.
 export class RepositoryCoordinator extends DurableObject<Env> {
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
