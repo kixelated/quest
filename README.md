@@ -115,6 +115,42 @@ command failed. Run `check` first to catch malformed plans. `ready` reads
 dependencies in the quest tree; it does not inspect live runner locks, open changes, or GitHub branch
 claims. Check those before you start work someone else may already be on.
 
+## Wait for pull request activity
+
+`quest wait` blocks until a GitHub PR has a review, comment, push, merge, or close:
+
+```sh
+quest wait 101
+quest wait https://github.com/kixelated/quest/pull/101 --since 2026-10-07T12:00:00Z --timeout 1800
+quest wait 101 --since abcdef0123456789abcdef0123456789abcdef012345
+```
+
+A number uses the repository's `origin`; a URL works from any directory.
+Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`.
+Without `--since`, the point is the current head's push time, so an existing
+review on that head is included. A SHA must have been a pushed tip; if its push
+time cannot be found, pass an ISO timestamp instead. Forks use the head
+repository's activity. Deleted head repositories require a timestamp.
+The initial PR commit listing must match the resolved head; a racing push or
+GitHub's 250-commit listing limit fails clearly instead of guessing membership.
+
+Output is plain, one line per event: timestamp (or SHA for a newly observed
+commit), type, actor, and URL. The last line adds a resume cursor. Pass its
+**last field** as `--since` on the next call. Cursors preserve commit membership
+and events sharing a timestamp; treat them as opaque, and use them only for the
+same PR. Explicit timestamps include events at that instant. Historical pushes
+come from repository activity; pushes observed while waiting come from new
+commit SHAs, regardless of git author dates. Actors are printed without deciding
+whose review counts. Check runs and edits to existing comments or reviews are
+outside this command's scope.
+
+The waiter makes one conditional timeline request every five minutes once it
+has read the existing pages, following a new page when the current one fills.
+It honors GitHub's rate-limit headers and fails loudly on invalid responses.
+There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
+timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
+with Ctrl-C to stop waiting.
+
 ## Work with your agents
 
 Open this repository in Claude Code or Codex. The binary carries the skills;

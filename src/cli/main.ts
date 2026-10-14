@@ -11,6 +11,7 @@ import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
+import { pullRequest, waitDependencies, waitForActivity, WaitInputError, WaitTimeout } from "./wait";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
@@ -24,7 +25,8 @@ export interface Output {
 class UsageError extends Error {}
 
 /** Run the CLI with `argv` (arguments only, no executable). Returns the exit code. */
-export function main(argv: string[], out: Output): number {
+export function main(argv: string[], out: Output): number | Promise<number> {
+	let pending: Promise<number> | undefined;
 	let code = 0;
 	const print = (line: string) => out.stdout(`${line}\n`);
 	const warn = (line: string) => out.stderr(`quest: ${line}\n`);
@@ -106,6 +108,36 @@ export function main(argv: string[], out: Output): number {
 		});
 
 	program
+		.command("wait")
+		.summary("Wait for pull request activity on GitHub")
+		.description(
+			"Wait for a review, comment, push, merge, or close. Polls the timeline every 5 minutes; " +
+				"rate limits delay requests. No timeout by default.\n\n" +
+				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
+				"Pass the final field of the last line to --since to resume without replaying events.\n\n" +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for activity, 3 on timeout, " +
+				"2 for invalid arguments, and 1 for other failures. Check runs and edits are not activity.",
+		)
+		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.option("--since <point>", "ISO timestamp, pushed-tip SHA, or resume cursor (default: current head push time)")
+		.option("--timeout <seconds>", "Maximum wait in seconds", positiveSeconds)
+		.action((value: string, options: { since?: string; timeout?: number }) => {
+			const pr = pullRequest(value, root());
+			const deps = waitDependencies();
+			deps.warn = warn;
+			pending = waitForActivity(pr, options, deps).then(
+				(lines) => {
+					for (const line of lines) print(line);
+					return 0;
+				},
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return error instanceof WaitTimeout ? 3 : error instanceof WaitInputError ? 2 : 1;
+				},
+			);
+		});
+
+	program
 		.command("guide")
 		.description("Print the quest guide: the format, workflow, and rules agents follow")
 		.action(() => out.stdout(GUIDE));
@@ -149,13 +181,13 @@ export function main(argv: string[], out: Output): number {
 
 	try {
 		program.parse(argv, { from: "user" });
-		return code;
+		return pending ?? code;
 	} catch (error) {
 		if (error instanceof CommanderError) {
 			// Help and version exit 0; any other parse failure is a usage error.
 			return error.exitCode === 0 ? 0 : 2;
 		}
-		if (error instanceof UsageError) {
+		if (error instanceof UsageError || error instanceof WaitInputError) {
 			out.stderr(`error: ${error.message}\n`);
 			return 2;
 		}
@@ -182,4 +214,13 @@ function withinRoot(root: string, path: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+/** A deadline must be finite, positive, and safe for the platform's timer. */
+function positiveSeconds(value: string): number {
+	const seconds = Number(value);
+	if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) {
+		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
+	}
+	return seconds;
 }

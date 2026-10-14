@@ -22,6 +22,8 @@ Consider ordering, queuing any merges if they would result in conflicts.
 
 Run each `/quest-merge` or `/quest-iterate` in its own sub-agent with its own isolated worktree.
 Each sub-agent blocks on its own waits and reports back only when done or blocked.
+For GitHub review or merge activity, it uses `quest wait` and resumes with the
+returned cursor as described by `quest skill merge`, rather than polling GitHub.
 Limit the number of active agents to the CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
