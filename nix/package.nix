@@ -48,6 +48,7 @@ stdenv.mkDerivation {
       ../package-lock.json
       ../tsconfig.json
       ../src
+      ../scripts/executable.mjs
       ../assets
     ];
   };
