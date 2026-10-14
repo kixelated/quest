@@ -1,10 +1,10 @@
 {
 	"name": "Quest",
-	"url": "https://kixel.quest",
+	"url": "https://kix.quest",
 	"description": "Versioned quest plans and explicitly approved GitHub operations.",
 	"public": true,
 	"hook_attributes": {
-		"url": "https://kixel.quest/webhooks/github",
+		"url": "https://kix.quest/webhooks/github",
 		"active": true
 	},
 	"default_permissions": {

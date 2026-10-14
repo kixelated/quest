@@ -11,9 +11,9 @@
 		"watch_dir": ["src", "scripts", "../docs", "../design", "../quest"],
 	},
 	"assets": { "directory": "build/public" },
-	"routes": [{ "pattern": "kixel.quest", "custom_domain": true }],
+	"routes": [{ "pattern": "kix.quest", "custom_domain": true }],
 	"workers_dev": false,
-	"vars": { "AUTH_URL": "https://kixel.quest", "GITHUB_APP_ID": "", "GITHUB_FORK_OWNER": "" },
+	"vars": { "AUTH_URL": "https://kix.quest", "GITHUB_APP_ID": "", "GITHUB_FORK_OWNER": "" },
 	"secrets": {
 		"required": [
 			"AUTH_SECRET",
@@ -23,7 +23,6 @@
 			"GITHUB_WEBHOOK_SECRET",
 		],
 	},
-	"artifacts": [{ "binding": "ARTIFACTS", "namespace": "quest" }],
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -32,6 +31,6 @@
 			"migrations_dir": "migrations",
 		},
 	],
-	"durable_objects": { "bindings": [{ "name": "REPOSITORIES", "class_name": "RepositoryCoordinator" }] },
+	// Retain the existing class and migration history until operator-approved storage cleanup.
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepositoryCoordinator"] }],
 }

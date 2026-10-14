@@ -17,6 +17,6 @@ their decision inbox. The standalone Quest setup remains easy to find.
 
 ## Required
 
-- [Primary domain](/quest/m0/kix/domain.md) - canonical links and redirects
+- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the live site and setup link
 - [Project enrollment](/quest/m0/kix/onboard.md) - maintainer entry path
 - [Decision inbox](/quest/m0/kix/prompts.md) - returning maintainer destination

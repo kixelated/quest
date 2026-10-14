@@ -158,11 +158,10 @@ losing your plans. The binary carries the skills, your tool manager (mise or nix
 pins its version, and your repository's instructions stay yours. Quest supports
 macOS, Linux, and [native Windows](docs/windows.md).
 
-The release also brings a quest board to [kixel.quest](https://kixel.quest).
-Contributors sign in, take a ready quest through a live runner lock, and offer
-gold, their own agent tokens, to run it; maintainers review and merge the result there, synced
-with GitHub. [The first milestone](quest/m0/README.md) lists the quests that
-remain.
+The hosted service is moving to [kix.quest](https://kix.quest): maintainers
+plan issues, start ready quests, and act on GitHub PRs through a decision UI.
+Hosted work will use explicitly selected maintainer or donor API funding.
+[The first milestone](quest/m0/README.md) lists the quests that remain.
 
 ## Join the party
 
