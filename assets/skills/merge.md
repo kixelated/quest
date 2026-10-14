@@ -16,6 +16,16 @@ This includes deciding if we should `/quest-plan` for suggested follow-ups.
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead.
 
+When waiting for a required review or for an enabled auto-merge to finish, run
+`quest wait <pr>` as one blocking command instead of polling GitHub in a loop.
+Inspect the events and decide whether they satisfy the wait; the command does
+not decide whose review counts. If activity is irrelevant (including bot
+notices), call it again with `--since` set to the last field of its last line.
+Use `--timeout <seconds>` only when this workflow needs a bound; exit 3 means
+the deadline expired, and other failures must be reported rather than treated
+as activity. Check CI with its own blocking check watcher; check runs are not
+PR timeline activity. Do not wait for optional reviews.
+
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.

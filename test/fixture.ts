@@ -178,5 +178,6 @@ export function runOn(
 		terminal,
 	};
 	const code = main(args, out);
+	if (typeof code !== "number") throw new Error("use await main for asynchronous CLI commands");
 	return { code, stdout, stderr };
 }
