@@ -75,6 +75,9 @@ npm link
 ```
 
 With Nix, `nix run github:kixelated/quest -- --help` builds and runs it instead.
+Native Windows needs no WSL for Quest: see [installation and removal](docs/windows.md).
+Windows ZIP artifacts are added by the next release containing this change;
+older releases remain macOS/Linux-only.
 
 The [CSV export example](examples/export/quest/README.md) is a small, working
 quest tree. From this checkout:
@@ -188,8 +191,8 @@ The [getting started guide](docs/getting-started.md) covers what happens next.
 The first release should let you paste one line into your agent to set Quest up,
 bring in existing GitHub issues, work through quests, and leave again without
 losing your plans. The binary carries the skills, your tool manager (mise or nix)
-pins its version, and your repository's instructions stay yours. macOS and Linux
-come first; [native Windows](quest/m1/windows.md) follows later.
+pins its version, and your repository's instructions stay yours. Quest supports
+macOS, Linux, and [native Windows](docs/windows.md).
 
 The release also brings a quest board to [kixel.quest](https://kixel.quest).
 Contributors sign in, take a ready quest through a live runner lock, and offer

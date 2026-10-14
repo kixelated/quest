@@ -26,6 +26,5 @@ test PR verify the integration before contributors are invited.
 
 ## Required
 
-- [GitHub App](/quest/m0/kix/github.md) - reviewed manifest and service endpoints
 - [Primary domain](/quest/m0/kix/domain.md) - stable callback and webhook URLs
 - [Bot publication](/quest/m0/kix/publication.md) - the integration exercised by the test PR

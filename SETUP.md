@@ -12,7 +12,8 @@ line in its root instructions.
 ## Install and pin
 
 Pin the latest [release](https://github.com/kixelated/quest/releases) tag.
-Releases ship binaries for macOS and Linux on arm64 and x64. If there is no
+Releases ship binaries for macOS, Linux, and native Windows on arm64 and x64.
+Check that the chosen release includes the Windows archives; older tags do not. If there is no
 release yet and the repository uses a nix flake (not on Intel Macs), pin the
 latest commit on `main`, which the flake builds from source; otherwise tell the
 user Quest has no release to install yet and stop.
@@ -30,7 +31,9 @@ Use the tool manager the repository already has:
   run the release's shell installer,
   `curl -LsSf https://github.com/kixelated/quest/releases/download/<tag>/quest-installer.sh | sh`,
   which puts `quest` in `~/.local/bin` (set `QUEST_INSTALL_DIR` to change it)
-  and edits no shell configuration. Tell the user this install is unpinned.
+  and edits no shell configuration. On native Windows, use the verified ZIP
+  installation in [the Windows guide](docs/windows.md) with consent instead of
+  the shell installer. Tell the user this install is unpinned.
 
 Confirm `quest --version` runs before continuing.
 
@@ -40,8 +43,8 @@ Confirm `quest --version` runs before continuing.
 quest init
 ```
 
-Init writes a stub per skill under `.claude/skills/` (linking `.agents/skills/`
-to the same tree), creates `quest/README.md` when missing, and appends a line
+Init writes a stub per skill under both `.claude/skills/` and `.agents/skills/`
+without creating symbolic links (existing linked layouts continue to work), creates `quest/README.md` when missing, and appends a line
 starting with `Quests: ` to the root `AGENTS.md`, or `CLAUDE.md` when only that
 exists. It prints each path it changed and is safe to rerun.
 
@@ -74,6 +77,7 @@ work or `/quest-import` to bring in open GitHub issues.
    line, and never deletes the quest tree.
 3. Remove the pin added above: the mise entry, or the flake input and dev
    shell package. For an unpinned install, delete the `quest` binary the
-   installer placed (`~/.local/bin/quest` by default).
+   installer placed (`~/.local/bin/quest` by default, or `quest.exe` in the
+   chosen Windows install directory). Remove any PATH entry you added.
 4. Ask the user whether to delete `quest/`. Git history keeps the plans either
    way.

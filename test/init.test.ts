@@ -68,7 +68,7 @@ function snapshot(dir: string): unknown[] {
 		});
 }
 
-test.each([
+for (const [path, type] of [
 	["quest", "file"],
 	["quest", "symlink"],
 	["quest/README.md", "directory"],
@@ -82,28 +82,36 @@ test.each([
 	[".claude/skills/quest-start/SKILL.md", "symlink"],
 	["AGENTS.md", "directory"],
 	["AGENTS.md", "symlink"],
-])("init refuses %s as a %s before writing anything", (path, type) => {
-	const dir = tempDir();
-	const conflict = join(dir, path);
-	mkdirSync(dirname(conflict), { recursive: true });
-	if (type === "directory") mkdirSync(conflict);
-	else if (type === "symlink") symlinkSync("missing.md", conflict);
-	else writeFileSync(conflict, "Keep these bytes.\n");
-	const before = snapshot(dir);
-	expect(() => init(dir)).toThrow(`${path} is not a`);
-	expect(snapshot(dir)).toEqual(before);
-});
+])
+	test.skipIf(type === "symlink" && process.platform === "win32")(
+		`init refuses ${path} as a ${type} before writing anything`,
+		() => {
+			const dir = tempDir();
+			const conflict = join(dir, path);
+			mkdirSync(dirname(conflict), { recursive: true });
+			if (type === "directory") mkdirSync(conflict);
+			else if (type === "symlink") symlinkSync("missing.md", conflict);
+			else writeFileSync(conflict, "Keep these bytes.\n");
+			const before = snapshot(dir);
+			expect(() => init(dir)).toThrow(`${path} is not a`);
+			expect(snapshot(dir)).toEqual(before);
+		},
+	);
 
-test.each(["directory", "symlink"])("init uses CLAUDE.md when AGENTS.md is a %s", (type) => {
-	const dir = tempDir();
-	writeFileSync(join(dir, "CLAUDE.md"), "# Claude\n");
-	if (type === "directory") mkdirSync(join(dir, "AGENTS.md"));
-	else symlinkSync("missing.md", join(dir, "AGENTS.md"));
-	init(dir);
-	expect(read(dir, "CLAUDE.md")).toContain(REFERENCE_LINE);
-	expect(existsSync(join(dir, "missing.md"))).toBe(false);
-	expect(lstatSync(join(dir, "AGENTS.md")).isDirectory()).toBe(type === "directory");
-});
+for (const type of ["directory", "symlink"])
+	test.skipIf(type === "symlink" && process.platform === "win32")(
+		`init uses CLAUDE.md when AGENTS.md is a ${type}`,
+		() => {
+			const dir = tempDir();
+			writeFileSync(join(dir, "CLAUDE.md"), "# Claude\n");
+			if (type === "directory") mkdirSync(join(dir, "AGENTS.md"));
+			else symlinkSync("missing.md", join(dir, "AGENTS.md"));
+			init(dir);
+			expect(read(dir, "CLAUDE.md")).toContain(REFERENCE_LINE);
+			expect(existsSync(join(dir, "missing.md"))).toBe(false);
+			expect(lstatSync(join(dir, "AGENTS.md")).isDirectory()).toBe(type === "directory");
+		},
+	);
 
 test("init appends to AGENTS.md, not CLAUDE.md, when both exist", () => {
 	const dir = tempDir();
@@ -142,18 +150,79 @@ test("a round trip with the Codex skills directory", () => {
 	init(dir);
 	expect(isFile(dir, ".agents/skills/quest-start/SKILL.md")).toBe(true);
 	expect(existsSync(join(dir, ".claude/skills/quest-start/SKILL.md"))).toBe(true);
-	expect(isSymlink(dir, ".claude/skills")).toBe(true);
+	expect(lstatSync(join(dir, ".claude/skills")).isDirectory()).toBe(true);
 
 	uninstall(dir);
 	expect(existsSync(join(dir, ".agents/skills"))).toBe(false);
 	expect(isSymlink(dir, ".claude/skills")).toBe(false);
 });
 
-test("init refuses two skill directories", () => {
+test("init uses independent skill directories without creating symlinks", () => {
+	const dir = tempDir();
+	for (const skills of [".claude/skills", ".agents/skills"]) {
+		mkdirSync(join(dir, skills, "custom"), { recursive: true });
+		writeFileSync(join(dir, skills, "custom/SKILL.md"), `# ${skills} custom skill\n`);
+	}
+	init(dir);
+	for (const skills of [".claude/skills", ".agents/skills"]) {
+		expect(lstatSync(join(dir, skills)).isDirectory()).toBe(true);
+		expect(isFile(dir, `${skills}/quest-start/SKILL.md`)).toBe(true);
+	}
+	expect(init(dir)).toEqual([]);
+	uninstall(dir);
+	for (const skills of [".claude/skills", ".agents/skills"]) {
+		expect(read(dir, `${skills}/custom/SKILL.md`)).toBe(`# ${skills} custom skill\n`);
+		expect(existsSync(join(dir, skills, "quest-start"))).toBe(false);
+	}
+});
+
+test("conflicts in the second destination prevent writes to the first", () => {
+	const dir = tempDir();
+	mkdirSync(join(dir, ".agents/skills/quest-start"), { recursive: true });
+	writeFileSync(join(dir, ".agents/skills/quest-start/SKILL.md"), "# User workflow\n");
+	const before = snapshot(dir);
+	expect(() => init(dir)).toThrow(".agents/skills/quest-start/SKILL.md is not a Quest stub");
+	expect(snapshot(dir)).toEqual(before);
+});
+
+test("setup and removal preserve CRLF instructions and recognize CRLF stubs", () => {
+	const dir = tempDir();
+	const original = "# Repository rules\r\n\r\nKeep this rule.\r\n";
+	writeFileSync(join(dir, "AGENTS.md"), original);
+	init(dir);
+	expect(read(dir, "AGENTS.md")).toBe(`${original}\r\n${REFERENCE_LINE}\r\n`);
+	for (const skills of [".claude/skills", ".agents/skills"]) {
+		for (const skill of readdirSync(join(dir, skills))) {
+			const path = `${skills}/${skill}/SKILL.md`;
+			writeFileSync(join(dir, path), read(dir, path).replaceAll("\n", "\r\n"));
+		}
+	}
+	expect(init(dir)).toEqual([]);
+	uninstall(dir);
+	expect(read(dir, "AGENTS.md")).toBe(original);
+	expect(existsSync(join(dir, ".agents"))).toBe(false);
+	expect(existsSync(join(dir, ".claude"))).toBe(false);
+});
+
+test.skipIf(process.platform === "win32")("existing linked skills install once and uninstall cleanly", () => {
 	const dir = tempDir();
 	mkdirSync(join(dir, ".claude/skills"), { recursive: true });
-	mkdirSync(join(dir, ".agents/skills"), { recursive: true });
-	expect(() => init(dir)).toThrow("both");
+	mkdirSync(join(dir, ".agents"));
+	symlinkSync("../.claude/skills", join(dir, ".agents/skills"));
+	const changed = init(dir);
+	expect(changed.filter((path) => path.endsWith("SKILL.md"))).toHaveLength(10);
+	expect(init(dir)).toEqual([]);
+	uninstall(dir);
+	expect(existsSync(join(dir, ".claude"))).toBe(false);
+	expect(existsSync(join(dir, ".agents"))).toBe(false);
+});
+
+test.skipIf(process.platform === "win32")("uninstall preserves an unrelated dangling skills link", () => {
+	const dir = tempDir();
+	mkdirSync(join(dir, ".agents"));
+	symlinkSync("../user-owned", join(dir, ".agents/skills"));
+	uninstall(dir);
+	expect(readlinkSync(join(dir, ".agents/skills"))).toBe("../user-owned");
 });
 
 test("uninstall is idempotent", () => {
