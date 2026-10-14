@@ -31,7 +31,6 @@ delivery. Follow the Deployment section of `cloudflare/README.md` and steps 1,
   production database.
 - Set the production GitHub OAuth app's homepage to `https://kix.quest` and
   its callback to `https://kix.quest/api/auth/callback/github`.
-- The deploy disconnects the unused Artifacts and coordinator bindings but
-  keeps the `RepositoryCoordinator` export and `v1` migration. Deleting them
-  would permanently remove its storage; that cleanup needs the operator's
-  inspection and explicit approval, and is out of scope here.
+- The deploy deletes the legacy `RepositoryCoordinator` Durable Object and
+  any storage it held, approved 2026-10-14 since nothing is stored. Afterwards
+  remove its `exports` tombstone from `cloudflare/wrangler.jsonc`.

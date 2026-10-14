@@ -9,8 +9,7 @@ with webhook replay producing no duplicate item.
 
 ## Plan
 
-- GitHub is authoritative. Cache snapshots and API responses as needed;
-  remove the Artifacts mirror assumption from the existing board loader.
+- GitHub is authoritative. Cache snapshots and API responses as needed.
 - Reuse the board's `Project` seam and the pure quest parser/readiness
   functions. Keep source commit IDs with derived state so stale plans do
   not authorize new execution.

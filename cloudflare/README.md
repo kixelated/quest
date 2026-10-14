@@ -36,11 +36,8 @@ adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
 state, cookies, and callbacks. Form routes enforce the configured origin before
 calling Better Auth's server API.
 
-The unused Artifacts and repository Durable Object bindings are disconnected.
-GitHub remains the planned authority for enrolled project state. The legacy
-`RepositoryCoordinator` export and its `v1` migration remain solely to preserve
-any deployed storage until operator-approved cleanup; no application route can
-reach it. D1 retains the existing accounts and sessions.
+GitHub remains the planned authority for enrolled project state. The Worker
+has no Durable Objects; D1 holds accounts, sessions, and GitHub App state.
 
 `cloudflare/` is an npm workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -140,11 +137,12 @@ npm run check
 npm run deploy
 ```
 
-D1 schema migrations are applied separately before deployment. Keep the
-existing `v1` Durable Object migration and unbound class export until the
-operator has inspected any legacy data and explicitly approved permanent
-storage cleanup. No deletion migration is included: deleting that class would
-permanently remove its stored data. This does not affect the D1 auth database.
+D1 schema migrations are applied separately before deployment. The `exports`
+tombstone in `wrangler.jsonc` deletes the legacy `RepositoryCoordinator`
+Durable Object namespace, and any storage it held, from Workers deployed before
+it was removed; Wrangler reports a stale tombstone where none exists. Remove the
+tombstone after the next production deploy. This does not affect the D1 auth
+database.
 
 After deploying, verify `/health`, `/setup`, and a theme asset, then complete
 sign-in/sign-out in the browser.
@@ -153,7 +151,7 @@ The auth schema migration is checked in for review. When upgrading Better Auth
 or adding a plugin, generate/review its schema changes and add a D1 migration;
 do not migrate the production database on HTTP requests.
 
-References: [Durable Object migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/),
+References: [Durable Object migrations](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/),
 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/),
 [Better Auth database](https://better-auth.com/docs/concepts/database), and
 [Hono integration](https://better-auth.com/docs/integrations/hono).

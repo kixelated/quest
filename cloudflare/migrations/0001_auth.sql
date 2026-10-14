@@ -1,4 +1,4 @@
--- Better Auth core schema, SQLite/D1. All repository content lives in Artifacts.
+-- Better Auth core schema, SQLite/D1.
 CREATE TABLE user (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
