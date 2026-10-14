@@ -65,11 +65,6 @@ Decided on 2026-10-13 through the API-credit and product-pivot interview:
   outside the pure quest core. The standalone CLI and versioned quest
   format remain useful without this service.
 
-The old draft PRs #40 (Artifacts intake), #41 (custom changes), and #43
-(mirroring) implement superseded outcomes. Salvage only relevant pieces,
-such as App/webhook handling, instead of landing their old architecture.
-This planning change does not close those PRs.
-
 ## Required
 
 - [Primary domain](/quest/m0/kix/domain.md) - kix.quest is canonical and kixel.quest redirects
