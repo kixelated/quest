@@ -45,10 +45,11 @@ The package stays `private`; GitHub releases will ship the `quest` binary.
 ## Releases
 
 Pushing a `vX.Y.Z` tag that matches `package.json`'s version runs the Release
-workflow. It compiles `quest` with Bun for macOS and Linux (arm64 and x64),
-runs the lifecycle check on each binary's native runner, and publishes the archives,
-`SHA256SUMS`, and `quest-installer.sh` to a GitHub release. It then checks that
-mise and the installer install the tag on every platform. A tag with a
+workflow. It compiles `quest` with Bun for macOS, Linux, and Windows (arm64 and
+x64), runs the lifecycle check on each binary's native runner, and publishes the
+macOS/Linux tarballs, Windows ZIPs, `SHA256SUMS`, and `quest-installer.sh` to a
+GitHub release. It then checks that mise and the installer (or, on Windows, the
+ZIP archive) install the tag on every platform. A tag with a
 prerelease suffix publishes a prerelease. `just compile` builds a binary for
 this machine; the Bun in the Nix shell is the version releases use.
 

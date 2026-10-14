@@ -5,7 +5,7 @@
 Ship Quest v0.1.0. A developer using Claude Code or Codex with GitHub pastes one
 line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
-macOS and Linux (WSL) only; native Windows is m1.
+It runs on macOS, Linux, and native Windows.
 
 The hosted launch is kix.quest: maintainers answer interactive prompts to
 plan issues, start ready quests, and act on new PRs. Claude Agent SDK sessions
@@ -33,6 +33,9 @@ ownership-manifest design:
 
 ## Required
 
+- [Reliable Worker tests](/quest/m0/test-timeouts.md) - local `just test` passes under host load without longer timeouts
+- [Wait on replies and reactions](/quest/m0/wait-signals.md) - `quest wait` wakes on review-thread replies and PR/review reactions
 - [Kix decision UI](/quest/m0/kix/README.md) - hosted planning and implementation through prompts, funded by explicit API allocations
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
+- [Development tooling](/quest/m0/tooling.md) - Dependabot vitest majors, one wrangler, approved install scripts

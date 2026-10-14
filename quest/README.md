@@ -14,4 +14,4 @@ earlier milestones complete.
 ## Required
 
 - [M0: First public release](/quest/m0/README.md) - install, set up, work, and leave, driven from one pinned binary, paired with the Kix decision UI
-- [M1: Later work](/quest/m1/README.md) - local API workers and plugin, donated reviews and CI, and native Windows
+- [M1: Later work](/quest/m1/README.md) - local API workers, the Claude plugin, and donated reviews and CI
