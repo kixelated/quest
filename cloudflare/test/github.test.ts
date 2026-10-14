@@ -274,7 +274,9 @@ describe("trusted App operations", () => {
 			head: "quest-bot-forks:quest/m0/one",
 			head_repo: "project",
 			draft: true,
+			maintainer_can_modify: false,
 		});
+		expect(requests.find((r) => r.path.endsWith("/pulls"))?.authorization).toBe("Bearer upstream-token");
 		await expect(github({ parent: 999 }).service.createPullRequest(repo, "app-test", fork, input)).rejects.toThrow(
 			"fork this upstream",
 		);

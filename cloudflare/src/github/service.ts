@@ -249,6 +249,10 @@ export class GitHubService {
 				title: input.title,
 				body: input.body,
 				draft: true,
+				// The upstream-scoped token has no write access to the fork's head
+				// branch, so it cannot grant maintainers edits there. Installation
+				// tokens cannot span both owners; the fork token only pushes.
+				maintainer_can_modify: false,
 			});
 		});
 	}

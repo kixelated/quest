@@ -57,7 +57,10 @@ Publication is restricted to `quest/*.md` on an existing `quest/...` branch in
 that namespace. The service verifies the fork's immediate parent ID is the
 upstream ID. PR creation uses an upstream-scoped token and an explicit head
 owner and repository; for organization cross-repository PRs GitHub requires
-`head_repo`. Agents cannot choose another namespace or obtain Git credentials.
+`head_repo`. Installation tokens cannot span two owners, so the fork-scoped
+token only pushes and the upstream token cannot grant maintainer edits on the
+fork branch; PRs are created with `maintainer_can_modify: false`.
+Agents cannot choose another namespace or obtain Git credentials.
 
 ## Webhooks and revocation
 
