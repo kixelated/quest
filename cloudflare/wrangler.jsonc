@@ -31,6 +31,7 @@
 			"migrations_dir": "migrations",
 		},
 	],
-	// Retain the existing class and migration history until operator-approved storage cleanup.
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepositoryCoordinator"] }],
+	// Deletes the legacy RepositoryCoordinator namespace and its storage if an earlier deploy
+	// provisioned it; a no-op otherwise. Remove this tombstone once every deploy has applied it.
+	"exports": { "RepositoryCoordinator": { "type": "durable-object", "state": "deleted" } },
 }

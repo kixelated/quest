@@ -10,7 +10,6 @@ import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
 import { githubWebhooks } from "./github/webhook";
 import { Layout, type Page, type User } from "./layout";
-export { RepositoryCoordinator } from "./repository";
 
 const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
