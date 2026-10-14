@@ -163,7 +163,7 @@ test("historical timestamp and SHA starts detect pushes through repository activ
 		const fixture = setup(
 			[
 				pull(undefined, B),
-				response([pushed(B, "2026-10-07T12:05:00Z"), pushed()]),
+				response([pushed(B, "2026-10-07T12:05:00Z"), pushed(A, "2026-10-07T11:59:00Z")]),
 				response([committed(A), committed(B)]),
 			],
 			[A, B],
@@ -174,6 +174,13 @@ test("historical timestamp and SHA starts detect pushes through repository activ
 			`2026-10-07T12:05:00Z pushed author https://github.com/contributor/fork/commit/${B}`,
 		);
 	}
+});
+
+test("an explicit timestamp includes a push at that instant", async () => {
+	const fixture = setup([pull(undefined, B), response([pushed(B)]), response([committed(A), committed(B)])], [A, B]);
+	const lines = await waitForActivity(pr, { since: POINT }, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toContain(`${POINT} pushed author https://github.com/contributor/fork/commit/${B}`);
 });
 
 test("all initial timeline pages are read, and the last known page is polled before following rollover", async () => {

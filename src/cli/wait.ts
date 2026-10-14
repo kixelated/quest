@@ -240,8 +240,12 @@ async function watch(
 		if (shaPoint && !match) throw new Error(`cannot resolve push time for ${point}; pass a timestamp with --since`);
 		const since = time ?? timestamp(string(match!.timestamp));
 		cursor = { pr: name, time: since, ids: [], commits: [] };
+		// An explicit timestamp includes its own instant; a SHA point excludes its own push.
 		historical = pushed
-			.filter((row) => timestamp(string(row.timestamp)) > since)
+			.filter((row) => {
+				const pushedAt = timestamp(string(row.timestamp));
+				return shaPoint ? pushedAt > since : pushedAt >= since;
+			})
 			.map((row) => ({
 				point: string(row.timestamp),
 				time: timestamp(string(row.timestamp)),
