@@ -246,6 +246,17 @@ test("a later force push back to a SHA pushed before the starting point is activ
 	]);
 });
 
+test("a push racing setup prints once, as a push", async () => {
+	const fixture = setup([
+		pull(),
+		response([pushed(B, "2026-10-07T12:05:00Z"), pushed()]),
+		response([committed(A), committed(B)]),
+	]);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z pushed author /);
+});
+
 test("all initial timeline pages are read, and the last known page is polled before following rollover", async () => {
 	const page2 = `https://api.github.com${timeline}&page=2`;
 	const page3 = `https://api.github.com${timeline}&page=3`;

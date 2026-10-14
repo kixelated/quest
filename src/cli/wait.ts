@@ -259,16 +259,17 @@ async function watch(
 				.filter((row) => !after(row))
 				.map((row) => ({ sha: string(row.after), time: timestamp(string(row.timestamp)) })),
 		};
-		historical = pushed
-			.filter((row) => string(row.activity_type) !== "force_push" && after(row))
-			.map((row) => ({
-				point: string(row.timestamp),
-				time: timestamp(string(row.timestamp)),
-				type: "pushed",
-				actor: actor(row.actor),
-				url: `https://github.com/${string(object(head.repo).full_name)}/commit/${string(row.after)}`,
-				id: `push:${string(row.after)}:${string(row.timestamp)}`,
-			}));
+		const plain = pushed.filter((row) => string(row.activity_type) !== "force_push" && after(row));
+		// A push racing setup is reported once, as a push, not again as a new commit.
+		for (const row of plain) baselineCommits.add(string(row.after));
+		historical = plain.map((row) => ({
+			point: string(row.timestamp),
+			time: timestamp(string(row.timestamp)),
+			type: "pushed",
+			actor: actor(row.actor),
+			url: `https://github.com/${string(object(head.repo).full_name)}/commit/${string(row.after)}`,
+			id: `push:${string(row.after)}:${string(row.timestamp)}`,
+		}));
 	}
 
 	const seenCommits = new Set([...baselineCommits, ...cursor.commits]);
