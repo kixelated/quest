@@ -5,6 +5,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 const API = "https://api.github.com";
 const POLL = 5 * 60_000;
 const SHA = /^[a-f\d]{7,40}$/i;
+/** The timeline records a force push a few seconds after repository activity (1-2s observed). */
+const TIMELINE_LAG = 60_000;
 
 export interface PullRequest {
 	owner: string;
@@ -50,8 +52,8 @@ interface Cursor {
 	time: number;
 	ids: string[];
 	commits: string[];
-	/** Force-pushed SHAs at or before the starting point; the timeline records them a few seconds late. */
-	pushes: string[];
+	/** Force pushes at or before the starting point, at their repository-activity time. */
+	pushes: { sha: string; time: number }[];
 }
 
 /** Accept a GitHub PR URL, or a number in the origin repository. */
@@ -201,7 +203,7 @@ async function watch(
 			const { rows, response } = await list(commitsPath);
 			for (const commit of rows) {
 				listedHead = string(commit.sha);
-				if (!/^[a-f\d]{40}$/i.test(listedHead)) throw new Error("invalid GitHub commit SHA");
+				if (!fullSha(listedHead)) throw new Error("invalid GitHub commit SHA");
 				baselineCommits.add(listedHead);
 			}
 			commitsPath = link(response, "next");
@@ -253,7 +255,9 @@ async function watch(
 			time: since,
 			ids: [],
 			commits: [],
-			pushes: forced.filter((row) => !after(row)).map((row) => string(row.after)),
+			pushes: forced
+				.filter((row) => !after(row))
+				.map((row) => ({ sha: string(row.after), time: timestamp(string(row.timestamp)) })),
 		};
 		historical = pushed
 			.filter((row) => string(row.activity_type) !== "force_push" && after(row))
@@ -269,7 +273,6 @@ async function watch(
 
 	const seenCommits = new Set([...baselineCommits, ...cursor.commits]);
 	const seenIds = new Set(cursor.ids);
-	const priorPushes = new Set(cursor.pushes);
 	const timeline = `${base}/issues/${pr.number}/timeline?per_page=100`;
 	let path = timeline;
 	let etag: string | undefined;
@@ -286,7 +289,7 @@ async function watch(
 			const type = string(row.event);
 			if (type === "committed") {
 				const sha = string(row.sha);
-				if (!/^[a-f\d]{40}$/i.test(sha)) throw new Error("invalid GitHub committed SHA");
+				if (!fullSha(sha)) throw new Error("invalid GitHub committed SHA");
 				if (!seenCommits.has(sha)) {
 					events.push({
 						point: sha,
@@ -300,9 +303,17 @@ async function watch(
 				seenCommits.add(sha);
 				continue;
 			}
-			if (type === "head_ref_force_pushed" && typeof row.commit_id === "string" && priorPushes.has(row.commit_id))
-				continue;
 			for (const event of timelineActivities(row, prUrl)) {
+				if (
+					type === "head_ref_force_pushed" &&
+					cursor.pushes.some(
+						(push) =>
+							push.sha === row.commit_id &&
+							event.time >= push.time &&
+							event.time - push.time <= TIMELINE_LAG,
+					)
+				)
+					continue;
 				if (event.time > cursor.time || (event.time === cursor.time && !seenIds.has(event.id)))
 					events.push(event);
 			}
@@ -328,7 +339,7 @@ async function watch(
 				time: latest,
 				ids: [...new Set(ids)],
 				commits: [...seenCommits],
-				pushes: [...priorPushes],
+				pushes: cursor.pushes.filter((push) => push.time + TIMELINE_LAG >= latest),
 			});
 			return unique.map(
 				(event, index) =>
@@ -410,6 +421,10 @@ function link(response: Response, relation: string): string | undefined {
 		.find((match) => match?.[2] === relation)?.[1];
 }
 
+function fullSha(value: unknown): boolean {
+	return typeof value === "string" && /^[a-f\d]{40}$/i.test(value);
+}
+
 function encodeCursor(cursor: Cursor): string {
 	return `q1.${Buffer.from(JSON.stringify(cursor)).toString("base64url")}`;
 }
@@ -423,10 +438,10 @@ function decodeCursor(value: string, pr: string): Cursor {
 			!Number.isFinite(parsed.time) ||
 			!Array.isArray(parsed.ids) ||
 			!parsed.ids.every((id) => typeof id === "string") ||
-			![parsed.commits, parsed.pushes].every(
-				(shas) =>
-					Array.isArray(shas) && shas.every((sha) => typeof sha === "string" && /^[a-f\d]{40}$/i.test(sha)),
-			)
+			!Array.isArray(parsed.commits) ||
+			!parsed.commits.every(fullSha) ||
+			!Array.isArray(parsed.pushes) ||
+			!parsed.pushes.every((push: ObjectValue | null) => fullSha(push?.sha) && Number.isFinite(push?.time))
 		)
 			throw new Error();
 		return parsed as unknown as Cursor;

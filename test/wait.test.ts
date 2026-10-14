@@ -222,6 +222,30 @@ test("the force push that created the starting head is not activity, even after 
 	expect(resumed[0]).toContain("review-2");
 });
 
+test("a later force push back to a SHA pushed before the starting point is activity", async () => {
+	const fixture = setup(
+		[
+			pull(undefined, B),
+			response([
+				pushed(B, "2026-10-07T12:05:00Z", "force_push"),
+				pushed(A, "2026-10-07T11:00:00Z", "force_push"),
+			]),
+			response([
+				committed(B),
+				forcePushed(A, "2026-10-07T11:00:01Z"),
+				forcePushed(B, "2026-10-07T12:05:02Z"),
+				{ ...forcePushed(A, "2026-10-07T12:30:00Z"), id: 10 },
+			]),
+		],
+		[B],
+	);
+	const lines = await waitForActivity(pr, { since: "2026-10-07T11:30:00Z" }, fixture.deps);
+	expect(lines.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
+		"2026-10-07T12:05:02Z head_ref_force_pushed",
+		"2026-10-07T12:30:00Z head_ref_force_pushed",
+	]);
+});
+
 test("all initial timeline pages are read, and the last known page is polled before following rollover", async () => {
 	const page2 = `https://api.github.com${timeline}&page=2`;
 	const page3 = `https://api.github.com${timeline}&page=3`;
