@@ -10,10 +10,10 @@ docs under `/docs` (`src/docs.tsx`), the quest board under `/repos`
 the layout (breadcrumbs, the status marker, the paste box) rather than adding
 a second shell.
 
-The quest board at `/repos/<name>` opens on each act with its progress, then
+The quest board at `/repos/<name>` opens on each milestone with its progress, then
 its epics and quests with their statuses, filtered by status with
 `?show=available` and the like. Each quest has a page at its path without
-`.md`, such as `/repos/quest/quest/a0/cloudflare/board`: its Markdown rendered
+`.md`, such as `/repos/quest/quest/m0/kix/prompts`: its Markdown rendered
 with raw HTML escaped, its status, and what to do next. Readiness comes from
 `quest/core`, so the board agrees with `quest ready`. Progress counts finished
 quests, which merges delete, from Git history (`scripts/history.ts`), weighted
@@ -159,3 +159,6 @@ References: [Artifacts binding](https://developers.cloudflare.com/artifacts/api/
 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/),
 [Better Auth database](https://better-auth.com/docs/concepts/database), and
 [Hono integration](https://better-auth.com/docs/integrations/hono).
+
+The server-only GitHub App integration, reviewed manifest, permission rationale,
+webhook lifecycle and operator registration are documented in [GITHUB.md](GITHUB.md).

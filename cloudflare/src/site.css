@@ -751,12 +751,12 @@ pre {
 	background: var(--ql-raised);
 }
 
-.act-head h2 a {
+.milestone-head h2 a {
 	color: var(--ql-gold-bright);
 	text-decoration: none;
 }
 
-.act-head h2 a:hover {
+.milestone-head h2 a:hover {
 	text-decoration: underline;
 }
 
@@ -777,7 +777,7 @@ pre {
 	margin-top: 1rem;
 }
 
-.act-summary {
+.milestone-summary {
 	max-width: 48rem;
 	margin: 0.25rem 0 1rem;
 }

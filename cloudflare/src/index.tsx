@@ -8,6 +8,7 @@ import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
 import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
+import { githubWebhooks } from "./github/webhook";
 import { Layout, type Page, type User } from "./layout";
 export { RepositoryCoordinator } from "./repository";
 
@@ -15,6 +16,7 @@ const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
 // policy, which would fail the origin check on /sign-in and /sign-out.
 app.use(secureHeaders({ referrerPolicy: "same-origin" }));
+app.route("/", githubWebhooks);
 app.get("/health", (c) => c.json({ status: "ok" }));
 // Short link for the one-line setup paste.
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
@@ -44,7 +46,7 @@ async function page(
 	);
 }
 
-// A project's board: its acts, epics, and quests with their statuses.
+// A project's board: its milestones, epics, and quests with their statuses.
 const boards = new WeakMap<Project, Board>();
 function board(name: string): Board | null {
 	const project = findProject(name);
@@ -68,7 +70,7 @@ app.get("/docs/:slug", (c) => {
 	return page(c, { title: doc.title, description: doc.summary }, <DocPage doc={doc} />);
 });
 
-// The quest board: a project's acts, then each quest's page at its path
+// The quest board: a project's milestones, then each quest's page at its path
 // without `.md`, the way its branch is named.
 app.get("/repos/:repository", (c) => {
 	const found = board(c.req.param("repository"));

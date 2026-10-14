@@ -7,4 +7,4 @@ These are sample plans for an imaginary application, not Quest's own backlog.
 
 ## Required
 
-- [A0: Download your data](/quest/a0/README.md) - let users export their own records
+- [M0: Download your data](/quest/m0/README.md) - let users export their own records

@@ -13,8 +13,8 @@ An **epic** is a directory that consists of multiple quests.
 The `README.md` file is the quest and the `Required` section lists the children.
 It completes when its own work is done and every child has merged.
 
-The root's entries are special epics called **acts** (`a0`, `a1`, ...) that group work by priority horizon.
-Acts are permanent.
+The root's entries are special epics called **milestones** (`m0`, `m1`, ...) that group work by priority horizon.
+Milestones are permanent.
 
 Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
@@ -109,9 +109,14 @@ Check for its branch and any open PR before starting.
 If a branch looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.
-For example, `quest/a1/foo/bar.md` is branch `quest/a1/foo/bar`.
+For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 
-When a quest is complete, create a draft PR.
+Push claims and updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
+A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
+
+When a quest is complete with no open decisions, open its PR ready for review.
+Otherwise open a draft and list its open decisions, or what remains unfinished, in the body.
+A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.
 Add a closing keyword for every issue under `Closes`.
 Fix any merge conflicts.
