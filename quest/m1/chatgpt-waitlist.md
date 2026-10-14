@@ -2,7 +2,7 @@
 
 ## Goal
 
-OpenAI approves the Cloudflare app for hosted Sign in with ChatGPT, so the web
+OpenAI approves the Kix app for hosted Sign in with ChatGPT, so the web
 UI can use it for login and hosted runs can draw on a contributor's ChatGPT
 plan. Self-serve token sharing covers only open-source, locally run apps.
 Hosted apps need the interest form or waitlist

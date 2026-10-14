@@ -1,22 +1,21 @@
-# [M] Isolate donor runner jobs in microVMs
+# [L] Isolate untrusted local donor jobs
 
 ## Goal
 
-A runner can run each job in a microVM (microsandbox on Linux KVM and Apple
-silicon), so contributors can safely donate machines to projects they don't
-fully trust, and trusted runners can take checks without risking their host.
-Network access is limited to an allowlist, and no secret enters the VM except
-the job's own.
+Local donors can run projects they do not trust in a supported VM boundary
+with constrained network and filesystem access, without exposing host secrets.
 
 ## Plan
 
-- Decided 2026-10-07: m0 relies on Nix's build sandbox and the agents' native
-  sandboxes; microVMs come with untrusted donors.
-- Re-check microsandbox's maturity (beta as of 2026-10). microvm.nix is the
-  NixOS-only alternative.
-- Consider letting trusted self-hosted runners use API keys stored in the app,
-  which the maintainer floated as a maybe.
+- Hosted m0 already requires isolated containers and external credentials.
+  This quest strengthens local donor execution; Nix build isolation alone
+  is not an isolation boundary for arbitrary agent commands.
+- Evaluate current microVM tooling and supported Linux/macOS hosts before
+  selecting an adapter. Do not make a beta runtime a core requirement.
+- Keep provider keys and publication credentials outside guests, and enforce
+  per-job authorization and egress. Document residual risks and unsupported hosts.
+- Verify filesystem, network, credential, teardown, and interrupted-job boundaries.
 
 ## Required
 
-- [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - the runners this hardens
+- [Local donor runner](/quest/m1/local/donor-runner.md) - the execution path this hardens

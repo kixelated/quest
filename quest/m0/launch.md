@@ -20,6 +20,12 @@ scope. The README and the landing page belong to
 - Use the release rehearsal transcript in the description of
   kixelated/quest#82 for the demo. v0.1.0 shipped on 2026-10-07.
 
+- Decided 2026-10-13: demonstrate the kix.quest issue-to-plan and ready-quest-to-PR
+  prompt flow. Keep API funding, operator compute, and future local integration
+  distinct; remove contest positioning. Publishing remains out of scope.
+
 ## Required
 
 - [Quest log theme](/quest/m0/theme/README.md) - the voice the posts build on, and the themed surfaces the demo records
+
+- [Web execution](/quest/m0/kix/execution.md) - the working hosted flow for the demo
