@@ -22,5 +22,8 @@ Decided 2026-10-14, following #96:
   (4.151.0 vs 4.132.0).
 - Approve the `esbuild` and `workerd` postinstall scripts in `package.json`'s
   `allowScripts`, using npm 11's `npm install-scripts approve`. Both scripts
-  fetch or verify native binaries the toolchain needs.
+  fetch or verify native binaries the toolchain needs. The lockfile also marks
+  the macOS-only `fsevents` as having an install script. Record an explicit
+  approval or denial for it too, depending on whether its script is needed, so
+  macOS installs are clean as well.
 - Bundled into one quest because each change is a line or two.
