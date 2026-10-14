@@ -3,8 +3,8 @@
 ## Goal
 
 Extend the hosted decision UI with local API workers and a Claude Code plugin,
-donated reviews and CI, stronger local isolation, additional login providers,
-and native Windows support. This milestone does not gate the first release.
+donated reviews and CI, stronger local isolation, and additional login providers.
+This milestone does not gate the first release.
 
 ## Required
 
@@ -14,4 +14,3 @@ and native Windows support. This milestone does not gate the first release.
 - [Additional logins](/quest/m1/logins.md) - Google and passkeys without changing repository authority
 - [ChatGPT hosted runs](/quest/m1/chatgpt-hosted.md) - conditional on provider approval and current terms
 - [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - resolve hosted-use approval before implementation
-- [Native Windows support](/quest/m1/windows.md) - install and use Quest without requiring WSL
