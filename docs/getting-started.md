@@ -17,9 +17,12 @@ Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest her
 
 [SETUP.md](../SETUP.md) has the agent install and pin the binary with mise or a
 nix flake, run `quest init`, and fit Quest into your root `AGENTS.md` or
-`CLAUDE.md`. Init writes a stub per skill under `.claude/skills/` and one line
+`CLAUDE.md`. Init writes a stub per skill under both `.claude/skills/` and
+`.agents/skills/` without requiring symbolic links, and one line
 starting with `Quests: ` in your root instructions; reword the rest of that
 line freely, since init and uninstall recognize it by the prefix.
+
+For native Windows installation and removal, see [the Windows guide](windows.md).
 
 ## Start your quest log
 

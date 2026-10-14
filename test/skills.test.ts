@@ -36,8 +36,8 @@ test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s points at the
  * This repository installs the same stubs as everyone else, so a skill added or
  * renamed here without its stub fails rather than going unused.
  */
-test("the repository's stubs are current", () => {
-	const dir = join(import.meta.dirname, "../.claude/skills");
+test.each([".claude/skills", ".agents/skills"])("the repository's %s stubs are current", (path) => {
+	const dir = join(import.meta.dirname, "..", path);
 	expect(readdirSync(dir).sort()).toEqual(SKILLS.map((skill) => skill.installed));
 	for (const skill of SKILLS) {
 		expect(
