@@ -32,6 +32,11 @@ and donor machines never receive the App's credentials.
 - PR status, checks, and reviews remain GitHub's. A maintainer may explicitly
   authorize a GitHub merge bound to the current head; honor branch rules and
   refusals, and never interpret an agent recommendation as approval.
+- Pick the merge method from the repository's allowed methods, preferring
+  squash, then merge commit, then rebase. Decided 2026-10-14: no per-repo
+  setting is needed, because GitHub's settings already say what's allowed. The
+  service's `mergePullRequest` currently hard-codes a merge commit, which
+  squash-only or rebase-only repositories refuse.
 - Fork PRs do not make unsafe privileged CI safe. Document that upstream
   workflows must treat contributed code as untrusted; do not grant donor
   code upstream credentials or run it in the publisher.
