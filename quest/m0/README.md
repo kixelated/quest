@@ -35,5 +35,4 @@ ownership-manifest design:
 
 - [Kix decision UI](/quest/m0/kix/README.md) - hosted planning and implementation through prompts, funded by explicit API allocations
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
-- [PR waits](/quest/m0/wait.md) - `quest wait` blocks until a PR has new activity, replacing the skills' hand-rolled polling
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

@@ -122,7 +122,7 @@ claims. Check those before you start work someone else may already be on.
 ```sh
 quest wait 101
 quest wait https://github.com/kixelated/quest/pull/101 --since 2026-10-07T12:00:00Z --timeout 1800
-quest wait 101 --since abcdef0123456789abcdef0123456789abcdef012345
+quest wait 101 --since abcdef0123456789abcdef0123456789abcdef01
 ```
 
 A number uses the repository's `origin`; a URL works from any directory.
