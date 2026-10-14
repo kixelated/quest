@@ -113,7 +113,17 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 			event,
 		),
 	);
-	await c.env.DB.batch(statements);
+	const committed = await c.env.DB.batch(statements);
+	if (committed[0]!.meta.changes === 0) {
+		// Another request may have inserted this ID after our initial read.
+		// Its digest/event predicate prevents effects; report a conflicting ID
+		// instead of acknowledging a different authenticated delivery.
+		const winner = await c.env.DB.prepare("SELECT digest,event FROM github_deliveries WHERE id=?")
+			.bind(delivery)
+			.first<{ digest: string; event: string }>();
+		if (winner?.digest !== digest || winner.event !== event) return c.json({ error: "Delivery conflict" }, 409);
+		return c.json({ status: "duplicate" });
+	}
 	// Observations never approve or launch work. Trusted consumers reconcile
 	// current GitHub state rather than treating delayed webhook bodies as facts.
 	return c.json({ status: "accepted" }, 202);

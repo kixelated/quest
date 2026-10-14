@@ -93,6 +93,15 @@ describe("signed GitHub webhooks", () => {
 		expect((await delivery("installation", "{")).status).toBe(400);
 		expect((await delivery("push", { repository: { id: 10 } })).status).toBe(400);
 	});
+	it("rejects conflicting delivery IDs even when their transactions race", async () => {
+		const id = crypto.randomUUID();
+		const responses = await Promise.all([
+			delivery("installation", installation("created"), id),
+			delivery("installation", installation("deleted"), id),
+		]);
+		expect(responses.map((r) => r.status).sort()).toEqual([202, 409]);
+		expect((await state())?.revision).toBe(1);
+	});
 	it("records permission/selection changes and suspension lifecycle once", async () => {
 		for (const action of ["created", "suspend", "unsuspend", "new_permissions_accepted"]) {
 			expect((await delivery("installation", installation(action))).status).toBe(202);
