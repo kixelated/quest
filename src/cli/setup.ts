@@ -9,13 +9,14 @@ import {
 	mkdirSync,
 	readFileSync,
 	readdirSync,
+	readlinkSync,
+	realpathSync,
 	rmSync,
 	rmdirSync,
 	statSync,
-	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { SKILLS } from "./skills";
 
@@ -28,7 +29,7 @@ const REFERENCE_MARKER = "Quests: ";
 /** Appended to the root agent instructions when Quest is installed. */
 export const REFERENCE_LINE = "Quests: when work mentions a quest, run `quest guide` and follow it.";
 
-/** The skill directories Claude Code and Codex read. One holds the stubs and the other links to it. */
+/** The skill directories Claude Code and Codex read; new installs use real directories. */
 const SKILL_DIRS = [".claude/skills", ".agents/skills"] as const;
 
 const QUEST_ROOT_README = "# Quests\n\n## Goal\n\nWhat this project is working toward.\n";
@@ -38,38 +39,31 @@ const QUEST_ROOT_README = "# Quests\n\n## Goal\n\nWhat this project is working t
  * A conflict throws before anything is written, so a refused init leaves the repository as it was.
  */
 export function init(root: string): string[] {
-	for (const dir of SKILL_DIRS) checkPath(root, dirname(dir), "directory");
-	const { real, link } = skillDirs(root);
-	const missing = SKILLS.filter((skill) => {
-		const dir = `${real}/${skill.installed}`;
-		const path = `${dir}/SKILL.md`;
-		checkPath(root, path, "file");
-		if (isFile(join(root, path))) {
-			if (read(root, path) === skill.stub) return false;
-			throw new Error(`${path} is not a Quest stub; remove or rename it before running \`quest init\``);
-		} else if (existsSync(join(root, dir))) {
-			throw new Error(`${dir} exists without SKILL.md; remove or rename it before running \`quest init\``);
-		}
-		return true;
-	});
+	const dirs = skillDirs(root);
+	const missing = dirs.flatMap((skills) =>
+		SKILLS.flatMap((skill) => {
+			const dir = `${skills}/${skill.installed}`;
+			const path = `${dir}/SKILL.md`;
+			checkPath(root, path, "file");
+			if (isFile(join(root, path))) {
+				if (isStub(root, path, skill.stub)) return [];
+				throw new Error(`${path} is not a Quest stub; remove or rename it before running \`quest init\``);
+			} else if (existsSync(join(root, dir))) {
+				throw new Error(`${dir} exists without SKILL.md; remove or rename it before running \`quest init\``);
+			}
+			return [{ path, stub: skill.stub }];
+		}),
+	);
 	const readme = "quest/README.md";
 	checkPath(root, readme, "file");
 	const instructions = ["AGENTS.md", "CLAUDE.md"].find((name) => isFile(join(root, name))) ?? "AGENTS.md";
 	checkPath(root, instructions, "file");
 
 	const changes: string[] = [];
-	mkdirSync(join(root, real), { recursive: true });
-	const linkPath = join(root, link);
-	if (!isSymlink(linkPath)) {
-		mkdirSync(dirname(linkPath), { recursive: true });
-		symlinkSync(join("..", real), linkPath);
-		changes.push(link);
-	}
-	for (const skill of missing) {
-		const dir = `${real}/${skill.installed}`;
-		mkdirSync(join(root, dir), { recursive: true });
-		writeFileSync(join(root, dir, "SKILL.md"), skill.stub);
-		changes.push(`${dir}/SKILL.md`);
+	for (const { path, stub } of missing) {
+		mkdirSync(dirname(join(root, path)), { recursive: true });
+		writeFileSync(join(root, path), stub);
+		changes.push(path);
 	}
 
 	if (!existsSync(join(root, readme))) {
@@ -106,17 +100,22 @@ export function uninstall(root: string): string[] {
 		for (const skill of SKILLS) {
 			const dir = `${skills}/${skill.installed}`;
 			const path = `${dir}/SKILL.md`;
-			if (!isFile(join(root, path)) || read(root, path) !== skill.stub) continue;
+			if (!isFile(join(root, path)) || !isStub(root, path, skill.stub)) continue;
 			rmSync(join(root, path));
 			changes.push(path);
 			removeIfEmpty(join(root, dir));
 		}
 		removeIfEmpty(join(root, skills));
 	}
-	// A link whose target just went away was the one init made.
+	// Remove only the conventional link from an older Quest install whose target went away.
 	for (const skills of SKILL_DIRS) {
 		const link = join(root, skills);
-		if (isSymlink(link) && !existsSync(link)) {
+		const other = SKILL_DIRS.find((dir) => dir !== skills)!;
+		if (
+			isSymlink(link) &&
+			!existsSync(link) &&
+			resolve(dirname(link), readlinkSync(link)) === resolve(root, other)
+		) {
 			rmSync(link);
 			changes.push(skills);
 		}
@@ -130,24 +129,17 @@ export function uninstall(root: string): string[] {
 	return changes;
 }
 
-/**
- * Which skill directory holds the stubs and which links to it: the one that is
- * already a directory, or `.claude/skills` when neither exists. Writes nothing.
- */
-function skillDirs(root: string): { real: string; link: string } {
-	const [claude, agents] = SKILL_DIRS.map((dir) => kind(join(root, dir)));
-	if (claude === "dir" && agents === "dir") {
-		throw new Error(
-			"both .claude/skills and .agents/skills are directories; merge them and link one to the other before running `quest init`",
-		);
-	} else if (claude === "dir" && (agents === null || agents === "symlink")) {
-		return { real: SKILL_DIRS[0], link: SKILL_DIRS[1] };
-	} else if (agents === "dir" && (claude === null || claude === "symlink")) {
-		return { real: SKILL_DIRS[1], link: SKILL_DIRS[0] };
-	} else if (claude === null && agents === null) {
-		return { real: SKILL_DIRS[0], link: SKILL_DIRS[1] };
-	}
-	throw new Error("unexpected .claude/skills or .agents/skills layout; link one directory to the other");
+/** Validate both destinations before writing; existing links to one tree are installed once. */
+function skillDirs(root: string): string[] {
+	const seen = new Set<string>();
+	return SKILL_DIRS.filter((dir) => {
+		checkPath(root, dir, "directory");
+		const path = join(root, dir);
+		const destination = existsSync(path) ? realpathSync(path) : resolve(path);
+		if (seen.has(destination)) return false;
+		seen.add(destination);
+		return true;
+	});
 }
 
 /** What sits at `path` without following a symlink, or `null` for nothing. */
@@ -185,6 +177,15 @@ function read(root: string, path: string): string {
 	return readFileSync(join(root, path), "utf8");
 }
 
+// Git may check out unchanged stubs with CRLF in an adopting repository.
+function isStub(root: string, path: string, stub: string): boolean {
+	return read(root, path).replaceAll("\r\n", "\n") === stub;
+}
+
+function newline(content: string): string {
+	return content.includes("\r\n") ? "\r\n" : "\n";
+}
+
 /** Lines without their terminators, as Markdown editors on any platform wrote them. */
 function lines(content: string): string[] {
 	const out = content.split(/\r?\n/);
@@ -199,11 +200,12 @@ function lines(content: string): string[] {
 function appendLine(root: string, path: string, marker: string, line: string): boolean {
 	let content = isFile(join(root, path)) ? read(root, path) : "";
 	if (lines(content).some((existing) => existing.startsWith(marker))) return false;
+	const eol = newline(content);
 	if (content !== "") {
-		if (!content.endsWith("\n")) content += "\n";
-		content += "\n";
+		if (!content.endsWith("\n")) content += eol;
+		content += eol;
 	}
-	writeFileSync(join(root, path), `${content}${line}\n`);
+	writeFileSync(join(root, path), `${content}${line}${eol}`);
 	return true;
 }
 
@@ -213,16 +215,18 @@ function appendLine(root: string, path: string, marker: string, line: string): b
  */
 function removeLine(root: string, path: string, marker: string): boolean {
 	if (!isFile(join(root, path))) return false;
-	const content = lines(read(root, path));
+	const original = read(root, path);
+	const eol = newline(original);
+	const content = lines(original);
 	if (!content.some((existing) => existing.startsWith(marker))) return false;
 	const kept = content
 		.filter((existing) => !existing.startsWith(marker))
-		.join("\n")
+		.join(eol)
 		.trimEnd();
 	if (kept === "") {
 		rmSync(join(root, path));
 	} else {
-		writeFileSync(join(root, path), `${kept}\n`);
+		writeFileSync(join(root, path), `${kept}${eol}`);
 	}
 	return true;
 }
