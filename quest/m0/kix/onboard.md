@@ -21,7 +21,3 @@ pause contributions or disconnect the project.
   Donors may fund eligible work but do not gain maintainer permissions.
 - Reuse appropriate parts of existing login/board code. Artifacts import,
   contributor fork issue-files, and automatic issue promotion are abandoned.
-
-## Required
-
-- [GitHub App](/quest/m0/kix/github.md) - installation identity and verified repository authority

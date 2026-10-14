@@ -4,3 +4,9 @@ GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
 GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
 # Local development serves the app from Wrangler instead of https://kixel.quest.
 AUTH_URL=http://localhost:8787
+
+# Server-only GitHub App integration; see GITHUB.md. Separate from OAuth login.
+GITHUB_APP_ID=replace-with-app-id
+GITHUB_APP_PRIVATE_KEY=replace-with-quoted-PEM-private-key
+GITHUB_WEBHOOK_SECRET=replace-with-random-webhook-secret
+GITHUB_FORK_OWNER=replace-with-service-controlled-fork-owner

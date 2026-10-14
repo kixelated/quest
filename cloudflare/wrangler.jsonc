@@ -13,8 +13,16 @@
 	"assets": { "directory": "build/public" },
 	"routes": [{ "pattern": "kixel.quest", "custom_domain": true }],
 	"workers_dev": false,
-	"vars": { "AUTH_URL": "https://kixel.quest" },
-	"secrets": { "required": ["AUTH_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"] },
+	"vars": { "AUTH_URL": "https://kixel.quest", "GITHUB_APP_ID": "", "GITHUB_FORK_OWNER": "" },
+	"secrets": {
+		"required": [
+			"AUTH_SECRET",
+			"GITHUB_CLIENT_ID",
+			"GITHUB_CLIENT_SECRET",
+			"GITHUB_APP_PRIVATE_KEY",
+			"GITHUB_WEBHOOK_SECRET",
+		],
+	},
 	"artifacts": [{ "binding": "ARTIFACTS", "namespace": "quest" }],
 	"d1_databases": [
 		{

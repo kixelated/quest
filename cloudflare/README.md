@@ -159,3 +159,6 @@ References: [Artifacts binding](https://developers.cloudflare.com/artifacts/api/
 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/),
 [Better Auth database](https://better-auth.com/docs/concepts/database), and
 [Hono integration](https://better-auth.com/docs/integrations/hono).
+
+The server-only GitHub App integration, reviewed manifest, permission rationale,
+webhook lifecycle and operator registration are documented in [GITHUB.md](GITHUB.md).
