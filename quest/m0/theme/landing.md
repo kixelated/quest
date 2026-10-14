@@ -1,26 +1,22 @@
-# [S] Wire the home page's calls to action
+# [S] Connect the landing page to Kix
 
 ## Goal
 
-On `https://kixel.quest`, the home page's calls to action ("Accept the
-quest") lead to sign-in, onboarding a GitHub repository, and the one-line SETUP
-paste.
+The home page on `https://kix.quest` explains the maintainer and donor paths
+and leads into sign-in and project onboarding. Returning maintainers reach
+their decision inbox. The standalone Quest setup remains easy to find.
 
 ## Plan
 
-- Narrowed again on 2026-10-07: the map's quests link to their board pages
-  since kixelated/quest#84, which needed neither sync nor onboarding. This
-  quest keeps only the calls to action.
-- Narrowed on 2026-10-06. The site quest built the design, the shell, and
-  the home page (`cloudflare/src/home.tsx`), and its quest map (`cloudflare/src/map.tsx`) draws
-  the tree at build time. This quest adds only the calls to action once
-  sign-in, sync, and onboarding exist.
-- Decided on 2026-10-07: this quest does not wait on
-  [wiring the board to live projects](/quest/m0/cloudflare/board.md).
-- Once `https://kixel.quest/setup` is live, the one-line paste in the README
-  and `docs/getting-started.md` uses it instead of the GitHub `SETUP.md` URL.
+- Preserve the existing shared visual design and map; make the simple prompt
+  workflow the product's main entry point rather than adding a dashboard.
+- Keep API-funded work honest: donations authorize usage, not cash transfers
+  or guaranteed harvesting of only unused promotional tokens.
+- Retain the working setup link. Switch README/getting-started examples to
+  kix.quest/setup only once that endpoint serves the actual setup instructions.
 
 ## Required
 
-- [GitHub sync](/quest/m0/cloudflare/github-sync.md) - mirrors Quest's own repository into Artifacts
-- [GitHub onboarding](/quest/m0/cloudflare/onboard.md) - the flow the "onboard a repository" call to action leads to
+- [Primary domain](/quest/m0/kix/domain.md) - canonical links and redirects
+- [Project enrollment](/quest/m0/kix/onboard.md) - maintainer entry path
+- [Decision inbox](/quest/m0/kix/prompts.md) - returning maintainer destination

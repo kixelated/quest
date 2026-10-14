@@ -2,10 +2,10 @@
 
 ## Goal
 
-By the 2026-10-14 Cloudflare demo, Quest presents itself as an original
+Quest presents itself as an original
 MMO-style quest log for your repository and your agents: themed README and
 docs copy, a shared identity (logo, palette, social image), a themed site at
-`https://kixel.quest` (home, docs, and quest board), and themed CLI output on
+`https://kix.quest` (home, docs, and quest board), and themed CLI output on
 a terminal. The quest format, `quest guide`, and the skills do not change
 beyond the 2026-10-07 rename of questlines to epics.
 
@@ -20,7 +20,7 @@ wording in this README's `Required` list.
 It also replaces the display aliases on the board, the home page, and
 `cloudflare/README.md` with format terms: Available and `?show=available`
 become ready, the Requires status and filter become blocked, Accepted by
-becomes active (a live runner lock), the Requires heading becomes `Required`, Ready to turn in
+becomes active (an authorized live job), the Requires heading becomes `Required`, Ready to turn in
 becomes in review, Quest complete becomes complete, and Objectives and Rewards
 become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
 marker and palette notes to match, keeping only the flavour rows (the party,
@@ -51,10 +51,9 @@ Decided while planning on 2026-10-05:
 - Hook, then substance. The headline and visuals sell "a quest log for your
   repo and your agents". The next lines deliver the existing pitch: readable
   plans, explicit dependencies, and reviewable Git changes.
-- Land before the demo. Originality (50%) and ease of use (25%) dominate the
-  competition judging, so the
-  [Cloudflare epic](/quest/m0/cloudflare/README.md) records its demo after
-  this epic lands. Aim to merge by 2026-10-12.
+- Decided 2026-10-13: the competition and deadline no longer gate launch.
+  Keep the visual identity, with the guided decision inbox as the primary
+  signed-in surface and repository maps/settings secondary.
 - Decided 2026-10-07: every surface (site, board, map, and CLI) names format
   concepts with the format's own terms: ready, blocked, and `Required`
   (claimed dropped 2026-10-07 with claims). There are no display aliases (Available, Requires, Accepted by,
@@ -110,5 +109,5 @@ Decided while planning on 2026-10-05:
 
 ## Related
 
-- [Quest board](/quest/m0/cloudflare/board.md) - the board shipped themed; this wires it to live projects
+- [Decision inbox](/quest/m0/kix/prompts.md) - the primary hosted workflow
 - [Launch material](/quest/m0/launch.md) - posts, quickstart, demo, and comparison written in the same voice

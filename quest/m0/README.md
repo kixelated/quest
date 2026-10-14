@@ -7,10 +7,12 @@ line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
 macOS and Linux (WSL) only; native Windows is m1.
 
-The launch includes Quest on Cloudflare. Outside contributors donate agent
-tokens and machines to run quests, and the result is reviewed and merged in a
-web UI that syncs with GitHub. It is also the entry for Cloudflare's
-competition, due 2026-10-14.
+The hosted launch is kix.quest: maintainers answer interactive prompts to
+plan issues, start ready quests, and act on new PRs. Claude Agent SDK sessions
+run in hosted isolation, funded by explicit maintainer or donor API accounts.
+The GitHub App bot publishes ordinary PRs. The contest no longer gates launch.
+The standalone v0.1.0 CLI shipped on 2026-10-07; remaining work expands the
+product without changing the core's independence.
 
 ## Plan
 
@@ -31,7 +33,7 @@ ownership-manifest design:
 
 ## Required
 
-- [Quest on Cloudflare](/quest/m0/cloudflare/README.md) - contributors donate tokens and machines that lock and run quests; maintainers review and merge in a web UI synced with GitHub
+- [Kix decision UI](/quest/m0/kix/README.md) - hosted planning and implementation through prompts, funded by explicit API allocations
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [PR waits](/quest/m0/wait.md) - `quest wait` blocks until a PR has new activity, replacing the skills' hand-rolled polling
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts
