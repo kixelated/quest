@@ -72,7 +72,7 @@ This planning change does not close those PRs.
 
 ## Required
 
-- [Primary domain](/quest/m0/kix/domain.md) - kix.quest is canonical and kixel.quest redirects
+- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator deploys the Worker and points GitHub sign-in at kix.quest
 - [GitHub App](/quest/m0/kix/github.md) - the bot, signed events, installation identity, and scoped credentials
 - [Operator setup](/quest/m0/kix/operator-setup.md) - register and configure the actual App and pilot deployment
 - [Project enrollment](/quest/m0/kix/onboard.md) - maintainers opt Quest repositories into contributions

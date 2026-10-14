@@ -1,15 +1,13 @@
-import { buildPagesASSETSBinding, cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
-// Read deployed bindings locally. The Vitest plugin omits Workers assets,
-// so use its file-backed ASSETS helper without contacting a Cloudflare account.
+// Use the deploy config's bindings locally; tests never contact a Cloudflare account.
 export default defineConfig({
 	plugins: [
 		cloudflareTest(async () => ({
 			wrangler: { configPath: "./wrangler.jsonc" },
 			remoteBindings: false,
 			miniflare: {
-				serviceBindings: { ASSETS: await buildPagesASSETSBinding("./build/public") },
 				bindings: {
 					AUTH_URL: "http://localhost:8787",
 					AUTH_SECRET: "test-only-secret-that-is-at-least-32-characters",

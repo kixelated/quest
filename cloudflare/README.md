@@ -70,11 +70,10 @@ just worker-dev
 This applies local D1 migrations and starts Wrangler. Open
 `http://localhost:8787`, sign in, and sign out. `/health` reports process health;
 it does not probe storage. `/setup` redirects to `SETUP.md` on GitHub, so the
-one-line setup paste can use `https://kix.quest/setup` once the canonical
-origin is deployed. D1 persists locally under `cloudflare/.wrangler/`.
-There are no remote-only bindings: local development and tests need no
-Cloudflare login. Wrangler reruns the build when `src/`, `scripts/`, or `docs/`
-change.
+one-line setup paste can use `https://kix.quest/setup`. D1 persists locally
+under `cloudflare/.wrangler/`. There are no remote-only bindings: local
+development and tests need no Cloudflare login. Wrangler reruns the build when
+`src/`, `scripts/`, or `docs/` change.
 
 ## Checks
 
@@ -86,10 +85,11 @@ just test
 These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 `just worker-check` checks generated binding types, TypeScript, formatting, and
 `wrangler deploy --dry-run`. `just worker-test` runs workerd integration tests
-with real local D1 and file-backed assets. Tests cover the home page and
-rendered docs in the shared layout, the board and quest pages, statuses, progress, safe Markdown, and finished quests from history, the mocked GitHub OAuth callback, persisted sessions, sign-out, rejected origins/invalid state,
-canonical redirects, asset serving, and the production OAuth origin. No OAuth
-credentials or Cloudflare account are required for checks.
+with real local D1. Tests cover the home page and rendered docs in the shared
+layout, the board and quest pages, statuses, progress, safe Markdown, and
+finished quests from history, the mocked GitHub OAuth callback, persisted
+sessions, sign-out, and rejected origins/invalid state. No OAuth credentials or
+Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
 
@@ -113,25 +113,15 @@ npm exec -- wrangler login
 npm exec -- wrangler d1 create quest-auth
 ```
 
-The checked-in config serves `https://kix.quest` and redirects
-`https://kixel.quest` to it. Both zones must be in the same Cloudflare account
-for Workers custom domains. `workers.dev` stays disabled. `AUTH_URL` is the
-only authentication origin; it also supplies generated absolute links.
-Worker-first asset routing ensures legacy CSS/image requests redirect as well.
+The checked-in config deploys to `https://kix.quest` as a Workers custom
+domain, which requires the `kix.quest` zone in the same Cloudflare account;
+`workers.dev` is disabled so sign-in has one origin. `AUTH_URL` is the only
+authentication origin and supplies generated absolute links.
 
 For an existing deployment, retain the Worker name, D1 database ID, and
-`AUTH_SECRET` so account data is preserved. Do not create a replacement
-production database. The `d1 create` command above is for a fresh deployment
-only. For another environment, change `routes`, `AUTH_URL`, Worker name,
-account, database, and OAuth credentials together.
-
-Normal legacy URLs preserve their encoded path and query parameters with a
-308 redirect to the configured origin. Legacy authentication routes restart
-at the canonical home page with a 303 and `no-store`, dropping OAuth codes,
-state, and request bodies. Host-scoped cookies cannot move to the new domain:
-existing users sign in again to their retained accounts. OAuth attempts
-started on the old domain must be restarted. The legacy origin is not trusted
-for form or authenticated API requests on the new origin.
+`AUTH_SECRET` so account data is preserved. The `d1 create` command above is
+for a fresh deployment only. For another environment, change `routes`,
+`AUTH_URL`, Worker name, account, database, and OAuth credentials together.
 
 Register the production GitHub OAuth app with callback
 `https://kix.quest/api/auth/callback/github`, then set secrets
@@ -153,26 +143,14 @@ operator has inspected any legacy data and explicitly approved permanent
 storage cleanup. No deletion migration is included: deleting that class would
 permanently remove its stored data. This does not affect the D1 auth database.
 
-Before deployment, coordinate the GitHub OAuth callback above and the GitHub
-App webhook URL (`https://kix.quest/api/github/webhook`, once that endpoint
-ships) with operator setup. Do not point production providers at an endpoint
-before it exists. After deployment:
-
-- Check `/health`, a board URL with query parameters, `/setup`, and a theme
-  asset on kix.quest; verify matching kixel.quest URLs redirect to that origin.
-- Complete sign-in/sign-out and confirm an existing GitHub account is reused.
-- Confirm old callbacks return to kix.quest without forwarding OAuth secrets.
-- Verify provider callback/webhook configuration and remove obsolete URLs.
-
-No live deployment, DNS change, provider registration, or real sign-in
-verification was performed for this change.
+After deploying, verify `/health`, `/setup`, and a theme asset, then complete
+sign-in/sign-out in the browser.
 
 The auth schema migration is checked in for review. When upgrading Better Auth
 or adding a plugin, generate/review its schema changes and add a D1 migration;
 do not migrate the production database on HTTP requests.
 
-References: [Worker-first assets](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/),
-[Durable Object migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/),
+References: [Durable Object migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/),
 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/),
 [Better Auth database](https://better-auth.com/docs/concepts/database), and
 [Hono integration](https://better-auth.com/docs/integrations/hono).
