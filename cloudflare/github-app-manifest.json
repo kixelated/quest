@@ -1,0 +1,28 @@
+{
+	"name": "Quest",
+	"url": "https://kix.quest",
+	"description": "Versioned quest plans and explicitly approved GitHub operations.",
+	"public": true,
+	"hook_attributes": {
+		"url": "https://kix.quest/webhooks/github",
+		"active": true
+	},
+	"default_permissions": {
+		"metadata": "read",
+		"contents": "write",
+		"issues": "write",
+		"pull_requests": "write",
+		"checks": "read",
+		"statuses": "read"
+	},
+	"default_events": [
+		"push",
+		"issues",
+		"issue_comment",
+		"pull_request",
+		"pull_request_review",
+		"check_run",
+		"check_suite",
+		"status"
+	]
+}

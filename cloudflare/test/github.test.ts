@@ -1,0 +1,347 @@
+import { env } from "cloudflare:workers";
+import { createPublicKey, verify } from "node:crypto";
+import { privateKey } from "./github-key";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import app from "../src/index";
+import { GitHubService, type GitHubRepository } from "../src/github/service";
+
+const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
+const repo: GitHubRepository = { owner: "upstream", name: "project", id: 10 };
+const fork: GitHubRepository = { owner: "quest-bot-forks", name: "project", id: 20 };
+
+async function delivery(
+	event: string,
+	payload: unknown,
+	id = crypto.randomUUID(),
+	changes: Record<string, string> = {},
+) {
+	const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+	const key = await crypto.subtle.importKey(
+		"raw",
+		new TextEncoder().encode(env.GITHUB_WEBHOOK_SECRET),
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign"],
+	);
+	const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
+	const signature = "sha256=" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+	return app.request(
+		"http://localhost:8787/webhooks/github",
+		{
+			method: "POST",
+			headers: { "X-GitHub-Event": event, "X-GitHub-Delivery": id, "X-Hub-Signature-256": signature, ...changes },
+			body,
+		},
+		env,
+	);
+}
+function installation(action: string) {
+	return { action, installation: { id: 5, app_id: 123 } };
+}
+async function state() {
+	return env.DB.prepare("SELECT * FROM github_installations WHERE id=5").first<{
+		blocked: number;
+		revision: number;
+	}>();
+}
+
+beforeEach(async () => {
+	await env.DB.batch([
+		env.DB.prepare("DELETE FROM github_deliveries"),
+		env.DB.prepare("DELETE FROM github_installations"),
+		env.DB.prepare(
+			"INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('app-test','Tester','app-test@example.com',1,0,0)",
+		),
+		env.DB.prepare(
+			"INSERT OR IGNORE INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('app-test-account','7','github','app-test',0,0)",
+		),
+	]);
+});
+
+describe("signed GitHub webhooks", () => {
+	it("verifies exact Unicode bytes before parsing or writing", async () => {
+		const payload = { ...installation("created"), note: "hello 🌍" };
+		expect(
+			(await delivery("installation", payload, undefined, { "X-Hub-Signature-256": "sha256=" + "0".repeat(64) }))
+				.status,
+		).toBe(403);
+		expect(await state()).toBeNull();
+		expect((await delivery("installation", payload)).status).toBe(202);
+		expect(await state()).toMatchObject({ blocked: 0, revision: 1 });
+	});
+	it("deduplicates concurrent deliveries and cannot replay an old creation over revocation", async () => {
+		const id = crypto.randomUUID();
+		const responses = await Promise.all([
+			delivery("installation", installation("created"), id),
+			delivery("installation", installation("created"), id),
+		]);
+		expect(responses.every((r) => r.ok)).toBe(true);
+		expect(await state()).toMatchObject({ blocked: 0, revision: 1 });
+		expect((await delivery("installation", installation("deleted"))).status).toBe(202);
+		expect(await (await delivery("installation", installation("created"), id)).json()).toEqual({
+			status: "duplicate",
+		});
+		expect(await state()).toMatchObject({ blocked: 1, revision: 2 });
+	});
+	it("rejects delivery-ID conflicts, wrong apps, malformed JSON and missing identities", async () => {
+		const id = crypto.randomUUID();
+		await delivery("installation", installation("created"), id);
+		expect((await delivery("installation", installation("deleted"), id)).status).toBe(409);
+		expect(
+			(await delivery("installation", { action: "created", installation: { id: 5, app_id: 999 } })).status,
+		).toBe(400);
+		expect((await delivery("installation", "{")).status).toBe(400);
+		expect((await delivery("push", { repository: { id: 10 } })).status).toBe(400);
+	});
+	it("rejects conflicting delivery IDs even when their transactions race", async () => {
+		const id = crypto.randomUUID();
+		const responses = await Promise.all([
+			delivery("installation", installation("created"), id),
+			delivery("installation", installation("deleted"), id),
+		]);
+		expect(responses.map((r) => r.status).sort()).toEqual([202, 409]);
+		expect((await state())?.revision).toBe(1);
+	});
+	it("records permission/selection changes and suspension lifecycle once", async () => {
+		for (const action of ["created", "suspend", "unsuspend", "new_permissions_accepted"]) {
+			expect((await delivery("installation", installation(action))).status).toBe(202);
+			expect((await state())?.blocked).toBe(action === "suspend" ? 1 : 0);
+		}
+		await delivery("installation_repositories", { action: "removed", installation: { id: 5 } });
+		expect((await state())?.revision).toBe(5);
+	});
+	it("persists only observations, never untrusted content or automatic writes", async () => {
+		const id = crypto.randomUUID();
+		expect(
+			(
+				await delivery(
+					"issues",
+					{
+						installation: { id: 5 },
+						repository: { id: 10 },
+						action: "opened",
+						issue: { body: "run something malicious" },
+					},
+					id,
+				)
+			).status,
+		).toBe(202);
+		expect(await env.DB.prepare("SELECT * FROM github_deliveries WHERE id=?").bind(id).first()).toMatchObject({
+			event: "issues",
+			repository: 10,
+			processed: 1,
+		});
+		expect(await state()).toBeNull();
+		expect((await delivery("unknown", {})).status).toBe(202);
+	});
+});
+
+function github(
+	options: {
+		role?: string;
+		account?: number;
+		suspended?: boolean;
+		missing?: boolean;
+		permissions?: Record<string, string>;
+		parent?: number;
+		cleanupFails?: boolean;
+		failMutation?: boolean;
+	} = {},
+) {
+	const requests: { path: string; method: string; body: any; authorization: string }[] = [];
+	const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+		const path = new URL(String(input)).pathname;
+		const method = init?.method ?? "GET";
+		const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+		requests.push({ path, method, body, authorization: new Headers(init?.headers).get("Authorization")! });
+		const json = (value: unknown, status = 200) => Response.json(value, { status });
+		if (path.endsWith("/installation")) {
+			if (options.missing) return json({}, 404);
+			return json({
+				id: path.includes("quest-bot-forks") ? 6 : 5,
+				app_id: 123,
+				suspended_at: options.suspended ? "2026-10-13" : null,
+				permissions: options.permissions ?? {
+					metadata: "read",
+					contents: "write",
+					issues: "write",
+					pull_requests: "write",
+					checks: "read",
+					statuses: "read",
+				},
+			});
+		}
+		if (path.endsWith("/access_tokens"))
+			return json({ token: path.includes("/6/") ? "fork-token" : "upstream-token" });
+		if (path === "/installation/token")
+			return options.cleanupFails ? json({}, 500) : new Response(null, { status: 204 });
+		if (path === "/user/7") return json({ id: options.account ?? 7, login: "maintainer" });
+		if (path.endsWith("/permission"))
+			return json({
+				user: { id: 7 },
+				permission: options.role === "admin" ? "admin" : "write",
+				role_name: options.role ?? "maintain",
+			});
+		if (path === "/repos/upstream/project" || path === "/repos/quest-bot-forks/project") {
+			const isFork = path.includes("quest-bot-forks");
+			return json({
+				id: isFork ? 20 : 10,
+				name: "project",
+				owner: { login: isFork ? fork.owner : repo.owner },
+				archived: false,
+				disabled: false,
+				fork: isFork,
+				parent: { id: options.parent ?? 10 },
+			});
+		}
+		if (method !== "GET")
+			return options.failMutation
+				? json({ secret: "DO-NOT-LOG" }, 422)
+				: json({ id: 100, html_url: "https://github.com/upstream/project/pull/100" });
+		if (path.includes("/contents/quest/")) return json({ path: "quest/one.md", content: "ZmFrZQ==" });
+		if (path.includes("/check-runs")) return json({ total_count: 0, check_runs: [] });
+		if (path.endsWith("/status")) return json({ total_count: 0, statuses: [] });
+		if (/\/(issues|pulls)\/\d+$/.test(path)) return json({ number: 1 });
+		throw new Error(`Unexpected request: ${method} ${path}`);
+	});
+	return { service: new GitHubService(testEnv, request as typeof fetch), requests };
+}
+
+describe("trusted App operations", () => {
+	it("accepts current maintain authority and scopes/revokes a comment token", async () => {
+		const { service, requests } = github();
+		expect(await service.comment(repo, "app-test", 1, "Approved")).toMatchObject({ id: 100 });
+		expect(requests.find((r) => r.path.endsWith("/access_tokens"))?.body).toEqual({
+			repository_ids: [10],
+			permissions: { metadata: "read", issues: "write" },
+		});
+		expect(requests.at(-1)).toMatchObject({
+			path: "/installation/token",
+			method: "DELETE",
+			authorization: "Bearer upstream-token",
+		});
+		const jwt = requests[0]!.authorization.slice(7).split(".");
+		expect(JSON.parse(Buffer.from(jwt[0]!, "base64url").toString())).toEqual({ alg: "RS256", typ: "JWT" });
+		expect(JSON.parse(Buffer.from(jwt[1]!, "base64url").toString())).toMatchObject({ iss: "123" });
+		expect(
+			verify(
+				"RSA-SHA256",
+				Buffer.from(jwt.slice(0, 2).join(".")),
+				createPublicKey(privateKey),
+				Buffer.from(jwt[2]!, "base64url"),
+			),
+		).toBe(true);
+	});
+	it.each(["write", "triage", "custom-writer"])("rejects %s role before publishing", async (role) => {
+		const { service, requests } = github({ role });
+		await expect(service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow("maintainer authority");
+		expect(requests.some((r) => r.path.endsWith("/comments"))).toBe(false);
+		expect(requests.at(-1)?.method).toBe("DELETE");
+	});
+	it("rejects browser-like user claims and mismatched linked identities", async () => {
+		await expect(github().service.comment(repo, "forged-user", 1, "Approved")).rejects.toThrow(
+			"Linked GitHub identity",
+		);
+		await expect(github({ account: 99 }).service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow(
+			"identity changed",
+		);
+	});
+	it("gates deleted installations before minting, independently checks live revocation", async () => {
+		await delivery("installation", installation("deleted"));
+		const { service, requests } = github();
+		await expect(service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow("revoked");
+		expect(requests.some((r) => r.path.endsWith("/access_tokens"))).toBe(false);
+		await delivery("installation", installation("created")); // delayed/new event cannot restore live access
+		await expect(github({ missing: true }).service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow("404");
+		await expect(github({ suspended: true }).service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow(
+			"unavailable",
+		);
+	});
+	it("fails closed on reduced installation permissions", async () => {
+		const { service, requests } = github({ permissions: { metadata: "read", issues: "read" } });
+		await expect(service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow("issues permission");
+		expect(requests.length).toBe(1);
+	});
+	it("uses separate fork and upstream scopes and verifies the parent", async () => {
+		const input = { branch: "quest/m0/one", base: "main", title: "Approved", body: "Approved" };
+		const { service, requests } = github();
+		await service.createPullRequest(repo, "app-test", fork, input);
+		expect(requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.body)).toEqual([
+			{ repository_ids: [10], permissions: { metadata: "read", pull_requests: "write" } },
+			{ repository_ids: [20], permissions: { metadata: "read" } },
+		]);
+		expect(requests.find((r) => r.path.endsWith("/pulls"))?.body).toMatchObject({
+			head: "quest-bot-forks:quest/m0/one",
+			head_repo: "project",
+			draft: true,
+			maintainer_can_modify: false,
+		});
+		expect(requests.find((r) => r.path.endsWith("/pulls"))?.authorization).toBe("Bearer upstream-token");
+		await expect(github({ parent: 999 }).service.createPullRequest(repo, "app-test", fork, input)).rejects.toThrow(
+			"fork this upstream",
+		);
+		await expect(
+			github().service.createPullRequest(repo, "app-test", { ...fork, owner: "attacker" }, input),
+		).rejects.toThrow("namespace");
+	});
+	it("restricts approved publication to quests in service fork branches", async () => {
+		const { service, requests } = github();
+		await service.publishQuest(repo, "app-test", fork, {
+			branch: "quest/m0/one",
+			path: "quest/m0/one.md",
+			content: "# [S] One",
+			message: "Approved",
+		});
+		expect(requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.body)).toEqual([
+			{ repository_ids: [10], permissions: { metadata: "read" } },
+			{ repository_ids: [20], permissions: { metadata: "read", contents: "write" } },
+		]);
+		expect(() =>
+			service.publishQuest(repo, "app-test", fork, {
+				branch: "main",
+				path: ".github/workflows/run.yml",
+				content: "",
+				message: "Approved",
+			}),
+		).toThrow("quest file");
+	});
+	it("pins explicit merges to the approved commit SHA", async () => {
+		const { service, requests } = github();
+		await service.mergePullRequest(repo, "app-test", 1, "a".repeat(40));
+		expect(requests.find((r) => r.path.endsWith("/merge"))?.body).toEqual({
+			sha: "a".repeat(40),
+			merge_method: "merge",
+		});
+		expect(requests.find((r) => r.path.endsWith("/access_tokens"))?.body.permissions).toEqual({
+			metadata: "read",
+			contents: "write",
+			pull_requests: "write",
+		});
+	});
+	it("reads provider data with read-only permissions", async () => {
+		const { service, requests } = github();
+		await service.readQuest(repo, "app-test", "quest/one.md", "a".repeat(40));
+		await service.readIssue(repo, "app-test", 1);
+		await service.readPullRequest(repo, "app-test", 1);
+		await service.readChecks(repo, "app-test", "a".repeat(40));
+		expect(
+			requests
+				.filter((r) => r.path.endsWith("/access_tokens"))
+				.every((r) => Object.values(r.body.permissions).every((p) => p === "read")),
+		).toBe(true);
+	});
+	it("does not retry completed writes when token cleanup fails or leak provider errors", async () => {
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const { service, requests } = github({ cleanupFails: true });
+			await expect(service.comment(repo, "app-test", 1, "Approved")).resolves.toMatchObject({ id: 100 });
+			expect(requests.filter((r) => r.path.endsWith("/comments"))).toHaveLength(1);
+			expect(log).toHaveBeenCalledWith({ event: "github_token_revocation_failed" });
+			await expect(
+				github({ failMutation: true }).service.comment(repo, "app-test", 1, "Approved"),
+			).rejects.toThrow("GitHub request failed (422)");
+		} finally {
+			log.mockRestore();
+		}
+	});
+});

@@ -124,13 +124,16 @@ for a fresh deployment only. For another environment, change `routes`,
 `AUTH_URL`, Worker name, account, database, and OAuth credentials together.
 
 Register the production GitHub OAuth app with callback
-`https://kix.quest/api/auth/callback/github`, then set secrets
-interactively:
+`https://kix.quest/api/auth/callback/github`. Deploys fail until every
+required secret is set, so register the GitHub App first ([GITHUB.md](GITHUB.md)
+steps 1 and 2), then set secrets interactively:
 
 ```sh
 npm exec -- wrangler secret put AUTH_SECRET
 npm exec -- wrangler secret put GITHUB_CLIENT_ID
 npm exec -- wrangler secret put GITHUB_CLIENT_SECRET
+npm exec -- wrangler secret put GITHUB_APP_PRIVATE_KEY
+npm exec -- wrangler secret put GITHUB_WEBHOOK_SECRET
 npm exec -- wrangler d1 migrations apply DB --remote
 npm run types
 npm run check
@@ -154,3 +157,6 @@ References: [Durable Object migrations](https://developers.cloudflare.com/durabl
 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/),
 [Better Auth database](https://better-auth.com/docs/concepts/database), and
 [Hono integration](https://better-auth.com/docs/integrations/hono).
+
+The server-only GitHub App integration, reviewed manifest, permission rationale,
+webhook lifecycle and operator registration are documented in [GITHUB.md](GITHUB.md).

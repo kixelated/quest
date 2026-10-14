@@ -65,16 +65,10 @@ Decided on 2026-10-13 through the API-credit and product-pivot interview:
   outside the pure quest core. The standalone CLI and versioned quest
   format remain useful without this service.
 
-The old draft PRs #40 (Artifacts intake), #41 (custom changes), and #43
-(mirroring) implement superseded outcomes. Salvage only relevant pieces,
-such as App/webhook handling, instead of landing their old architecture.
-This planning change does not close those PRs.
-
 ## Required
 
-- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator deploys the Worker and points GitHub sign-in at kix.quest
-- [GitHub App](/quest/m0/kix/github.md) - the bot, signed events, installation identity, and scoped credentials
-- [Operator setup](/quest/m0/kix/operator-setup.md) - register and configure the actual App and pilot deployment
+- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
+- [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Project enrollment](/quest/m0/kix/onboard.md) - maintainers opt Quest repositories into contributions
 - [GitHub project state](/quest/m0/kix/repository.md) - quest snapshots, issues, PRs, and deduplicated events
 - [API funding](/quest/m0/kix/funding.md) - explicit donor allocations, credentials, accounting, and revocation

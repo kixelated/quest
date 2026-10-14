@@ -1,24 +1,20 @@
-# [S] Register and configure the Kix GitHub bot
+# [S] Set up the Kix bot's pilot repositories
 
 ## Goal
 
-The operator registers the reviewed GitHub App, configures its secrets in
-the deployed service, supplies a service-controlled fork namespace, and
-installs it on the pilot repositories. A real issue event and a bounded
-test PR verify the integration before contributors are invited.
+The operator supplies a service-controlled fork namespace and installs the
+registered GitHub App on it and on the pilot repositories. A real issue event
+and a bounded test PR verify the integration before contributors are invited.
 
 ## Plan
 
-- This is an operator/setup outcome. No App was created during the
-  2026-10-13 planning interview.
-- The operator chooses the registration owner, available App name, and fork
-  namespace during setup. The bot identity is distinct from that namespace;
-  do not assume an App can own a fork by itself.
-- Review the actual requested permissions before registration. Configure
-  App ID, private key, webhook secret, and any login credentials as service
-  secrets, never in git or an agent worktree.
-- Use the canonical kix.quest URLs and validate real installation-token
-  behavior across upstream and service-owned forks.
+- This is an operator/setup outcome. App registration and its secrets belong
+  to [Deploy kix.quest](/quest/m0/kix/deploy.md), because every deploy needs them.
+- The operator chooses the fork namespace during setup. The bot identity is
+  distinct from that namespace; do not assume an App can own a fork by itself.
+  Set it as `GITHUB_FORK_OWNER` (steps 3 and 5 of `cloudflare/GITHUB.md`).
+- Validate real installation-token behavior across upstream and
+  service-owned forks.
 - Configure the operator's hosting limit and explicit API funding for the
   rehearsal. A live test must not draw on an unidentified donor account.
 - Record nonsecret setup/run instructions and deployment identifiers.
@@ -26,6 +22,5 @@ test PR verify the integration before contributors are invited.
 
 ## Required
 
-- [GitHub App](/quest/m0/kix/github.md) - reviewed manifest and service endpoints
-- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the live origin for callback and webhook URLs
+- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the live origin and registered App
 - [Bot publication](/quest/m0/kix/publication.md) - the integration exercised by the test PR
