@@ -141,9 +141,10 @@ Output is plain, one line per event: timestamp (or SHA for a newly observed
 commit), type, actor, and URL. The last line adds a resume cursor. Pass its
 **last field** as `--since` on the next call. Cursors preserve commit membership
 and events sharing a timestamp; treat them as opaque, and use them only for the
-same PR. Explicit timestamps include events at that instant. Historical pushes
-come from repository activity; pushes observed while waiting come from new
-commit SHAs, regardless of git author dates. Actors are printed without deciding
+same PR. Explicit timestamps include events at that instant. Historical plain
+pushes come from repository activity; pushes observed while waiting come from new
+commit SHAs, regardless of git author dates. Force pushes come from the PR
+timeline, excluding the one that created the starting head. Actors are printed without deciding
 whose review counts. Check runs and edits to existing comments or reviews are
 outside this command's scope.
 

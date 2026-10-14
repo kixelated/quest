@@ -50,6 +50,8 @@ interface Cursor {
 	time: number;
 	ids: string[];
 	commits: string[];
+	/** Force-pushed SHAs at or before the starting point; the timeline records them a few seconds late. */
+	pushes: string[];
 }
 
 /** Accept a GitHub PR URL, or a number in the origin repository. */
@@ -239,17 +241,26 @@ async function watch(
 		const match = shaPoint ? pushed.find((row) => string(row.after).startsWith(point.toLowerCase())) : undefined;
 		if (shaPoint && !match) throw new Error(`cannot resolve push time for ${point}; pass a timestamp with --since`);
 		const since = time ?? timestamp(string(match!.timestamp));
-		cursor = { pr: name, time: since, ids: [], commits: [] };
 		// An explicit timestamp includes its own instant; a SHA point excludes its own push.
+		const after = (row: ObjectValue) => {
+			const pushedAt = timestamp(string(row.timestamp));
+			return shaPoint ? pushedAt > since : pushedAt >= since;
+		};
+		// Force pushes are reported from the timeline alone, so one push prints once.
+		const forced = pushed.filter((row) => string(row.activity_type) === "force_push");
+		cursor = {
+			pr: name,
+			time: since,
+			ids: [],
+			commits: [],
+			pushes: forced.filter((row) => !after(row)).map((row) => string(row.after)),
+		};
 		historical = pushed
-			.filter((row) => {
-				const pushedAt = timestamp(string(row.timestamp));
-				return shaPoint ? pushedAt > since : pushedAt >= since;
-			})
+			.filter((row) => string(row.activity_type) !== "force_push" && after(row))
 			.map((row) => ({
 				point: string(row.timestamp),
 				time: timestamp(string(row.timestamp)),
-				type: string(row.activity_type) === "force_push" ? "head_ref_force_pushed" : "pushed",
+				type: "pushed",
 				actor: actor(row.actor),
 				url: `https://github.com/${string(object(head.repo).full_name)}/commit/${string(row.after)}`,
 				id: `push:${string(row.after)}:${string(row.timestamp)}`,
@@ -258,6 +269,7 @@ async function watch(
 
 	const seenCommits = new Set([...baselineCommits, ...cursor.commits]);
 	const seenIds = new Set(cursor.ids);
+	const priorPushes = new Set(cursor.pushes);
 	const timeline = `${base}/issues/${pr.number}/timeline?per_page=100`;
 	let path = timeline;
 	let etag: string | undefined;
@@ -288,6 +300,8 @@ async function watch(
 				seenCommits.add(sha);
 				continue;
 			}
+			if (type === "head_ref_force_pushed" && typeof row.commit_id === "string" && priorPushes.has(row.commit_id))
+				continue;
 			for (const event of timelineActivities(row, prUrl)) {
 				if (event.time > cursor.time || (event.time === cursor.time && !seenIds.has(event.id)))
 					events.push(event);
@@ -314,6 +328,7 @@ async function watch(
 				time: latest,
 				ids: [...new Set(ids)],
 				commits: [...seenCommits],
+				pushes: [...priorPushes],
 			});
 			return unique.map(
 				(event, index) =>
@@ -408,8 +423,10 @@ function decodeCursor(value: string, pr: string): Cursor {
 			!Number.isFinite(parsed.time) ||
 			!Array.isArray(parsed.ids) ||
 			!parsed.ids.every((id) => typeof id === "string") ||
-			!Array.isArray(parsed.commits) ||
-			!parsed.commits.every((sha) => typeof sha === "string" && /^[a-f\d]{40}$/i.test(sha))
+			![parsed.commits, parsed.pushes].every(
+				(shas) =>
+					Array.isArray(shas) && shas.every((sha) => typeof sha === "string" && /^[a-f\d]{40}$/i.test(sha)),
+			)
 		)
 			throw new Error();
 		return parsed as unknown as Cursor;

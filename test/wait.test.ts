@@ -183,6 +183,45 @@ test("an explicit timestamp includes a push at that instant", async () => {
 	expect(lines[0]).toContain(`${POINT} pushed author https://github.com/contributor/fork/commit/${B}`);
 });
 
+function forcePushed(sha: string, time: string) {
+	return { event: "head_ref_force_pushed", id: 9, commit_id: sha, created_at: time, actor: { login: "author" } };
+}
+
+test("a historical force push prints once, from the timeline", async () => {
+	const fixture = setup(
+		[
+			pull(undefined, B),
+			response([pushed(B, "2026-10-07T12:05:00Z", "force_push"), pushed(A, "2026-10-07T11:59:00Z")]),
+			response([committed(B), forcePushed(B, "2026-10-07T12:05:02Z")]),
+		],
+		[B],
+	);
+	const lines = await waitForActivity(pr, { since: POINT }, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:05:02Z head_ref_force_pushed author /);
+});
+
+test("the force push that created the starting head is not activity, even after resuming", async () => {
+	const later = reviewed(2, "2026-10-07T12:06:00Z");
+	const first = setup(
+		[
+			pull(undefined, B),
+			response([pushed(B, "2026-10-07T12:05:00Z", "force_push")]),
+			response([committed(B), reviewed(1, "2026-10-07T12:05:01Z"), forcePushed(B, "2026-10-07T12:05:02Z")]),
+		],
+		[B],
+	);
+	const lines = await waitForActivity(pr, {}, first.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toContain("review-1");
+	const second = setup([
+		response([committed(B), reviewed(1, "2026-10-07T12:05:01Z"), forcePushed(B, "2026-10-07T12:05:02Z"), later]),
+	]);
+	const resumed = await waitForActivity(pr, { since: cursor(lines) }, second.deps);
+	expect(resumed).toHaveLength(1);
+	expect(resumed[0]).toContain("review-2");
+});
+
 test("all initial timeline pages are read, and the last known page is polled before following rollover", async () => {
 	const page2 = `https://api.github.com${timeline}&page=2`;
 	const page3 = `https://api.github.com${timeline}&page=3`;
