@@ -31,5 +31,8 @@ foreground time limit; each wake rereads your whole context.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
-Report once auto-merge is enabled; do not wait for the merge queue to land it.
+If your caller said it watches the merge queue, report once auto-merge is enabled.
+Otherwise wait until the PR merges. If it leaves the queue unmerged or auto-merge
+is disabled, confirm with the PR's current state, then report why instead of
+enabling auto-merge again; a new head needs the user's approval.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.
