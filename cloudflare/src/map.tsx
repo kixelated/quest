@@ -121,12 +121,12 @@ export function QuestMap(props: { board: Board }) {
 	const web = board.project.web;
 	const regions = chart(board);
 	return (
-		<div class="ql-ledger map">
+		<div class="ql-panel map">
 			<ol class="map-regions" role="list">
 				{regions.map(({ milestone, href, paths }) => (
 					<li class="region">
 						<header class="region-head">
-							{milestone.number !== "" && <span class="eyebrow">Milestone {milestone.number}</span>}
+							{milestone.number !== "" && <span class="ql-eyebrow">Milestone {milestone.number}</span>}
 							<h3>
 								<a href={href}>{milestone.title}</a>
 							</h3>

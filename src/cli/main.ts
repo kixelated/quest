@@ -111,12 +111,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("wait")
 		.summary("Wait for pull request activity on GitHub")
 		.description(
-			"Wait for a review, comment, push, merge, or close. Polls the timeline every 5 minutes; " +
-				"rate limits delay requests. No timeout by default.\n\n" +
+			"Wait for a review, comment, review-thread reply, reaction to the PR or a review, push, merge, or close. " +
+				"Polls every 5 minutes; rate limits delay requests. No timeout by default.\n\n" +
 				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
+				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
 				"Pass the final field of the last line to --since to resume without replaying events.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for activity, 3 on timeout, " +
-				"2 for invalid arguments, and 1 for other failures. Check runs and edits are not activity.",
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Replies and reactions by that account are ignored. " +
+				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
+				"Check runs and edits are not activity.",
 		)
 		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
 		.option("--since <point>", "ISO timestamp, pushed-tip SHA, or resume cursor (default: current head push time)")

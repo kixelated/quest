@@ -16,7 +16,7 @@ export function DocIndex() {
 			<ul class="doc-list">
 				{docs.map((doc) => (
 					<li>
-						<a class="ql-ledger doc-card" href={`/docs/${doc.slug}`}>
+						<a class="ql-panel doc-card" href={`/docs/${doc.slug}`}>
 							<span class="doc-title">{doc.title}</span>
 							<span class="muted">{doc.summary}</span>
 						</a>
@@ -34,7 +34,7 @@ export function DocPage(props: { doc: Doc }) {
 				<a href="/docs">All docs</a>
 				<a href={`${repo}/blob/main/docs/${props.doc.slug}.md`}>Edit on GitHub</a>
 			</nav>
-			<article class="ql-ledger prose">{raw(props.doc.html)}</article>
+			<article class="ql-panel prose">{raw(props.doc.html)}</article>
 		</section>
 	);
 }

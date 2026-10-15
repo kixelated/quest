@@ -98,8 +98,9 @@ $ quest --root examples/export ready quest/m0/download.md
 
 With no path, `ready` lists every ready quest. Given a path, it shows what
 blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
-`!` a blocked one, and each size label takes its colour: XS grey, S green,
-M yellow, L red, and XL purple. Set `NO_COLOR` to keep the layout without colours.
+`!` a blocked one, and each size label takes its colour, like loot rarity: XS
+grey, S green, M blue, L purple, and XL orange (your terminal's yellow). Set
+`NO_COLOR` to keep the layout without colours.
 
 Scripts and agents read the piped form, which is plain text:
 
@@ -120,7 +121,8 @@ claims. Check those before you start work someone else may already be on.
 
 ## Wait for pull request activity
 
-`quest wait` blocks until a GitHub PR has a review, comment, push, merge, or close:
+`quest wait` blocks until a GitHub PR has a review, comment, review-thread
+reply, reaction to the PR or one of its reviews, push, merge, or close:
 
 ```sh
 quest wait 101
@@ -148,9 +150,22 @@ timeline, excluding the one that created the starting head. Actors are printed w
 whose review counts. Check runs and edits to existing comments or reviews are
 outside this command's scope.
 
-The waiter makes one conditional timeline request every five minutes once it
-has read the existing pages, following a new page when the current one fills.
-It honors GitHub's rate-limit headers and fails loudly on invalid responses.
+Review-thread replies and reactions never reach the PR timeline, so they are
+read separately. A reply prints as `replied`; a thread's first comment is part
+of a review and prints as `reviewed`. Reactions on the PR body or a review
+print as `reacted:<content>`, so a clean review that only leaves a 👍 prints
+`reacted:thumbs_up`. Each poll reads the newest 100 reactions on each, so a
+burst of more than that still wakes the waiter but prints only the newest;
+reactions on other comments are not read. Replies and
+reactions by the authenticated account are ignored, so an agent's own replies
+do not wake it; activity from a person sharing that account is ignored too.
+The cursor keeps a separate position for each source, so a reply that becomes
+visible after a newer reaction is still reported.
+
+Each poll makes one conditional timeline request and one conditional
+review-comment request every five minutes once it has read the existing pages,
+following a new page when the current one fills, plus one GraphQL query for
+reactions. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting.
@@ -200,7 +215,7 @@ plan issues, start ready quests, and act on GitHub PRs through a decision UI.
 Hosted work will use explicitly selected maintainer or donor API funding.
 [The first milestone](quest/m0/README.md) lists the quests that remain.
 
-## Join the party
+## Contributing
 
 Quest is planned in the open with Quest itself: [its quest log](quest/README.md)
 is the backlog, and contributors claim quests from the same log their agents
