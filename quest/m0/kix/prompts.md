@@ -22,15 +22,20 @@ or reconnecting preserves the current question and submitted answers.
   quest: offer starting/prioritizing it. New PR: offer the next review,
   iteration, or permitted GitHub merge decision. Capability and authorization
   determine available actions; do not display nonworking promises.
-- Use in-app unread notifications as the baseline and offer browser
-  notifications with user opt-in. Coalesce updates into the same decision
-  item; a reconnect or duplicate webhook must not create another prompt.
+- Use in-app unread notifications as the baseline; Web Push belongs to the
+  [mobile web app](/quest/m0/kix/mobile.md). Coalesce updates into the same
+  decision item; a reconnect or duplicate webhook must not create another
+  prompt. Design the inbox phone-first.
 - Decisions are bound to a project, current maintainer, session, and
   question/revision. Reject stale or duplicate submissions safely. Agent
   recommendations and other users' comments are never approval.
-- Surface waiting-for-answer, active, funding-exhausted, and failed states
-  plainly, with the next useful action. Keep detailed logs, account setup,
-  budgets, and repository browsing available as secondary views.
+- Surface waiting-for-answer, active, account-limited, runner-offline, and
+  failed states plainly, with the next useful action. Keep runner and account
+  setup and repository browsing available as secondary views.
+- Decided 2026-10-15: prompts and agent-written summaries are the whole
+  default UI. There is no log view; raw agent output sits behind a collapsed
+  per-job disclosure for current maintainers
+  ([agent activity](/quest/m0/kix/activity.md)).
 - Reuse the established visual identity and existing components where they
   help. Maps, status grids, and configuration screens are not the primary
   signed-in experience. Preserve keyboard and accessible form behavior.

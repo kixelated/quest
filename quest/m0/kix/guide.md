@@ -1,11 +1,11 @@
-# [M] Guide maintainers and donors through Kix
+# [M] Guide maintainers through Kix
 
 ## Goal
 
-A dedicated guide takes a maintainer from project enrollment through an
-issue's planning interview, a funded implementation, and a reviewed GitHub
-PR. A donor can set up an API key, select allowed work and a budget, inspect
-usage, and stop funding without guessing how the service works.
+A dedicated guide takes a maintainer from project enrollment and runner
+setup through an issue's planning interview, an implementation, and a
+reviewed GitHub PR, answering decisions from their phone, without guessing
+how the service works.
 
 ## Plan
 
@@ -14,21 +14,22 @@ usage, and stop funding without guessing how the service works.
 - Keep the product path centered on decisions and prompts. Explain
   repository opt-in, Quest-file requirements, GitHub App permissions, who
   can answer, and how draft plans become eligible after merging.
-- Explain named API accounts, maintainer-paid planning, explicit donor
-  planning consent, project and per-quest allocations, estimates,
-  in-flight usage, provider limits, and revocation.
-- Document creating Console keys and claiming eligible monthly credits,
-  with current official sources. Distinguish supported API billing from
-  unverified promotional-donation claims and ordinary chat subscriptions.
-- Include operator registration, fork ownership, hosting limits, and recovery
-  in an operator section. Keep those details out of the maintainer's normal
+- Decided 2026-10-15: cover installing `quest runner` on Linux or macOS, the
+  required Nix devShell (and adding one), signing in multiple Claude Code and
+  opencode accounts, routing and pinning, account limits, and what happens
+  when a runner goes offline. Cover installing the PWA and enabling push
+  notifications, including adding it to the iOS home screen.
+- Cite current official provider terms for using subscriptions with each
+  CLI, and say plainly that kix never holds provider tokens.
+- Include operator registration, fork ownership, and recovery in an
+  operator section. Keep those details out of the maintainer's normal
   decision flow.
-- Extend the guide when local CLI/plugin support ships; do not advertise
-  future local integrations as available. CLI reference changes remain in
-  their own feature quests.
+- Extend the guide when cloud runners, API-key funding, and donations ship;
+  do not advertise them as available before then.
 - Validate the guide against the running UI and a real pilot repository.
 
 ## Required
 
 - [Web execution](/quest/m0/kix/execution.md) - the complete user flow being documented
+- [Mobile web app](/quest/m0/kix/mobile.md) - install and notification steps
 - [Operator setup](/quest/m0/kix/operator-setup.md) - verified deployment and App setup

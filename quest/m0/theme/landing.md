@@ -2,16 +2,17 @@
 
 ## Goal
 
-The home page on `https://kix.quest` explains the maintainer and donor paths
-and leads into sign-in and project onboarding. Returning maintainers reach
+The home page on `https://kix.quest` explains the maintainer path (decide
+from your phone while your runners do the work) and leads into sign-in,
+project onboarding, and runner setup. Returning maintainers reach
 their decision inbox. The standalone Quest setup remains easy to find.
 
 ## Plan
 
 - Preserve the existing shared visual design and map; make the simple prompt
   workflow the product's main entry point rather than adding a dashboard.
-- Keep API-funded work honest: donations authorize usage, not cash transfers
-  or guaranteed harvesting of only unused promotional tokens.
+- Do not advertise cloud runners, API-key funding, or donations until they
+  ship in m1.
 - Retain the working setup link. Switch README/getting-started examples to
   kix.quest/setup only once that endpoint serves the actual setup instructions.
 

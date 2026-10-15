@@ -15,7 +15,7 @@ with webhook replay producing no duplicate item.
   not authorize new execution.
 - Native issues remain untrusted source material. Receiving an issue queues
   a decision item; it does not itself authorize a model call, create a quest,
-  or spend a donor's budget.
+  or spend an account's usage.
 - Associate contribution PRs with their quests and runs. An existing PR or
   active claim prevents duplicate implementation of that quest.
 - Observe all new repository PRs for the requested maintainer workflow,
