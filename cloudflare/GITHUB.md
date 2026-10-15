@@ -96,7 +96,7 @@ reconcile current provider state rather than replay issue/PR payloads as facts.
 2. Store the returned/generated App ID in the `GITHUB_APP_ID` Wrangler var.
    Put the PEM private key and high-entropy webhook secret into Workers secrets
    named `GITHUB_APP_PRIVATE_KEY` and `GITHUB_WEBHOOK_SECRET` using
-   `npm exec -- wrangler secret put NAME` from `cloudflare/`. Keep multiline PEM
+   `bun run wrangler secret put NAME` from `cloudflare/`. Keep multiline PEM
    intact. Keep the existing `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` for OAuth
    login; they are separate credentials. Never commit conversion responses,
    PEM keys, installation tokens or `.dev.vars`.
@@ -105,7 +105,7 @@ reconcile current provider state rather than replay issue/PR payloads as facts.
    repositories. Existing installations must accept permission increases before
    operations needing those grants become available. GitHub's installation
    UI, not browser form claims, chooses repository access.
-4. Run `npm exec -- wrangler d1 migrations apply DB --remote`, then the normal
+4. Run `bun run wrangler d1 migrations apply DB --remote`, then the normal
    Worker deployment from [README](README.md). GitHub App setup, credentials,
    production deployment, fork namespace ownership and live installation tests
    are operator work; this change performs none of those external actions.

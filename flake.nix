@@ -24,8 +24,9 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          nodejs = pkgs.nodejs_24;
-          quest = pkgs.callPackage ./nix/package.nix { inherit nodejs; };
+          quest = pkgs.callPackage ./nix/package.nix { };
+          # package.json's packageManager pins Bun for CI runners without Nix.
+          bunVersion = pkgs.lib.removePrefix "bun@" (pkgs.lib.importJSON ./package.json).packageManager;
         in
         {
           packages = {
@@ -35,8 +36,7 @@
           apps.default = flake-utils.lib.mkApp { drv = quest; };
           devShells.default = pkgs.mkShell {
             packages = with pkgs; [
-              nodejs
-              # Compiles the release binaries; the Release workflow installs this version.
+              # Installs dependencies, runs every script and tool, and compiles the release binaries.
               bun
               just
               jq
@@ -52,6 +52,13 @@
           formatter = pkgs.nixfmt;
           checks = {
             package = quest;
+            bun-version = pkgs.runCommand "bun-version" { } ''
+              if [ "${pkgs.bun.version}" != "${bunVersion}" ]; then
+                echo "package.json pins bun@${bunVersion}, but the flake provides Bun ${pkgs.bun.version}" >&2
+                exit 1
+              fi
+              touch "$out"
+            '';
             quest-tree = pkgs.runCommand "quest-tree" { nativeBuildInputs = [ quest ]; } ''
               quest --root ${self} check
               touch "$out"

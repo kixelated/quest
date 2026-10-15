@@ -45,9 +45,9 @@ try {
         Expand-Archive -LiteralPath (Join-Path $work $archive) -DestinationPath (Join-Path $work 'archive')
         $binary = Join-Path $work 'archive/quest.exe'
     }
-    node (Join-Path $PSScriptRoot 'windows-architecture.mjs') $binary $Target
+    bun (Join-Path $PSScriptRoot 'windows-architecture.mjs') $binary $Target
     if ($LASTEXITCODE -ne 0) { throw 'Wrong Windows binary architecture' }
-    node (Join-Path $PSScriptRoot 'lifecycle-check.mjs') $binary ($Tag.Substring(1))
+    bun (Join-Path $PSScriptRoot 'lifecycle-check.mjs') $binary ($Tag.Substring(1))
     if ($LASTEXITCODE -ne 0) { throw 'Native Windows lifecycle failed' }
     Write-Output "$Method ($Target): quest $($Tag.Substring(1))"
 } finally {

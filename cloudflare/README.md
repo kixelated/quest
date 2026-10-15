@@ -39,7 +39,7 @@ calling Better Auth's server API.
 GitHub remains the planned authority for enrolled project state. The Worker
 has no Durable Objects; D1 holds accounts, sessions, and GitHub App state.
 
-`cloudflare/` is an npm workspace of the repository root, so the Worker
+`cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
 and readiness the CLI runs.
 
@@ -91,13 +91,13 @@ Cloudflare account are required for checks.
 After changing bindings, regenerate types:
 
 ```sh
-npm run types -w cloudflare
+bun run --cwd cloudflare types
 ```
 
-Wrangler comes from npm, pinned in the root `package-lock.json` and shared
-with the test plugin; the Nix shell does not provide it. Use
-`npm exec -- wrangler` from `cloudflare/` for the documented deployment
-commands so generated types and deployment use that same version.
+Wrangler is a dependency pinned in the root `bun.lock` and shared with the
+test plugin; the Nix shell does not provide it. Use `bun run wrangler` from
+`cloudflare/` for the documented deployment commands so generated types and
+deployment use that same version, on Bun (`cloudflare/bunfig.toml`).
 
 ## Deployment
 
@@ -106,8 +106,8 @@ from CI. In the Nix shell, enter `cloudflare/` and authenticate:
 
 ```sh
 cd cloudflare
-npm exec -- wrangler login
-npm exec -- wrangler d1 create quest-auth
+bun run wrangler login
+bun run wrangler d1 create quest-auth
 ```
 
 The checked-in config deploys to `https://kix.quest` as a Workers custom
@@ -126,15 +126,15 @@ required secret is set, so register the GitHub App first ([GITHUB.md](GITHUB.md)
 steps 1 and 2), then set secrets interactively:
 
 ```sh
-npm exec -- wrangler secret put AUTH_SECRET
-npm exec -- wrangler secret put GITHUB_CLIENT_ID
-npm exec -- wrangler secret put GITHUB_CLIENT_SECRET
-npm exec -- wrangler secret put GITHUB_APP_PRIVATE_KEY
-npm exec -- wrangler secret put GITHUB_WEBHOOK_SECRET
-npm exec -- wrangler d1 migrations apply DB --remote
-npm run types
-npm run check
-npm run deploy
+bun run wrangler secret put AUTH_SECRET
+bun run wrangler secret put GITHUB_CLIENT_ID
+bun run wrangler secret put GITHUB_CLIENT_SECRET
+bun run wrangler secret put GITHUB_APP_PRIVATE_KEY
+bun run wrangler secret put GITHUB_WEBHOOK_SECRET
+bun run wrangler d1 migrations apply DB --remote
+bun run types
+bun run check
+bun run deploy
 ```
 
 D1 schema migrations are applied separately before deployment. The `exports`

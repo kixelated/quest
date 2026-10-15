@@ -4,15 +4,15 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Install the locked npm dependencies for the CLI and the Worker.
+# Install the locked dependencies for the CLI and the Worker.
 install:
-    npm ci
+    bun install --frozen-lockfile
 
 # Check code, repository tooling, and the quest tree.
 check:
-    npm run check
-    npm run --silent quest -- check
-    npm run --silent quest -- --root examples/export check
+    bun run check
+    bun run --silent quest check
+    bun run --silent quest --root examples/export check
     actionlint
     shellcheck .claude/hooks/*.sh scripts/*.sh
     shfmt -d .claude/hooks/*.sh scripts/*.sh
@@ -21,44 +21,44 @@ check:
 
 # Run tests, including the shell hooks and the lifecycle of both builds.
 test:
-    npm test
+    bun run test
     bash .claude/hooks/direnv.test.sh
     bash scripts/install-check.test.sh
     bash scripts/installer.test.sh
-    npm run build
+    bun run build
     bash scripts/lifecycle-check.sh "$PWD/dist/quest.js"
-    npm run compile
+    bun run compile
     bash scripts/lifecycle-check.sh "$PWD/dist/quest"
     just worker-test
 
 # Apply formatters without changing program behavior.
 fix:
-    npm run fix
+    bun run fix
     shfmt -w .claude/hooks/*.sh scripts/*.sh
     nixfmt flake.nix nix/*.nix
-    npm run fix -w cloudflare
+    bun run --cwd cloudflare fix
 
 # Build the bundled CLI into dist/quest.js.
 build:
-    npm run build
+    bun run build
 
 # Compile a standalone binary for this machine into dist/quest.
 compile:
-    npm run compile
+    bun run compile
 
 # Run the local CLI, for example `just run ready`.
 run *args:
-    npm run --silent quest -- {{args}}
+    bun run --silent quest {{args}}
 
 # Check generated binding types, TypeScript, formatting, and deployment bundle.
 worker-check:
-    npm run check -w cloudflare
+    bun run --cwd cloudflare check
 
 # Run Worker integration tests in the Cloudflare runtime.
 worker-test:
-    npm test -w cloudflare
+    bun run --cwd cloudflare test
 
 # Apply auth migrations locally and start the Worker.
 worker-dev:
-    npm run migrate -w cloudflare
-    npm run dev -w cloudflare
+    bun run --cwd cloudflare migrate
+    bun run --cwd cloudflare dev

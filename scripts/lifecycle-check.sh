@@ -15,7 +15,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/quest-lifecycle.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 # The shared lifecycle is also run directly by native Windows CI.
-node "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle-check.mjs" "$binary"
+bun "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle-check.mjs" "$binary"
 
 # A reader that closes stdout early, like `quest ready | head -1`, ends the
 # command quietly. The writer waits on a FIFO until the reader has closed, so

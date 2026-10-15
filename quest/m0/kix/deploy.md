@@ -17,7 +17,7 @@ delivery. Follow the Deployment section of `cloudflare/README.md` and steps 1,
   authentication origin. Remove the Worker's kixel.quest custom domain when
   deploying; the checked-in config no longer lists it.
 - Merging to `main` does not deploy: no workflow runs Wrangler, and
-  deployment is a manual `npm run deploy` from `cloudflare/`.
+  deployment is a manual `bun run deploy` from `cloudflare/`.
 - Every deploy of `main` fails until the required secrets `AUTH_SECRET`,
   `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` and
   `GITHUB_WEBHOOK_SECRET` are set, so register the App from
@@ -25,7 +25,7 @@ delivery. Follow the Deployment section of `cloudflare/README.md` and steps 1,
   events before registering, and set `GITHUB_APP_ID`. Keep secrets out of
   git and agent worktrees.
 - Apply the D1 migrations, including `0002_github.sql`, with
-  `npm exec -- wrangler d1 migrations apply DB --remote` before deploying.
+  `bun run wrangler d1 migrations apply DB --remote` before deploying.
 - Add the `kix.quest` zone to the Worker's Cloudflare account. Keep the
   Worker name, D1 database ID, and `AUTH_SECRET`; do not create a new
   production database.

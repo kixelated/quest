@@ -107,9 +107,9 @@ explicitly choose to discard it.
 
 ## Build and verify from source
 
-Node 22.12 or newer is required for a source build. From the checkout, run
-`npm ci`, `npm run check`, `npm test`, and `npm run build`. Then run
-`node scripts/lifecycle-check.mjs dist/quest.js`. The shared lifecycle checks
+[Bun](https://bun.sh) is required for a source build. From the checkout, run
+`bun install --frozen-lockfile`, `bun run check`, `bun run test`, and
+`bun run build`. Then run `bun scripts/lifecycle-check.mjs dist/quest.js`. The shared lifecycle checks
 paths containing spaces, actual Git worktrees, CRLF plans/instructions, existing
 custom skills, conflicts, and repeated setup/removal without remote writes.
 Windows tests do not require symlink privileges; symlink-specific legacy cases

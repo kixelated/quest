@@ -1,0 +1,8 @@
+# Markdown assets (the bundled skills and guide) import as text, at runtime and
+# in `bun build`. vitest.config.ts mirrors this for the test runner.
+[loader]
+".md" = "text"
+
+# Scripts run on Bun even when a tool declares a Node shebang.
+[run]
+bun = true
