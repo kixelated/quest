@@ -127,7 +127,7 @@ describe("Worker", () => {
 	it("offers to return to the page as requested, still encoded", async () => {
 		const response = await SELF.fetch(`${origin}/%09/evil.example`);
 		expect(response.status).toBe(404);
-		expect(await response.text()).toContain('name="next" value="/%09/evil.example"');
+		expect(await response.text()).toContain('href="/sign-in?next=%2F%2509%2Fevil.example"');
 		for (const path of ["%E0", "%", "m0%2Fcloudflare%2Fboard"]) {
 			expect((await SELF.fetch(`${origin}/repos/quest/quest/${path}`)).status).toBe(404);
 		}
@@ -137,13 +137,13 @@ describe("Worker", () => {
 		expect(response.status).toBe(302);
 		expect(response.headers.get("location")).toBe("https://github.com/kixelated/quest/blob/main/SETUP.md");
 	});
-	it("renders a GitHub sign-in form without a session", async () => {
+	it("links to sign-in without a session", async () => {
 		const response = await SELF.fetch(origin);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("cache-control")).toBe("no-store");
-		// The sign-in form's post must carry this origin, not `null`.
+		// Sign-in form posts must carry this origin, not `null`.
 		expect(response.headers.get("referrer-policy")).toBe("same-origin");
-		expect(await response.text()).toContain("Sign in with GitHub");
+		expect(await response.text()).toContain('href="/sign-in?next=%2F"');
 	});
 	it("starts GitHub OAuth with persisted state and cookies", async () => {
 		const response = await SELF.fetch(`${origin}/sign-in`, {
