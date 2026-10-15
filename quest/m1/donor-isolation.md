@@ -7,9 +7,9 @@ with constrained network and filesystem access, without exposing host secrets.
 
 ## Plan
 
-- Hosted m0 already requires isolated containers and external credentials.
-  This quest strengthens local donor execution; Nix build isolation alone
-  is not an isolation boundary for arbitrary agent commands.
+- m0 runners only run their owner's own projects. This quest strengthens
+  shared runners; Nix devShells give reproducibility, not an isolation
+  boundary for arbitrary agent commands.
 - Evaluate current microVM tooling and supported Linux/macOS hosts before
   selecting an adapter. Do not make a beta runtime a core requirement.
 - Keep provider keys and publication credentials outside guests, and enforce
@@ -18,4 +18,4 @@ with constrained network and filesystem access, without exposing host secrets.
 
 ## Required
 
-- [Local donor runner](/quest/m1/local/donor-runner.md) - the execution path this hardens
+- [Shared runners](/quest/m1/donor-runner.md) - the execution path this hardens

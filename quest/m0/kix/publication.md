@@ -5,7 +5,7 @@
 Authorized planning and implementation results become ordinary GitHub PRs
 under the App bot's identity, with contributor/model attribution appropriate
 to the repository. Repeated delivery updates the same intended PR. Agents
-and donor machines never receive the App's credentials.
+and runners never receive the App's credentials.
 
 ## Plan
 
@@ -20,6 +20,9 @@ and donor machines never receive the App's credentials.
   paper trail, not unrelated source changes. Implementation/iteration may
   publish their selected task's changes. Unsupported permission-sensitive
   changes must produce a decision, not be silently dropped.
+- Runner checkpoints publish work in progress to the job's fenced branch
+  through this same validation, so a reassigned job can continue from it.
+  A fenced-out attempt cannot write to the branch.
 - The service may need broader App registration permissions than each
   operation uses; document that truthfully and narrow issued tokens.
   No job gets an unrestricted push credential or permission to write main.
@@ -38,7 +41,7 @@ and donor machines never receive the App's credentials.
   service's `mergePullRequest` currently hard-codes a merge commit, which
   squash-only or rebase-only repositories refuse.
 - Fork PRs do not make unsafe privileged CI safe. Document that upstream
-  workflows must treat contributed code as untrusted; do not grant donor
+  workflows must treat contributed code as untrusted; do not grant contributed
   code upstream credentials or run it in the publisher.
 - Reconcile ambiguous GitHub outcomes before replaying publication so
   interruptions cannot create duplicate PRs or overwrite newer work.
