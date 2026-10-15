@@ -22,5 +22,9 @@ export default defineConfig({
 			},
 		})),
 	],
-	test: { setupFiles: ["./test/setup.ts"] },
+	// Each test file otherwise starts its own workerd and re-imports the whole Worker
+	// (the pool appends `import main` to cloudflare:test), all transformed by vitest's
+	// one Node process, which also answers a module resolve for every SELF.fetch.
+	// One shared runtime imports the Worker once, so a busy host can't stall the tests.
+	test: { setupFiles: ["./test/setup.ts"], fileParallelism: false, isolate: false },
 });
