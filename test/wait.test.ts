@@ -535,8 +535,8 @@ test("a review-thread reply wakes the waiter, but its own activity and a thread'
 	expect(fixture.sleeps).toEqual([300_000]);
 	const comments = fixture.sideCalls.filter((call) => call.path.includes("/comments"));
 	expect(comments.map((call) => call.path)).toEqual([
-		`${base}/pulls/1/comments?per_page=100&since=2026-10-07T12:00:00.000Z`,
-		`${base}/pulls/1/comments?per_page=100&since=2026-10-07T12:00:00.000Z`,
+		`${base}/pulls/1/comments?per_page=100&since=2026-10-07T11:59:59.000Z`,
+		`${base}/pulls/1/comments?per_page=100&since=2026-10-07T11:59:59.000Z`,
 	]);
 	expect(comments[1].headers.get("if-none-match")).toBe('"c"');
 });
@@ -554,7 +554,7 @@ test("resuming tracks replies and reactions separately, so neither replays nor h
 	const lines = await waitForActivity(pr, { since: point }, second.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:03:00Z replied reviewer /);
-	expect(second.sideCalls[0].path).toContain("since=2026-10-07T12:00:00.000Z");
+	expect(second.sideCalls[0].path).toContain("since=2026-10-07T11:59:59.000Z");
 	const third = setup([response([committed(A)]), response([committed(A)])], [A], {
 		comments: [response([replied(2, "2026-10-07T12:03:00Z")]), response([replied(2, "2026-10-07T12:03:00Z")])],
 		graphql: [
@@ -566,7 +566,7 @@ test("resuming tracks replies and reactions separately, so neither replays nor h
 	expect(later).toHaveLength(1);
 	expect(later[0]).toContain("reacted:thumbs_up");
 	expect(third.sleeps).toEqual([300_000]);
-	expect(third.sideCalls[0].path).toContain("since=2026-10-07T12:03:00.000Z");
+	expect(third.sideCalls[0].path).toContain("since=2026-10-07T12:02:59.000Z");
 });
 
 test("GraphQL errors fail loudly instead of hiding reactions", async () => {

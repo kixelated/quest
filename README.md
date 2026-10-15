@@ -153,7 +153,9 @@ Review-thread replies and reactions never reach the PR timeline, so they are
 read separately. A reply prints as `replied`; a thread's first comment is part
 of a review and prints as `reviewed`. Reactions on the PR body or a review
 print as `reacted:<content>`, so a clean review that only leaves a 👍 prints
-`reacted:thumbs_up`; reactions on other comments are not read. Replies and
+`reacted:thumbs_up`. Each poll reads the newest 100 reactions on each, so a
+burst of more than that still wakes the waiter but prints only the newest;
+reactions on other comments are not read. Replies and
 reactions by the authenticated account are ignored, so an agent's own replies
 do not wake it; activity from a person sharing that account is ignored too.
 The cursor keeps a separate position for each source, so a reply that becomes

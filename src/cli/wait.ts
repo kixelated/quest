@@ -362,9 +362,10 @@ async function watch(
 	};
 
 	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=100`);
-	// `since` filters by update time, which is never before creation.
+	// `since` excludes its own instant and filters by update time, which is never before
+	// creation; start a second early so unseen replies at the mark's second are still read.
 	const comments = pager(
-		`${base}/pulls/${pr.number}/comments?per_page=100&since=${new Date(cursor.marks.replies.time).toISOString()}`,
+		`${base}/pulls/${pr.number}/comments?per_page=100&since=${new Date(cursor.marks.replies.time - 1000).toISOString()}`,
 	);
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
 	for (;;) {
