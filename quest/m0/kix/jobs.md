@@ -31,7 +31,9 @@ duplicate results or overwrite a replacement's work.
   permission to run an action.
 - Ready quests on an opted-in project's default branch are eligible. An
   explicit spawn decision can promote selected ready work. Draft plans,
-  active claims, and existing PRs prevent duplicate starts.
+  active claims, and existing PRs prevent duplicate starts. A quest branch
+  pushed by someone's local agent is a claim too, since the skills keep
+  working without kix.
 - Runners require a Nix devShell. A project without a flake devShell gets a
   decision offering a planning job to add one, rather than a failed start.
 - Paused sessions preserve their questions and context. Resume an identified

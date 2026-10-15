@@ -73,6 +73,11 @@ operator-paid-hosting decisions:
 - **Keep useful infrastructure.** Retain Workers/Hono and D1 for the web
   service. Durable database claims and HTTPS streams replace MoQ locks and
   logs.
+- **Not exclusive.** The web UI is one interface, not the only one. Every
+  skill keeps working from a user's own agent (Claude Code, Codex, ...)
+  without kix. The two coexist through GitHub: kix sees a local agent's
+  quest branches and PRs, which count as claims and get the usual PR
+  decision items. There is no plugin or session mirroring.
 - **Independent core.** Keep provider, GitHub, Cloudflare, and UI behavior
   outside the pure quest core. The standalone CLI and versioned quest
   format remain useful without this service.
