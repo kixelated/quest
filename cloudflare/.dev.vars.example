@@ -2,6 +2,10 @@
 AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters
 GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
 GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
+# Optional Google sign-in, offered only when both are set. Wrangler dev loads
+# the secret only while it is listed in wrangler.jsonc's `secrets.required`.
+# GOOGLE_CLIENT_ID=replace-with-google-oauth-client-id
+# GOOGLE_CLIENT_SECRET=replace-with-google-oauth-client-secret
 # Local development serves the app from Wrangler instead of https://kix.quest.
 AUTH_URL=http://localhost:8787
 
