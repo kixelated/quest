@@ -9,6 +9,10 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+    ignore:
+      # Bump by hand once @cloudflare/vitest-plugin's peer range includes the new major.
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

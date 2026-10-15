@@ -47,7 +47,6 @@
               shellcheck
               shfmt
               nixfmt
-              wrangler
             ];
           };
           formatter = pkgs.nixfmt;

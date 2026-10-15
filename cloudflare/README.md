@@ -94,9 +94,9 @@ After changing bindings, regenerate types:
 npm run types -w cloudflare
 ```
 
-Nix provides Node and Wrangler for interactive use. Recipes use the newer
-Wrangler pinned in the root `package-lock.json`, which is also used by the test plugin.
-Use `npm exec -- wrangler` from `cloudflare/` for the documented deployment
+Wrangler comes from npm, pinned in the root `package-lock.json` and shared
+with the test plugin; the Nix shell does not provide it. Use
+`npm exec -- wrangler` from `cloudflare/` for the documented deployment
 commands so generated types and deployment use that same version.
 
 ## Deployment
