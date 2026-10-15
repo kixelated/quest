@@ -1,5 +1,6 @@
 import { createPrivateKey, sign } from "node:crypto";
 import { check, parse, ready } from "quest/core";
+import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 
 export interface GitHubRepository {
@@ -15,7 +16,7 @@ interface Installation {
 	suspended_at: string | null;
 	permissions: Permissions;
 }
-export interface Repository {
+interface Repository {
 	id: number;
 	name: string;
 	owner: { login: string };
@@ -36,14 +37,12 @@ export type ProjectPreview = {
 	branch: string;
 	commit: string;
 	license: Repository["license"];
+	licenseError: string | null;
 	quests: { path: string; title: string }[];
 	state: ContributionState | null;
 };
 type Tree = { truncated: boolean; tree: { path: string; type: string; mode: string; sha: string }[] };
 
-// A deliberate integration point while the product's open-source eligibility
-// policy is unresolved. With no policy, enabling contributions fails closed.
-export type OpenSourcePolicy = (repository: Repository) => void | Promise<void>;
 interface GitHubEnvironment {
 	DB: D1Database;
 	GITHUB_APP_ID: string;
@@ -79,11 +78,9 @@ function branch(value: string) {
 export class GitHubService {
 	#env: GitHubEnvironment;
 	#fetch: typeof fetch;
-	#openSource?: OpenSourcePolicy;
-	constructor(env: GitHubEnvironment, request: typeof fetch = fetch, openSource?: OpenSourcePolicy) {
+	constructor(env: GitHubEnvironment, request: typeof fetch = fetch) {
 		this.#env = env;
 		this.#fetch = request;
-		this.#openSource = openSource;
 	}
 
 	#jwt() {
@@ -120,6 +117,26 @@ export class GitHubService {
 		if (state?.blocked) throw new GitHubError("GitHub installation revoked or suspended");
 	}
 
+	#repository(repo: GitHubRepository, current: Repository) {
+		if (
+			current.id !== repo.id ||
+			current.owner.login.toLowerCase() !== repo.owner.toLowerCase() ||
+			current.name.toLowerCase() !== repo.name.toLowerCase() ||
+			current.archived ||
+			current.disabled
+		)
+			throw new GitHubError("Repository identity or availability changed");
+	}
+
+	async #license(current: Repository): Promise<string | null> {
+		try {
+			if (await osiApproved(current.license?.spdx_id, this.#fetch)) return null;
+			return "GitHub must detect an OSI-approved license. Add or correct the repository license on GitHub, then review this project again.";
+		} catch {
+			return "License approval could not be verified. Contributions cannot be enabled while SPDX license data is unavailable.";
+		}
+	}
+
 	async #withRepository<T>(
 		repo: GitHubRepository,
 		permissions: Permissions,
@@ -151,14 +168,7 @@ export class GitHubService {
 		if (!minted.token) throw new GitHubError("Installation token unavailable");
 		try {
 			const current = await this.#api<Repository>(minted.token, path);
-			if (
-				current.id !== repo.id ||
-				current.owner.login.toLowerCase() !== repo.owner.toLowerCase() ||
-				current.name.toLowerCase() !== repo.name.toLowerCase() ||
-				current.archived ||
-				current.disabled
-			)
-				throw new GitHubError("Repository identity or availability changed");
+			this.#repository(repo, current);
 			await this.#gate(installation.id);
 			return await action(minted.token, current, installation.id);
 		} finally {
@@ -294,6 +304,7 @@ export class GitHubService {
 			branch: current.default_branch,
 			commit: commit.sha,
 			license: current.license,
+			licenseError: await this.#license(current),
 			quests: documents
 				.filter((doc) => available.has(doc.path))
 				.map((doc) => ({ path: doc.path, title: doc.title?.text ?? doc.path })),
@@ -315,13 +326,20 @@ export class GitHubService {
 			state === "enabled" ? { contents: "read" } : {},
 			async (token, current, installation) => {
 				if (state === "enabled") {
-					await this.#preview(token, repo, current, installation);
-					if (!this.#openSource)
-						throw new GitHubError(
-							"Open-source eligibility policy is awaiting a maintainer decision; contributions cannot be enabled yet",
-						);
-					await this.#openSource(current);
-					// Content reads can be slow; authority must still hold at opt-in.
+					const preview = await this.#preview(token, repo, current, installation);
+					if (preview.licenseError) throw new GitHubError(preview.licenseError);
+					// The repository or license can change during content reads. Check
+					// current eligibility again, rather than persisting the preview's grant.
+					const latest = await this.#api<Repository>(token, repositoryPath(repo));
+					this.#repository(repo, latest);
+					this.#public(latest);
+					if (
+						latest.default_branch !== current.default_branch ||
+						latest.license?.spdx_id !== current.license?.spdx_id
+					)
+						throw new GitHubError("Repository eligibility changed; review this project again");
+					const licenseError = await this.#license(latest);
+					if (licenseError) throw new GitHubError(licenseError);
 					await this.#maintainer(token, repo, userId);
 				}
 				// Recheck the local revocation gate after potentially long content reads.

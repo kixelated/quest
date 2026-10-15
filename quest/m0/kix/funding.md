@@ -48,7 +48,3 @@ key. Concurrent jobs respect the same durable accounting.
   [secure SDK deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment),
   [SDK cost tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking),
   and [Console usage APIs](https://platform.claude.com/docs/en/manage-claude/usage-cost-api).
-
-## Required
-
-- [Project enrollment](/quest/m0/kix/onboard.md) - projects, maintainers, and permitted funding targets

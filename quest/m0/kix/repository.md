@@ -26,7 +26,3 @@ with webhook replay producing no duplicate item.
   duplicate notices. Reconcile missed events against GitHub.
 - PR review and check data informs recommendations, never substitutes for
   maintainer authorization or GitHub's merge rules.
-
-## Required
-
-- [Project enrollment](/quest/m0/kix/onboard.md) - enrolled repositories and their maintainers

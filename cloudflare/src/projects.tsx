@@ -107,15 +107,28 @@ export function ProjectSetupPage(props: { preview: ProjectPreview; error?: strin
 					second approval flag per quest. Your normal GitHub review rules, CI, and merge protections still
 					apply.
 				</p>
-				<p class="muted">
-					Open-source eligibility is awaiting a maintainer decision. Enabling contributions is unavailable
-					until that policy is settled.
-				</p>
+				{preview.licenseError ? (
+					<p class="muted" role="alert">
+						{preview.licenseError}
+					</p>
+				) : (
+					<p class="muted">
+						GitHub detects {preview.license?.name} ({preview.license?.spdx_id}), an OSI-approved license.
+					</p>
+				)}
+
 				<form method="post" action={action}>
 					<input type="hidden" name="id" value={repo.id} />
 					<input type="hidden" name="state" value="enabled" />
-					<button class="button primary" disabled>
-						{preview.state === "paused" ? "Resume contributions" : "Enable contributions"}
+					<button
+						class="button primary"
+						disabled={preview.licenseError !== null || preview.state === "enabled"}
+					>
+						{preview.state === "enabled"
+							? "Contributions enabled"
+							: preview.state === "paused"
+								? "Resume contributions"
+								: "Enable contributions"}
 					</button>
 				</form>
 				{preview.state && (
