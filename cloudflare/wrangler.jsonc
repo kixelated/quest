@@ -13,7 +13,7 @@
 	"assets": { "directory": "build/public" },
 	"routes": [{ "pattern": "kix.quest", "custom_domain": true }],
 	"workers_dev": false,
-	"vars": { "AUTH_URL": "https://kix.quest", "GITHUB_APP_ID": "", "GITHUB_FORK_OWNER": "" },
+	"vars": { "AUTH_URL": "https://kix.quest", "GITHUB_APP_ID": "", "GITHUB_FORK_OWNER": "", "GOOGLE_CLIENT_ID": "" },
 	"secrets": {
 		"required": [
 			"AUTH_SECRET",

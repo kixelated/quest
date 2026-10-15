@@ -69,8 +69,9 @@ before parsing. GitHub's 25 MB payload ceiling bounds the request. Delivery IDs,
 body digest, event and minimal installation/repository metadata persist in D1;
 untrusted issue/PR bodies are not stored. Dedup and lifecycle changes commit in
 one transaction. A duplicate cannot reapply a state transition; reuse with a
-different body/event is rejected. Keep delivery records to preserve replay
-protection. There is no asynchronous enqueue/ack gap or remote side effect here.
+different body/event is rejected for 30 days; each insert prunes older records
+in the same transaction. There is no asynchronous enqueue/ack gap or remote side
+effect here.
 
 Deleted or suspended installations immediately gate new local operations.
 Permission and repository-selection changes invalidate the recorded revision;

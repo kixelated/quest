@@ -59,13 +59,17 @@ export function Layout(props: Page & { children: Child }) {
 						<span class="account">
 							{props.user ? (
 								<>
-									<span class="muted">Signed in as {props.user.name}.</span>
+									<a class="muted" href="/account">
+										Signed in as {props.user.name}.
+									</a>
 									<form method="post" action="/sign-out">
 										<button class="button quiet">Sign out</button>
 									</form>
 								</>
 							) : (
-								<SignIn path={props.path}>Sign in with GitHub</SignIn>
+								<a class="button quiet" href={`/sign-in?next=${encodeURIComponent(props.path)}`}>
+									Sign in
+								</a>
 							)}
 						</span>
 					</nav>

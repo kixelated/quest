@@ -2,7 +2,8 @@ import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { createAuth } from "./auth";
+import { AccountPage, SignInPage } from "./account";
+import { type Provider, createAuth, providers } from "./auth";
 import { type Board, findDoc as findQuest, readBoard } from "./board/model";
 import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
 import { type Project, findProject, home } from "./board/project";
@@ -130,9 +131,9 @@ app.notFound((c) =>
 
 // The server API bypasses Better Auth's HTTP middleware. Guard form routes
 // before calling it; the /api/auth/* handler enforces its own Origin/CSRF checks.
-for (const path of ["/sign-in", "/sign-out"]) {
+for (const path of ["/sign-in", "/sign-out", "/link", "/passkeys/delete"]) {
 	app.use(path, async (c, next) => {
-		if (c.req.header("Origin") !== new URL(c.env.AUTH_URL).origin) {
+		if (c.req.method === "POST" && c.req.header("Origin") !== new URL(c.env.AUTH_URL).origin) {
 			return c.json({ error: "Invalid origin" }, 403);
 		}
 		await next();
@@ -149,24 +150,54 @@ function local(path: string): boolean {
 	return /^\/(?![/\\])[^\\\0-\x1f\x7f]*$/.test(path) && !/%(2f|5c)/i.test(path);
 }
 
-app.post("/sign-in", async (c) => {
-	// Return to the page that signed in, if it names a path on this site.
-	const { next } = await c.req.parseBody();
-	const callbackURL = typeof next === "string" && local(next) ? next : "/";
-	const response = await createAuth(c.env).api.signInSocial({
-		body: { provider: "github", callbackURL },
-		headers: c.req.raw.headers,
-		asResponse: true,
-	});
-	if (!response.ok) return response;
-	const result: { url?: string } = await response.json();
-	if (!result.url) return c.json({ error: "Sign in unavailable" }, 502);
+// A configured provider named by a form field.
+function provider(c: Context<{ Bindings: Env }>, value: unknown): Provider | undefined {
+	return providers(c.env).find((p) => p === value);
+}
+
+// Turn a Better Auth JSON response into a redirect, keeping its cookies.
+function redirect(response: Response, location: string) {
 	const headers = new Headers(response.headers);
 	headers.delete("content-type");
 	headers.delete("content-length");
-	headers.set("Location", result.url);
+	headers.set("Location", location);
 	headers.set("Cache-Control", "no-store");
 	return new Response(null, { status: 303, headers });
+}
+
+// Start an OAuth flow, either signing in or linking to the signed-in account.
+async function oauth(response: Response) {
+	if (!response.ok) return response;
+	const result: { url?: string } = await response.json();
+	if (!result.url) return Response.json({ error: "Sign in unavailable" }, { status: 502 });
+	return redirect(response, result.url);
+}
+
+app.get("/sign-in", (c) => {
+	const next = c.req.query("next");
+	return page(
+		c,
+		{ title: "Sign in", description: "Sign in to Quest with GitHub, Google, or a passkey." },
+		<SignInPage
+			providers={providers(c.env)}
+			next={next && local(next) ? next : "/"}
+			error={c.req.query("error")}
+		/>,
+	);
+});
+app.post("/sign-in", async (c) => {
+	// Return to the page that signed in, if it names a path on this site.
+	const body = await c.req.parseBody();
+	const callbackURL = typeof body.next === "string" && local(body.next) ? body.next : "/";
+	const chosen = body.provider === undefined ? "github" : provider(c, body.provider);
+	if (!chosen) return c.json({ error: "Sign-in method unavailable" }, 400);
+	return oauth(
+		await createAuth(c.env).api.signInSocial({
+			body: { provider: chosen, callbackURL, errorCallbackURL: "/sign-in" },
+			headers: c.req.raw.headers,
+			asResponse: true,
+		}),
+	);
 });
 app.post("/sign-out", async (c) => {
 	const response = await createAuth(c.env).api.signOut({
@@ -174,12 +205,51 @@ app.post("/sign-out", async (c) => {
 		asResponse: true,
 	});
 	if (!response.ok) return response;
-	const headers = new Headers(response.headers);
-	headers.delete("content-type");
-	headers.delete("content-length");
-	headers.set("Location", "/");
-	headers.set("Cache-Control", "no-store");
-	return new Response(null, { status: 303, headers });
+	return redirect(response, "/");
+});
+
+// The signed-in account: its linked providers and passkeys.
+app.get("/account", async (c) => {
+	const auth = createAuth(c.env);
+	const headers = c.req.raw.headers;
+	if (!(await auth.api.getSession({ headers }))) return c.redirect("/sign-in?next=/account", 303);
+	const [accounts, passkeys] = await Promise.all([
+		auth.api.listUserAccounts({ headers }),
+		auth.api.listPasskeys({ headers }),
+	]);
+	const linked = providers(c.env).filter((p) => accounts.some((account) => account.providerId === p));
+	return page(c, { title: "Account", description: "Your Quest sign-in methods and passkeys." }, (user) => (
+		<AccountPage
+			name={user!.name}
+			linked={linked}
+			providers={providers(c.env)}
+			passkeys={passkeys}
+			error={c.req.query("error")}
+		/>
+	));
+});
+// Linking proves ownership of the other provider through its OAuth flow.
+app.post("/link", async (c) => {
+	const chosen = provider(c, (await c.req.parseBody()).provider);
+	if (!chosen) return c.json({ error: "Sign-in method unavailable" }, 400);
+	return oauth(
+		await createAuth(c.env).api.linkSocialAccount({
+			body: { provider: chosen, callbackURL: "/account", errorCallbackURL: "/account" },
+			headers: c.req.raw.headers,
+			asResponse: true,
+		}),
+	);
+});
+app.post("/passkeys/delete", async (c) => {
+	const { id } = await c.req.parseBody();
+	if (typeof id !== "string") return c.json({ error: "Passkey required" }, 400);
+	const response = await createAuth(c.env).api.deletePasskey({
+		body: { id },
+		headers: c.req.raw.headers,
+		asResponse: true,
+	});
+	if (!response.ok) return response;
+	return redirect(response, "/account");
 });
 app.onError((error, c) => {
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
