@@ -35,6 +35,9 @@ const lifecycle = new Map([
 	["unsuspend", false],
 	["new_permissions_accepted", false],
 ]);
+// Far beyond GitHub's redelivery window. Older IDs could be accepted again,
+// which is harmless because observations never authorize or launch work.
+export const deliveryRetention = 30 * 24 * 60 * 60 * 1000;
 
 export const githubWebhooks = new Hono<{ Bindings: Env }>();
 githubWebhooks.use("/webhooks/github", bodyLimit({ maxSize: 25 * 1024 * 1024 }));
@@ -83,10 +86,11 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 		if (previous.digest !== digest || previous.event !== event) return c.json({ error: "Delivery conflict" }, 409);
 		return c.json({ status: "duplicate" });
 	}
+	const now = Date.now();
 	const statements = [
 		c.env.DB.prepare(
 			"INSERT OR IGNORE INTO github_deliveries(id,digest,event,installation,repository,action,receivedAt) VALUES(?,?,?,?,?,?,?)",
-		).bind(delivery, digest, event, installation, repository, action, Date.now()),
+		).bind(delivery, digest, event, installation, repository, action, now),
 	];
 	// D1 batch is a transaction. The processed predicate prevents concurrent
 	// duplicates from applying a lifecycle transition twice.
@@ -112,6 +116,7 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 			digest,
 			event,
 		),
+		c.env.DB.prepare("DELETE FROM github_deliveries WHERE receivedAt<?").bind(now - deliveryRetention),
 	);
 	const committed = await c.env.DB.batch(statements);
 	if (committed[0]!.meta.changes === 0) {

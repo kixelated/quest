@@ -2,7 +2,8 @@
 
 A deployable foundation for Quest on Cloudflare, and the site at
 `https://kix.quest`: the quest log for your repo and your agents, on the web.
-Hono serves HTML directly, so there is no client bundle. Every page renders
+Hono serves HTML directly, so there is no client bundle; only passkeys need a
+small script (`src/passkey.js`). Every page renders
 inside the shared layout in `src/layout.tsx`, which follows
 [the quest log theme](../design/theme.md): the home page (`src/home.tsx`), the
 docs under `/docs` (`src/docs.tsx`), the quest board under `/repos`
@@ -36,6 +37,34 @@ adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
 state, cookies, and callbacks. Form routes enforce the configured origin before
 calling Better Auth's server API.
 
+### Sign-in methods
+
+People sign in at `/sign-in` with GitHub, Google (when configured), or a
+passkey, and manage their methods at `/account`. Every method reaches the same
+local account, but repository authority comes only from the account's linked
+GitHub identity and the App installation (`src/github/service.ts`); Google and
+passkeys never grant it on their own.
+
+- **Linking is explicit.** A signed-in person links another provider from
+  `/account`, proving ownership through its OAuth flow; the emails may differ.
+  A matching email never links accounts: signing in with a new provider whose
+  email belongs to an existing account fails with instructions to link it.
+- **One identity per provider.** A provider identity belongs to one account, and
+  an account links at most one of each provider, so the GitHub identity behind
+  repository authority is unambiguous. Account merging is not supported.
+- **No unlinking yet.** Better Auth's unlink endpoint is disabled, so an account
+  cannot strand itself without GitHub authority or a way back in.
+- **Passkeys** enroll from `/account` on a session less than a day old, and
+  require user verification (a PIN, biometric, or equivalent) to enroll and to
+  sign in. Removing one needs the signed-in owner. Recovery is through another
+  passkey or a linked provider; there is no administrator bypass.
+  `src/passkey.js` drives the browser's WebAuthn JSON helpers directly; where a
+  browser lacks them, the passkey buttons stay hidden.
+
+The passkey relying party is the hostname of `AUTH_URL`, and its exact origin
+is the only one accepted. Changing the hostname orphans existing passkeys;
+people enroll new ones after signing in with a provider.
+
 GitHub remains the planned authority for enrolled project state. The Worker
 has no Durable Objects; D1 holds accounts, sessions, and GitHub App state.
 
@@ -54,7 +83,12 @@ cp cloudflare/.dev.vars.example cloudflare/.dev.vars
 ```
 
 Fill in the local file with a random `AUTH_SECRET` (at least 32 characters) and
-GitHub OAuth app credentials. Configure the GitHub app's homepage as
+GitHub OAuth app credentials. Google sign-in is optional and off by default:
+to try it, register a Google OAuth web client with redirect URI
+`http://localhost:8787/api/auth/callback/google`, set both Google values in
+the local file, and temporarily list `GOOGLE_CLIENT_SECRET` under
+`secrets.required` in `wrangler.jsonc`, because Wrangler dev loads only declared
+secrets. Configure the GitHub app's homepage as
 `http://localhost:8787` and callback as
 `http://localhost:8787/api/auth/callback/github`. The file is ignored by Git.
 Its `AUTH_URL` overrides the production origin in `wrangler.jsonc`. Use a
@@ -85,7 +119,10 @@ These include the Worker and run in the existing Linux/macOS Nix CI jobs.
 with real local D1. Tests cover the home page and rendered docs in the shared
 layout, the board and quest pages, statuses, progress, safe Markdown, and
 finished quests from history, the mocked GitHub OAuth callback, persisted
-sessions, sign-out, and rejected origins/invalid state. No OAuth credentials or
+sessions, sign-out, and rejected origins/invalid state. Login tests mock GitHub
+and Google OAuth and run real P-256 WebAuthn registration and assertions: the
+linking rules, collisions, passkey user verification, origin, signature,
+replay, and ownership. No OAuth credentials or
 Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
@@ -121,7 +158,12 @@ for a fresh deployment only. For another environment, change `routes`,
 `AUTH_URL`, Worker name, account, database, and OAuth credentials together.
 
 Register the production GitHub OAuth app with callback
-`https://kix.quest/api/auth/callback/github`. Deploys fail until every
+`https://kix.quest/api/auth/callback/github`. For Google sign-in, also register
+a production Google OAuth web client with redirect URI
+`https://kix.quest/api/auth/callback/google`, set its public client ID as
+`GOOGLE_CLIENT_ID` in `wrangler.jsonc`, and set the secret with
+`npm exec -- wrangler secret put GOOGLE_CLIENT_SECRET`; without both, Google is
+not offered. The secret is optional, so it is not listed under `secrets.required`. Deploys fail until every
 required secret is set, so register the GitHub App first ([GITHUB.md](GITHUB.md)
 steps 1 and 2), then set secrets interactively:
 
