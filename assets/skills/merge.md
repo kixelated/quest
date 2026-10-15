@@ -5,7 +5,7 @@ description: Merge a quest once reviews and CI pass.
 Before you begin, run `quest guide` and read its output completely.
 
 Parse the arguments to determine the PR number, otherwise resolve it from the current context/branch.
-If a draft, flip it to "Ready for Review".
+If a draft, stop and offer `/quest-ready` instead.
 
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.

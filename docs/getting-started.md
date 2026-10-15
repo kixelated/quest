@@ -56,8 +56,9 @@ on Cloudflare locks active work with MoQ announcements that clear when a session
 ends. On GitHub, check the quest's remote branch and open PRs. `quest ready`
 reads dependencies in the quest tree; it does not look for these live states.
 
-You review each change, and `/quest-merge` (`$quest-merge` in Codex) merges it
-once checks and reviews pass. The quest is complete, its plan leaves the tree,
+You review each change. `/quest-ready` marks a draft ready for review and waits
+for a review, and `/quest-merge` (`$quest-merge` in Codex) merges it once checks
+and reviews pass. The quest is complete, its plan leaves the tree,
 and the quests that required it can become ready.
 
 ## Update or remove it

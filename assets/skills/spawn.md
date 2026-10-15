@@ -33,15 +33,16 @@ Report each sub-agent's final status, staying silent on interim notifications, b
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
 
+- `/quest-ready`: If the PR is a draft with no significant issues or open decisions.
 - `/quest-merge`: If the PR is ready for review with no significant issues.
-- `/quest-iterate`: If the PR is a draft, has significant issues, or needs decisions.
+- `/quest-iterate`: If the PR has significant issues or needs decisions.
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
 Also offer `/quest-plan` for its suggested follow-ups.
 Include quest context, as many quests are concurrently in flight.
 
-Run each selected `/quest-merge` or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
+Run each selected `/quest-ready`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
 Run selected `/quest-plan` sessions in the foreground.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.

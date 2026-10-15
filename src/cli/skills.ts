@@ -14,6 +14,7 @@ import importSkill from "../../assets/skills/import.md";
 import iterate from "../../assets/skills/iterate.md";
 import merge from "../../assets/skills/merge.md";
 import plan from "../../assets/skills/plan.md";
+import ready from "../../assets/skills/ready.md";
 import spawn from "../../assets/skills/spawn.md";
 import start from "../../assets/skills/start.md";
 
@@ -71,6 +72,7 @@ export const SKILLS: readonly Skill[] = Object.entries({
 	iterate,
 	merge,
 	plan,
+	ready,
 	spawn,
 	start,
 }).map(([name, text]) => new Skill(name, text));
