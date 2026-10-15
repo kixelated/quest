@@ -34,6 +34,9 @@ duplicate results or overwrite a replacement's work.
   active claims, and existing PRs prevent duplicate starts. A quest branch
   pushed by someone's local agent is a claim too, since the skills keep
   working without kix.
+- Jobs on PR heads containing non-maintainer commits route only to Linux
+  runners, which build the PR's devShell in a VM
+  ([sandbox](/quest/m0/kix/sandbox.md)).
 - Runners require a Nix devShell. A project without a flake devShell gets a
   decision offering a bootstrap job to add one, rather than a failed start.
   That job is the one exception to running in the project's shell: it runs

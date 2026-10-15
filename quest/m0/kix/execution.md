@@ -34,3 +34,4 @@ requested iteration, in the same decision UI.
 
 - [Web planning](/quest/m0/kix/planning.md) - the complete decision/session/publication path
 - [Agent activity](/quest/m0/kix/activity.md) - how maintainers follow running work
+- [Job sandbox](/quest/m0/kix/sandbox.md) - safe iteration on PRs with contributors' commits

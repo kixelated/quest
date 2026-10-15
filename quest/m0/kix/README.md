@@ -55,6 +55,10 @@ operator-paid-hosting decisions:
   reproducibility. The runner pins the agent CLIs through Nix as well.
   Runners keep a persistent local store and honor the flake's substituters;
   a [shared cache](/quest/m1/automation/cache.md) follows in m1.
+- **Sandboxed jobs.** Every job's commands run in an OS sandbox. PR heads
+  with non-maintainer commits route to Linux runners, which build the PR's
+  devShell in a VM first; macOS runners take trusted revisions only. Cloud
+  runners are Linux-only.
 - **Auto-routing.** kix picks an online runner with a usable account; the
   maintainer may pin one. Runners push checkpoints, through the service, to
   the job's fenced branch, and an offline runner's job is reassigned
@@ -90,6 +94,7 @@ operator-paid-hosting decisions:
 - [GitHub project state](/quest/m0/kix/repository.md) - quest snapshots, issues, PRs, and deduplicated events
 - [Job coordination](/quest/m0/kix/jobs.md) - durable claims, routing to online runners, reassignment, and HTTPS progress
 - [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
+- [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Decision inbox](/quest/m0/kix/prompts.md) - a simple prompt UI with new-issue and new-PR notifications
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries

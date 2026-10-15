@@ -12,7 +12,8 @@ routing and the UI.
 Decided 2026-10-15 in the decisions-not-implementations interview:
 
 - Cloud runners follow the m0 own-machine runners and reuse the same runner,
-  job protocol, Nix devShell requirement, and adapters.
+  job protocol, Nix devShell requirement, sandbox, and adapters. They are
+  Linux-only.
 - Start with free cloud compute: the operator pays hosting under a spend
   cap. Paid compute comes later in its own quest, once usage justifies it.
 - Hosted runners use API keys only. Provider terms make hosted subscription
