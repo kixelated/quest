@@ -4,6 +4,7 @@ import { privateKey } from "./github-key";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { GitHubService, type GitHubRepository } from "../src/github/service";
+import { deliveryRetention } from "../src/github/webhook";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const repo: GitHubRepository = { owner: "upstream", name: "project", id: 10 };
@@ -101,6 +102,27 @@ describe("signed GitHub webhooks", () => {
 		]);
 		expect(responses.map((r) => r.status).sort()).toEqual([202, 409]);
 		expect((await state())?.revision).toBe(1);
+	});
+	it("prunes deliveries past the retention window on insert", async () => {
+		const [expired, retained] = [crypto.randomUUID(), crypto.randomUUID()];
+		const backdate = (id: string, age: number) =>
+			env.DB.prepare("UPDATE github_deliveries SET receivedAt=? WHERE id=?")
+				.bind(Date.now() - age, id)
+				.run();
+		const hour = 60 * 60 * 1000;
+		await delivery("installation", installation("created"), expired);
+		await delivery("installation", installation("created"), retained);
+		await backdate(expired, deliveryRetention + hour);
+		await backdate(retained, deliveryRetention - hour);
+		const ids = async () =>
+			(await env.DB.prepare("SELECT id FROM github_deliveries").all<{ id: string }>()).results.map((r) => r.id);
+		expect(await ids()).toHaveLength(2);
+		expect((await delivery("installation", installation("suspend"))).status).toBe(202);
+		const remaining = await ids();
+		expect(remaining).toHaveLength(2);
+		expect(remaining).toContain(retained);
+		expect(remaining).not.toContain(expired);
+		expect((await delivery("installation", installation("deleted"), retained)).status).toBe(409);
 	});
 	it("records permission/selection changes and suspension lifecycle once", async () => {
 		for (const action of ["created", "suspend", "unsuspend", "new_permissions_accepted"]) {
