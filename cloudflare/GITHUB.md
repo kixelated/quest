@@ -129,3 +129,49 @@ and [PR creation](https://docs.github.com/en/rest/pulls/pulls#create-a-pull-requ
 The earlier draft #43 informed JWT/signature handling and current repository
 identity checks. Its Rust/WASM, mirroring, Artifacts credentials, custom changes,
 workflow orchestration and repository coordinator design were not reused.
+
+## Project enrollment (draft)
+
+`/projects` is the short maintainer setup flow, separate from the quest board
+and decision inbox. It resolves the registered App's installation URL, accepts
+an explicit `owner/repository` selection, and verifies the linked GitHub
+identity's current maintain/admin authority through the existing service.
+Installing the App never creates a `github_projects` record or enables work.
+
+The preview reads the default branch at an exact commit, validates its Quest
+tree with the shared core, and lists ready quests. It rejects private,
+unavailable, incomplete, invalid, and symlinked quest snapshots. Repositories
+without Quest files follow `/setup`; no repository writes occur during setup.
+
+The D1 enrollment records a project-wide enabled/paused state, distinct from
+installation permissions. Every opt-in/resume, pause, and disconnect rechecks
+current authority and provider gates. Pause/disconnect do not require valid
+Quest files or public visibility, so maintainers can stop contributions after
+those conditions change. Disconnect deletes the enrollment, not the GitHub
+App installation or existing contributions. Remembered selections are only
+navigation and never confer authority. Future job coordination must recheck
+this state and current provider eligibility before launching new work.
+
+**Unresolved product decision:** how to verify that a public repository is
+open-source. No production policy is selected here. `OpenSourcePolicy` is a
+server-only check supplied to `GitHubService`; until the policy is settled and
+wired into production, opt-in/resume fail closed and their UI controls stay
+disabled. Tests inject a fixture-only policy to verify the independent state
+transitions. GitHub's detected license is available to the eventual policy;
+public visibility alone never enables contributions.
+
+Recommendation for review: require a GitHub-detected SPDX ID matching an
+OSI-approved license, and show setup guidance for undetected licenses. A known
+SPDX ID alone does not establish OSI approval. The official
+[OSI license API](https://opensource.org/blog/introducing-the-new-api-for-osi-approved-licenses)
+provides approval status and SPDX identifiers. Confirm this rule or choose a maintainer attestation/manual review
+path before completing the quest. GitHub detects licenses with a limited
+known-license matcher, so this recommendation can exclude valid custom or
+unrecognized licensing arrangements. See the official
+[license API documentation](https://docs.github.com/en/rest/licenses/licenses),
+[Git trees API](https://docs.github.com/en/rest/git/trees#get-a-tree), and
+[App metadata API](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app).
+
+The project-state quest owns ongoing snapshots, branches, PRs, and event
+reconciliation; this setup preview does not reserve or launch ready quests.
+The jobs/funding quests own live eligibility checks and contribution execution.

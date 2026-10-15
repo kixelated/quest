@@ -9,6 +9,8 @@ import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
 import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
+import { GitHubError, GitHubService } from "./github/service";
+import { ProjectsPage, ProjectSetupPage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
 import { Layout, type Page, type User } from "./layout";
 
@@ -68,6 +70,105 @@ app.get("/docs/:slug", (c) => {
 	const doc = findDoc(c.req.param("slug"));
 	if (!doc) return c.notFound();
 	return page(c, { title: doc.title, description: doc.summary }, <DocPage doc={doc} />);
+});
+
+// Setup stays separate from the quest board and future decision inbox.
+app.use("/projects/*", async (c, next) => {
+	if (c.req.method === "POST" && c.req.header("Origin") !== new URL(c.env.AUTH_URL).origin)
+		return c.json({ error: "Invalid origin" }, 403);
+	await next();
+});
+app.get("/projects", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.redirect("/sign-in?next=/projects", 303);
+	const github = new GitHubService(c.env);
+	let installation: string | null = null;
+	try {
+		installation = await github.installationURL();
+	} catch (error) {
+		if (!(error instanceof GitHubError)) throw error;
+	}
+	return page(
+		c,
+		{ title: "Project setup", description: "Opt your Quest repository into contributions." },
+		<ProjectsPage
+			projects={await github.projects(session.user.id)}
+			installation={installation}
+			error={c.req.query("error") ? "Use a GitHub owner/repository name." : undefined}
+		/>,
+	);
+});
+app.get("/projects/select", (c) => {
+	const selected = c.req.query("repository")?.trim();
+	const match = selected?.match(/^([a-zA-Z0-9][a-zA-Z0-9_.-]{0,99})\/([a-zA-Z0-9][a-zA-Z0-9_.-]{0,99})$/);
+	return c.redirect(match ? projectURL(match[1], match[2]) : "/projects?error=repository", 303);
+});
+app.get("/projects/github/:owner/:repository", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.redirect(`/sign-in?next=${encodeURIComponent(here(c))}`, 303);
+	const github = new GitHubService(c.env);
+	try {
+		const repository = await github.resolveRepository(c.req.param("owner"), c.req.param("repository"));
+		const preview = await github.previewProject(repository, session.user.id);
+		return page(
+			c,
+			{
+				title: `${repository.owner}/${repository.name} setup`,
+				description: "Review ready quests and contribution settings.",
+			},
+			<ProjectSetupPage preview={preview} />,
+		);
+	} catch (error) {
+		if (!(error instanceof GitHubError)) throw error;
+		return page(
+			c,
+			{ title: "Project unavailable", description: "Check repository access and Quest setup." },
+			<section class="wrap docs">
+				<h1>Project unavailable</h1>
+				<p role="alert">{error.message}</p>
+				<p>
+					<a href="/projects">Return to project setup</a> or <a href="/setup">set up Quest</a>.
+				</p>
+			</section>,
+			403,
+		);
+	}
+});
+app.post("/projects/github/:owner/:repository", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Sign in required" }, 401);
+	const { id, state } = await c.req.parseBody();
+	if (
+		typeof id !== "string" ||
+		!/^[1-9]\d*$/.test(id) ||
+		(state !== "enabled" && state !== "paused" && state !== "disconnected")
+	)
+		return c.json({ error: "Invalid project choice" }, 400);
+	try {
+		await new GitHubService(c.env).setContributions(
+			{ id: Number(id), owner: c.req.param("owner"), name: c.req.param("repository") },
+			session.user.id,
+			state,
+		);
+		return c.redirect(
+			state === "disconnected" ? "/projects" : projectURL(c.req.param("owner"), c.req.param("repository")),
+			303,
+		);
+	} catch (error) {
+		if (!(error instanceof GitHubError)) throw error;
+		return page(
+			c,
+			{ title: "Project unchanged", description: "The contribution setting could not be changed." },
+			<section class="wrap docs">
+				<h1>Project unchanged</h1>
+				<p role="alert">{error.message}</p>
+				<p>
+					<a href="/projects">Return to project setup</a>.
+				</p>
+			</section>,
+			403,
+		);
+	}
 });
 
 // The quest board: a project's milestones, then each quest's page at its path
