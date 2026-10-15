@@ -66,11 +66,6 @@ function render(slug: string, markdown: string) {
 			heading({ tokens, depth, text }) {
 				return `<h${depth} id="${anchor(plain(text))}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
 			},
-			// The opening paragraph gets the illuminated drop cap.
-			paragraph(token) {
-				const open = token === opening ? `<p class="ql-dropcap">` : "<p>";
-				return `${open}${this.parser.parseInline(token.tokens)}</p>\n`;
-			},
 		},
 	});
 	marked.walkTokens(tokens, (token: Token) => {

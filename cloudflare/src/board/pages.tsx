@@ -384,7 +384,6 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 		const path = entry.target === null ? null : rooted(entry.target);
 		return path === null || !childPaths.has(path);
 	});
-	let opened = false;
 
 	return (
 		<div class="wrap quest-view">
@@ -419,16 +418,10 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 							</>
 						);
 					}
-					// The opening paragraph gets the illuminated drop cap.
-					let html = section.html;
-					if (!opened && html.startsWith("<p>")) {
-						html = `<p class="ql-dropcap">${html.slice(3)}`;
-						opened = true;
-					}
 					return (
 						<>
 							{section.heading && <h2>{HEADINGS[section.heading] ?? section.heading}</h2>}
-							<div class="quest-body">{raw(html)}</div>
+							<div class="quest-body">{raw(section.html)}</div>
 						</>
 					);
 				})}
