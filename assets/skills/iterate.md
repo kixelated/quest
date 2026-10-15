@@ -23,5 +23,5 @@ One round only; never request a review.
 Push your changes to the PR and update its summary.
 Summarize the changes made, and offer `/quest-plan` for follow-ups that belong outside this PR.
 
-Mark the PR ready once no decisions need the user.
+Mark the PR ready once nothing is unfinished and no decisions need the user.
 Never merge; that is `/quest-merge`, once the user picks it.

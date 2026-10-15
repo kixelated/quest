@@ -5,7 +5,7 @@ description: Mark a draft PR ready for review, wait for an automated review, the
 Before you begin, run `quest guide` and `quest skill merge`, and read their output completely.
 
 Parse the arguments to determine the PR number, otherwise resolve it from the current context/branch.
-If its body lists open decisions, offer `/quest-iterate` first.
+If its body lists open decisions or unfinished work, offer `/quest-iterate` first.
 
 Flip a draft to "Ready for Review", then wait with `quest wait`, as `quest skill merge` describes, until an automated reviewer reviews or reacts.
 Skip the wait only if the repository has no automated reviewer.
