@@ -42,9 +42,38 @@ function reviewed(id = 1, time = POINT) {
 	};
 }
 
-function setup(responses: Response[], baseline = [A]) {
+function reactions(
+	pull: unknown[] = [],
+	reviews: unknown[] = [],
+	page: { hasNextPage: boolean; endCursor: string | null } = { hasNextPage: false, endCursor: null },
+) {
+	return response({
+		data: {
+			viewer: { login: "waiter" },
+			repository: { pullRequest: { reactions: { nodes: pull }, reviews: { pageInfo: page, nodes: reviews } } },
+		},
+	});
+}
+
+function reacted(id: string, time = POINT, login = "codex[bot]", content = "THUMBS_UP") {
+	return { id, content, createdAt: time, user: { login } };
+}
+
+function replied(id: number, time = POINT, login = "reviewer", inReplyTo: number | null = 1) {
+	return {
+		id,
+		in_reply_to_id: inReplyTo,
+		created_at: time,
+		user: { login },
+		html_url: `https://github.com/example/project/pull/1#discussion_r${id}`,
+	};
+}
+
+/** Review comments and reactions come from their own queues, empty once drained. */
+function setup(responses: Response[], baseline = [A], side: { comments?: Response[]; graphql?: Response[] } = {}) {
 	let now = Date.parse("2026-10-07T12:10:00Z");
 	const calls: { path: string; headers: Headers }[] = [];
+	const sideCalls: { path: string; headers: Headers; body?: unknown }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
 	const deps: WaitDependencies = {
@@ -57,14 +86,29 @@ function setup(responses: Response[], baseline = [A]) {
 		warn: (text) => warnings.push(text),
 		fetch: async (url, init) => {
 			const parsed = new URL(String(url));
-			calls.push({ path: parsed.pathname + parsed.search, headers: new Headers(init?.headers) });
+			const call = { path: parsed.pathname + parsed.search, headers: new Headers(init?.headers) };
+			if (parsed.pathname.endsWith("/pulls/1/comments")) {
+				sideCalls.push(call);
+				return side.comments?.shift() ?? response([]);
+			}
+			if (parsed.pathname === "/graphql") {
+				sideCalls.push({ ...call, body: JSON.parse(String(init?.body)) });
+				return side.graphql?.shift() ?? reactions();
+			}
+			calls.push(call);
 			if (parsed.pathname.endsWith("/commits")) return response(baseline.map((sha) => ({ sha })));
 			const next = responses.shift();
 			if (!next) throw new Error(`unexpected request: ${parsed.pathname + parsed.search}`);
 			return next;
 		},
 	};
-	return { deps, calls, sleeps, warnings, responses };
+	return { deps, calls, sideCalls, sleeps, warnings, responses };
+}
+
+function graphql(fixture: ReturnType<typeof setup>) {
+	return fixture.sideCalls
+		.filter((call) => call.path === "/graphql")
+		.map((call) => call.body as { variables: Record<string, unknown> });
 }
 
 function cursor(lines: string[]): string {
@@ -444,4 +488,90 @@ test("malformed timestamps and unexpected 304 responses fail without phantom act
 	expect(invalid.calls).toHaveLength(0);
 	const cached = setup([pull(), response([pushed()]), response(null, {}, 304)]);
 	await expect(waitForActivity(pr, {}, cached.deps)).rejects.toThrow("without a cached response");
+});
+
+test("a clean review's reaction on the PR body ends the wait", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		graphql: [reactions([reacted("r1", "2026-10-07T12:05:00Z")])],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(
+		/^2026-10-07T12:05:00Z reacted:thumbs_up codex\[bot\] https:\/\/github.com\/example\/project\/pull\/1 q1\./,
+	);
+	expect(graphql(fixture)[0]).toMatchObject({ variables: { owner: "example", repo: "project", number: 1 } });
+});
+
+test("reactions on reviews are read from every page of reviews", async () => {
+	const review = (id: number, nodes: unknown[]) => ({
+		url: `https://github.com/example/project/pull/1#pullrequestreview-${id}`,
+		reactions: { nodes },
+	});
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		graphql: [
+			reactions([], [review(1, [])], { hasNextPage: true, endCursor: "next" }),
+			reactions([], [review(2, [reacted("r2", POINT, "author", "EYES")])]),
+		],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toContain("reacted:eyes author https://github.com/example/project/pull/1#pullrequestreview-2");
+	expect(graphql(fixture).map((body) => body.variables.after)).toEqual([null, "next"]);
+});
+
+test("a review-thread reply wakes the waiter, but its own activity and a thread's first comment do not", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		comments: [
+			response([replied(1, POINT, "reviewer", null), replied(2, POINT, "waiter")], { etag: '"c"' }),
+			response([replied(1, POINT, "reviewer", null), replied(2, POINT, "waiter"), replied(3)]),
+		],
+		graphql: [reactions([reacted("r1", POINT, "waiter")]), reactions([reacted("r1", POINT, "waiter")])],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(
+		/^2026-10-07T12:00:00Z replied reviewer https:\/\/github.com\/example\/project\/pull\/1#discussion_r3 q1\./,
+	);
+	expect(fixture.sleeps).toEqual([300_000]);
+	const comments = fixture.sideCalls.filter((call) => call.path.includes("/comments"));
+	expect(comments.map((call) => call.path)).toEqual([
+		`${base}/pulls/1/comments?per_page=100&since=2026-10-07T12:00:00.000Z`,
+		`${base}/pulls/1/comments?per_page=100&since=2026-10-07T12:00:00.000Z`,
+	]);
+	expect(comments[1].headers.get("if-none-match")).toBe('"c"');
+});
+
+test("resuming tracks replies and reactions separately, so neither replays nor hides the other", async () => {
+	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		graphql: [reactions([reacted("r1", "2026-10-07T12:05:00Z")])],
+	});
+	const point = cursor(await waitForActivity(pr, {}, first.deps));
+	// A reply older than the reaction, first visible after the waiter returned.
+	const second = setup([response([committed(A)])], [A], {
+		comments: [response([replied(2, "2026-10-07T12:03:00Z")])],
+		graphql: [reactions([reacted("r1", "2026-10-07T12:05:00Z")])],
+	});
+	const lines = await waitForActivity(pr, { since: point }, second.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:03:00Z replied reviewer /);
+	expect(second.sideCalls[0].path).toContain("since=2026-10-07T12:00:00.000Z");
+	const third = setup([response([committed(A)]), response([committed(A)])], [A], {
+		comments: [response([replied(2, "2026-10-07T12:03:00Z")]), response([replied(2, "2026-10-07T12:03:00Z")])],
+		graphql: [
+			reactions([reacted("r1", "2026-10-07T12:05:00Z")]),
+			reactions([reacted("r1", "2026-10-07T12:05:00Z"), reacted("r2", "2026-10-07T12:05:00Z")]),
+		],
+	});
+	const later = await waitForActivity(pr, { since: cursor(lines) }, third.deps);
+	expect(later).toHaveLength(1);
+	expect(later[0]).toContain("reacted:thumbs_up");
+	expect(third.sleeps).toEqual([300_000]);
+	expect(third.sideCalls[0].path).toContain("since=2026-10-07T12:03:00.000Z");
+});
+
+test("GraphQL errors fail loudly instead of hiding reactions", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		graphql: [response({ errors: [{ message: "Could not resolve to a PullRequest" }] })],
+	});
+	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("GitHub GraphQL error");
 });
