@@ -1,0 +1,3 @@
+# Scripts run on Bun even when a tool declares a Node shebang, as in the root bunfig.toml.
+[run]
+bun = true

@@ -1,7 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// The CLI bundles Markdown assets as text (esbuild's `text` loader); load them
-// the same way here.
+// Bun loads Markdown assets as text (bunfig.toml); load them the same way here.
 export default defineConfig({
 	plugins: [
 		{

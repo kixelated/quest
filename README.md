@@ -63,15 +63,15 @@ branch claims the work. These states stay out of the plan file.
 
 ## Try it
 
-Build from source with Node 22.12 or newer (or enter the pinned shell with
+Build from source with [Bun](https://bun.sh) (or enter the pinned shell with
 `nix develop`), then link the `quest` command:
 
 ```sh
 git clone https://github.com/kixelated/quest.git
 cd quest
-npm ci
-npm run build
-npm link
+bun install --frozen-lockfile
+bun run build
+bun link
 ```
 
 With Nix, `nix run github:kixelated/quest -- --help` builds and runs it instead.

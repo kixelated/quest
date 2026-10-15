@@ -16,13 +16,11 @@
 	"bin": {
 		"quest": "dist/quest.js"
 	},
-	"engines": {
-		"node": ">=22.12"
-	},
+	"packageManager": "bun@1.4.2",
 	"scripts": {
-		"build": "esbuild src/cli/bin.ts --bundle --platform=node --format=esm --target=node22 --loader:.md=text --banner:js=\"#!/usr/bin/env node\" --outfile=dist/quest.js --log-level=warning && node scripts/executable.mjs dist/quest.js",
-		"compile": "bun build src/cli/bin.ts --compile --loader .md:text --outfile dist/quest",
-		"quest": "npm run --silent build && node dist/quest.js",
+		"build": "bun build src/cli/bin.ts --target=bun --banner \"#!/usr/bin/env bun\" --outfile dist/quest.js && bun scripts/executable.mjs dist/quest.js",
+		"compile": "bun build src/cli/bin.ts --compile --outfile dist/quest",
+		"quest": "bun src/cli/bin.ts",
 		"check": "tsc && tsc -p src/core && prettier --check .",
 		"test": "vitest run",
 		"fix": "prettier --write ."
@@ -38,9 +36,9 @@
 	"devDependencies": {
 		"@types/mdast": "4.0.4",
 		"@types/node": "26.6.4",
-		"esbuild": "0.28.2",
 		"prettier": "3.9.9",
 		"typescript": "7.0.2",
 		"vitest": "5.0.3"
-	}
+	},
+	"trustedDependencies": []
 }

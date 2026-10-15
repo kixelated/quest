@@ -1,43 +1,83 @@
-# The `quest` CLI built from source: the same esbuild bundle `npm run build`
-# makes, run by Node.
+# The `quest` CLI built from source: the same Bun bundle `bun run build` makes.
 {
   lib,
-  stdenv,
-  nodejs,
-  esbuild,
-  importNpmLock,
+  stdenvNoCC,
+  bun,
+  fetchurl,
 }:
 let
   manifest = lib.importJSON ../package.json;
-  lock = lib.importJSON ../package-lock.json;
+  # bun.lock is JSON with trailing commas.
+  lock = builtins.fromJSON (
+    lib.concatMapStrings (part: if lib.isList part then lib.head part else part) (
+      builtins.split ",([[:space:]]*[]}])" (builtins.readFile ../bun.lock)
+    )
+  );
   packages = lock.packages;
+
+  # A lock key is the chain of package names from the root, so `a/@s/b` is
+  # `@s/b` nested under `a`.
+  segments =
+    key:
+    lib.foldl' (
+      acc: part:
+      if acc != [ ] && builtins.match "@[^/]*" (lib.last acc) != null then
+        lib.init acc ++ [ "${lib.last acc}/${part}" ]
+      else
+        acc ++ [ part ]
+    ) [ ] (lib.splitString "/" key);
 
   # The lockfile also covers the Worker and the test tooling, which the CLI
   # bundle never touches. Keep only the entries its runtime dependencies reach,
-  # resolved the way Node does: the nearest enclosing node_modules wins.
+  # resolved the way Bun does: the nearest enclosing package wins.
   resolve =
     from: name:
     let
-      scopes = if from == "" then [ ] else lib.splitString "/node_modules/" from;
-      nested = lib.genList (
-        i: lib.concatStringsSep "/node_modules/" (lib.take (lib.length scopes - i) scopes ++ [ name ])
-      ) (lib.length scopes);
+      scopes = if from == "" then [ ] else segments from;
     in
-    lib.findFirst (key: packages ? ${key}) null (nested ++ [ "node_modules/${name}" ]);
+    lib.findFirst (key: packages ? ${key}) null (
+      lib.genList (i: lib.concatStringsSep "/" (lib.take (lib.length scopes - i) scopes ++ [ name ])) (
+        lib.length scopes + 1
+      )
+    );
   reach = from: deps: lib.filter (key: key != null) (map (resolve from) (lib.attrNames deps));
   closure = builtins.genericClosure {
     startSet = map (key: { inherit key; }) (reach "" manifest.dependencies);
     operator =
       { key }:
+      let
+        meta = lib.elemAt packages.${key} 2;
+      in
       map (key: { inherit key; }) (
-        reach key (packages.${key}.dependencies or { } // packages.${key}.peerDependencies or { })
+        reach key (
+          meta.dependencies or { } // meta.optionalDependencies or { } // meta.peerDependencies or { }
+        )
       );
   };
-  runtime = {
-    inherit (manifest) name version dependencies;
-  };
+
+  # Each entry is [ "name@version" registry metadata integrity ].
+  tarball =
+    key:
+    let
+      entry = packages.${key};
+      name = lib.last (segments key);
+      version = lib.removePrefix "${name}@" (lib.head entry);
+    in
+    fetchurl {
+      url = "https://registry.npmjs.org/${name}/-/${baseNameOf name}-${version}.tgz";
+      hash = lib.elemAt entry 3;
+    };
+  unpack =
+    { key }:
+    let
+      dir = lib.concatMapStringsSep "/" (name: "node_modules/${name}") (segments key);
+    in
+    ''
+      mkdir -p ${dir}
+      tar -xzf ${tarball key} --strip-components=1 -C ${dir}
+    '';
 in
-stdenv.mkDerivation {
+stdenvNoCC.mkDerivation {
   pname = manifest.name;
   inherit (manifest) version;
 
@@ -45,7 +85,7 @@ stdenv.mkDerivation {
     root = ../.;
     fileset = lib.fileset.unions [
       ../package.json
-      ../package-lock.json
+      ../bunfig.toml
       ../tsconfig.json
       ../src
       ../scripts/executable.mjs
@@ -53,28 +93,20 @@ stdenv.mkDerivation {
     ];
   };
 
-  npmDeps = importNpmLock {
-    package = runtime;
-    packageLock = lock // {
-      packages = {
-        "" = runtime;
-      }
-      // lib.listToAttrs (map ({ key }: lib.nameValuePair key packages.${key}) closure);
-    };
-  };
+  nativeBuildInputs = [ bun ];
+  # The bundle's `#!/usr/bin/env bun` is patched to this Bun.
+  buildInputs = [ bun ];
 
-  # esbuild comes from nixpkgs rather than the lockfile's per-platform binaries.
-  nativeBuildInputs = [
-    nodejs
-    esbuild
-    importNpmLock.npmConfigHook
-  ];
-  # The bundle's `#!/usr/bin/env node` is patched to this Node.
-  buildInputs = [ nodejs ];
+  configurePhase = ''
+    runHook preConfigure
+    ${lib.concatMapStrings unpack closure}
+    runHook postConfigure
+  '';
 
   buildPhase = ''
     runHook preBuild
-    npm run build
+    export HOME=$TMPDIR
+    bun run build
     runHook postBuild
   '';
 

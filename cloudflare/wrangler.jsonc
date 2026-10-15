@@ -7,7 +7,7 @@
 	"observability": { "enabled": true },
 	// Renders docs/*.md, snapshots quest/ for the board, and stages the theme and site.css into build/.
 	"build": {
-		"command": "node scripts/build.ts",
+		"command": "bun scripts/build.ts",
 		"watch_dir": ["src", "scripts", "../docs", "../design", "../quest"],
 	},
 	"assets": { "directory": "build/public" },

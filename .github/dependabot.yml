@@ -1,14 +1,18 @@
 version: 2
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
     groups:
-      npm:
+      bun:
         patterns: ["*"]
+    ignore:
+      # Bump by hand once @cloudflare/vitest-plugin's peer range includes the new major.
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

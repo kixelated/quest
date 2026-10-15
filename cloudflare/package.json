@@ -4,9 +4,9 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wrangler dev",
-		"build": "node scripts/build.ts",
-		"check": "npm run build && wrangler types --check && tsc --noEmit && prettier --check . && wrangler deploy --dry-run",
-		"test": "npm run build && vitest run",
+		"build": "bun scripts/build.ts",
+		"check": "bun run build && wrangler types --check && tsc --noEmit && prettier --check . && wrangler deploy --dry-run",
+		"test": "bun run build && vitest run",
 		"fix": "prettier --write .",
 		"types": "wrangler types",
 		"migrate": "wrangler d1 migrations apply DB --local",
