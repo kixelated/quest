@@ -26,4 +26,4 @@ Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
 
 Once the quest is complete and the user has settled every decision, including choices you made without asking, and the PR reflects them, run `/quest-ready` on it.
 
-A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, marking the PR ready only when the quest is complete and it has none.
+A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, running `/quest-ready` only when the quest is complete and it has none.
