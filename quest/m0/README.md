@@ -33,7 +33,6 @@ ownership-manifest design:
 
 ## Required
 
-- [Wait on replies and reactions](/quest/m0/wait-signals.md) - `quest wait` wakes on review-thread replies and PR/review reactions
 - [Kix decision UI](/quest/m0/kix/README.md) - hosted planning and implementation through prompts, funded by explicit API allocations
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

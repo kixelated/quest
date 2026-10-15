@@ -7,6 +7,20 @@ const POLL = 5 * 60_000;
 const SHA = /^[a-f\d]{7,40}$/i;
 /** The timeline records a force push a few seconds after repository activity (1-2s observed). */
 const TIMELINE_LAG = 60_000;
+/** Reactions on the PR body and on each review; the newest 100 per subject are enough to spot new ones. */
+const REACTIONS = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+	viewer { login }
+	repository(owner: $owner, name: $repo) {
+		pullRequest(number: $number) {
+			reactions(last: 100) { nodes { ...reaction } }
+			reviews(first: 100, after: $after) {
+				pageInfo { hasNextPage endCursor }
+				nodes { url reactions(last: 100) { nodes { ...reaction } } }
+			}
+		}
+	}
+}
+fragment reaction on Reaction { id content createdAt user { login } }`;
 
 export interface PullRequest {
 	owner: string;
@@ -46,11 +60,19 @@ interface Activity {
 	id: string;
 }
 
+/** Each source is read separately, so each keeps its own position. */
+type Source = "timeline" | "replies" | "reactions";
+const SOURCES: Source[] = ["timeline", "replies", "reactions"];
+/** The newest event time read from a source, and the IDs of events at that time. */
+interface Mark {
+	time: number;
+	ids: string[];
+}
+
 /** A cursor is a snapshot, since git timestamps cannot describe push order. */
 interface Cursor {
 	pr: string;
-	time: number;
-	ids: string[];
+	marks: Record<Source, Mark>;
 	commits: string[];
 	/** Force pushes at or before the starting point, at their repository-activity time. */
 	pushes: { sha: string; time: number }[];
@@ -131,7 +153,7 @@ async function watch(
 		if (deps.now() >= deadline) throw new WaitTimeout();
 	};
 	let pollInterval = POLL;
-	const request = async (path: string, etag?: string): Promise<Response> => {
+	const request = async (path: string, etag?: string, payload?: unknown): Promise<Response> => {
 		// Follow only same-origin pagination links; never send a token to another host.
 		const url = new URL(path, API);
 		if (url.origin !== API || url.username || url.password) throw new Error("invalid GitHub pagination URL");
@@ -142,6 +164,7 @@ async function watch(
 			let response: Response;
 			try {
 				response = await deps.fetch(url, {
+					...(payload === undefined ? {} : { method: "POST", body: JSON.stringify(payload) }),
 					headers: {
 						Accept: "application/vnd.github+json",
 						Authorization: `Bearer ${deps.token}`,
@@ -155,7 +178,7 @@ async function watch(
 				if (deps.now() >= deadline) throw new WaitTimeout();
 				throw error;
 			}
-			pollInterval = Math.max(POLL, seconds(response.headers.get("x-poll-interval")) ?? 0);
+			pollInterval = Math.max(pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
 			if (response.status === 200 || response.status === 304) return response;
 			const body = await response.text();
 			const limited =
@@ -252,8 +275,11 @@ async function watch(
 		const forced = pushed.filter((row) => string(row.activity_type) === "force_push");
 		cursor = {
 			pr: name,
-			time: since,
-			ids: [],
+			marks: {
+				timeline: { time: since, ids: [] },
+				replies: { time: since, ids: [] },
+				reactions: { time: since, ids: [] },
+			},
 			commits: [],
 			pushes: forced
 				.filter((row) => !after(row))
@@ -273,28 +299,86 @@ async function watch(
 	}
 
 	const seenCommits = new Set([...baselineCommits, ...cursor.commits]);
-	const seenIds = new Set(cursor.ids);
-	const timeline = `${base}/issues/${pr.number}/timeline?per_page=100`;
-	let path = timeline;
-	let etag: string | undefined;
-	for (;;) {
-		const response = await request(path, etag);
-		if (response.status === 304) {
-			if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
-			await pause(pollInterval);
-			continue;
-		}
-		const rows = array(await response.json());
+	const seen = Object.fromEntries(SOURCES.map((source) => [source, new Set(cursor.marks[source].ids)])) as Record<
+		Source,
+		Set<string>
+	>;
+	const fresh = (source: Source, event: Activity) => {
+		const mark = cursor.marks[source];
+		return event.time > mark.time || (event.time === mark.time && !seen[source].has(event.id));
+	};
+	/** Read every page once, then poll the last page conditionally, following it when it fills. */
+	const pager = (first: string) => {
+		let path = first;
+		let etag: string | undefined;
+		return async (): Promise<ObjectValue[]> => {
+			const rows: ObjectValue[] = [];
+			for (;;) {
+				const response = await request(path, etag);
+				if (response.status === 304) {
+					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
+					return rows;
+				}
+				rows.push(...array(await response.json()));
+				const next = link(response, "next");
+				if (!next) {
+					etag = response.headers.get("etag") ?? undefined;
+					return rows;
+				}
+				path = next;
+				etag = undefined;
+			}
+		};
+	};
+	/** REST has no endpoint for reactions on reviews, and GraphQL also names the waiter. */
+	const reactions = async (): Promise<{ viewer: string; events: Activity[] }> => {
 		const events: Activity[] = [];
-		for (const row of rows) {
+		let viewer: string;
+		let after: string | null = null;
+		do {
+			const response = await request("/graphql", undefined, {
+				query: REACTIONS,
+				variables: { owner: pr.owner, repo: pr.repo, number: pr.number, after },
+			});
+			const body = object(await response.json());
+			if (body.errors !== undefined)
+				throw new Error(
+					`GitHub GraphQL error: ${array(body.errors)
+						.map((error) => String(error.message))
+						.join("; ")}`,
+				);
+			const data = object(body.data);
+			viewer = string(object(data.viewer).login);
+			const pull = object(object(data.repository).pullRequest);
+			const reviews = object(pull.reviews);
+			const reacted = (owner: ObjectValue, url: string) =>
+				array(object(owner.reactions).nodes).map((row) => reaction(row, url));
+			if (after === null) events.push(...reacted(pull, prUrl));
+			for (const review of array(reviews.nodes)) events.push(...reacted(review, string(review.url)));
+			const page = object(reviews.pageInfo);
+			after = page.hasNextPage === true ? string(page.endCursor) : null;
+		} while (after !== null);
+		return { viewer, events };
+	};
+
+	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=100`);
+	// `since` excludes its own instant and filters by update time, which is never before
+	// creation; start a second early so unseen replies at the mark's second are still read.
+	const comments = pager(
+		`${base}/pulls/${pr.number}/comments?per_page=100&since=${new Date(cursor.marks.replies.time - 1000).toISOString()}`,
+	);
+	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
+	for (;;) {
+		pollInterval = POLL;
+		for (const row of await timeline()) {
 			const type = string(row.event);
 			if (type === "committed") {
 				const sha = string(row.sha);
 				if (!fullSha(sha)) throw new Error("invalid GitHub committed SHA");
 				if (!seenCommits.has(sha)) {
-					events.push({
+					found.timeline.push({
 						point: sha,
-						time: cursor.time,
+						time: cursor.marks.timeline.time,
 						type: "committed",
 						actor: actor(row.actor ?? row.committer),
 						url: string(row.html_url),
@@ -315,39 +399,45 @@ async function watch(
 					)
 				)
 					continue;
-				if (event.time > cursor.time || (event.time === cursor.time && !seenIds.has(event.id)))
-					events.push(event);
+				if (fresh("timeline", event)) found.timeline.push(event);
 			}
 		}
-		// Drain pagination before returning so the cursor also records every commit.
-		historical.push(...events);
-		const next = link(response, "next");
-		if (next) {
-			path = next;
-			etag = undefined;
-			continue;
+		const replies = await comments();
+		const { viewer, events } = await reactions();
+		// The waiter's own replies and reactions never wake it.
+		for (const row of replies) {
+			// A thread's first comment belongs to a review, which the timeline reports.
+			if (row.in_reply_to_id === undefined || row.in_reply_to_id === null) continue;
+			const event = timedActivity(row, "replied", "created_at", prUrl);
+			if (event.actor !== viewer && fresh("replies", event)) found.replies.push(event);
 		}
-		if (historical.length) {
-			historical.sort((a, b) => a.time - b.time);
-			const unique = [...new Map(historical.map((event) => [event.id, event])).values()];
-			const latest = Math.max(cursor.time, ...unique.map((event) => event.time));
-			const ids = [
-				...(latest === cursor.time ? seenIds : []),
-				...unique.filter((event) => event.time === latest).map((event) => event.id),
-			];
+		found.reactions.push(...events.filter((event) => event.actor !== viewer && fresh("reactions", event)));
+
+		if (SOURCES.some((source) => found[source].length)) {
+			const marks = Object.fromEntries(
+				SOURCES.map((source) => {
+					const mark = cursor.marks[source];
+					const time = Math.max(mark.time, ...found[source].map((event) => event.time));
+					const ids = [
+						...(time === mark.time ? mark.ids : []),
+						...found[source].filter((event) => event.time === time).map((event) => event.id),
+					];
+					return [source, { time, ids: [...new Set(ids)] }];
+				}),
+			) as Record<Source, Mark>;
 			const nextCursor = encodeCursor({
 				pr: name,
-				time: latest,
-				ids: [...new Set(ids)],
+				marks,
 				commits: [...seenCommits],
-				pushes: cursor.pushes.filter((push) => push.time + TIMELINE_LAG >= latest),
+				pushes: cursor.pushes.filter((push) => push.time + TIMELINE_LAG >= marks.timeline.time),
 			});
+			const all = SOURCES.flatMap((source) => found[source]).sort((a, b) => a.time - b.time);
+			const unique = [...new Map(all.map((event) => [event.id, event])).values()];
 			return unique.map(
 				(event, index) =>
 					`${event.point} ${event.type} ${event.actor} ${event.url}${index === unique.length - 1 ? ` ${nextCursor}` : ""}`,
 			);
 		}
-		etag = response.headers.get("etag") ?? undefined;
 		await pause(pollInterval);
 	}
 }
@@ -372,6 +462,18 @@ function timedActivity(row: ObjectValue, type: string, timeField: string, fallba
 		actor: actor(row.actor ?? row.user),
 		url: row.html_url === undefined ? fallback : string(row.html_url),
 		id: `${type}:${id}`,
+	};
+}
+
+function reaction(row: ObjectValue, url: string): Activity {
+	const point = string(row.createdAt);
+	return {
+		point,
+		time: timestamp(point),
+		type: `reacted:${string(row.content).toLowerCase()}`,
+		actor: actor(row.user),
+		url,
+		id: `reacted:${string(row.id)}`,
 	};
 }
 
@@ -433,12 +535,18 @@ function encodeCursor(cursor: Cursor): string {
 function decodeCursor(value: string, pr: string): Cursor {
 	try {
 		const parsed = object(JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8")));
+		const marks = object(parsed.marks);
 		if (
 			parsed.pr !== pr ||
-			typeof parsed.time !== "number" ||
-			!Number.isFinite(parsed.time) ||
-			!Array.isArray(parsed.ids) ||
-			!parsed.ids.every((id) => typeof id === "string") ||
+			!SOURCES.every((source) => {
+				const mark = object(marks[source]);
+				return (
+					typeof mark.time === "number" &&
+					Number.isFinite(mark.time) &&
+					Array.isArray(mark.ids) &&
+					mark.ids.every((id) => typeof id === "string")
+				);
+			}) ||
 			!Array.isArray(parsed.commits) ||
 			!parsed.commits.every(fullSha) ||
 			!Array.isArray(parsed.pushes) ||
