@@ -9,19 +9,18 @@ The scope consists of all ready quests that are not claimed.
 Use the argument (if provided) to filter to specific quests/epics.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
-Present one quest at a time. Before its question, write a short paragraph explaining the problem, the quest's goal, and your recommendation, including any blockers or tradeoffs the user needs to decide.
-Ask one synchronous question and wait for the answer before asking the next, following the guide's Questions section.
-Offer these choices:
+Start every quest you would recommend starting, without asking: well planned, with no blockers or conflicts with quests already started.
+Print each quest you skip and why, suggesting `/quest-plan` for any with significant design issues.
 
-- `/quest-start`: If the quest is well planned with no blockers.
-- `/quest-plan`: If the quest has significant design issues.
+Ask only when unsure, such as a quest that may not be worth implementing or may not be worth doing now.
+Present those one at a time: a short paragraph explaining the problem, the quest's goal, and your recommendation, then one synchronous question following the guide's Questions section, offering:
+
+- `/quest-start`: If the quest should start now.
 - skip: If the quest should not be started yet.
 - deprioritize: If the quest should wait behind other work; `/quest-plan` moves it down.
 - `/quest-delete`: If the quest should be deleted.
 
-Consider ordering, suggesting to skip any quests that would result in conflicts.
-
-Only after the user chooses `/quest-start` for that quest, spawn a background sub-agent with its own isolated worktree, since agents cannot write to a worktree their parent created.
+Start each quest in a background sub-agent with its own isolated worktree, since agents cannot write to a worktree their parent created.
 
 Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
@@ -33,15 +32,16 @@ Report each sub-agent's final status, staying silent on interim notifications, b
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
 
+- `/quest-ready`: If the PR is a draft ready for review.
 - `/quest-merge`: If the PR is ready for review with no significant issues.
-- `/quest-iterate`: If the PR is a draft, has significant issues, or needs decisions.
+- `/quest-iterate`: If the PR has significant issues or needs decisions.
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
 Also offer `/quest-plan` for its suggested follow-ups.
 Include quest context, as many quests are concurrently in flight.
 
-Run each selected `/quest-merge` or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
+Run each selected `/quest-ready`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
 Run selected `/quest-plan` sessions in the foreground.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.

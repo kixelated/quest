@@ -21,14 +21,9 @@ Never write to or clean up a directory other agents share, such as a session scr
 When done, explain the result in a few lines and summarize any issues encountered.
 Prompt the user interactively for any open decisions, including your recommendation.
 Record the outcome as a PR comment as a paper-trail.
-Once the quest is complete and no decisions remain, mark a draft PR ready for review.
 
 Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
 
-If there are no outstanding decisions, interactively prompt the user including your recommendation:
-- `/quest-merge`: If this quest is ready to be merged.
-- `/quest-plan`: If this quest has significant design issues.
-- skip: If this quest should not be merged yet.
-- `/quest-delete`: If this quest should be deleted.
+Once the quest is complete and the user has settled every decision, including choices you made without asking, and the PR reflects them, run `/quest-ready` on it.
 
-A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead and leaves the PR a draft.
+A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, running `/quest-ready` only when the quest is complete and it has none.
