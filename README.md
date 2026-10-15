@@ -122,7 +122,8 @@ claims. Check those before you start work someone else may already be on.
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
-reply, reaction to the PR or one of its reviews, push, merge, or close:
+reply, reaction to the PR or one of its reviews, push, merge, close, or leaves
+the merge queue (a dequeue, or a disabled auto-merge):
 
 ```sh
 quest wait 101

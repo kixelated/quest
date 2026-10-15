@@ -27,7 +27,11 @@ returned cursor as described by `quest skill merge`, rather than polling GitHub.
 Limit the number of active agents to the CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-Keep going until all PRs have been decided then wait for all spawned sub-agents to finish.
+A merge sub-agent reports once auto-merge is enabled, before the PR lands.
+Wait on each such PR with `quest wait` until it merges; if it leaves the merge
+queue unmerged or auto-merge is disabled, dispatch `/quest-merge` for it again.
+
+Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.
 
 As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for its suggested follow-ups.
