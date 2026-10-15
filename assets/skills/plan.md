@@ -40,6 +40,6 @@ New work joins the milestone matching its priority, at its rank; an epic groups 
 
 Include all of the decision prompts in the PR as a paper trail, with a ✅ next to the selected option.
 
-When done, commit, create a PR, and run `/quest-ready` on it.
+When done, commit, open the PR ready for review, and run `/quest-merge` on it.
 Quests planned as follow-ups of an open PR may be committed to that PR instead.
 The quest should be reviewed before it is merged.
