@@ -23,4 +23,4 @@ One round only; never request a review.
 Push your changes to the PR and update its summary.
 Summarize the changes made, and offer `/quest-plan` for follow-ups that belong outside this PR.
 
-Never merge or mark the PR ready; offer `/quest-ready` for a draft or `/quest-merge` otherwise, and run it only once the user picks it.
+Never merge or mark the PR ready; offer `/quest-ready` or `/quest-merge` instead.

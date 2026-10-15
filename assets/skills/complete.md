@@ -10,7 +10,7 @@ The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent.
 
 Ask synchronously with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), following the guide's Questions section and including your recommendation:
-- `/quest-ready`: Are drafts with no significant issues or open decisions.
+- `/quest-ready`: Are drafts ready for review.
 - `/quest-merge`: Are ready for review with only minor outstanding issues.
 - `/quest-iterate`: Have significant issues or need decisions.
 - skip: Are not ready to be merged yet.

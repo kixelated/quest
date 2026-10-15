@@ -33,7 +33,7 @@ Report each sub-agent's final status, staying silent on interim notifications, b
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
 
-- `/quest-ready`: If the PR is a draft with no significant issues or open decisions.
+- `/quest-ready`: If the PR is a draft ready for review.
 - `/quest-merge`: If the PR is ready for review with no significant issues.
 - `/quest-iterate`: If the PR has significant issues or needs decisions.
 - skip: If the PR should not be merged yet.

@@ -25,8 +25,8 @@ Record the outcome as a PR comment as a paper-trail.
 Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
 
 If there are no outstanding decisions, interactively prompt the user including your recommendation:
-- `/quest-ready`: If the PR is a draft and this quest is ready for review.
-- `/quest-merge`: If the PR is ready for review and this quest is ready to be merged.
+- `/quest-ready`: If the PR is a draft ready for review.
+- `/quest-merge`: If this quest is ready to be merged.
 - `/quest-plan`: If this quest has significant design issues.
 - skip: If this quest should not be merged yet.
 - `/quest-delete`: If this quest should be deleted.
