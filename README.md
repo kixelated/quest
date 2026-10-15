@@ -98,8 +98,9 @@ $ quest --root examples/export ready quest/m0/download.md
 
 With no path, `ready` lists every ready quest. Given a path, it shows what
 blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
-`!` a blocked one, and each size label takes its colour: XS grey, S green,
-M yellow, L red, and XL purple. Set `NO_COLOR` to keep the layout without colours.
+`!` a blocked one, and each size label takes its colour, like loot rarity: XS
+grey, S green, M blue, L purple, and XL orange (your terminal's yellow). Set
+`NO_COLOR` to keep the layout without colours.
 
 Scripts and agents read the piped form, which is plain text:
 
@@ -214,7 +215,7 @@ plan issues, start ready quests, and act on GitHub PRs through a decision UI.
 Hosted work will use explicitly selected maintainer or donor API funding.
 [The first milestone](quest/m0/README.md) lists the quests that remain.
 
-## Join the party
+## Contributing
 
 Quest is planned in the open with Quest itself: [its quest log](quest/README.md)
 is the backlog, and contributors claim quests from the same log their agents

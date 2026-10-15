@@ -12,9 +12,10 @@ holds the agent contract embedded in the binary.
 
 ## Rules
 
-- Original homage, not a parody. Use only genre conventions: `!` and `?`
-  markers, quest log pages, gold borders, and size colours. Use no
-  Blizzard names, art, fonts, icons, or screenshots.
+- Modern game UI, not fantasy pastiche. Use only genre conventions: `!` and
+  `?` markers, a quest log, and rarity-coloured sizes. No serif blackletter,
+  parchment, gold leaf, ornaments, or skeuomorphic trim, and no names, art,
+  fonts, icons, or screenshots from any game.
 - Hand-written SVG and CSS, and open-licensed fonts only.
 - Dark only. There is no light mode.
 - Never use colour as the only signal. Every marker and size colour comes with
@@ -27,8 +28,10 @@ Hook, then substance. Lead with "a quest log for your repo and your agents",
 then deliver the pitch: readable plans, explicit dependencies, and reviewable
 Git changes.
 
-Lean into the RPG voice but stay semi-professional: ledger, party, and gold,
-yes; pixel art, sound, and game interface chrome, no.
+Plain copy with a light game flavour. "Quest" and "quest log" are the product,
+so they stay, along with the markers and size colours. Everything else reads
+like a modern developer tool: no party, no gold, no roman numerals, no pixel
+art or sound. Agent tokens are called tokens.
 
 ## Glossary
 
@@ -39,16 +42,15 @@ blocked and `Required:`), with the markers and size colours.
 
 | Format term | Display | Marker |
 | --- | --- | --- |
-| ready | Available | yellow `!` |
+| ready | Available | amber `!` |
 | blocked | Requires: *titles* | grey `!` |
 | live runner lock | Accepted by @*name* | |
-| open PR or change | Ready to turn in | yellow `?` |
+| open PR or change | Ready to turn in | amber `?` |
 | merged | Quest complete | |
 | `Goal` | Objectives | |
 | `Closes` | Rewards | |
-| contributors who donate tokens | the party | |
-| agent tokens, donated or spent | gold | coin glyph |
-| fund a quest | Offer gold | coin glyph |
+| agent tokens, donated or spent | tokens | token chip |
+| fund a quest | Offer tokens | token chip |
 
 A quest shows its most advanced state: Ready to turn in, then Accepted by, then
 Available or Requires. Accepted by comes from a live runner lock on Quest on
@@ -56,84 +58,82 @@ Cloudflare, which clears when its MoQ announcement disappears; open changes
 carry Ready to turn in. GitHub uses the pushed quest branch to claim work.
 None of these states adds a section to the quest file.
 
-Gold is display only: a run's spend and donated tokens show as gold with a coin
-glyph. There is no pledge pool and no new state.
+Tokens are display only: a run's spend and donated tokens show with an amber
+token chip. There is no pledge pool and no new state.
 
 ## Size
 
-Quests are coloured by size, from grey XS to purple XL, on every surface: the
-site, the board, the map, and the CLI. Show the size label next to its colour.
+Quests are coloured by size on every surface (the site, the board, the map,
+and the CLI) along the loot-rarity ladder players already know: grey, green,
+blue, purple, orange. Show the size label next to its colour.
 
 | Size | Colour | Hex | Terminal SGR |
 | --- | --- | --- | --- |
-| XS | grey | `#a59f95` | `90` |
-| S | green | `#5ccf5c` | `32` |
-| M | yellow | `#f2d23c` | `33` |
-| L | red | `#ff6b60` | `31` |
-| XL | purple | `#c77dff` | `35` |
+| XS | grey | `#9ba5b4` | `90` |
+| S | green | `#4ade80` | `32` |
+| M | blue | `#4da3ff` | `34` |
+| L | purple | `#b98cff` | `35` |
+| XL | orange | `#ff9a3c` | `33` |
 
-XL has no extra tag: its purple and its size label already stand out.
+XL has no extra tag: its orange and its size label already stand out.
 
-Contrast as text on the three ink surfaces (WCAG AA needs 4.5:1):
+Contrast as text on the three surfaces (WCAG AA needs 4.5:1):
 
 | Size | `--ql-bg` | `--ql-panel` | `--ql-raised` |
 | --- | --- | --- | --- |
-| XS | 7.2:1 | 6.8:1 | 6.0:1 |
-| S | 9.5:1 | 8.9:1 | 7.9:1 |
-| M | 12.7:1 | 11.9:1 | 10.6:1 |
-| L | 6.8:1 | 6.4:1 | 5.7:1 |
-| XL | 7.0:1 | 6.6:1 | 5.9:1 |
+| XS | 7.9:1 | 7.3:1 | 6.6:1 |
+| S | 11.2:1 | 10.5:1 | 9.4:1 |
+| M | 7.5:1 | 7.0:1 | 6.2:1 |
+| L | 7.7:1 | 7.2:1 | 6.4:1 |
+| XL | 9.3:1 | 8.7:1 | 7.7:1 |
 
 The `.ql-size` badge tints its background with 14% of the hue, which lowers
-these ratios. Every size still passes on every surface, and the lowest is L on
-`--ql-raised`, at 4.6:1.
+these ratios slightly; every size still passes on every surface.
 
-Markers use the same hues: yellow (`#f2d23c`, SGR `33`) for `!` Available and
-`?` Ready to turn in, and grey (`#a59f95`, SGR `90`) for a blocked `!`.
-The grey is warm so it sits on the ink surfaces. The purple is a cool violet,
-well clear of L's red and of the gold leaf, and more saturated than the lapis
-links.
+Markers use the accent: amber (`#ffc53d`, SGR `33`) for `!` ready and `?` in
+review, and grey (`#9ba5b4`, SGR `90`) for a blocked `!`.
 Terminal colours are named ANSI SGR codes, so they follow the user's terminal
-palette and work on any colour terminal: bright black `90` for XS and blocked,
-and the standard `32`, `33`, `31`, and `35` for S to XL. The scale has no
-orange, so every size has a 16-colour code and needs no colour-depth
-detection.
+palette and work on any colour terminal. The 16-colour palette has no orange,
+so XL uses yellow `33`, which many palettes render orange-brown.
 
 ## Palette
 
-An illuminated ledger: warm ink pages, parchment text, and gold-leaf trim.
+A modern game menu: cool near-black surfaces, hairline borders, crisp white
+text, one amber accent, and rarity hues for sizes.
 [`theme/theme.css`](theme/theme.css) defines these as `--ql-*` custom
 properties.
 
 | Token | Hex | Use |
 | --- | --- | --- |
-| `--ql-bg` | `#14100b` | page backdrop, ink |
-| `--ql-panel` | `#1d1711` | ledger pages |
-| `--ql-raised` | `#2a2118` | selected rows, insets, inline code |
-| `--ql-rule` | `#3d3125` | dividers, table rules |
-| `--ql-gold` | `#c9a14a` | gold-leaf borders, the divider |
-| `--ql-gold-dim` | `#7a6230` | inner trim, margin rules |
-| `--ql-gold-bright` | `#e6c063` | headings, drop caps, gold amounts |
-| `--ql-text` | `#ede1c6` | body text, parchment |
-| `--ql-muted` | `#b2a487` | secondary text |
-| `--ql-link` | `#9db9e8` | links, lapis |
-| `--ql-grey` | `#a59f95` | XS, blocked marker |
-| `--ql-green` | `#5ccf5c` | S |
-| `--ql-yellow` | `#f2d23c` | M, Available and Ready to turn in markers |
-| `--ql-red` | `#ff6b60` | L |
-| `--ql-purple` | `#c77dff` | XL |
+| `--ql-bg` | `#0a0c11` | page backdrop |
+| `--ql-panel` | `#11151d` | panels |
+| `--ql-raised` | `#1a202b` | buttons, insets, inline code |
+| `--ql-rule` | `#262e3b` | hairline borders, dividers |
+| `--ql-rule-strong` | `#3a4557` | hover borders, unsized entry edges |
+| `--ql-accent` | `#ffc53d` | primary buttons, markers, eyebrows, focus, tokens |
+| `--ql-accent-dim` | `#8a6a1f` | the start of the progress fill |
+| `--ql-text` | `#e8ecf3` | body text and headings |
+| `--ql-muted` | `#97a2b4` | secondary text |
+| `--ql-link` | `#7cc4ff` | links |
+| `--ql-grey` | `#9ba5b4` | XS, blocked marker |
+| `--ql-green` | `#4ade80` | S |
+| `--ql-blue` | `#4da3ff` | M |
+| `--ql-purple` | `#b98cff` | L |
+| `--ql-orange` | `#ff9a3c` | XL |
 
 Components colour sizes through `--ql-size-xs`, `--ql-size-s`, `--ql-size-m`,
 `--ql-size-l`, and `--ql-size-xl` (or the `.ql-xs` to `.ql-xl` classes), which
 point at the hues above, so a scale change is a token change.
 
 Every text colour meets WCAG AA (4.5:1) on `--ql-bg`, `--ql-panel`, and
-`--ql-raised`. The lowest is red on `--ql-raised`, at 5.7:1.
+`--ql-raised`. The lowest is blue on `--ql-raised`, at 6.2:1. Dark text on the
+amber accent is 12.4:1.
 
 ## Type
 
-- Headings: [Cormorant Garamond](https://fonts.google.com/specimen/Cormorant+Garamond),
-  weight 700.
+- Display: [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed),
+  weights 600 and 700. Page and section headings, buttons, navigation, and
+  labels are uppercase with wide tracking; smaller headings stay mixed case.
 - Body: [Inter](https://fonts.google.com/specimen/Inter), weights 400 and 600.
 - Code: the system monospace font.
 
@@ -144,29 +144,32 @@ do not commit font files. `theme.css` has the fallback stacks.
 
 [`theme/theme.css`](theme/theme.css) also carries the shared pieces:
 
-- Ledger page (`.ql-ledger`): an ink panel with a gold-leaf border, an inner
-  trim, and a double margin rule down the left. Quests, docs, and code samples
-  sit on ledger pages.
-- Drop cap (`.ql-dropcap`): the first letter of a page's opening paragraph,
-  three lines tall in gold Cormorant Garamond.
-- Divider (`.ql-divider`): a gold rule broken by a lozenge between two dots.
-  It separates sections.
-- Markers, size colours (`.ql-size`), and gold amounts (`.ql-gold`), each
+- Panel (`.ql-panel`): a raised surface with a hairline border, a faint top
+  sheen, and a short accent tab on its top edge. `--ql-tab` recolours the tab.
+  Quests, docs, and code samples sit on panels.
+- Eyebrow (`.ql-eyebrow`): a small uppercase label in the accent above a
+  heading. It replaces ornamental dividers between sections.
+- Markers, size colours (`.ql-size`), and token amounts (`.ql-tokens`), each
   with its text label.
+
+The site adds clipped-corner buttons, log entries edged in their size colour
+like inventory slots, a glowing progress bar, and a faint grid behind the top
+of each page.
 
 ## Mark
 
-[`theme/logo.svg`](theme/logo.svg) is a gold-leaf `!` on an ink shield with a
-gold border. It carries its own dark fill, so it reads on light pages too, and
-it stays legible at 16 px for favicons. Use it as is: do not recolour it, add
+[`theme/logo.svg`](theme/logo.svg) is a flat dark `!` on an amber rounded
+square. It carries its own fill, so it reads on light and dark pages, and it
+stays legible at 16 px for favicons. Use it as is: do not recolour it, add
 text inside it, or pair it with game art.
 
 ## Social image
 
 [`theme/og.svg`](theme/og.svg) is the source and
 [`theme/og.png`](theme/og.png) the 1280 by 640 export. The SVG imports
-Cormorant Garamond and Inter from Google Fonts, so export it with network
-access:
+Barlow Condensed and Inter from Google Fonts, so export it with network
+access. Headless Chrome can silently fall back to system fonts on a cold font
+cache, so re-run the export if the fonts look wrong:
 
 ```sh
 google-chrome --headless=new --hide-scrollbars --virtual-time-budget=10000 \

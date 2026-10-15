@@ -1,21 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="title">
 	<title id="title">Quest</title>
-	<!-- Hand-written mark: a gold-leaf exclamation point on an ink shield. See design/theme.md. -->
-	<defs>
-		<linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#33281c"/>
-			<stop offset="1" stop-color="#120e09"/>
-		</linearGradient>
-		<linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#fbe9b0"/>
-			<stop offset="0.45" stop-color="#e6c063"/>
-			<stop offset="1" stop-color="#a5741d"/>
-		</linearGradient>
-	</defs>
-	<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#ink)" stroke="#c9a14a" stroke-width="3" stroke-linejoin="round"/>
-	<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#7a6230" stroke-width="1.2" stroke-linejoin="round"/>
-	<g fill="url(#leaf)" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
-		<path d="M24.8 13 H39.2 L35 38.3 H29 Z"/>
-		<path d="M32 41 L37.5 46.5 L32 52 L26.5 46.5 Z"/>
+	<!-- Hand-written mark: a flat exclamation point on an amber rounded square. See design/theme.md. -->
+	<rect x="2" y="2" width="60" height="60" rx="14" fill="#ffc53d"/>
+	<g fill="#0a0c11">
+		<path d="M25 11 H39 L35.5 39 H28.5 Z"/>
+		<rect x="27" y="44" width="10" height="10" rx="2"/>
 	</g>
 </svg>

@@ -51,9 +51,9 @@ describe("ready", () => {
 				"5 quests ready\n" +
 				`${bang} ${sgr("90", "[XS]")} Tiny   quest/m0/epic/xs.md\n` +
 				`${bang} ${sgr("32", "[S]")} Small   quest/m0/epic/s.md\n` +
-				`${bang} ${sgr("33", "[M]")} Medium  quest/m0/epic/m.md\n` +
-				`${bang} ${sgr("31", "[L]")} Large   quest/m0/epic/l.md\n` +
-				`${bang} ${sgr("35", "[XL]")} Huge   quest/m0/epic/xl.md\n`,
+				`${bang} ${sgr("34", "[M]")} Medium  quest/m0/epic/m.md\n` +
+				`${bang} ${sgr("35", "[L]")} Large   quest/m0/epic/l.md\n` +
+				`${bang} ${sgr("33", "[XL]")} Huge   quest/m0/epic/xl.md\n`,
 			stderr: "",
 		});
 	});

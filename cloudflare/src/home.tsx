@@ -1,6 +1,6 @@
 import type { Child } from "hono/jsx";
 import type { Board } from "./board/model";
-import { Bang, Coin, Difficulty, Divider, Marker, Paste, Query, repo, type Size, type Status } from "./layout";
+import { Bang, Difficulty, Marker, Paste, Query, repo, type Size, type Status, Token } from "./layout";
 import { QuestMap } from "./map";
 
 // The home page. Display names follow the glossary in design/theme.md.
@@ -41,10 +41,10 @@ const tree = `quest/
     export.md    # Available
     download.md  # Requires: export.md`;
 
-function Section(props: { id: string; title: string; children: Child }) {
+function Section(props: { id: string; eyebrow: string; title: string; children: Child }) {
 	return (
 		<section class="wrap section" id={props.id} aria-labelledby={`${props.id}-title`}>
-			<Divider />
+			<p class="ql-eyebrow">{props.eyebrow}</p>
 			<h2 id={`${props.id}-title`}>{props.title}</h2>
 			{props.children}
 		</section>
@@ -57,6 +57,7 @@ export function Home(props: { setup: string; board: Board }) {
 		<>
 			<section class="wrap hero">
 				<div class="hero-copy">
+					<p class="ql-eyebrow">For Claude Code and Codex</p>
 					<h1>A quest log for your repo and your agents</h1>
 					<p class="lede">Readable plans. Explicit dependencies. Reviewable Git changes.</p>
 					<p>
@@ -76,7 +77,7 @@ export function Home(props: { setup: string; board: Board }) {
 						</a>
 					</p>
 				</div>
-				<div class="ql-ledger hero-log" aria-label="An example quest log">
+				<div class="ql-panel hero-log" aria-label="An example quest log">
 					<h2 class="log-title">Quest log</h2>
 					<ul class="log">
 						{log.map((entry) => (
@@ -97,7 +98,7 @@ export function Home(props: { setup: string; board: Board }) {
 				</div>
 			</section>
 
-			<Section id="files" title="Every plan is a file">
+			<Section id="files" eyebrow="The format" title="Every plan is a file">
 				<div class="split">
 					<div>
 						<p>
@@ -110,7 +111,7 @@ export function Home(props: { setup: string; board: Board }) {
 							and <code>quest check</code> keeps every link and dependency honest.
 						</p>
 					</div>
-					<figure class="ql-ledger code-page">
+					<figure class="ql-panel code-page">
 						<figcaption>Your repository</figcaption>
 						<pre>
 							<code>{tree}</code>
@@ -119,7 +120,7 @@ export function Home(props: { setup: string; board: Board }) {
 				</div>
 			</Section>
 
-			<Section id="git" title="Coordinate agents through Git">
+			<Section id="git" eyebrow="Coordination" title="Coordinate agents through Git">
 				<p class="intro">
 					No server holds the plan. Agents coordinate the way your team already does: with branches and pull
 					requests.
@@ -156,16 +157,16 @@ export function Home(props: { setup: string; board: Board }) {
 				</ol>
 			</Section>
 
-			<Section id="sample" title="As written, as read">
+			<Section id="sample" eyebrow="Rendering" title="As written, as read">
 				<p class="intro">The same quest: the Markdown your agents edit, and the page you read.</p>
 				<div class="split sample">
-					<figure class="ql-ledger code-page">
+					<figure class="ql-panel code-page">
 						<figcaption>quest/m0/download.md</figcaption>
 						<pre>
 							<code>{sample}</code>
 						</pre>
 					</figure>
-					<article class="ql-ledger quest-page" aria-label="The quest, rendered">
+					<article class="ql-panel quest-page" aria-label="The quest, rendered">
 						<header class="quest-head">
 							<span class="ql-marker ql-blocked">
 								<Bang />
@@ -175,7 +176,7 @@ export function Home(props: { setup: string; board: Board }) {
 						</header>
 						<p class="quest-status ql-blocked">Requires: CSV endpoint</p>
 						<h4>Objectives</h4>
-						<p class="ql-dropcap">People can download their data as a CSV from the settings page.</p>
+						<p>People can download their data as a CSV from the settings page.</p>
 						<h4>Plan</h4>
 						<p>Call the export endpoint. Show progress, and let people retry a failed download.</p>
 						<h4>Requires</h4>
@@ -190,7 +191,7 @@ export function Home(props: { setup: string; board: Board }) {
 				</div>
 			</Section>
 
-			<Section id="how" title="How it works">
+			<Section id="how" eyebrow="Workflow" title="How it works">
 				<ol class="steps">
 					<li>
 						<h3>Plan with your agent</h3>
@@ -200,7 +201,7 @@ export function Home(props: { setup: string; board: Board }) {
 						</p>
 					</li>
 					<li>
-						<h3>Send out the party</h3>
+						<h3>Run agents in parallel</h3>
 						<p>
 							<code>/quest-start</code> takes one quest to a pull request. <code>/quest-spawn</code> sends
 							several agents out in parallel.
@@ -220,7 +221,7 @@ export function Home(props: { setup: string; board: Board }) {
 				</p>
 			</Section>
 
-			<Section id="map" title="Long-term plans, as a map">
+			<Section id="map" eyebrow="Roadmap" title="Long-term plans, as a map">
 				<p class="intro">
 					Quest is planned with Quest. Milestones become regions, epics become paths, and every quest is a
 					waypoint coloured by its size. Each deploy charts the tree as it stands.
@@ -228,23 +229,22 @@ export function Home(props: { setup: string; board: Board }) {
 				<QuestMap board={props.board} />
 			</Section>
 
-			<Section id="party" title="Join the party">
+			<Section id="contribute" eyebrow="Contribute" title="Built in the open">
 				<div class="split">
 					<div>
 						<p>
-							Quest is open source, and it is planned in the open with Quest itself. Contributors accept
+							Quest is open source, and it is planned in the open with Quest itself. Contributors pick up
 							quests from the same log your agents read.
 						</p>
 						<p>
-							Soon you will be able to <span class="ql-gold">offer gold</span>, your agent's tokens, to
-							fund a quest you want finished. Gold is how the log shows tokens: there is no XP and no
-							leaderboard.
+							Soon you will be able to <span class="ql-tokens">offer tokens</span> from your own agent
+							account to fund a quest you want finished.
 						</p>
 					</div>
-					<div class="ql-ledger offer">
+					<div class="ql-panel offer">
 						<p class="offer-amount">
-							<Coin />
-							<span class="ql-gold">Offer gold</span>
+							<Token />
+							<span class="ql-tokens">Offer tokens</span>
 						</p>
 						<p class="muted">
 							Arrives with the quest board. Until then, pick an available quest and send your agent to

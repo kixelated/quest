@@ -26,9 +26,9 @@ type Size = "XS" | "S" | "M" | "L" | "XL";
  * colours, so they follow the user's terminal palette. The size label always
  * prints beside its colour, so colour is never the only signal.
  */
-const SIZE_COLOURS: Record<Size, string> = { XS: "90", S: "32", M: "33", L: "31", XL: "35" };
+const SIZE_COLOURS: Record<Size, string> = { XS: "90", S: "32", M: "34", L: "35", XL: "33" };
 
-/** Marker colours, from `design/theme.md` (Size): a yellow `!` is ready, a grey one blocked. */
+/** Marker colours, from `design/theme.md` (Size): an amber `!` is ready, a grey one blocked. */
 const MARKER_COLOURS = { ready: "33", blocked: "90" } as const;
 
 /** A status marker for a ready or blocked quest. */

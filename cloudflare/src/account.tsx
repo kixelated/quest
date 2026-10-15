@@ -27,7 +27,7 @@ function Problem(props: { error?: string }) {
 
 function Panel(props: { title: string; children: Child }) {
 	return (
-		<section class="ql-ledger panel">
+		<section class="ql-panel panel">
 			<h2>{props.title}</h2>
 			{props.children}
 		</section>
