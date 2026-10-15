@@ -23,6 +23,8 @@ body {
 	font-family: var(--ql-font-body);
 	font-size: 1.0625rem;
 	line-height: 1.65;
+	/* A stacking context, so the grid below paints above this background. */
+	isolation: isolate;
 }
 
 body::before {
@@ -152,6 +154,12 @@ pre {
 
 .button:hover {
 	background: var(--ql-rule-strong);
+}
+
+/* The clip path hides an outset outline, so draw it inside, in a colour that shows on the accent too. */
+.button:focus-visible {
+	outline-color: var(--ql-text);
+	outline-offset: -5px;
 }
 
 .button.primary {
