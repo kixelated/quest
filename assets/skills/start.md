@@ -24,11 +24,6 @@ Record the outcome as a PR comment as a paper-trail.
 
 Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
 
-Once the user has settled every decision, including choices you made without asking, and the PR reflects them, mark it ready for review.
-Then interactively prompt the user including your recommendation:
-- `/quest-merge`: If this quest is ready to be merged.
-- `/quest-iterate`: If this quest has significant issues.
-- skip: If this quest should not be merged yet.
-- `/quest-delete`: If this quest should be deleted.
+Once the user has settled every decision, including choices you made without asking, and the PR reflects them, run `/quest-ready` on it.
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, marking the PR ready only when it has none.
