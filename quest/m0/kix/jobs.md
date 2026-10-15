@@ -35,7 +35,10 @@ duplicate results or overwrite a replacement's work.
   pushed by someone's local agent is a claim too, since the skills keep
   working without kix.
 - Runners require a Nix devShell. A project without a flake devShell gets a
-  decision offering a planning job to add one, rather than a failed start.
+  decision offering a bootstrap job to add one, rather than a failed start.
+  That job is the one exception to running in the project's shell: it runs
+  in the runner's own pinned Nix environment, and publication only accepts
+  flake files from it.
 - Paused sessions preserve their questions and context. Resume an identified
   attempt/session after an authorized answer, rather than starting a new
   unrelated agent or guessing an answer.

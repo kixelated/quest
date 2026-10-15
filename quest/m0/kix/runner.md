@@ -47,7 +47,12 @@ replacing the hosted Agent SDK runtime:
 - Return distinct completed, needs-decision, account-limited, cancelled,
   and failed outcomes. Never label a CLI-level success as a completed quest
   without checking its actual result.
-- m0 runners run the owner's own projects only, a trusted boundary.
+- m0 runners run the owner's own projects only, and only trusted
+  revisions: the default branch, and branches whose commits come from kix
+  jobs or the project's maintainers. A Nix devShell is not an isolation
+  boundary, so a PR head containing other contributors' commits never runs
+  on a runner in m0. Iterating such a PR produces a blocked decision instead.
+  Isolated execution comes with [donor isolation](/quest/m1/donor-isolation.md).
   Sharing a runner with other projects is [later work](/quest/m1/donor-runner.md).
 - Sources:
   [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),

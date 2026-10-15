@@ -7,8 +7,9 @@ with constrained network and filesystem access, without exposing host secrets.
 
 ## Plan
 
-- m0 runners only run their owner's own projects. This quest strengthens
-  shared runners; Nix devShells give reproducibility, not an isolation
+- m0 runners only run their owner's own projects at trusted revisions. This
+  quest strengthens shared runners and lets owners iterate PRs containing
+  other contributors' commits; Nix devShells give reproducibility, not an isolation
   boundary for arbitrary agent commands.
 - Evaluate current microVM tooling and supported Linux/macOS hosts before
   selecting an adapter. Do not make a beta runtime a core requirement.

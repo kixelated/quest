@@ -15,11 +15,11 @@ official agent CLIs (Claude Code, opencode) with any number of signed-in
 accounts. The GitHub App bot publishes ordinary PRs.
 
 This epic owns an end-to-end test of the whole flow: enroll a project,
-connect a runner with two accounts, receive an issue notification, answer
-planning prompts, publish a draft quest PR, merge through GitHub's rules,
-start a ready quest, follow its summaries, answer an implementation question
-from a push notification, take the runner offline so the job is reassigned,
-and receive its contribution PR notification. Exercise duplicate events,
+connect two runners, one with two accounts, receive an issue notification,
+answer planning prompts, publish a draft quest PR, merge through GitHub's
+rules, start a ready quest, follow its summaries, answer an implementation
+question from a push notification, take its runner offline so the job is
+reassigned to the other, and receive its contribution PR notification. Exercise duplicate events,
 interrupted sessions, and an exhausted account with stubbed agents before a
 live rehearsal on the operator's runner.
 
