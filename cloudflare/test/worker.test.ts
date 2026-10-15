@@ -21,7 +21,7 @@ describe("Worker", () => {
 		expect(html).toContain(`Follow ${origin}/setup to set up Quest here.`);
 		expect(html).toContain('href="/theme/theme.css"');
 		expect(html).toContain(`content="${origin}/theme/og.png"`);
-		for (const section of ["files", "git", "sample", "how", "map", "party"]) {
+		for (const section of ["files", "git", "sample", "how", "map", "contribute"]) {
 			expect(html).toContain(`id="${section}"`);
 		}
 	});

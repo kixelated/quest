@@ -7,7 +7,7 @@ import { raw } from "hono/html";
 export const repo = "https://github.com/kixelated/quest";
 
 const fonts =
-	"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Inter:wght@400;600&display=swap";
+	"https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;600&display=swap";
 
 export type User = { name: string };
 
@@ -34,7 +34,7 @@ export function Layout(props: Page & { children: Child }) {
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<title>{title}</title>
 				<meta name="description" content={props.description} />
-				<meta name="theme-color" content="#14100b" />
+				<meta name="theme-color" content="#0a0c11" />
 				<meta property="og:title" content={title} />
 				<meta property="og:description" content={props.description} />
 				<meta property="og:image" content={`${props.origin}/theme/og.png`} />
@@ -77,7 +77,6 @@ export function Layout(props: Page & { children: Child }) {
 				{props.crumbs && <Crumbs crumbs={props.crumbs} />}
 				<main>{props.children}</main>
 				<footer class="wrap site-footer">
-					<Divider />
 					<p>
 						<a href="/">Quest</a> · <a href="/docs">Docs</a> · <a href={repo}>GitHub</a> · MIT or Apache-2.0
 					</p>
@@ -139,26 +138,13 @@ const copyScript = `for (const button of document.querySelectorAll("[data-copy]"
 	});
 }`;
 
-// The ornamental divider: a gold rule broken by a lozenge between two dots.
-export function Divider() {
-	return (
-		<div class="ql-divider" aria-hidden="true">
-			<svg viewBox="0 0 48 16">
-				<circle cx="6" cy="8" r="1.75" fill="currentColor" />
-				<path d="M24 1 L31 8 L24 15 L17 8 Z" fill="currentColor" />
-				<circle cx="42" cy="8" r="1.75" fill="currentColor" />
-			</svg>
-		</div>
-	);
-}
-
 // Status glyphs, drawn like the mark. Colour comes from the marker class.
 export function Bang() {
 	return (
 		<svg class="glyph" viewBox="-10 -22 20 44" aria-hidden="true">
-			<g fill="currentColor" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
-				<path d="M-6.5 -19 H6.5 L3 4 H-3 Z" />
-				<path d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z" />
+			<g fill="currentColor" stroke="#0a0c11" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
+				<path d="M-7 -19 H7 L3.5 4 H-3.5 Z" />
+				<rect x="-5" y="8.5" width="10" height="10" rx="2" />
 			</g>
 		</svg>
 	);
@@ -168,12 +154,16 @@ export function Query() {
 	return (
 		<svg class="glyph" viewBox="-12 -22 24 44" aria-hidden="true">
 			<g stroke-linecap="round" stroke-linejoin="round">
-				<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="#1a1207" stroke-width="9.5" />
+				<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="#0a0c11" stroke-width="9.5" />
 				<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="currentColor" stroke-width="5" />
-				<path
-					d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z"
+				<rect
+					x="-5"
+					y="8.5"
+					width="10"
+					height="10"
+					rx="2"
 					fill="currentColor"
-					stroke="#1a1207"
+					stroke="#0a0c11"
 					stroke-width="2.4"
 					paint-order="stroke"
 				/>
@@ -182,13 +172,12 @@ export function Query() {
 	);
 }
 
-// A gold coin: agent tokens, shown as gold. Display only.
-export function Coin() {
+// A token chip: agent tokens, donated or spent. Display only.
+export function Token() {
 	return (
-		<svg class="glyph coin" viewBox="0 0 20 20" aria-hidden="true">
-			<circle cx="10" cy="10" r="9" fill="#e6c063" stroke="#7a6230" stroke-width="1.5" />
-			<circle cx="10" cy="10" r="5.5" fill="none" stroke="#a5741d" stroke-width="1" />
-			<path d="M10 6.5 L13.5 10 L10 13.5 L6.5 10 Z" fill="#a5741d" />
+		<svg class="glyph token" viewBox="0 0 20 20" aria-hidden="true">
+			<path d="M10 1.5 L17.4 5.75 V14.25 L10 18.5 L2.6 14.25 V5.75 Z" fill="#ffc53d" />
+			<path d="M10 6 L13.5 10 L10 14 L6.5 10 Z" fill="#0a0c11" />
 		</svg>
 	);
 }

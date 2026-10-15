@@ -1,123 +1,105 @@
 /*
- * Quest log theme, "illuminated ledger": palette, type, and status tokens. Dark only.
+ * Quest log theme, "modern game UI": palette, type, and status tokens. Dark only.
  *
  * design/theme.md is canonical. Change it first, then this file.
  *
  * Fonts are open-licensed (SIL Open Font License 1.1). Load them from Google Fonts:
- * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Inter:wght@400;600&display=swap">
+ * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;600&display=swap">
  */
 
 :root {
 	color-scheme: dark;
 
-	/* Surfaces: warm ink */
-	--ql-bg: #14100b;
-	--ql-panel: #1d1711;
-	--ql-raised: #2a2118;
-	--ql-rule: #3d3125;
+	/* Surfaces: cool near-black */
+	--ql-bg: #0a0c11;
+	--ql-panel: #11151d;
+	--ql-raised: #1a202b;
+	--ql-rule: #262e3b;
+	--ql-rule-strong: #3a4557;
 
-	/* Gold leaf */
-	--ql-gold: #c9a14a;
-	--ql-gold-dim: #7a6230;
-	--ql-gold-bright: #e6c063;
+	/* The accent: quest-giver amber, for calls to action and the markers */
+	--ql-accent: #ffc53d;
+	--ql-accent-dim: #8a6a1f;
 
-	/* Text: parchment */
-	--ql-text: #ede1c6;
-	--ql-muted: #b2a487;
-	--ql-link: #9db9e8;
+	/* Text */
+	--ql-text: #e8ecf3;
+	--ql-muted: #97a2b4;
+	--ql-link: #7cc4ff;
 
-	/* Status and size hues */
-	--ql-grey: #a59f95;
-	--ql-green: #5ccf5c;
-	--ql-yellow: #f2d23c;
-	--ql-red: #ff6b60;
-	--ql-purple: #c77dff;
+	/* Status and size hues: the loot-rarity ladder */
+	--ql-grey: #9ba5b4;
+	--ql-green: #4ade80;
+	--ql-blue: #4da3ff;
+	--ql-purple: #b98cff;
+	--ql-orange: #ff9a3c;
 
 	/* Size colours: colour a size through these, not the hues. */
 	--ql-size-xs: var(--ql-grey);
 	--ql-size-s: var(--ql-green);
-	--ql-size-m: var(--ql-yellow);
-	--ql-size-l: var(--ql-red);
-	--ql-size-xl: var(--ql-purple);
+	--ql-size-m: var(--ql-blue);
+	--ql-size-l: var(--ql-purple);
+	--ql-size-xl: var(--ql-orange);
 
 	/* Type */
-	--ql-font-heading: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+	--ql-font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
 	--ql-font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 	--ql-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* A ledger page: ink panel, gold-leaf border with an inner trim, and a double margin rule. */
-.ql-ledger {
+/*
+ * A panel: a raised surface with a hairline border and a short accent tab on
+ * its top edge. Set --ql-tab to recolour the tab, for example to a size colour.
+ */
+.ql-panel {
 	position: relative;
-	background: var(--ql-panel);
+	background: linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 40%), var(--ql-panel);
 	color: var(--ql-text);
 	font-family: var(--ql-font-body);
-	border: 1px solid var(--ql-gold);
-	border-radius: 4px;
-	box-shadow:
-		inset 0 0 0 4px var(--ql-panel),
-		inset 0 0 0 5px var(--ql-gold-dim);
-	padding: 2rem 1.75rem 2rem 3rem;
+	border: 1px solid var(--ql-rule);
+	border-radius: 6px;
+	padding: 1.75rem;
 }
 
-.ql-ledger::before {
+.ql-panel::before {
 	content: "";
 	position: absolute;
-	top: 5px;
-	bottom: 5px;
-	left: 1.75rem;
-	border-left: 3px double var(--ql-gold-dim);
+	top: -1px;
+	left: 1.25rem;
+	width: 2.5rem;
+	height: 2px;
+	border-radius: 0 0 2px 2px;
+	background: var(--ql-tab, var(--ql-accent));
 }
 
-:where(.ql-ledger) :is(h1, h2, h3) {
-	font-family: var(--ql-font-heading);
+:where(.ql-panel) :is(h1, h2, h3) {
+	font-family: var(--ql-font-display);
 	font-weight: 700;
-	color: var(--ql-gold-bright);
-}
-
-/* An illuminated first letter, three lines tall. */
-.ql-dropcap::first-letter {
-	float: left;
-	font-family: var(--ql-font-heading);
-	font-weight: 700;
-	font-size: 3.6em;
-	line-height: 0.8;
-	padding: 0.08em 0.1em 0 0;
-	color: var(--ql-gold-bright);
+	color: var(--ql-text);
 }
 
 /*
- * The ornamental divider: a gold rule broken by a lozenge between two dots.
- * <div class="ql-divider"><svg viewBox="0 0 48 16">dot, lozenge, dot</svg></div>
+ * A label above a heading: small, uppercase, tracked out, in the accent.
+ * <p class="ql-eyebrow">Milestone 0</p>
  */
-.ql-divider {
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
-	color: var(--ql-gold);
-}
-
-.ql-divider::before,
-.ql-divider::after {
-	content: "";
-	flex: 1;
-	border-top: 1px solid var(--ql-gold-dim);
-}
-
-.ql-divider svg {
-	width: 48px;
-	height: 16px;
+.ql-eyebrow {
+	display: block;
+	margin: 0;
+	font-family: var(--ql-font-display);
+	font-size: 0.85rem;
+	font-weight: 600;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	color: var(--ql-accent);
 }
 
 /* Status markers. Always pair the glyph with its label text. */
 .ql-marker {
-	font-family: var(--ql-font-heading);
 	font-weight: 700;
 }
 
 .ql-available,
 .ql-turn-in {
-	color: var(--ql-yellow);
+	color: var(--ql-accent);
 }
 
 .ql-blocked {
@@ -149,18 +131,20 @@
 .ql-size {
 	display: inline-block;
 	min-width: 2.4em;
-	border: 1px solid currentColor;
+	border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
 	border-radius: 3px;
-	padding: 0 0.35em;
-	font-size: 0.8em;
-	font-weight: 600;
+	padding: 0 0.4em;
+	font-family: var(--ql-font-display);
+	font-size: 0.85em;
+	font-weight: 700;
+	letter-spacing: 0.06em;
 	text-align: center;
 	background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
-/* Gold: agent tokens shown as coins. Display only. */
-.ql-gold {
-	color: var(--ql-gold-bright);
+/* Agent tokens, donated or spent. Display only. */
+.ql-tokens {
+	color: var(--ql-accent);
 	font-weight: 600;
 	white-space: nowrap;
 }

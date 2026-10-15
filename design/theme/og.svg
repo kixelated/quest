@@ -2,82 +2,86 @@
 	<title id="title">Quest: a quest log for your repo and your agents</title>
 	<!-- Hand-written social image. Colours and fonts follow design/theme.md; export steps are there too. -->
 	<style>
-		@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&amp;family=Inter:wght@400;600&amp;display=block");
-		.heading { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 700; }
+		@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&amp;family=Inter:wght@400;600&amp;display=block");
+		.display { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700; text-transform: uppercase; }
 		.body { font-family: Inter, "Liberation Sans", sans-serif; }
 		.strong { font-weight: 600; }
 	</style>
 	<defs>
-		<radialGradient id="backdrop" cx="0.5" cy="0" r="0.9">
-			<stop offset="0" stop-color="#2a1f12"/>
-			<stop offset="1" stop-color="#14100b"/>
+		<radialGradient id="glow-amber" cx="0.12" cy="0" r="0.6">
+			<stop offset="0" stop-color="#ffc53d" stop-opacity="0.16"/>
+			<stop offset="1" stop-color="#ffc53d" stop-opacity="0"/>
 		</radialGradient>
-		<linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#33281c"/>
-			<stop offset="1" stop-color="#120e09"/>
+		<radialGradient id="glow-blue" cx="0.92" cy="0.05" r="0.55">
+			<stop offset="0" stop-color="#4da3ff" stop-opacity="0.12"/>
+			<stop offset="1" stop-color="#4da3ff" stop-opacity="0"/>
+		</radialGradient>
+		<pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+			<path d="M48 0 H0 V48" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+		</pattern>
+		<linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#fff"/>
+			<stop offset="1" stop-color="#fff" stop-opacity="0"/>
 		</linearGradient>
-		<linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#fbe9b0"/>
-			<stop offset="0.45" stop-color="#e6c063"/>
-			<stop offset="1" stop-color="#a5741d"/>
-		</linearGradient>
+		<mask id="grid-fade"><rect width="1280" height="640" fill="url(#fade)"/></mask>
 		<!-- Status markers, coloured with the color attribute on each use. -->
-		<g id="bang" fill="currentColor" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
-			<path d="M-6.5 -19 H6.5 L3 4 H-3 Z"/>
-			<path d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z"/>
+		<g id="bang" fill="currentColor" stroke="#0a0c11" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
+			<path d="M-7 -19 H7 L3.5 4 H-3.5 Z"/>
+			<rect x="-5" y="8.5" width="10" height="10" rx="2"/>
 		</g>
 		<g id="query" stroke-linecap="round" stroke-linejoin="round">
-			<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="#1a1207" stroke-width="9.5"/>
+			<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="#0a0c11" stroke-width="9.5"/>
 			<path d="M-8 -9 C-8 -21 8 -21 8 -9 C8 -1 0 -1 0 5" fill="none" stroke="currentColor" stroke-width="5"/>
-			<path d="M0 8 L5.5 13.5 L0 19 L-5.5 13.5 Z" fill="currentColor" stroke="#1a1207" stroke-width="2.4" paint-order="stroke"/>
+			<rect x="-5" y="8.5" width="10" height="10" rx="2" fill="currentColor" stroke="#0a0c11" stroke-width="2.4" paint-order="stroke"/>
 		</g>
 	</defs>
 
-	<rect width="1280" height="640" fill="url(#backdrop)"/>
-
-	<!-- Ledger page: gold-leaf border, inner trim, and a double margin rule -->
-	<rect x="32" y="32" width="1216" height="576" rx="6" fill="#1d1711" stroke="#c9a14a" stroke-width="3"/>
-	<rect x="42" y="42" width="1196" height="556" rx="3" fill="none" stroke="#7a6230" stroke-width="1.5"/>
-	<path d="M70 42 V598 M75 42 V598" stroke="#7a6230" stroke-width="1.5"/>
+	<rect width="1280" height="640" fill="#0a0c11"/>
+	<rect width="1280" height="640" fill="url(#grid)" mask="url(#grid-fade)"/>
+	<rect width="1280" height="640" fill="url(#glow-amber)"/>
+	<rect width="1280" height="640" fill="url(#glow-blue)"/>
 
 	<!-- Mark: a copy of design/theme/logo.svg -->
-	<g transform="translate(104 84) scale(3.1)">
-		<path d="M32 3 L57 9 V29 C57 44 47.5 54 32 61 C16.5 54 7 44 7 29 V9 Z" fill="url(#ink)" stroke="#c9a14a" stroke-width="3" stroke-linejoin="round"/>
-		<path d="M32 8.5 L52 13.3 V29 C52 41 44.5 49 32 55.3 C19.5 49 12 41 12 29 V13.3 Z" fill="none" stroke="#7a6230" stroke-width="1.2" stroke-linejoin="round"/>
-		<g fill="url(#leaf)" stroke="#1a1207" stroke-width="2.4" stroke-linejoin="round" paint-order="stroke">
-			<path d="M24.8 13 H39.2 L35 38.3 H29 Z"/>
-			<path d="M32 41 L37.5 46.5 L32 52 L26.5 46.5 Z"/>
+	<g transform="translate(80 72) scale(1.5)">
+		<rect x="2" y="2" width="60" height="60" rx="14" fill="#ffc53d"/>
+		<g fill="#0a0c11">
+			<path d="M25 11 H39 L35.5 39 H28.5 Z"/>
+			<rect x="27" y="44" width="10" height="10" rx="2"/>
 		</g>
 	</g>
+	<text x="196" y="146" class="display" font-size="64" letter-spacing="4" fill="#e8ecf3">Quest</text>
 
 	<!-- Hook, then substance -->
-	<text x="344" y="196" class="heading" font-size="132" letter-spacing="2" fill="#e6c063">Quest</text>
-	<text x="348" y="262" class="body strong" font-size="36" fill="#ede1c6">A quest log for your repo and your agents</text>
-	<text x="348" y="308" class="body" font-size="26" fill="#b2a487">Readable plans. Explicit dependencies. Reviewable Git changes.</text>
+	<text x="80" y="268" class="display" font-size="88" letter-spacing="1" fill="#e8ecf3">A quest log for your repo</text>
+	<text x="80" y="352" class="display" font-size="88" letter-spacing="1" fill="#e8ecf3">and your agents</text>
+	<text x="82" y="408" class="body" font-size="28" fill="#97a2b4">Readable plans. Explicit dependencies. Reviewable Git changes.</text>
 
-	<!-- Ornamental divider: a gold rule broken by a lozenge between two dots -->
-	<path d="M104 356 H604 M676 356 H1196" stroke="#7a6230" stroke-width="1.5"/>
-	<circle cx="618" cy="356" r="2.6" fill="#c9a14a"/>
-	<path d="M640 345 L651 356 L640 367 L629 356 Z" fill="#c9a14a"/>
-	<circle cx="662" cy="356" r="2.6" fill="#c9a14a"/>
-
-	<!-- Sample entries, using the format terms: ready, in review (an open PR), and blocked -->
-	<rect x="96" y="382" width="1108" height="56" rx="3" fill="#2a2118"/>
-	<use href="#bang" x="126" y="410" color="#f2d23c"/>
-	<rect x="158" y="395" width="48" height="30" rx="4" fill="#5ccf5c" fill-opacity="0.14" stroke="#5ccf5c" stroke-width="1.5"/>
-	<text x="182" y="417" class="body strong" font-size="20" text-anchor="middle" fill="#5ccf5c">S</text>
-	<text x="226" y="420" class="body strong" font-size="30" fill="#ede1c6">Add the CSV endpoint</text>
-	<text x="1184" y="419" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">Ready</text>
-
-	<use href="#query" x="126" y="472" color="#f2d23c"/>
-	<rect x="158" y="457" width="48" height="30" rx="4" fill="#ff6b60" fill-opacity="0.14" stroke="#ff6b60" stroke-width="1.5"/>
-	<text x="182" y="479" class="body strong" font-size="20" text-anchor="middle" fill="#ff6b60">L</text>
-	<text x="226" y="482" class="body strong" font-size="30" fill="#ede1c6">Build the quest board</text>
-	<text x="1184" y="481" class="body strong" font-size="24" text-anchor="end" fill="#f2d23c">In review</text>
-
-	<use href="#bang" x="126" y="534" color="#a59f95"/>
-	<rect x="158" y="519" width="48" height="30" rx="4" fill="#f2d23c" fill-opacity="0.14" stroke="#f2d23c" stroke-width="1.5"/>
-	<text x="182" y="541" class="body strong" font-size="20" text-anchor="middle" fill="#f2d23c">M</text>
-	<text x="226" y="544" class="body strong" font-size="30" fill="#b2a487">Add a CSV download button</text>
-	<text x="1184" y="543" class="body" font-size="24" text-anchor="end" fill="#a59f95">Blocked by CSV endpoint</text>
+	<!-- Sample entries, edged in their size colour, using the format terms: ready, in review, and blocked -->
+	<g transform="translate(80 452)">
+		<rect width="360" height="108" rx="6" fill="#11151d" stroke="#262e3b"/>
+		<rect width="3" height="108" fill="#4ade80"/>
+		<use href="#bang" x="34" y="44" color="#ffc53d"/>
+		<text x="58" y="48" class="body strong" font-size="24" fill="#e8ecf3">Add the CSV endpoint</text>
+		<rect x="58" y="66" width="40" height="26" rx="3" fill="#4ade80" fill-opacity="0.14" stroke="#4ade80" stroke-opacity="0.55"/>
+		<text x="78" y="86" class="display" font-size="19" text-anchor="middle" fill="#4ade80">S</text>
+		<text x="112" y="86" class="body strong" font-size="20" fill="#ffc53d">Ready</text>
+	</g>
+	<g transform="translate(460 452)">
+		<rect width="360" height="108" rx="6" fill="#11151d" stroke="#262e3b"/>
+		<rect width="3" height="108" fill="#b98cff"/>
+		<use href="#query" x="34" y="44" color="#ffc53d"/>
+		<text x="58" y="48" class="body strong" font-size="24" fill="#e8ecf3">Build the quest board</text>
+		<rect x="58" y="66" width="40" height="26" rx="3" fill="#b98cff" fill-opacity="0.14" stroke="#b98cff" stroke-opacity="0.55"/>
+		<text x="78" y="86" class="display" font-size="19" text-anchor="middle" fill="#b98cff">L</text>
+		<text x="112" y="86" class="body strong" font-size="20" fill="#ffc53d">In review</text>
+	</g>
+	<g transform="translate(840 452)">
+		<rect width="360" height="108" rx="6" fill="#11151d" stroke="#262e3b"/>
+		<rect width="3" height="108" fill="#4da3ff"/>
+		<use href="#bang" x="34" y="44" color="#9ba5b4"/>
+		<text x="58" y="48" class="body strong" font-size="24" fill="#97a2b4">Add a download button</text>
+		<rect x="58" y="66" width="40" height="26" rx="3" fill="#4da3ff" fill-opacity="0.14" stroke="#4da3ff" stroke-opacity="0.55"/>
+		<text x="78" y="86" class="display" font-size="19" text-anchor="middle" fill="#4da3ff">M</text>
+		<text x="112" y="86" class="body" font-size="20" fill="#9ba5b4">Blocked</text>
+	</g>
 </svg>

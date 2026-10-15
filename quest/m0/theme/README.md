@@ -23,8 +23,8 @@ become ready, the Requires status and filter become blocked, Accepted by
 becomes active (an authorized live job), the Requires heading becomes `Required`, Ready to turn in
 becomes in review, Quest complete becomes complete, and Objectives and Rewards
 become `Goal` and `Closes`. It rewrites `design/theme.md`'s glossary and its
-marker and palette notes to match, keeping only the flavour rows (the party,
-gold, Offer gold). The social image already uses the format terms.
+marker and palette notes to match, keeping only the flavour rows (tokens,
+Offer tokens). The social image already uses the format terms.
 Decided 2026-10-07: the pass also pluralises `quest check`'s terminal
 summary ("1 documents checked") and keeps the piped `quest: N documents ok`
 contract unchanged.
@@ -37,10 +37,21 @@ a cold font cache, so re-run the export if the fonts look wrong.
 
 ## Plan
 
-Decided while planning on 2026-10-05:
+Decided while planning on 2026-10-05, amended 2026-10-14 where noted:
+
+- Decided 2026-10-14: a modern video game look replaces the illuminated
+  ledger. Cool near-black surfaces, Barlow Condensed display type, one amber
+  accent, clipped-corner buttons, and panels with an accent tab replace the
+  serif, gold leaf, ornaments, and drop caps. Sizes follow the loot-rarity
+  ladder: XS grey, S green, M blue, L purple, XL orange (SGR `90`, `32`,
+  `34`, `35`, `33`). The logo is a flat `!` on an amber rounded square. The
+  copy keeps a light flavour: quest, quest log, markers, and size colours
+  stay; gold becomes tokens and the party goes. The user picked this over a
+  plain developer-tool look and a terminal look, as less cringe and more
+  modern.
 
 - Original homage, not a WoW parody. Use only genre conventions (`!` and `?`
-  markers, quest log windows, gold borders, size colours). No Blizzard
+  markers, quest log windows, size colours). No Blizzard
   names, art, fonts, icons, or screenshots.
 - Flavour over the contract. The format's terms (quest, epic, milestone,
   `Required`, `[XS]`-`[XL]`) are the contract agents and `quest check` rely
@@ -57,8 +68,8 @@ Decided while planning on 2026-10-05:
 - Decided 2026-10-07: every surface (site, board, map, and CLI) names format
   concepts with the format's own terms: ready, blocked, and `Required`
   (claimed dropped 2026-10-07 with claims). There are no display aliases (Available, Requires, Accepted by,
-  Objectives, Rewards). Markers, size colours, the voice, and the flavour
-  (gold, the party) stay. The user weighed RPG replacements (unlocked/locked,
+  Objectives, Rewards). Markers, size colours, and the voice
+  stay. The user weighed RPG replacements (unlocked/locked,
   accepted, Objective/Prerequisites) and kept the current terms. Renaming
   `## Required` to `## Requires` was considered and dropped, so `Required`
   stays.
@@ -71,33 +82,29 @@ Decided while planning on 2026-10-05:
 - Decided 2026-10-07: README.md, `docs/getting-started.md`, and
   `cloudflare/README.md` use the format's own terms (quest, epic,
   milestone, ready, blocked, `Required`, `Goal`) with no display-name
-  aliases. Their voice, hook, logo, and flavour (the party, gold) stay. The
+  aliases. Their voice, hook, and logo stay. The
   final pass aligns `design/theme.md`, which still lists copy among the glossary
   users.
 - `design/theme.md` is the human source of truth for the glossary, markers,
   colours, palette, type, and mark (`design/theme/`). The CLI and the Worker
   each keep a small constant table that cites it. The roughly ten strings
   are cheap to duplicate, and this keeps presentation out of the shared core.
-- The look is dark only. There is no light mode. On 2026-10-06 the
-  "illuminated ledger" direction (warm ink, parchment text, gold leaf,
-  Cormorant Garamond headings) replaced the slate window and Cinzel. It has
-  landed in `design/theme.md` with the site's shared layout in
-  `cloudflare/src/layout.tsx`.
-- Lean into the RPG voice but stay semi-professional (decided 2026-10-06).
-  Tokens are gold coins, visually ("Offer gold"), as display only.
+- The look is dark only. There is no light mode. The 2026-10-06
+  "illuminated ledger" direction was replaced on 2026-10-14 (above).
+- Tokens are called tokens ("Offer tokens"), shown with an amber token chip,
+  as display only (amended 2026-10-14; was gold coins).
 - The site on the Worker (home, docs, and the hosted app under one shell)
   replaces launch.md's earlier "no website" boundary.
 - Decided 2026-10-07: the size scale stays `[XS]`-`[XL]`, and quests are
   coloured by size on every surface (site, board, map, and CLI).
   `design/theme.md` calls these size and size colours, not difficulty, so
   there is a single name.
-- Decided 2026-10-07: the size colours are XS grey, S green, M yellow, L red,
-  and XL purple, replacing L orange and XL red. Every size now has a named
-  ANSI colour (SGR `90`, `32`, `33`, `31`, `35`), so the CLI needs no
-  256-colour code or colour-depth detection. The web hues pass WCAG AA on all
-  three ink surfaces, and components use the `--ql-size-*` tokens, so a scale
-  change is a token change in `design/theme/theme.css`.
-- Decided 2026-10-07: XL quests have no "Elite" tag. Purple XL and its size
+- Decided 2026-10-07: every size has a named ANSI colour, so the CLI needs no
+  256-colour code or colour-depth detection, and components use the
+  `--ql-size-*` tokens, so a scale change is a token change in
+  `design/theme/theme.css`. The hues became the rarity ladder on 2026-10-14
+  (above).
+- Decided 2026-10-07: XL quests have no "Elite" tag. XL's colour and its size
   label already stand out.
 - Decided 2026-10-07 on the map's PR (kixelated/quest#78): the map already
   uses these terms. A blocked waypoint's tooltip lists what it needs under

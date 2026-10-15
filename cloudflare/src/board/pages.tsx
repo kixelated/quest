@@ -1,7 +1,7 @@
 import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 import { type Doc, entries, rooted } from "quest/core";
-import { Coin, type Crumb, Difficulty, Divider, Marker, Paste, SignIn, type User } from "../layout";
+import { type Crumb, Difficulty, Marker, Paste, SignIn, Token, type User } from "../layout";
 import { render } from "./markdown";
 import {
 	type Board,
@@ -103,7 +103,7 @@ function EpicRow(props: { epic: Group }) {
 		<li class="epic">
 			<div class="epic-head">
 				<h3>
-					<span class="eyebrow">Epic</span>
+					<span class="ql-eyebrow">Epic</span>
 					<a href={epic.href}>{epic.title}</a>
 				</h3>
 				<span class="muted epic-count">
@@ -119,9 +119,9 @@ function MilestoneSection(props: { milestone: Milestone; items: Item[] }) {
 	const { milestone } = props;
 	const name = milestone.number === "" ? milestone.title : `Milestone ${milestone.number}`;
 	return (
-		<section class="ql-ledger milestone" id={milestoneAnchor(milestone)}>
+		<section class="ql-panel milestone" id={milestoneAnchor(milestone)}>
 			<header class="milestone-head">
-				{milestone.number !== "" && <p class="eyebrow">{name}</p>}
+				{milestone.number !== "" && <p class="ql-eyebrow">{name}</p>}
 				<h2>
 					<a href={milestone.href}>{milestone.title}</a>
 				</h2>
@@ -194,7 +194,7 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 	return (
 		<div class="wrap board">
 			<header class="board-head">
-				<p class="eyebrow">{project.title}</p>
+				<p class="ql-eyebrow">{project.title}</p>
 				<h1>Quest log</h1>
 				{board.summary && <p class="lede">{board.summary}</p>}
 				<Tally board={board} show={show} />
@@ -214,14 +214,14 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 				<MilestoneSection milestone={milestone} items={items} />
 			))}
 			{milestones.length === 0 && (
-				<p class="ql-ledger muted">
+				<p class="ql-panel muted">
 					No quests are {SHOWN.find(([kind]) => kind === show)![1].toLowerCase()} right now.{" "}
 					<a href={`/repos/${project.name}`}>Show every quest</a>.
 				</p>
 			)}
 
 			<div class="board-foot">
-				<section class="ql-ledger" aria-labelledby="finished-title">
+				<section class="ql-panel" aria-labelledby="finished-title">
 					<h2 id="finished-title">Recently completed</h2>
 					{recent.length > 0 ? (
 						<FinishedList finished={recent} />
@@ -229,7 +229,7 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 						<p class="muted">No finished quests in this history yet.</p>
 					)}
 				</section>
-				<section class="ql-ledger" aria-labelledby="issues-title">
+				<section class="ql-panel" aria-labelledby="issues-title">
 					<h2 id="issues-title">Open issues</h2>
 					{project.issues.length > 0 ? (
 						<ul>
@@ -338,7 +338,7 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 				<p class="muted">Paste this into Claude Code or Codex in your checkout:</p>
 				<Paste id="start" text={`/quest-start ${quest.path}`} />
 			</Panel>
-			<Panel title="Offer gold">
+			<Panel title="Offer tokens">
 				<p class="muted">
 					Fund this quest with your own agent tokens, and an agent runs it on your fork. The result arrives as
 					a change for review.
@@ -346,13 +346,13 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 				{props.user ? (
 					<>
 						<button class="button primary" type="button" disabled>
-							<Coin /> Offer gold
+							<Token /> Offer tokens
 						</button>
 						<p class="muted note-small">Hosted runs open soon.</p>
 					</>
 				) : (
 					<SignIn path={props.path} primary>
-						<Coin /> Sign in to offer gold
+						<Token /> Sign in to offer tokens
 					</SignIn>
 				)}
 			</Panel>
@@ -362,7 +362,7 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 
 function Panel(props: { title: string; children: Child }) {
 	return (
-		<section class="ql-ledger panel">
+		<section class="ql-panel panel">
 			<h2>{props.title}</h2>
 			{props.children}
 		</section>
@@ -401,7 +401,7 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 				)}
 				{group && <ProgressBar progress={group.progress} name={group.title} />}
 			</header>
-			<article class="ql-ledger quest-page">
+			<article class="ql-panel quest-page">
 				{sections.map((section) => {
 					if (section.heading === "Required") {
 						return (
@@ -441,7 +441,6 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 					</Panel>
 				)}
 				<section class="panel-links">
-					<Divider />
 					<p>
 						<a href={`/repos/${project.name}`}>Back to the quest log</a>
 						{markdown && (
