@@ -192,19 +192,23 @@ export class SystemdGate implements GateBackend {
 	async wait(slot: number, signal: AbortSignal): Promise<void> {
 		const result = await execute(
 			"systemctl",
-			["--user", "show", "--property=ControlGroup", "--value", unit(slot)],
+			["--user", "show", "--property=FragmentPath", "--property=ControlGroup", unit(slot)],
 			signal,
 		);
 		signal.throwIfAborted();
-		if (result.code !== 0) {
-			if (result.stderr.includes("not found") || result.stderr.includes("not loaded")) return;
-			throw new Error(`gate wait failed: ${result.stderr.trim() || result.code}`);
-		}
-		const cgroup = result.stdout.trim();
-		if (!cgroup)
-			throw new Error(
-				"gate scope has no cgroup; remove an obsolete manually configured quest-gate unit before continuing",
-			);
+		if (result.code !== 0) throw new Error(`gate wait failed: ${result.stderr.trim() || result.code}`);
+		const properties = new Map(
+			result.stdout
+				.trim()
+				.split("\n")
+				.map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+		);
+		// A unit file would make every transient claim on this slot fail.
+		if (properties.get("FragmentPath"))
+			throw new Error(`gate slot is blocked by ${properties.get("FragmentPath")}; remove that unit file`);
+		// The occupant already exited (or awaits collection): retry admission.
+		const cgroup = properties.get("ControlGroup");
+		if (!cgroup) return;
 		await new Promise<void>((resolve, reject) => {
 			let watcher: ReturnType<typeof watch> | undefined;
 			const finish = (error?: unknown) => {

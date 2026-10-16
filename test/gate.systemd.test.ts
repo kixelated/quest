@@ -189,6 +189,11 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 		}
 	});
 
+	test("waiting on a slot that was already collected returns to admission", async () => {
+		// The occupying scope can exit between a lost claim and the wait.
+		await expect(new SystemdGate().wait(999, signal())).resolves.toBeUndefined();
+	});
+
 	test("cancellation kills the exact owned cgroup", async () => {
 		const spawned = child(cli, ["gate", "bun", "-e", "console.log('ready'); setInterval(() => {}, 1000);"]);
 		await line(spawned.process, "ready");

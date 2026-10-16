@@ -59,7 +59,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Run a command in a user systemd scope; nested calls share their existing slot.\n\n" +
 				'Reads ~/.config/quest/gate.json: {"jobs": 2}; defaults to the CPU count. ' +
-				"All callers must use the same host configuration. Unsupported platforms fail explicitly.",
+				"Unsupported platforms fail explicitly.",
 		)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")

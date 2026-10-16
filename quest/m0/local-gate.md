@@ -33,24 +33,26 @@ remain useful without multiplying full-machine builds and test stacks.
   invocation, configurable admission, nested scope reuse, exact cgroup-handle
   cancellation, and event-driven contention waiting. Kernel scopes retain slots
   through supervisor crashes and detached descendants.
-- The quest remains unfinished. Automatic repository entrypoint adoption needs
-  a platform policy: recommended next step is explicit Linux support first,
-  retaining a clear unsupported error on macOS and Windows until native ownership
-  backends are justified. Do not install an unconditional gate in cross-platform
-  entrypoints or silently run an unsupported gate ungated.
-- The pinned Bun exposes `--no-orphans`, but its best-effort registration and
-  bounded PID-tree walks need further validation before relying on it for exact
-  ownership. Windows ownership can use native Job Objects; portable Node
-  process groups do not provide the required crash and descendant guarantees. A broader backend choice
-  and its packaging remain open. No native helper is added in this draft.
-- A 10-sample local bundled-CLI probe measured median startup of 35.5 ms for
-  `--version` and 72.5 ms for a gated `/bin/true` (about 37 ms additional).
-  This is an admission-cost probe on the current loaded host, not a whole-machine
-  responsiveness result. Representative build/test contention remains unmeasured.
-- Shared configuration must remain consistent while slots are active. Safe
-  configuration changes across active callers and representative build/test
-  contention measurements remain unfinished. Fairness is not promised by this
-  simple admission implementation.
+- Decided 2026-10-15 (user): gate checks and CI-like suites on host load, not
+  agents. The agent-level load-average rule was removed from the spawn and
+  complete skills.
+- Configuration changes are safe while commands run: each admission reads the
+  limit when it starts waiting, and commands in higher slots finish undisturbed
+  after the limit is lowered.
+- Open: whether admission uses fixed per-user slots, the host load average
+  (which includes other users and sessions), or both. The systemd ownership
+  backend is only needed for slots; [Recoverable worktrees](/quest/m0/worktree.md)
+  needs the same exact descendant ownership and should reuse it either way.
+- Open: the platform policy for automatic entrypoint adoption (`just check`,
+  `just test`). Explicit Linux support is recommended first, keeping a clear
+  unsupported error on macOS and Windows until native backends are justified.
+  Do not silently run an unsupported gate ungated. The pinned Bun's
+  `--no-orphans` does not establish exact ownership by itself (best-effort
+  registration, bounded PID-tree walks); Windows could use Job Objects.
+- Unfinished: representative build/test contention measurements, once the
+  admission policy and adopted entrypoints are settled. A 10-sample probe
+  measured about 37 ms of admission overhead for a gated `/bin/true`.
+  Fairness is not promised.
 
 ## Related
 

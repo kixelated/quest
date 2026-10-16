@@ -190,10 +190,11 @@ platform. Repository entrypoints do not invoke this preview automatically yet.
 
 All repositories and worktrees belonging to a user share the same slots. The
 limit defaults to the available CPU count; set `jobs` in
-`~/.config/quest/gate.json` to change it, for example `{"jobs": 2}`. Use the same
-host configuration for all callers, and change it only when gated commands are
-idle. A nested invocation shares its existing kernel scope. Internal compiler
-or test worker parallelism remains the command's responsibility.
+`~/.config/quest/gate.json` to change it, for example `{"jobs": 2}`. Each
+admission reads the file when it starts waiting; after lowering the limit,
+commands already running in higher slots finish undisturbed. A nested invocation
+shares its existing kernel scope. Internal compiler or test worker parallelism
+remains the command's responsibility.
 
 Arguments, working directory, environment and terminal streams pass through to
 the executable. Waiting happens before it starts. Cancellation kills its exact

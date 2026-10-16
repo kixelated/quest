@@ -26,7 +26,6 @@ Each sub-agent blocks on its own waits and reports back only when done or blocke
 For GitHub review or merge activity, it uses `quest wait` and resumes with the
 returned cursor as described by `quest skill merge`, rather than polling GitHub.
 Limit the number of active agents to the CPU core count.
-Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
 Tell each merge sub-agent that you watch its merge queue, so it reports once
 auto-merge is enabled. Wait on each such PR with `quest wait` until it merges.
