@@ -198,6 +198,53 @@ There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting.
 
+## Recoverable local checkouts
+
+The experimental `quest worktree` commands reserve disk across this user's
+repositories and preserve private recovery data outside disposable checkouts.
+They only operate on Git worktrees they create; use the owning application for
+Codex, Claude, or other managed checkouts. Foreground process supervision and
+crash reconciliation remain unfinished. Do not use these commands to supervise
+active agents or commands, and stop all work before taking a checkpoint or
+releasing its checkout.
+
+Set a shared capacity and an explicit reservation in bytes, including the
+checkout, expected build growth, and recovery history. Measure representative
+jobs before choosing the budget; `status` reports allocated and retained bytes.
+Reservations serialize creators and account for concurrent expected growth.
+They do not enforce filesystem quotas against arbitrary external writers.
+
+```sh
+quest worktree capacity 20000000000
+quest worktree create example --reserve 3000000000 --ref HEAD
+quest worktree status
+quest worktree checkpoint example --notes "Implementing the parser" --check "unit tests not run"
+quest worktree release example --notes "Awaiting review" --check "just check passed" --keep .env --scratch node_modules dist
+quest worktree restore example
+```
+
+Creation prints JSON with the ID and detached checkout path under `.worktrees/`.
+Release always takes a fresh checkpoint. Tracked working files, the staged
+index, reachable Git history, and initialized submodules' local history are
+preserved. Untracked and ignored files require explicit `--keep` or `--scratch`
+classification before release; source cannot be declared scratch. `--keep`
+never pushes or publishes its contents. Checkpoints record notes and check
+results without running tests or claiming that validation passed.
+
+Recovery lives in `$QUEST_WORKTREE_HOME`, or
+`$XDG_STATE_HOME/quest/worktrees` (default `~/.local/state/quest/worktrees`). It
+must be outside the disposable checkout and on the same filesystem for disk
+admission. Checkpoint bytes remain charged after checkout removal. There is no
+automatic recovery-data deletion or branch deletion, including after a squash
+merge. Restore leaves the main checkout detached, preserving existing branches.
+A failed creation, restoration, or removal remains charged and visible in
+`status`. Run `restore` again to retry an interrupted restoration from its
+checkpoint, or `release` to finish an interrupted removal or abandon an
+interrupted creation or restoration; neither checkpoints the partial checkout.
+No live lock is stolen: after a crash, confirm the registry lock's owner has
+exited before removing it. This initial interface intentionally refuses unknown
+or changed checkout ownership.
+
 ## Work with your agents
 
 Open this repository in Claude Code or Codex. The binary carries the skills;
