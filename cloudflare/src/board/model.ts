@@ -10,7 +10,12 @@ import type { Change, Completed, Project } from "./project";
  * A quest's most advanced state, per design/theme.md: Ready to turn in, then
  * Available or Requires.
  */
-export type Status = { kind: "turn-in"; change: Change } | { kind: "available" } | { kind: "blocked"; requires: Ref[] };
+export type Status =
+	| { kind: "turn-in"; change: Change }
+	| { kind: "available" }
+	| { kind: "pending" }
+	| { kind: "accepted" }
+	| { kind: "blocked"; requires: Ref[] };
 
 /** A link to another quest, or a blocker's own words when it names none. */
 export type Ref = { title: string; href: string | null };
@@ -64,10 +69,14 @@ export function title(text: string): { size: Size | null; name: string } {
  * A quest's page: its path without `.md`, like its branch name. A README is
  * its directory's page.
  */
+export function boardHref(project: Project): string {
+	return project.href ?? `/repos/${project.name}`;
+}
+
 export function questHref(project: Project, path: string): string {
-	if (path === ROOT) return `/repos/${project.name}`;
+	if (path === ROOT) return boardHref(project);
 	const page = path.replace(/\/README\.md$/, "").replace(/\.md$/, "");
-	return `/repos/${project.name}/${encodePath(page)}`;
+	return `${boardHref(project)}/${encodePath(page)}`;
 }
 
 /**
@@ -114,6 +123,9 @@ export function readBoard(project: Project): Board {
 	const docs = new Map(parsed.map((doc) => [doc.path, doc]));
 	const contents = new Map(sorted.map(({ path, content }) => [path, content]));
 	const open = new Set(ready(parsed));
+	// Observations narrow the tree's ready quests; until they are complete, an
+	// unseen change or claim may already occupy one.
+	const free = project.available === undefined ? open : new Set(project.available ?? []);
 	const changes = new Map(project.changes.map((change) => [change.quest, change]));
 
 	const name = (path: string) => {
@@ -124,7 +136,9 @@ export function readBoard(project: Project): Board {
 	const status = (doc: Doc): Status => {
 		const change = changes.get(doc.path);
 		if (change) return { kind: "turn-in", change };
-		if (open.has(doc.path)) return { kind: "available" };
+		if (project.claims?.includes(doc.path)) return { kind: "accepted" };
+		if (free.has(doc.path)) return { kind: "available" };
+		if (open.has(doc.path)) return { kind: "pending" };
 		const requires = blockers(parsed, doc).map((blocker) =>
 			blocker.path === null
 				? { title: blocker.text, href: null }
@@ -214,7 +228,7 @@ export function readBoard(project: Project): Board {
 	}
 
 	const all = milestones.flatMap((milestone) => flatten(milestone.items));
-	const counts = { "turn-in": 0, available: 0, blocked: 0 };
+	const counts = { "turn-in": 0, available: 0, pending: 0, blocked: 0, accepted: 0 };
 	for (const q of all) counts[q.status.kind]++;
 
 	const milestoneOf = (path: string) => milestones.find((c) => c.number !== "" && path.startsWith(`${dir(c.path)}/`));

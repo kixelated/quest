@@ -42,5 +42,4 @@ or reconnecting preserves the current question and submitted answers.
 
 ## Required
 
-- [Project state](/quest/m0/kix/repository.md) - issues, PRs, quests, and notification events
 - [Job coordination](/quest/m0/kix/jobs.md) - durable questions and authorized answers
