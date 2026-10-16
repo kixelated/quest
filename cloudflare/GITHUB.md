@@ -165,7 +165,9 @@ navigation and never confer authority. Any current maintainer can select an
 already enrolled repository by name and reach pause/disconnect even if it has
 become private, archived, or Quest-invalid. The enrolled-project lookup proves
 current identity and authority independently of the failing preview; it does
-not depend on being the original enroller. Future job coordination must recheck
+not depend on being the original enroller. It matches enrollment by the durable
+GitHub repository ID, and refreshes the stored owner/name after authority is
+verified, so selecting a renamed repository recovers the same stop controls. Future job coordination must recheck
 this state and current provider eligibility before launching new work.
 
 Contributions require a public repository whose GitHub-detected SPDX license

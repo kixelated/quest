@@ -30,6 +30,7 @@ const documents = [
 function github(
 	options: {
 		role?: string;
+		repositoryName?: string;
 		account?: number;
 		private?: boolean;
 		archived?: boolean;
@@ -56,6 +57,8 @@ function github(
 		onLicenseRead?: () => void;
 	} = {},
 ) {
+	const repositoryName = options.repositoryName ?? repo.name;
+	const repositoryBase = `/repos/${repo.owner}/${repositoryName}`;
 	const snapshot = (options.documents ?? documents).map((doc, i) => ({
 		...doc,
 		content: options.invalid && i === 1 ? "# Bad quest" : doc.content,
@@ -107,7 +110,7 @@ function github(
 			);
 		if (path.endsWith("/access_tokens")) return Response.json({ token: "installation-token" });
 		if (path === "/installation/token") return new Response(null, { status: 204 });
-		if (path === "/repos/upstream/project") {
+		if (path === repositoryBase) {
 			repositoryReads++;
 			const detected =
 				repositoryReads > 1 && options.changedLicense !== undefined
@@ -117,6 +120,7 @@ function github(
 						: options.license;
 			return Response.json({
 				...repo,
+				name: repositoryName,
 				id: options.id ?? repo.id,
 				owner: { login: repo.owner },
 				private: options.private ?? false,
@@ -136,9 +140,9 @@ function github(
 				role_name: options.role ?? "maintain",
 			});
 		}
-		if (path === "/repos/upstream/project/commits/trunk")
+		if (path === `${repositoryBase}/commits/trunk`)
 			return Response.json({ sha: commit, commit: { tree: { sha: tree } } });
-		if (path === `/repos/upstream/project/git/trees/${tree}`)
+		if (path === `${repositoryBase}/git/trees/${tree}`)
 			return Response.json({
 				truncated: options.truncated ?? false,
 				tree: options.noQuests
@@ -160,7 +164,7 @@ function github(
 		}
 		if (path === "/graphql") {
 			const body = calls.at(-1)!.body;
-			expect(body.variables).toEqual({ owner: repo.owner, name: repo.name });
+			expect(body.variables).toEqual({ owner: repo.owner, name: repositoryName });
 			const blobs = Object.fromEntries(
 				[...body.query.matchAll(/(q\d+): object\(oid: "([a-f0-9]{40})"\)/g)].map(([, alias, oid]) => {
 					const doc = snapshot.find((doc) => blobOid(doc.content) === oid);
@@ -438,44 +442,48 @@ describe("project enrollment", () => {
 });
 
 describe("project setup routes", () => {
-	it.each([{ private: true }, { archived: true }, { invalid: true }])(
-		"lets a replacement maintainer reach stop controls when preview fails: %j",
-		async (options) => {
-			await github().service.setContributions(repo, "enrollment-test", "enabled");
-			const who = identity("github");
-			const { session } = await oauth(who);
-			const account = await env.DB.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
-				.bind(who.id)
-				.first<{ userId: string }>();
-			expect(account!.userId).not.toBe("enrollment-test");
-			expect(await github().service.projects(account!.userId)).toEqual([]);
-			const { request } = github({ ...options, account: Number(who.id) });
-			vi.spyOn(globalThis, "fetch").mockImplementation(request as typeof fetch);
-			const response = await app.request(
-				`${origin}/projects/github/upstream/project`,
-				{ headers: { Cookie: session! } },
+	it.each([
+		{ private: true, repositoryName: repo.name },
+		{ archived: true, repositoryName: repo.name },
+		{ invalid: true, repositoryName: repo.name },
+		{ private: true, repositoryName: "renamed" },
+		{ archived: true, repositoryName: "renamed" },
+		{ invalid: true, repositoryName: "renamed" },
+	])("lets a replacement maintainer reach stop controls when preview fails: %j", async (options) => {
+		await github().service.setContributions(repo, "enrollment-test", "enabled");
+		const who = identity("github");
+		const { session } = await oauth(who);
+		const account = await env.DB.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
+			.bind(who.id)
+			.first<{ userId: string }>();
+		expect(account!.userId).not.toBe("enrollment-test");
+		expect(await github().service.projects(account!.userId)).toEqual([]);
+		const { request } = github({ ...options, account: Number(who.id) });
+		const route = `${origin}/projects/github/upstream/${options.repositoryName}`;
+		vi.spyOn(globalThis, "fetch").mockImplementation(request as typeof fetch);
+		const response = await app.request(route, { headers: { Cookie: session! } }, testEnv);
+		expect(response.status).toBe(403);
+		const html = await response.text();
+		expect(html).toContain('name="id" value="10"');
+		expect(html).toContain('name="state" value="paused"');
+		expect(html).toContain('name="state" value="disconnected"');
+		expect(await env.DB.prepare("SELECT name FROM github_projects WHERE id=10").first()).toEqual({
+			name: options.repositoryName,
+		});
+		for (const next of ["paused", "disconnected"]) {
+			const stopped = await app.request(
+				route,
+				{
+					method: "POST",
+					headers: { Cookie: session!, Origin: origin },
+					body: new URLSearchParams({ id: "10", state: next }),
+				},
 				testEnv,
 			);
-			expect(response.status).toBe(403);
-			const html = await response.text();
-			expect(html).toContain('name="id" value="10"');
-			expect(html).toContain('name="state" value="paused"');
-			expect(html).toContain('name="state" value="disconnected"');
-			for (const next of ["paused", "disconnected"]) {
-				const stopped = await app.request(
-					`${origin}/projects/github/upstream/project`,
-					{
-						method: "POST",
-						headers: { Cookie: session!, Origin: origin },
-						body: new URLSearchParams({ id: "10", state: next }),
-					},
-					testEnv,
-				);
-				expect(stopped.status).toBe(303);
-			}
-			expect(await state()).toBeNull();
-		},
-	);
+			expect(stopped.status).toBe(303);
+		}
+		expect(await state()).toBeNull();
+	});
 
 	it("does not expose enrolled stop controls or accept their forms without current authority", async () => {
 		await github().service.setContributions(repo, "enrollment-test", "enabled");

@@ -287,14 +287,23 @@ export class GitHubService {
 
 	/** Let any current maintainer reach stop controls without a valid preview. */
 	async enrolledProject(owner: string, repository: string, userId: string): Promise<Enrollment | null> {
-		if (!name(owner) || !name(repository)) throw new GitHubError("Invalid repository");
-		const enrolled = await this.#env.DB.prepare(
-			"SELECT id,owner,name,state FROM github_projects WHERE owner=? COLLATE NOCASE AND name=? COLLATE NOCASE",
-		)
-			.bind(owner, repository)
-			.first<Enrollment>();
-		if (!enrolled) return null;
-		return this.#authorized(enrolled, userId, {}, async () => enrolled, true);
+		return this.#withInstallation({ owner, name: repository }, {}, async (token, installation) => {
+			const current = await this.#api<Repository>(token, `/repos/${owner}/${repository}`);
+			const repo = { id: current.id, owner: current.owner.login, name: current.name };
+			repositoryPath(repo);
+			const enrolled = await this.#env.DB.prepare("SELECT state FROM github_projects WHERE id=?")
+				.bind(repo.id)
+				.first<{ state: ContributionState }>();
+			if (!enrolled) return null;
+			await this.#maintainer(token, repo, userId);
+			await this.#gate(installation);
+			// Names are navigation metadata, not identity. A rename must not hide
+			// an existing enrollment from a current maintainer's stop controls.
+			await this.#env.DB.prepare("UPDATE github_projects SET owner=?,name=? WHERE id=?")
+				.bind(repo.owner, repo.name, repo.id)
+				.run();
+			return { ...repo, state: enrolled.state };
+		});
 	}
 
 	async #preview(
