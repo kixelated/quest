@@ -49,6 +49,7 @@ async function state() {
 beforeEach(async () => {
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM github_deliveries"),
+		env.DB.prepare("DELETE FROM github_projects"),
 		env.DB.prepare("DELETE FROM github_installations"),
 		env.DB.prepare(
 			"INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('app-test','Tester','app-test@example.com',1,0,0)",
@@ -155,6 +156,55 @@ describe("signed GitHub webhooks", () => {
 		});
 		expect(await state()).toBeNull();
 		expect((await delivery("unknown", {})).status).toBe(202);
+	});
+	it("durably coalesces entity notifications across deliveries, updates, and replay after retention", async () => {
+		await env.DB.prepare(
+			"INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(10,'upstream','project',5,'enabled','app-test',0)",
+		).run();
+		const payload = {
+			installation: { id: 5 },
+			repository: { id: 10 },
+			action: "opened",
+			pull_request: { id: 200, number: 2, title: "Untrusted", body: "Never retain this" },
+		};
+		const id = crypto.randomUUID();
+		const responses = await Promise.all([
+			delivery("pull_request", payload, id),
+			delivery("pull_request", payload, id),
+		]);
+		expect(responses.every((r) => r.ok)).toBe(true);
+		await delivery("pull_request", { ...payload, action: "synchronize" });
+		await env.DB.prepare("DELETE FROM github_deliveries").run();
+		await delivery("pull_request", payload, id);
+		const rows = (await env.DB.prepare("SELECT * FROM github_project_activity").all()).results;
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({ repository: 10, kind: "pull", id: "200", number: 2, data: null });
+		expect(JSON.stringify(rows)).not.toContain("Untrusted");
+		await delivery("issue_comment", {
+			installation: { id: 5 },
+			repository: { id: 10 },
+			issue: { id: 999, number: 2, pull_request: {} },
+			action: "created",
+		});
+		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toHaveLength(1);
+	});
+	it("ignores entity pointers from a previous installation or an unenrolled repository", async () => {
+		await env.DB.prepare(
+			"INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(10,'upstream','project',8,'enabled','app-test',0)",
+		).run();
+		await delivery("issues", {
+			installation: { id: 5 },
+			repository: { id: 10 },
+			action: "opened",
+			issue: { id: 100, number: 1 },
+		});
+		await delivery("issues", {
+			installation: { id: 8 },
+			repository: { id: 11 },
+			action: "opened",
+			issue: { id: 101, number: 1 },
+		});
+		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toEqual([]);
 	});
 });
 

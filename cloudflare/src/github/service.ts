@@ -2,6 +2,7 @@ import { createHash, createPrivateKey, sign } from "node:crypto";
 import { check, isQuest, parse, ready } from "quest/core";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
+import { activityQuery, type ActivityPage, type ProjectState, type Scan, reconcile, readState } from "./state";
 
 export interface GitHubRepository {
 	owner: string;
@@ -306,12 +307,7 @@ export class GitHubService {
 		});
 	}
 
-	async #preview(
-		token: string,
-		repo: GitHubRepository,
-		current: Repository,
-		installation: number,
-	): Promise<ProjectPreview> {
+	async #snapshot(token: string, repo: GitHubRepository, current: Repository) {
 		this.#public(current);
 		if (!current.default_branch) throw new GitHubError("Repository default branch unavailable");
 		const path = repositoryPath(repo);
@@ -349,6 +345,7 @@ export class GitHubService {
 		});
 		if (result.errors?.length || !result.data?.repository) throw new GitHubError("Quest content unavailable");
 		const blobs = result.data.repository;
+		const files: { path: string; content: string }[] = [];
 		const documents = entries.map((entry, i) => {
 			const blob = blobs[`q${i}`];
 			if (
@@ -364,6 +361,7 @@ export class GitHubService {
 			const content = Buffer.from(blob.text, "utf8");
 			const oid = createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
 			if (oid !== entry.sha) throw new GitHubError("Quest content unavailable");
+			files.push({ path: entry.path, content: blob.text });
 			return parse(entry.path, blob.text);
 		});
 		const paths = new Set(root.tree.map((entry) => entry.path));
@@ -371,16 +369,117 @@ export class GitHubService {
 			throw new GitHubError("Fix the quest tree with quest check before enabling contributions");
 		const available = new Set(ready(documents));
 		return {
-			repository: repo,
-			branch: current.default_branch,
 			commit: commit.sha,
-			license: current.license,
-			licenseError: await this.#license(current),
-			quests: documents
+			date: new Date().toISOString().slice(0, 10),
+			documents: files,
+			completed: [],
+			ready: documents
 				.filter((doc) => available.has(doc.path))
 				.map((doc) => ({ path: doc.path, title: doc.title?.text ?? doc.path })),
+		};
+	}
+
+	async #preview(
+		token: string,
+		repo: GitHubRepository,
+		current: Repository,
+		installation: number,
+	): Promise<ProjectPreview> {
+		const snapshot = await this.#snapshot(token, repo, current);
+		return {
+			repository: repo,
+			branch: current.default_branch,
+			commit: snapshot.commit,
+			license: current.license,
+			licenseError: await this.#license(current),
+			quests: snapshot.ready,
 			state: await this.#state(repo, installation),
 		};
+	}
+
+	async #observations(repo: GitHubRepository, installation: number) {
+		const result = await readState(this.#env.DB, repo);
+		const state = await this.#state(repo, installation);
+		await this.#gate(installation);
+		if (state === null) throw new GitHubError("Project enrollment changed");
+		if (result && state !== "enabled") result.available = [];
+		return result;
+	}
+
+	/** Observations only. Neither a refresh nor an arriving entity launches work. */
+	projectState(repo: GitHubRepository, userId: string, refresh = false): Promise<ProjectState | null> {
+		return this.#authorized(
+			repo,
+			userId,
+			refresh
+				? { contents: "read", issues: "read", pull_requests: "read", checks: "read", statuses: "read" }
+				: {},
+			async (token, current, installation) => {
+				this.#public(current);
+				if ((await this.#state(repo, installation)) === null)
+					throw new GitHubError("Project is not enrolled for this installation");
+				if (!refresh) return this.#observations(repo, installation);
+				await this.#env.DB.prepare("INSERT OR IGNORE INTO github_project_state(repository,epoch) VALUES(?,?)")
+					.bind(repo.id, crypto.randomUUID())
+					.run();
+				const row = await this.#env.DB.prepare(
+					"SELECT revision,scan,invalidated,epoch FROM github_project_state WHERE repository=?",
+				)
+					.bind(repo.id)
+					.first<{ revision: number; scan: string | null; invalidated: number; epoch: string }>();
+				const previous: Scan | null = row?.scan ? JSON.parse(row.scan) : null;
+				const scan: Scan =
+					previous && !previous.complete && row?.invalidated !== 1
+						? previous
+						: {
+								id: crypto.randomUUID(),
+								issues: null,
+								pulls: null,
+								refs: null,
+								claims: [],
+								complete: false,
+							};
+				const snapshot = await this.#snapshot(token, repo, current);
+				const response = await this.#api<{ data?: { repository: ActivityPage | null }; errors?: unknown[] }>(
+					token,
+					"/graphql",
+					"POST",
+					{
+						query: activityQuery(scan),
+						variables: {
+							owner: repo.owner,
+							name: repo.name,
+							issues: scan.issues || null,
+							pulls: scan.pulls || null,
+							refs: scan.refs || null,
+						},
+					},
+				);
+				if (response.errors?.length || !response.data?.repository)
+					throw new GitHubError("Project activity unavailable");
+				// A rename, transfer, visibility change, revocation, or lost
+				// maintainer role during the scan must not publish fresh observations.
+				const latest = await this.#api<Repository>(token, repositoryPath(repo));
+				this.#repository(repo, latest);
+				this.#public(latest);
+				if (latest.default_branch !== current.default_branch)
+					throw new GitHubError("Default branch changed; refresh again");
+				await this.#maintainer(token, repo, userId);
+				await this.#gate(installation);
+				if ((await this.#state(repo, installation)) === null)
+					throw new GitHubError("Project enrollment changed");
+				await reconcile(
+					this.#env.DB,
+					repo,
+					snapshot,
+					scan,
+					response.data.repository,
+					row!.revision,
+					row!.epoch,
+				);
+				return this.#observations(repo, installation);
+			},
+		);
 	}
 
 	previewProject(repo: GitHubRepository, userId: string) {
@@ -422,12 +521,18 @@ export class GitHubService {
 						.bind(Date.now(), repo.id)
 						.run();
 				} else {
-					await this.#env.DB.prepare(
-						`INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,?,?,?,'enabled',?,?)
+					await this.#env.DB.batch([
+						this.#env.DB.prepare(
+							"DELETE FROM github_project_state WHERE repository=? AND EXISTS(SELECT 1 FROM github_projects WHERE id=? AND installation<>?)",
+						).bind(repo.id, repo.id, installation),
+						this.#env.DB.prepare(
+							"DELETE FROM github_project_activity WHERE repository=? AND EXISTS(SELECT 1 FROM github_projects WHERE id=? AND installation<>?)",
+						).bind(repo.id, repo.id, installation),
+						this.#env.DB.prepare(
+							`INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,?,?,?,'enabled',?,?)
 					ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,name=excluded.name,installation=excluded.installation,state=excluded.state,updatedAt=excluded.updatedAt`,
-					)
-						.bind(repo.id, repo.owner, repo.name, installation, userId, Date.now())
-						.run();
+						).bind(repo.id, repo.owner, repo.name, installation, userId, Date.now()),
+					]);
 				}
 			},
 			state !== "enabled",

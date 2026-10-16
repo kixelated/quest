@@ -110,6 +110,43 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 			).bind(`repositories_${action}`, installation, delivery, digest, event),
 		);
 	}
+	if (observed.has(event)) {
+		const pending = "EXISTS(SELECT 1 FROM github_deliveries WHERE id=? AND digest=? AND event=? AND processed=0)";
+		const enrolled = "EXISTS(SELECT 1 FROM github_projects WHERE id=? AND installation=?)";
+		// Only identity pointers are retained from untrusted webhook content.
+		// Different delivery IDs and later updates coalesce on the provider ID.
+		const pull = payload.pull_request;
+		const issue = payload.issue;
+		const kind = pull ? "pull" : issue && !issue.pull_request ? "issue" : null;
+		const entity = pull ?? issue;
+		if (kind && positiveId(entity.id) && positiveId(entity.number)) {
+			statements.push(
+				c.env.DB.prepare(
+					`INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt)
+			SELECT ?,?,?,?,?,? WHERE ${pending} AND ${enrolled}
+			ON CONFLICT(repository,kind,id) DO UPDATE SET changedAt=excluded.changedAt`,
+				).bind(
+					repository,
+					kind,
+					String(entity.id),
+					entity.number,
+					now,
+					now,
+					delivery,
+					digest,
+					event,
+					repository,
+					installation,
+				),
+			);
+		}
+		statements.push(
+			c.env.DB.prepare(
+				`UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=? AND ${pending} AND ${enrolled}`,
+			).bind(repository, delivery, digest, event, repository, installation),
+		);
+	}
+
 	statements.push(
 		c.env.DB.prepare("UPDATE github_deliveries SET processed=1 WHERE id=? AND digest=? AND event=?").bind(
 			delivery,

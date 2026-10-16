@@ -184,12 +184,12 @@ export function Token() {
 }
 
 // A quest's status, per the glossary in design/theme.md.
-export type Status = "available" | "blocked" | "accepted" | "turn-in";
+export type Status = "available" | "pending" | "blocked" | "accepted" | "turn-in";
 
 // A status glyph: a yellow `!` for Available, a grey one for Requires, and a
-// yellow `?` for Ready to turn in. Accepted has none. Always pair it with its label.
+// yellow `?` for Ready to turn in. Accepted and Pending have none. Always pair it with its label.
 export function Marker(props: { status: Status }) {
-	if (props.status === "accepted") return <span class="ql-marker" />;
+	if (props.status === "accepted" || props.status === "pending") return <span class="ql-marker" />;
 	return <span class={`ql-marker ql-${props.status}`}>{props.status === "turn-in" ? <Query /> : <Bang />}</span>;
 }
 

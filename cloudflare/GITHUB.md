@@ -203,6 +203,66 @@ See the official [GitHub license API](https://docs.github.com/en/rest/licenses/l
 [GraphQL blobs](https://docs.github.com/en/graphql/reference/git#blob), and
 [App metadata API](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app).
 
-The project-state quest owns ongoing snapshots, branches, PRs, and event
-reconciliation; this setup preview does not reserve or launch ready quests.
+The setup preview does not reserve or launch ready quests.
 The jobs/funding quests own live eligibility checks and contribution execution.
+
+## Project state and activity
+
+An enrolled project's setup page links to `/projects/github/<owner>/<repo>/state`.
+A maintainer explicitly refreshes observations with its same-origin form. The
+service rereads the default branch at an exact commit using the preview's shared
+snapshot reader and validates the Quest tree with the pure core. The authenticated
+board and nested quest pages use the existing `Project` seam. Source links retain
+the exact commit; live project state never replaces GitHub as authority.
+
+Each refresh reconciles one page of native issues, **all** PRs (including human
+contributions and closed/merged PRs), and `quest/` branches. Independent opaque
+cursors persist across requests. Continue reconciliation until all connections
+finish; candidates remain empty while a scan is incomplete or a webhook has
+invalidated it. The next completed scan also detects deleted entities and removed
+claims. Refreshing a completed scan starts again from the authoritative entity
+connections, so missed webhooks and later changes to old entities are recovered.
+This deliberately avoids GitHub's bounded, delayed activity feed; GitHub does
+[not automatically redeliver failed webhooks](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries).
+There is no scheduled background poll in this stage.
+
+A single GraphQL activity query reads up to 50 issues, 50 PRs and 100 branch
+claims, keeping external request count independent of entity/file counts. Bulk
+D1 writes use `json_each`, avoiding a query per entity or SQLite's parameter
+limit. A revision comparison commits each page and cursor atomically; concurrent
+refreshes or an intervening webhook cannot publish over a newer observation.
+A webhook restarts an unfinished scan on the next refresh. Installation tokens
+remain read-only, repository-scoped, and revoked after use.
+
+Durable activity items use the GitHub repository ID, entity kind and full database
+ID. GitHub's GraphQL `fullDatabaseId` strings and webhook numeric IDs map to the
+same stored text key. Duplicate delivery IDs, redelivery with new IDs, later
+pushes/comments/reviews, and reconciliation all update the same item. Webhooks
+retain identity pointers only, never issue/PR bodies. Authoritative API reads add
+escaped titles, state, comment/review counts, current PR head, that head's check
+rollup, aggregate review decision, and up to 20 latest reviewer records with an
+explicit pagination flag. Raw bodies and individual check logs are not cached.
+Unavailable/deleted entities retain their notification identity and are marked
+missing rather than disappearing or presenting old state as current.
+
+A PR associates with a quest only when its head branch exactly matches the quest's
+path without `.md` (or an epic's `/README.md`). An unrelated human PR remains in
+activity without a guessed association. Open associated PRs and observed quest
+branch claims exclude that quest from candidate data; branch claims display as
+Claimed on the board. Runner/run associations belong to job coordination.
+
+Every cached read and refresh proves current maintainer authority, live repository
+identity/public visibility, installation access, and enrollment for that
+installation. Refresh rechecks those boundaries after provider reads. Paused
+projects remain readable but have no candidates. Disconnect cascades cached
+snapshots and activity; explicitly enrolling a replacement installation clears
+prior observations. No positive authority cache is created. Candidate data is an
+observation tied to its commit, **never execution permission**: job coordination
+must validate current eligibility, fresh revision, locks, and PRs before a start.
+Review/check data is similarly descriptive and cannot approve a merge.
+
+The `/data` endpoint exposes the same authenticated snapshot/activity with
+`Cache-Control: no-store` for future decision and job consumers. The activity
+page is a secondary read view; the durable decision inbox and its unread/answer
+state belong to the prompts workflow. Neither incoming activity nor refreshing
+starts a model, creates a quest/job, spends usage, or writes to GitHub.
