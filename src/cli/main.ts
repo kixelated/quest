@@ -143,7 +143,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"merge-queue removal, or disabled auto-merge. Polls every 5 minutes; rate limits delay requests. No timeout by default.\n\n" +
 				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
-				"Pass the final field of the last line to --since to resume without replaying events.\n\n" +
+				"Pass the final field of the last line to --since to resume without replaying events. " +
+				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Replies and reactions by that account are ignored. " +
 				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
 				"Check runs and edits are not activity.",
@@ -161,6 +162,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return 0;
 				},
 				(error: unknown) => {
+					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
 					warn(error instanceof Error ? error.message : String(error));
 					return error instanceof WaitTimeout ? 3 : error instanceof WaitInputError ? 2 : 1;
 				},

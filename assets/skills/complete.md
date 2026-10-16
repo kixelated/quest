@@ -29,7 +29,8 @@ Limit the number of active agents to the CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
 Tell each merge sub-agent that you watch its merge queue, so it reports once
-auto-merge is enabled. Wait on each such PR with `quest wait` until it merges.
+auto-merge is enabled. Wait on each such PR with `quest wait`, as `quest skill merge`
+describes, until it merges.
 If it leaves the queue unmerged or auto-merge is disabled, confirm with the PR's
 current state, then ask about the PR again; never dispatch `/quest-merge` without
 the user's choice, since a new head needs fresh approval.

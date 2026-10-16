@@ -196,7 +196,10 @@ following a new page when the current one fills, plus one GraphQL query for
 reactions. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
-with Ctrl-C to stop waiting.
+with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
+a cursor, or the given `--since` (else the head SHA) if setup had not finished.
+Retry with it, not the original command, so activity that landed during the
+first wait is still reported.
 
 ## Work with your agents
 
