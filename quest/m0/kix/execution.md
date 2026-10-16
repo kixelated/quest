@@ -12,7 +12,7 @@ requested iteration, in the same decision UI.
 - Use the same runners, prompt contract, and publisher as planning instead
   of a separate agent orchestration stack.
 - Apply quest-spawn selection/readiness behavior, including the
-  [within-milestone impact ranking](/quest/m0/unblocked.md), and the existing
+  `quest unblocked` within-milestone impact ranking, and the existing
   quest-start/quest-iterate workflows. A project opt-in authorizes eligible
   ready default-branch quests; explicit UI selection can prioritize work.
   Draft or blocked plans and already active/open work are not started again.
