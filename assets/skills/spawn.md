@@ -55,6 +55,7 @@ Leave the worktree you are running in and any holding uncommitted work; list tho
 
 With an `api` argument, bill agents to API keys instead of this session's account: run each as a headless agent CLI process rather than a sub-agent.
 `QUEST_API_KEYS` lists the keys, separated by whitespace; refer to each by its position.
+An entry may be a secret reference instead of a key, such as a 1Password `op://` URI; resolve it only for its child, for example by launching the child under `op run`.
 Stop and report if the variable is unset or the agent CLI is not installed.
 Never show a key in a command, prompt, log, report, or commit: expand it from the variable inside the command.
 

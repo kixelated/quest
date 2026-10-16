@@ -227,10 +227,11 @@ a separate invocation, so you review every change.
 
 To bill spawned agents to API keys instead of your agent's account, export
 `QUEST_API_KEYS` with one or more whitespace-separated keys and run
-`/quest-spawn api`. Each quest runs as a headless `claude -p` or `codex exec`
-process on one key; a key whose credit runs out is dropped, and spawning stops
-once every key is exhausted. Disable auto-reload or set a spend limit in each
-provider console so draining a key cannot charge a card.
+`/quest-spawn api`. Entries may be secret references such as 1Password `op://`
+URIs, resolved only for each agent. Each quest runs as a headless `claude -p` or
+`codex exec` process on one key; a key whose credit runs out is dropped, and
+spawning stops once every key is exhausted. Disable auto-reload or set a spend
+limit in each provider console so draining a key cannot charge a card.
 
 To use Quest in your own repository, paste this into your agent:
 
