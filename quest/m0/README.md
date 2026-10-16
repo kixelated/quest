@@ -35,6 +35,7 @@ ownership-manifest design:
 
 ## Required
 
+- [Spawn on API keys](/quest/m0/spawn-api.md) - drain expiring API credits by running spawned quests as headless agents
 - [Expensive command gate](/quest/m0/local-gate.md) - shared CPU admission across worktrees and repositories
 - [Recoverable worktrees](/quest/m0/worktree.md) - disk admission, checkpoints, release, and restore
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
