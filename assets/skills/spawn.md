@@ -61,7 +61,7 @@ Never show a key in a command, prompt, log, report, or commit: expand it from th
 
 Start each process in the background, in its own isolated worktree, with JSON output, this session's model, effort, and permission mode passed explicitly, and permission prompts off, so the harness reports its exit as it would a sub-agent's.
 For example, `claude -p --output-format json --model <model> --effort <level>` or `codex exec --json`.
-Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
+Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, then unset `QUEST_API_KEYS` there so it holds no other key, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
 Read its final reply and session id from that agent's output: `claude -p` prints one result object with a dollar cost, while `codex exec --json` streams JSONL events, with the thread id in `thread.started`, the reply in the last `item.completed`, and token usage instead of cost.
 Report cost only when the agent provides it.
 Tell it that it cannot prompt, so it ends with any decisions and its recommendations in its final reply.
