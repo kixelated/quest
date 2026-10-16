@@ -212,7 +212,9 @@ Admission is sized from the host, with no configuration. Every platform waits
 while the 1-minute load average exceeds the usable core count (honoring CPU
 affinity), or while available memory is below one command's budget: 4 GiB, or a
 quarter of RAM on smaller hosts, where RAM is capped by any container memory
-limit. Load and free memory count work from every session and user. The load
+limit. On Linux, available memory includes reclaimable host cache and is bounded
+by the remaining budget of each enclosing memory cgroup. Load and memory count
+work from every session and user. The load
 average lags new work, so the gate admits at most one waiting command every 5
 seconds rather than releasing every waiter at once. Windows reports no load
 average and macOS counts reclaimable cache as used memory, so those signals are
@@ -221,9 +223,10 @@ skipped there.
 On Linux with unified cgroup v2, writable `cgroup.kill`, and a systemd 254+ user
 manager, each command also takes one of `min(cores, RAM / 4 GiB)` slots in a
 user scope. The slot stays taken until the command's last descendant exits,
-even if the gate crashes, and cancellation kills that exact cgroup. Without a
-user manager, Linux uses load and memory admission alone, like macOS and
-Windows.
+even if the gate crashes, and cancellation kills that exact cgroup. The gate
+checks the client and manager versions and probes writable ownership before
+starting the command. Linux uses load and memory admission alone when those
+prerequisites are unavailable, like macOS and Windows.
 
 A nested invocation runs immediately inside the admitted command. Internal
 compiler or test worker parallelism remains the command's responsibility.

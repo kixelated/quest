@@ -1,10 +1,10 @@
 // Opt in explicitly: these tests require a real Linux systemd user manager.
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { closeSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { SystemdGate } from "../src/cli/gate";
+import { openOwnership, scopeHandshake, systemd, SystemdGate } from "../src/cli/gate";
 import { tempDir } from "./fixture";
 
 const root = resolve(import.meta.dirname, "..");
@@ -59,6 +59,40 @@ const hold = (file: string) => `
 `;
 
 describe.skipIf(!enabled)("real systemd scope ownership", () => {
+	test("the disposable prerequisite scope supports exact ownership", async () => {
+		expect(await systemd(signal())).toBe(true);
+	});
+
+	test("memory admission respects a real scope budget instead of abundant host memory", async () => {
+		const script = `import {linuxMemory, hostLimits} from ${JSON.stringify(join(root, "src/cli/gate.ts"))}; console.log(JSON.stringify({memory: linuxMemory(), limits: hostLimits()}));`;
+		const command = spawn(
+			"systemd-run",
+			[
+				"--user",
+				"--scope",
+				"--quiet",
+				"--collect",
+				"--expand-environment=no",
+				"--property=MemoryMax=256M",
+				"bun",
+				"-e",
+				script,
+			],
+			{ cwd: root, stdio: ["ignore", "pipe", "pipe"] },
+		);
+		let stdout = "";
+		let stderr = "";
+		command.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
+		command.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
+		const [code] = await once(command, "close");
+		expect(code, stderr).toBe(0);
+		const result = JSON.parse(stdout);
+		expect(result.memory.total).toBe(256 * 2 ** 20);
+		expect(result.memory.available).toBeGreaterThan(0);
+		expect(result.memory.available).toBeLessThan(result.memory.total);
+		expect(result.limits.memory).toBe(64 * 2 ** 20);
+	});
+
 	test("forwards arguments, locale, stdin and exact exit codes across directories", async () => {
 		const locale = process.env.LC_ALL ?? null;
 		const spawned = child(
@@ -204,5 +238,44 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 		await line(spawned.process, "ready");
 		spawned.process.kill("SIGTERM");
 		expect((await spawned.closed).code).toBe(143);
+	});
+
+	test("a dead handshake cannot acquire ownership of a successor in its reused slot", async () => {
+		const original = spawn(
+			"systemd-run",
+			[
+				"--user",
+				"--scope",
+				"--quiet",
+				"--collect",
+				"--expand-environment=no",
+				"--unit=quest-gate-0.scope",
+				"/bin/sh",
+				"-c",
+				scopeHandshake + "exit 0",
+			],
+			{ stdio: ["ignore", "ignore", "pipe", "ignore", "pipe", "pipe"] },
+		);
+		const closed = once(original, "close");
+		const [record] = await once(original.stdio[4]!, "data");
+		const [path, inode] = String(record).trim().split("\t");
+		// Hold the buffered record without acknowledging it. Kill and collect
+		// the original scope, exactly the pre-admission interleaving in review.
+		const killed = spawnSync("systemctl", ["--user", "kill", "--signal=SIGKILL", "quest-gate-0.scope"]);
+		expect(killed.status, killed.stderr.toString()).toBe(0);
+		await closed;
+		await new SystemdGate().wait(0, signal());
+		const release = join(tempDir(), "release");
+		const successor = child(runner, [JSON.stringify(["bun", "-e", hold(release)])]);
+		try {
+			await line(successor.process, "ready");
+			expect(() => openOwnership(join("/sys/fs/cgroup", path, "cgroup.kill"), BigInt(inode))).toThrow(
+				"exited before admission",
+			);
+			expect(await new SystemdGate().tryRun(0, ["/bin/sh", "-c", ":"], signal())).toBeNull();
+		} finally {
+			writeFileSync(release, "");
+			await successor.closed;
+		}
 	});
 });

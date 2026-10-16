@@ -2,9 +2,12 @@
 // for CPU load and free memory; on Linux, systemd scope slots also cap
 // concurrency and own orphans' lifetimes.
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
 	closeSync,
+	constants as fsConstants,
 	existsSync,
+	fstatSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
@@ -13,8 +16,8 @@ import {
 	watch,
 	writeSync,
 } from "node:fs";
-import { availableParallelism, constants, freemem, homedir, loadavg, totalmem } from "node:os";
-import { join } from "node:path";
+import { availableParallelism, constants, homedir, loadavg, totalmem } from "node:os";
+import { dirname, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -61,6 +64,7 @@ export const COMMAND_MEMORY = 4 * 2 ** 30;
 
 /** Usable memory: physical RAM, or a smaller cgroup/container limit. */
 function usableMemory(): number {
+	if (process.platform === "linux") return linuxMemory().total;
 	const constrained = process.constrainedMemory?.() ?? 0;
 	return constrained > 0 ? Math.min(totalmem(), constrained) : totalmem();
 }
@@ -78,14 +82,62 @@ export function hostLimits(cores = availableParallelism(), memory = usableMemory
 	};
 }
 
+/** Count reclaimable host cache and the headroom of every enclosing memory cgroup. */
+export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total: number; available: number } {
+	const meminfo = readFileSync(join(proc, "meminfo"), "utf8");
+	const bytes = (key: string) => {
+		const value = meminfo.match(new RegExp(`^${key}:\\s+(\\d+) kB$`, "m"))?.[1];
+		if (value === undefined) throw new Error(`gate cannot read Linux ${key}`);
+		return Number(value) * 1024;
+	};
+	let total = bytes("MemTotal");
+	let available = bytes("MemAvailable");
+	for (const line of readFileSync(join(proc, "self/cgroup"), "utf8").trim().split("\n")) {
+		const [, controllers, path] = line.match(/^\d+:([^:]*):(.*)$/) ?? [];
+		if (controllers === undefined || path === undefined) throw new Error("gate cannot read Linux memory cgroups");
+		const unified = controllers === "";
+		if (!unified && !controllers?.split(",").includes("memory")) continue;
+		const root = unified ? cgroups : join(cgroups, "memory");
+		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
+		const limits = unified
+			? ["memory.max", "memory.high"]
+			: ["memory.limit_in_bytes", "memory.soft_limit_in_bytes"];
+		// Child cgroups inherit their parents' limits and shared memory usage.
+		for (let group = join(root, path); ; group = dirname(group)) {
+			for (const file of limits) {
+				try {
+					const limit = Number(readFileSync(join(group, file), "utf8").trim());
+					if (!Number.isFinite(limit) || limit <= 0) continue; // "max", or an unset v1 soft limit.
+					const current = Number(readFileSync(join(group, usage), "utf8").trim());
+					if (!Number.isFinite(current) || current < 0)
+						throw new Error("gate cannot read Linux cgroup memory usage");
+					total = Math.min(total, limit);
+					available = Math.min(available, Math.max(0, limit - current));
+				} catch (error) {
+					// The memory controller may not be enabled in every ancestor.
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+				}
+			}
+			if (group === root || group === dirname(group)) break;
+		}
+	}
+	return { total, available };
+}
+
 /** Claims are empty files, named by window, in one per-user directory. */
-export function fileHost(directory: string): Host {
+export function fileHost(directory: string, now = Date.now): Host {
 	return {
 		load: () => loadavg()[0],
 		// macOS counts reclaimable cache as used, so only its load is gated.
-		memory: () => (process.platform === "darwin" ? Infinity : freemem()),
-		now: Date.now,
+		memory: () =>
+			process.platform === "darwin"
+				? Infinity
+				: process.platform === "linux"
+					? linuxMemory().available
+					: process.availableMemory(),
+		now,
 		claim(window) {
+			if (window !== Math.floor(now() / SETTLE_MS)) return false;
 			mkdirSync(directory, { recursive: true });
 			try {
 				closeSync(openSync(join(directory, String(window)), "wx"));
@@ -93,6 +145,9 @@ export function fileHost(directory: string): Host {
 				if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
 				throw error;
 			}
+			// A descheduled caller may have created an old claim after cleanup.
+			// It must not admit work from that expired sample.
+			if (window !== Math.floor(now() / SETTLE_MS)) return false;
 			for (const name of readdirSync(directory)) {
 				if (Number(name) < window) rmSync(join(directory, name), { force: true });
 			}
@@ -150,6 +205,7 @@ function run(command: string[], signal: AbortSignal): Promise<number> {
 		});
 		const cancel = () => child.kill("SIGTERM");
 		signal.addEventListener("abort", cancel, { once: true });
+		if (signal.aborted) cancel();
 		child.once("error", (error) => {
 			signal.removeEventListener("abort", cancel);
 			reject(error);
@@ -180,7 +236,13 @@ const unit = (slot: number) => `quest-gate-${slot}.scope`;
 const scopePattern = /(?:^|\/)quest-gate-\d+\.scope(?:\/|$)/;
 
 /** No shell parses the command. This shell only restores stderr and locale. */
-const handshake = "cat /proc/self/cgroup >&4 || exit 125; read -r admitted <&5 || exit 125; exec 4>&- 5<&-; ";
+export const scopeHandshake =
+	"IFS=: read -r hierarchy controllers path </proc/self/cgroup || exit 125; " +
+	'[ "$hierarchy:$controllers" = 0: ] || exit 125; ' +
+	'exec 7>"/sys/fs/cgroup$path/cgroup.kill" || exit 125; ' +
+	'while read -r key value; do if [ "$key" = ino: ]; then inode=$value; fi; done </proc/self/fdinfo/7; ' +
+	'[ -n "$inode" ] || exit 125; printf "%s\\t%s\\n" "$path" "$inode" >&4; ' +
+	"read -r admitted <&5 || exit 125; exec 4>&- 5<&- 7>&-; ";
 const forward =
 	'if [ "$1" = set ]; then export LC_ALL="$2"; else unset LC_ALL; fi; ' + 'shift 2; exec 2>&3 3>&-; exec "$@"';
 
@@ -188,6 +250,18 @@ interface Result {
 	code: number;
 	stderr: string;
 	stdout: string;
+}
+
+/** Validate the shell's kernel identity before this handle can be used to cancel. */
+export function openOwnership(path: string, inode: bigint): number {
+	const handle = openSync(path, fsConstants.O_WRONLY);
+	try {
+		if (fstatSync(handle, { bigint: true }).ino !== inode) throw new Error("gate scope exited before admission");
+		return handle;
+	} catch (error) {
+		closeSync(handle);
+		throw error;
+	}
 }
 
 function execute(
@@ -236,10 +310,13 @@ function execute(
 				cgroup += data.toString();
 				if (!cgroup.endsWith("\n")) return;
 				try {
-					const path = cgroup.trim().match(/^0::(\/[^\n]+)$/)?.[1];
+					const identity = cgroup.match(/^(\/[^\t\n]+)\t(\d+)\n$/);
+					const path = identity?.[1];
 					if (!path || !path.endsWith(`/${scope}`))
 						throw new Error("gate requires unified cgroup v2 ownership");
-					killHandle = openSync(join("/sys/fs/cgroup", path, "cgroup.kill"), "w");
+					// The slot path can already name a successor if the shell died.
+					// Linux kernfs inodes include the generation on 64-bit hosts.
+					killHandle = openOwnership(join("/sys/fs/cgroup", path, "cgroup.kill"), BigInt(identity![2]));
 					if (signal.aborted) cancel();
 					else {
 						const admission = (child.stdio as unknown as (Writable | null)[])[5];
@@ -284,6 +361,10 @@ export class SystemdGate implements GateBackend {
 
 	async tryRun(slot: number, command: string[], signal: AbortSignal): Promise<number | null> {
 		const name = unit(slot);
+		return this.runScope(name, command, signal);
+	}
+
+	async runScope(name: string, command: string[], signal: AbortSignal): Promise<number | null> {
 		const result = await execute(
 			"systemd-run",
 			[
@@ -296,7 +377,7 @@ export class SystemdGate implements GateBackend {
 				"--",
 				"/bin/sh",
 				"-c",
-				handshake + forward,
+				scopeHandshake + forward,
 				"quest-gate",
 				process.env.LC_ALL === undefined ? "unset" : "set",
 				process.env.LC_ALL ?? "",
@@ -366,15 +447,34 @@ export class SystemdGate implements GateBackend {
 	}
 }
 
-/** A user manager on unified cgroups provides exact slot ownership. */
-function systemd(): boolean {
+/** Probe without starting the user's command; unsupported hosts use direct admission. */
+export async function systemd(signal: AbortSignal): Promise<boolean> {
 	const runtime = process.env.XDG_RUNTIME_DIR;
-	return (
+	if (!(
 		process.platform === "linux" &&
 		runtime !== undefined &&
 		existsSync(join(runtime, "systemd", "private")) &&
 		existsSync("/sys/fs/cgroup/cgroup.controllers")
-	);
+	))
+		return false;
+	try {
+		const client = await execute("systemd-run", ["--version"], signal);
+		if (client.code !== 0 || Number(client.stdout.match(/^systemd (\d+)/)?.[1] ?? 0) < 254) return false;
+		const manager = await execute("systemctl", ["--user", "show", "--property=Version", "--value"], signal);
+		if (manager.code !== 0 || Number(manager.stdout.match(/^(\d+)/)?.[1] ?? 0) < 254) return false;
+		// This exercises the manager, kernel support, and actual scope permissions,
+		// including opening cgroup.kill in both processes before the handshake.
+		return (
+			(await new SystemdGate().runScope(
+				`quest-gate-probe-${randomUUID()}.scope`,
+				["/bin/sh", "-c", ":"],
+				signal,
+			)) === 0
+		);
+	} catch {
+		signal.throwIfAborted();
+		return false;
+	}
 }
 
 const notices: Record<Waiting, string> = {
@@ -398,7 +498,12 @@ export async function gate(command: string[]): Promise<number> {
 	};
 	for (const [name, handler] of Object.entries(handlers)) process.on(name, handler);
 	try {
-		const backend = systemd() ? new SystemdGate() : new DirectGate();
+		// Kernel ownership already proves admission; a nested call must not need
+		// another manager probe (or fall back into host pressure admission).
+		if (process.platform === "linux" && new SystemdGate().nested()) {
+			return interrupted || (await run(command, controller.signal));
+		}
+		const backend = (await systemd(controller.signal)) ? new SystemdGate() : new DirectGate();
 		// A nested invocation executes inside the already admitted command.
 		if (backend.nested()) {
 			const result = await run(command, controller.signal);
