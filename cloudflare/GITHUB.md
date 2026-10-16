@@ -129,3 +129,80 @@ and [PR creation](https://docs.github.com/en/rest/pulls/pulls#create-a-pull-requ
 The earlier draft #43 informed JWT/signature handling and current repository
 identity checks. Its Rust/WASM, mirroring, Artifacts credentials, custom changes,
 workflow orchestration and repository coordinator design were not reused.
+
+## Project enrollment
+
+`/projects` is the short maintainer setup flow, separate from the quest board
+and decision inbox. It resolves the registered App's installation URL, accepts
+an explicit `owner/repository` selection, and verifies the linked GitHub
+identity's current maintain/admin authority through the existing service.
+Installing the App never creates a `github_projects` record or enables work.
+Repository selection resolves its installation using the App JWT, then reads
+metadata with a token restricted to the named repository and metadata-read
+permission. Subsequent authorized operations scope tokens by repository ID.
+Resolution uses the same installation gates and token revocation as other
+reads; it never consumes GitHub's shared anonymous repository-lookup quota.
+
+The preview reads the default branch at an exact commit, validates its Quest
+tree with the shared core, and lists ready quests. Blob selection uses the
+core's `isQuest` predicate, excluding root and nested `AGENTS.md`/`CLAUDE.md`
+instructions just as the CLI does. It fetches all quest blobs
+in one GraphQL read using the scoped installation token, rather than one
+external request per file. Blob IDs come from the pinned Git tree; missing,
+binary, truncated, partial, or hash-mismatched content fails closed. This keeps
+enrollment's external request count independent of the number of quest files.
+It rejects private,
+unavailable, incomplete, invalid, and symlinked quest snapshots. Repositories
+without Quest files follow `/setup`; no repository writes occur during setup.
+
+The D1 enrollment records a project-wide enabled/paused state, distinct from
+installation permissions. Every opt-in/resume, pause, and disconnect rechecks
+current authority and provider gates. Pause/disconnect do not require valid
+Quest files, public visibility, or an active/unarchived repository, so maintainers can stop contributions after
+those conditions change. Disconnect deletes the enrollment, not the GitHub
+App installation or existing contributions. Remembered selections are only
+navigation and never confer authority. Any current maintainer can select an
+already enrolled repository by name and reach pause/disconnect even if it has
+become private, archived, or Quest-invalid. The enrolled-project lookup proves
+current identity and authority independently of the failing preview; it does
+not depend on being the original enroller. It matches enrollment by the durable
+GitHub repository ID, and refreshes the stored owner/name after authority is
+verified, so selecting a renamed repository recovers the same stop controls. If a transfer
+or reinstall changes the App installation, those stop controls remain available
+while the new installation requires explicit opt-in; selection never silently
+reassigns an existing contribution authorization to the new installation. Future job coordination must recheck
+this state and current provider eligibility before launching new work.
+
+Contributions require a public repository whose GitHub-detected SPDX license
+identifier matches a license marked `isOsiApproved: true` in SPDX's current
+published license metadata. A recognized SPDX identifier alone is insufficient.
+Missing, `NOASSERTION`, custom, and non-OSI licenses cannot opt in. Add or correct
+the repository's license on GitHub and return to setup; no manual attestation
+or review bypass is provided. This policy was selected by the maintainer on
+2026-10-15 to make public open-source eligibility explicit and independently
+verifiable.
+
+Each preview, opt-in, and resume reads
+`https://spdx.org/licenses/<detected SPDX ID>.json` without storing a positive
+authorization cache. The returned ID must match exactly, and the approval flag
+must be the boolean `true`. Failed/malformed lookups fail closed with guidance;
+pause and disconnect remain available. Opt-in/resume recheck live repository
+identity, visibility, detected license, OSI approval, and maintainer authority
+after reading the quest snapshot. Neither license names nor browser form fields
+can override those checks. Deprecated SPDX identifiers GitHub still detects
+remain supported when SPDX marks that exact ID OSI-approved.
+
+This uses the maintained [SPDX JSON interface](https://github.com/spdx/license-list-data/blob/main/accessingLicenses.md)
+instead of maintaining an application allowlist. Approval freshness follows
+SPDX's latest published license list and the upstream serving infrastructure.
+GitHub's detector only recognizes a limited set of license files, so custom or
+unrecognized arrangements stay ineligible even when they may be open-source.
+See the official [GitHub license API](https://docs.github.com/en/rest/licenses/licenses),
+[SPDX license list](https://spdx.org/licenses/),
+[Git trees API](https://docs.github.com/en/rest/git/trees#get-a-tree),
+[GraphQL blobs](https://docs.github.com/en/graphql/reference/git#blob), and
+[App metadata API](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app).
+
+The project-state quest owns ongoing snapshots, branches, PRs, and event
+reconciliation; this setup preview does not reserve or launch ready quests.
+The jobs/funding quests own live eligibility checks and contribution execution.

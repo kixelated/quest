@@ -33,9 +33,13 @@ describe("Worker", () => {
 		const waypoints = [...html.matchAll(/class="waypoint [^"]+"><a href="(\/repos\/quest\/quest\/[^"]+)"/g)];
 		const epics = [...html.matchAll(/<p class="path-name"><a href="(\/repos\/quest\/quest\/[^"]+)"/g)];
 		expect(waypoints.length).toBeGreaterThan(0);
-		for (const [, href] of [...waypoints, ...epics]) {
-			expect((await SELF.fetch(`${origin}${href}`)).status, href).toBe(200);
-		}
+		await Promise.all(
+			[...waypoints, ...epics].map(async ([, href]) => {
+				const response = await SELF.fetch(`${origin}${href}`);
+				expect(response.status, href).toBe(200);
+				await response.body?.cancel();
+			}),
+		);
 	});
 	it("renders the repository's docs", async () => {
 		const index = await (await SELF.fetch(`${origin}/docs`)).text();
@@ -103,26 +107,30 @@ describe("Worker", () => {
 		const separator = await app.fetch(new Request(`${origin}${href.replace("/m0/", "/m0%2F")}`), env);
 		expect(separator.status).toBe(404);
 	});
-	it("returns to a local page after signing in, and only a local page", async () => {
+	it.each([
+		["/repos/quest/quest/m0", "/repos/quest/quest/m0"],
+		["/repos/quest?show=available", "/repos/quest?show=available"],
+		...[
+			"//evil.example",
+			"/\\evil.example",
+			"https://evil.example",
+			"/\t/evil.example",
+			"/\n/x",
+			"/%2F/evil.example",
+			"/%5cevil.example",
+		].map((next) => [next, "/"]),
+	])("returns to a local page after signing in: %j -> %j", async (next, expected) => {
 		// Better Auth stores each sign-in's callback with its OAuth state.
-		const callback = async (next: string) => {
-			await env.DB.prepare("DELETE FROM verification").run();
-			const response = await SELF.fetch(`${origin}/sign-in`, {
-				method: "POST",
-				headers: { Origin: origin },
-				body: new URLSearchParams({ next }),
-				redirect: "manual",
-			});
-			expect(response.status).toBe(303);
-			const row = await env.DB.prepare("SELECT value FROM verification").first<{ value: string }>();
-			return JSON.parse(row!.value).callbackURL;
-		};
-		expect(await callback("/repos/quest/quest/m0")).toBe("/repos/quest/quest/m0");
-		expect(await callback("/repos/quest?show=available")).toBe("/repos/quest?show=available");
-		const unsafe = ["//evil.example", "/\\evil.example", "https://evil.example", "/\t/evil.example", "/\n/x"];
-		for (const next of [...unsafe, "/%2F/evil.example", "/%5cevil.example"]) {
-			expect(await callback(next)).toBe("/");
-		}
+		await env.DB.prepare("DELETE FROM verification").run();
+		const response = await SELF.fetch(`${origin}/sign-in`, {
+			method: "POST",
+			headers: { Origin: origin },
+			body: new URLSearchParams({ next }),
+			redirect: "manual",
+		});
+		expect(response.status).toBe(303);
+		const row = await env.DB.prepare("SELECT value FROM verification").first<{ value: string }>();
+		expect(JSON.parse(row!.value).callbackURL).toBe(expected);
 	});
 	it("offers to return to the page as requested, still encoded", async () => {
 		const response = await SELF.fetch(`${origin}/%09/evil.example`);

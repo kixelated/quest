@@ -16,6 +16,10 @@ spend cap bounds the free hosting.
 - Keep provider keys out of the container. A constrained credential proxy
   forwards each job's requests to the chosen key; the container gets a
   revocable job credential only.
+- Decided 2026-10-15 in the funding interview: the first cloud release uses
+  maintainer API keys. Enable production key collection with this hosted
+  integration; [donor allocations](/quest/m1/cloud/donors.md) follow working
+  cloud runners and do not gate this quest.
 - Reuse the project's Nix devShell and the shared cache where available, so
   cold containers do not rebuild the world.
 - The operator cap stops new cloud starts when reached and says so plainly;
@@ -29,4 +33,4 @@ spend cap bounds the free hosting.
 
 ## Required
 
-- [API funding](/quest/m1/cloud/funding.md) - API keys, the credential proxy, and accounting
+- [API funding](/quest/m1/cloud/funding.md) - maintainer API keys, the credential proxy, and accounting

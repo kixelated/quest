@@ -1183,3 +1183,25 @@ a.entry-title:hover {
 		margin-top: 0.3rem;
 	}
 }
+
+/* Project setup uses the same panels, quest rows, and theme tokens as accounts. */
+.projects > section {
+	margin-block: 1.5rem;
+}
+.project-select {
+	display: grid;
+	gap: 0.75rem;
+	max-width: 30rem;
+}
+.project-select input {
+	min-width: 0;
+	padding: 0.65rem;
+	color: var(--ql-text);
+	background: var(--ql-bg);
+	border: 1px solid var(--ql-rule);
+	border-radius: 4px;
+	font: inherit;
+}
+.project-select button {
+	justify-self: start;
+}

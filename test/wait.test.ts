@@ -151,7 +151,7 @@ test("a plain push is detected by new SHA regardless of git dates, with conditio
 	expect(fixture.calls[5].headers.get("if-none-match")).toBe('"old"');
 });
 
-test("force pushes, comments, inline comments, merges and closes are printed without reviewer policy", async () => {
+test("force pushes, comments, inline comments, merges, closes and dequeues are printed without reviewer policy", async () => {
 	const event = (event: string, id: number) => ({ event, id, created_at: POINT, actor: { login: "bot[bot]" } });
 	const fixture = setup([
 		pull(),
@@ -173,6 +173,10 @@ test("force pushes, comments, inline comments, merges and closes are printed wit
 			{ event: "commit-commented", comments: [{ id: 4, created_at: POINT, user: null }] },
 			event("merged", 5),
 			event("closed", 6),
+			event("removed_from_merge_queue", 7),
+			event("auto_merge_disabled", 8),
+			event("added_to_merge_queue", 9),
+			event("auto_merge_enabled", 10),
 		]),
 	]);
 	const lines = await waitForActivity(pr, {}, fixture.deps);
@@ -183,6 +187,8 @@ test("force pushes, comments, inline comments, merges and closes are printed wit
 		"commit-commented",
 		"merged",
 		"closed",
+		"removed_from_merge_queue",
+		"auto_merge_disabled",
 	]);
 });
 

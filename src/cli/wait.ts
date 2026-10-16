@@ -442,12 +442,23 @@ async function watch(
 	}
 }
 
+// A dequeue or a disabled auto-merge needs the agent. A merge also leaves the queue, a second before "merged".
+const WAKES = [
+	"reviewed",
+	"commented",
+	"merged",
+	"closed",
+	"head_ref_force_pushed",
+	"removed_from_merge_queue",
+	"auto_merge_disabled",
+];
+
 function timelineActivities(row: ObjectValue, prUrl: string): Activity[] {
 	const type = string(row.event);
 	if (type === "line-commented" || type === "commit-commented") {
 		return array(row.comments).map((comment) => timedActivity(comment, type, "created_at", prUrl));
 	}
-	if (!["reviewed", "commented", "merged", "closed", "head_ref_force_pushed"].includes(type)) return [];
+	if (!WAKES.includes(type)) return [];
 	return [timedActivity(row, type, type === "reviewed" ? "submitted_at" : "created_at", prUrl)];
 }
 
