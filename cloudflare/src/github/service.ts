@@ -402,7 +402,7 @@ export class GitHubService {
 		const state = await this.#state(repo, installation);
 		await this.#gate(installation);
 		if (state === null) throw new GitHubError("Project enrollment changed");
-		if (result && state !== "enabled") result.available = [];
+		if (result && state !== "enabled") result.project.available = [];
 		return result;
 	}
 
@@ -428,17 +428,18 @@ export class GitHubService {
 					.bind(repo.id)
 					.first<{ revision: number; scan: string | null; invalidated: number; epoch: string }>();
 				const previous: Scan | null = row?.scan ? JSON.parse(row.scan) : null;
-				const scan: Scan =
-					previous && !previous.complete && row?.invalidated !== 1
-						? previous
-						: {
-								id: crypto.randomUUID(),
-								issues: null,
-								pulls: null,
-								refs: null,
-								claims: [],
-								complete: false,
-							};
+				// History resumes through any webhook; only occupancy, which is
+				// small, restarts to observe a possibly opened, closed, or claimed quest.
+				const scan: Scan = {
+					history:
+						previous && !previous.history.complete
+							? previous.history
+							: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
+					occupancy:
+						previous && !previous.occupancy.complete && row!.invalidated !== 1
+							? previous.occupancy
+							: { open: null, refs: null, pulls: [], claims: [], complete: false },
+				};
 				const snapshot = await this.#snapshot(token, repo, current);
 				const response = await this.#api<{ data?: { repository: ActivityPage | null }; errors?: unknown[] }>(
 					token,
@@ -449,9 +450,10 @@ export class GitHubService {
 						variables: {
 							owner: repo.owner,
 							name: repo.name,
-							issues: scan.issues || null,
-							pulls: scan.pulls || null,
-							refs: scan.refs || null,
+							issues: scan.history.issues || null,
+							pulls: scan.history.pulls || null,
+							open: scan.occupancy.open || null,
+							refs: scan.occupancy.refs || null,
 						},
 					},
 				);
