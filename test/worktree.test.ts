@@ -1,5 +1,14 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readlinkSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +76,80 @@ describe("recoverable worktrees", { timeout: 20_000 }, () => {
 		expect(existsSync(join(record.path, ".gitignore"))).toBe(false);
 		expect(git(record.path, "show", ":added")).toBe("staged addition");
 		expect(readFileSync(join(record.path, "added"), "utf8")).toBe("modified addition");
+	});
+	it("restores within the original reservation while charging other retained checkpoints", () => {
+		const { repo, worktrees } = fixture();
+		const reserve = 1_000_000;
+		worktrees.configure(reserve);
+		const record = worktrees.create(repo, "work", reserve);
+		worktrees.release(record.id, notes);
+		worktrees.restore(record.id);
+		expect(worktrees.status().allocated).toBe(reserve);
+		worktrees.release(record.id, notes);
+		const retained = worktrees.status().allocated;
+		expect(retained).toBeGreaterThan(0);
+		worktrees.create(repo, "other", reserve - retained);
+		expect(() => worktrees.restore(record.id)).toThrow("disk capacity exceeded");
+		expect(worktrees.status().records[0].phase).toBe("released");
+	});
+	it("preserves split-index entries after the disposable Git directory is gone", () => {
+		const { repo, worktrees } = fixture();
+		const record = worktrees.create(repo, "work", 10_000_000);
+		writeFileSync(join(record.path, "file"), "staged\n");
+		git(record.path, "add", "file");
+		writeFileSync(join(record.path, "file"), "unstaged\n");
+		git(record.path, "update-index", "--split-index");
+		const backing = git(record.path, "rev-parse", "--path-format=absolute", "--shared-index-path");
+		expect(backing).not.toBe("");
+		expect(existsSync(backing)).toBe(true);
+		worktrees.checkpoint(record.id, notes);
+		expect(git(record.path, "rev-parse", "--path-format=absolute", "--shared-index-path")).toBe(backing);
+		const status = git(record.path, "status", "--porcelain=v1");
+		worktrees.release(record.id, notes);
+		expect(existsSync(backing)).toBe(false);
+		worktrees.restore(record.id);
+		expect(git(record.path, "status", "--porcelain=v1")).toBe(status);
+		expect(git(record.path, "show", ":file")).toBe("staged");
+		expect(readFileSync(join(record.path, "file"), "utf8")).toBe("unstaged\n");
+	});
+	it.each(["file to directory", "directory to file"])("roundtrips staged %s replacements", (direction) => {
+		const { repo, worktrees } = fixture();
+		if (direction === "directory to file") {
+			git(repo, "rm", "file");
+			mkdirSync(join(repo, "file"));
+			writeFileSync(join(repo, "file", "child"), "original\n");
+			git(repo, "add", ".");
+			git(repo, "commit", "-m", "start with directory");
+		}
+		const record = worktrees.create(repo, "work", 10_000_000);
+		git(record.path, "rm", "-r", "file");
+		const path = direction === "file to directory" ? "file/child" : "file";
+		if (direction === "file to directory") mkdirSync(join(record.path, "file"));
+		writeFileSync(join(record.path, path), "staged replacement\n");
+		git(record.path, "add", ".");
+		writeFileSync(join(record.path, path), "unstaged replacement\n");
+		const status = git(record.path, "status", "--porcelain=v1");
+		worktrees.release(record.id, notes);
+		worktrees.restore(record.id);
+		expect(git(record.path, "status", "--porcelain=v1")).toBe(status);
+		expect(git(record.path, "show", `:${path}`)).toBe("staged replacement");
+		expect(readFileSync(join(record.path, path), "utf8")).toBe("unstaged replacement\n");
+	});
+	it.skipIf(process.platform === "win32")("preserves tracked and retained relative symlink text", () => {
+		const { repo, worktrees } = fixture();
+		symlinkSync("file", join(repo, "link"));
+		git(repo, "add", "link");
+		git(repo, "commit", "-m", "track relative symlink");
+		const record = worktrees.create(repo, "work", 10_000_000);
+		symlinkSync("file", join(record.path, "kept-link"));
+		mkdirSync(join(record.path, "kept-directory"));
+		symlinkSync("../file", join(record.path, "kept-directory", "link"));
+		worktrees.release(record.id, { ...notes, keep: ["kept-link", "kept-directory"] });
+		worktrees.restore(record.id);
+		expect(readlinkSync(join(record.path, "link"))).toBe("file");
+		expect(readlinkSync(join(record.path, "kept-link"))).toBe("file");
+		expect(readlinkSync(join(record.path, "kept-directory", "link"))).toBe("../file");
+		expect(git(record.path, "diff", "HEAD")).toBe("");
 	});
 	it("retains unique committed history independently of the released checkout", () => {
 		const { repo, worktrees } = fixture();
@@ -180,12 +263,16 @@ describe("recoverable worktrees", { timeout: 20_000 }, () => {
 	});
 	it("restores local-only submodule history and both staged and unstaged submodule edits", () => {
 		const { root, repo, worktrees } = fixture();
+		const globalConfig = join(root, "gitconfig");
+		writeFileSync(globalConfig, "[init]\n\tdefaultBranch = master\n");
+		vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfig);
 		const upstream = repository(join(root, "upstream"));
 		git(repo, "-c", "protocol.file.allow=always", "submodule", "add", upstream, "module");
 		git(repo, "commit", "-m", "add module");
 		const record = worktrees.create(repo, "work", 20_000_000);
 		git(record.path, "-c", "protocol.file.allow=always", "submodule", "update", "--init");
 		const module = join(record.path, "module");
+		git(module, "switch", "-c", "master");
 		git(module, "config", "user.name", "Fixture");
 		git(module, "config", "user.email", "fixture@localhost");
 		writeFileSync(join(module, "file"), "local commit\n");
@@ -198,6 +285,7 @@ describe("recoverable worktrees", { timeout: 20_000 }, () => {
 		worktrees.release(record.id, notes);
 		worktrees.restore(record.id);
 		expect(git(module, "rev-parse", "HEAD")).toBe(unique);
+		expect(git(module, "symbolic-ref", "HEAD")).toBe("refs/heads/master");
 		expect(git(module, "config", "user.name")).toBe("Fixture");
 		expect(git(module, "remote", "get-url", "origin")).toBe(upstream);
 		expect(git(module, "show", ":file")).toBe("staged module");

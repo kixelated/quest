@@ -36,8 +36,6 @@ interface RepositorySnapshot {
 	path: string;
 	head: string;
 	branch: string | null;
-	files: string[];
-	missing: string[];
 }
 interface Snapshot {
 	version: 1;
@@ -70,6 +68,11 @@ function save(path: string, value: unknown): void {
 	const temporary = `${path}.${randomUUID()}.tmp`;
 	writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);
+}
+/** Copy file trees without changing symbolic-link text. */
+function copy(source: string, destination: string): void {
+	mkdirSync(dirname(destination), { recursive: true });
+	cpSync(source, destination, { recursive: true, dereference: false, verbatimSymlinks: true });
 }
 /** One spelling per path: Git prints `C:/...`, Node `C:\...`, and Windows may use 8.3 names. */
 function canonical(path: string): string {
@@ -161,8 +164,15 @@ export class Worktrees {
 		if (!record) throw new Error(`unknown worktree: ${id}`);
 		return record;
 	}
+	private retained(): number {
+		const directory = join(this.home, "checkpoints");
+		// Shared registry/container metadata is outside per-checkout reservations.
+		return existsSync(directory)
+			? readdirSync(directory).reduce((total, entry) => total + diskUsage(join(directory, entry)), 0)
+			: 0;
+	}
 	private measure(registry: Registry): number {
-		const retained = diskUsage(join(this.home, "checkpoints"));
+		const retained = this.retained();
 		return (
 			retained +
 			registry.records.reduce((total, record) => {
@@ -214,7 +224,7 @@ export class Worktrees {
 		return this.locked((registry) => ({
 			capacity: registry.capacity,
 			allocated: this.measure(registry),
-			retained: diskUsage(join(this.home, "checkpoints")),
+			retained: this.retained(),
 			records: registry.records,
 		}));
 	}
@@ -334,20 +344,17 @@ export class Worktrees {
 				for (const file of files)
 					if (covers(scratch, path ? `${path}/${file}` : file))
 						throw new Error(`scratch includes tracked source: ${file}`);
-				const missing: string[] = [];
 				for (const file of files) {
 					const source = join(root, file);
 					try {
-						lstatSync(source);
+						// HEAD may name a file replaced by a directory in the index.
+						if (lstatSync(source).isDirectory()) continue;
 					} catch (error) {
-						if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-							missing.push(file);
-							continue;
-						}
+						// A missing descendant can be underneath a replacement file.
+						if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) continue;
 						throw error;
 					}
-					mkdirSync(dirname(join(target, "files", file)), { recursive: true });
-					cpSync(source, join(target, "files", file), { dereference: false });
+					copy(source, join(target, "files", file));
 				}
 				const [head, index, config, symbolic] = git(
 					root,
@@ -364,7 +371,14 @@ export class Worktrees {
 					.trim()
 					.split("\n");
 				const branch = symbolic === "HEAD" ? null : symbolic; // Detached HEAD is supported.
-				cpSync(index, join(target, "index"));
+				const savedIndex = join(target, "index");
+				copy(index, savedIndex);
+				// Materialize a private full index while its split-index backing file still exists.
+				// The live index and its flags stay intact.
+				execFileSync("git", ["-C", root, "update-index", "--no-split-index"], {
+					env: { ...process.env, GIT_INDEX_FILE: savedIndex },
+					stdio: "pipe",
+				});
 				if (path) cpSync(config, join(target, "config"));
 				// A recovery commit makes staged blobs reachable without changing HEAD/index.
 				const tree = git(root, "write-tree").trim();
@@ -384,7 +398,7 @@ export class Worktrees {
 				git(root, "update-ref", `refs/quest/worktrees/${record.id}/${number}`, commit);
 				// A full bundle has no prerequisites, so `bundle verify` would only repeat its creation.
 				git(root, "bundle", "create", join(target, "history.bundle"), "--all", "--reflog", "HEAD");
-				snapshot.repositories.push({ path, head, branch, files, missing });
+				snapshot.repositories.push({ path, head, branch });
 				// Without exclude patterns, --others lists untracked and ignored files alike.
 				for (const file of list(root, "--others")) {
 					const relative = path ? `${path}/${file}` : file;
@@ -412,8 +426,7 @@ export class Worktrees {
 					throw new Error(
 						`keep directories cannot contain a repository: ${path}; tracked submodules are preserved automatically`,
 					);
-				mkdirSync(dirname(join(directory, "kept", path)), { recursive: true });
-				cpSync(source, join(directory, "kept", path), { recursive: true, dereference: false });
+				copy(source, join(directory, "kept", path));
 			}
 			save(join(directory, "snapshot.json"), snapshot);
 			const previous = record.checkpoint;
@@ -478,7 +491,9 @@ export class Worktrees {
 				throw new Error(`cannot restore a ${record.phase} allocation; release finishes or abandons it`);
 			if (existsSync(record.path))
 				throw new Error("restore destination exists; refusing to adopt or overwrite it");
-			this.admit(registry, record.reserve, dirname(record.path));
+			// Its retained recovery already counts toward the shared capacity and free-space usage.
+			const retained = diskUsage(join(this.home, "checkpoints", record.id));
+			this.admit(registry, Math.max(0, record.reserve - retained), dirname(record.path));
 			const snapshot = json<Snapshot>(join(record.checkpoint, "snapshot.json"));
 			if (snapshot.version !== 1) throw new Error("unsupported checkpoint version");
 			record.phase = "restoring";
@@ -522,6 +537,8 @@ export class Worktrees {
 						} catch (error) {
 							if ((error as { status?: number }).status !== 5) throw error;
 						}
+						// Detach before fetching branches, including git init's initial branch.
+						writeFileSync(join(root, ".git", "HEAD"), `${saved.head}\n`);
 						git(root, "fetch", "--no-write-fetch-head", join(source, "history.bundle"), "+refs/*:refs/*");
 						// Submodule gitdirs are private copies, so their branches return as saved.
 						writeFileSync(
@@ -529,13 +546,8 @@ export class Worktrees {
 							`${saved.branch ? `ref: ${saved.branch}` : saved.head}\n`,
 						);
 					}
-					// Every tracked file and the index come from the checkpoint, so nothing is checked out.
-					for (const file of saved.missing) rmSync(join(root, file), { force: true });
-					for (const file of saved.files.filter((file) => !saved.missing.includes(file))) {
-						mkdirSync(dirname(join(root, file)), { recursive: true });
-						rmSync(join(root, file), { force: true });
-						cpSync(join(source, "files", file), join(root, file), { dereference: false });
-					}
+					// The checkout starts empty, so the saved tree itself describes present files.
+					copy(join(source, "files"), root);
 					cpSync(
 						join(source, "index"),
 						i === 0
@@ -543,8 +555,7 @@ export class Worktrees {
 							: join(root, ".git", "index"),
 					);
 				}
-				if (existsSync(join(record.checkpoint, "kept")))
-					cpSync(join(record.checkpoint, "kept"), record.path, { recursive: true, dereference: false });
+				if (existsSync(join(record.checkpoint, "kept"))) copy(join(record.checkpoint, "kept"), record.path);
 				record.phase = "active";
 				record.failure = undefined;
 				return record;
