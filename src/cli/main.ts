@@ -7,6 +7,7 @@ import { Command, CommanderError, InvalidArgumentError, Option } from "commander
 
 import { description, version } from "../../package.json";
 import { blockers, check, formatFinding, label, lookup, ready, renderBlocker } from "../core";
+import { gate } from "./gate";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
@@ -51,6 +52,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.exitOverride();
 	const root = () => program.opts<{ root: string }>().root;
+
+	program
+		.command("gate")
+		.summary("Admit an expensive command to a shared host slot (Linux/systemd)")
+		.description(
+			"Run a command in a user systemd scope; nested calls share their existing slot.\n\n" +
+				'Reads ~/.config/quest/gate.json: {"jobs": 2}; defaults to the CPU count. ' +
+				"All callers must use the same host configuration. Unsupported platforms fail explicitly.",
+		)
+		.argument("<command>", "Executable to run")
+		.argument("[args...]", "Arguments forwarded verbatim")
+		.action((command: string, args: string[]) => {
+			pending = gate([command, ...args]).catch((error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			});
+		});
 
 	program
 		.command("check")
@@ -182,7 +200,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	try {
-		program.parse(argv, { from: "user" });
+		program.parse(gateBoundary(argv), { from: "user" });
 		return pending ?? code;
 	} catch (error) {
 		if (error instanceof CommanderError) {
@@ -225,4 +243,14 @@ function positiveSeconds(value: string): number {
 		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
 	}
 	return seconds;
+}
+
+/** Stop option parsing before a gated executable, keeping its own flags intact. */
+function gateBoundary(argv: string[]): string[] {
+	let index = 0;
+	while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
+		index += argv[index] === "--root" ? 2 : 1;
+	}
+	if (argv[index] !== "gate" || !argv[index + 1] || ["--", "-h", "--help"].includes(argv[index + 1])) return argv;
+	return [...argv.slice(0, index + 1), "--", ...argv.slice(index + 1)];
 }

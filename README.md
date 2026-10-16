@@ -174,6 +174,36 @@ There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting.
 
+## Gate expensive commands (Linux preview)
+
+`quest gate <command> [args...]` admits expensive phases to shared host slots:
+
+```sh
+quest gate bun run test
+quest gate cargo build --release
+```
+
+The preview requires Linux, unified cgroup v2 with writable `cgroup.kill`, and
+`systemd-run` / `systemctl` (systemd 254+) connected to a systemd user manager. Other platforms
+fail explicitly. Ordinary Quest commands remain available on every supported
+platform. Repository entrypoints do not invoke this preview automatically yet.
+
+All repositories and worktrees belonging to a user share the same slots. The
+limit defaults to the available CPU count; set `jobs` in
+`~/.config/quest/gate.json` to change it, for example `{"jobs": 2}`. Use the same
+host configuration for all callers, and change it only when gated commands are
+idle. A nested invocation shares its existing kernel scope. Internal compiler
+or test worker parallelism remains the command's responsibility.
+
+Arguments, working directory, environment and terminal streams pass through to
+the executable. Waiting happens before it starts. Cancellation kills its exact
+cgroup; if the gate crashes, surviving descendants retain their slot until they
+finish. Commands that deliberately move themselves into other cgroups are
+outside this cooperative admission boundary. The gate watches the kernel cgroup lifecycle for waiting, with no PID recovery guesses, polling or extra daemon.
+There is no fairness guarantee: a queued command may wait on the first occupied
+slot while another becomes available. This preview makes no measured claim of
+improved whole-machine responsiveness.
+
 ## Work with your agents
 
 Open this repository in Claude Code or Codex. The binary carries the skills;

@@ -27,6 +27,31 @@ remain useful without multiplying full-machine builds and test stacks.
 - Update CLI help and existing usage docs inline. Keep the shared primitive
   outside repository-specific policy and independent of the hosted runner.
 
+### Implementation status
+
+- The draft implements a Linux/systemd user-scope backend, transparent CLI
+  invocation, configurable admission, nested scope reuse, exact cgroup-handle
+  cancellation, and event-driven contention waiting. Kernel scopes retain slots
+  through supervisor crashes and detached descendants.
+- The quest remains unfinished. Automatic repository entrypoint adoption needs
+  a platform policy: recommended next step is explicit Linux support first,
+  retaining a clear unsupported error on macOS and Windows until native ownership
+  backends are justified. Do not install an unconditional gate in cross-platform
+  entrypoints or silently run an unsupported gate ungated.
+- The pinned Bun exposes `--no-orphans`, but its best-effort registration and
+  bounded PID-tree walks need further validation before relying on it for exact
+  ownership. Windows ownership can use native Job Objects; portable Node
+  process groups do not provide the required crash and descendant guarantees. A broader backend choice
+  and its packaging remain open. No native helper is added in this draft.
+- A 10-sample local bundled-CLI probe measured median startup of 35.5 ms for
+  `--version` and 72.5 ms for a gated `/bin/true` (about 37 ms additional).
+  This is an admission-cost probe on the current loaded host, not a whole-machine
+  responsiveness result. Representative build/test contention remains unmeasured.
+- Shared configuration must remain consistent while slots are active. Safe
+  configuration changes across active callers and representative build/test
+  contention measurements remain unfinished. Fairness is not promised by this
+  simple admission implementation.
+
 ## Related
 
 - [Recoverable worktrees](/quest/m0/worktree.md) - disk admission and checkout lifetime
