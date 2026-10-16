@@ -38,6 +38,21 @@ Agent count is unrestricted by this command; expensive work uses `quest gate`.
   cancellation, interrupted cleanup, and simultaneous disk admission. Measure
   retained disk after complete and suspended jobs; update existing docs inline.
 
+Draft implementation status:
+
+- Draft implementation: explicit disk capacity/reservation, generic Git-owned
+  create/checkpoint/release/restore, private recovery metadata, full bundles,
+  tracked/index preservation, explicit keep/scratch classification, initialized
+  submodule history, retained failed allocations, and filesystem fixtures.
+- Remaining before this quest is complete: exact foreground descendant ownership
+  through cancellation/crashes and automatic reconciliation, interrupted create
+  and restore recovery, automatic release at lifecycle boundaries, concurrency
+  and cancellation fixtures, and measured real-job retained footprints. Native
+  agent lifecycle adoption remains in the related integration quest.
+- Process groups and PID files cannot prove detached descendants are stopped
+  after a supervisor crash. Keep this PR draft until a supported ownership
+  backend can enforce that boundary; unsupported platforms must fail explicitly.
+
 ## Related
 
 - [Expensive command gate](/quest/m0/local-gate.md) - independent CPU admission

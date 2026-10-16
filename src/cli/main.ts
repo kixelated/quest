@@ -11,6 +11,7 @@ import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
+import { Worktrees } from "./worktree";
 import { pullRequest, waitDependencies, waitForActivity, WaitInputError, WaitTimeout } from "./wait";
 
 /** Where the command writes; the process streams, or a buffer under test. */
@@ -139,6 +140,50 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
+	const worktree = program
+		.command("worktree")
+		.description("Reserve disk and checkpoint, release, or restore private Git checkouts");
+	const state = () => new Worktrees();
+	const record = (value: unknown) => print(JSON.stringify(value));
+	worktree
+		.command("capacity <bytes>")
+		.description("Set this user's shared disk budget in bytes")
+		.action((bytes: string) => {
+			state().configure(bytesValue(bytes));
+		});
+	worktree
+		.command("status")
+		.description("Print reservations, retained recovery bytes, and checkouts as JSON")
+		.action(() => record(state().status()));
+	worktree
+		.command("create <name>")
+		.description("Create an exclusively owned detached Git worktree under .worktrees/")
+		.requiredOption("--reserve <bytes>", "Checkout, expected build growth, and checkpoint bytes", bytesValue)
+		.option("--ref <ref>", "Initial Git revision", "HEAD")
+		.action((name: string, options: { reserve: number; ref: string }) =>
+			record(state().create(root(), name, options.reserve, options.ref)),
+		);
+	for (const operation of ["checkpoint", "release"] as const) {
+		worktree
+			.command(`${operation} <id>`)
+			.description(
+				operation === "checkpoint"
+					? "Preserve source, index, history, and resume notes outside the checkout"
+					: "Take a fresh checkpoint, then remove an exclusively owned idle checkout",
+			)
+			.requiredOption("--notes <text>", "Unresolved work, or an explicit completion statement")
+			.option("--check <result...>", "Checks passed, failed, or not run", [])
+			.option("--keep <path...>", "Explicit valuable untracked or ignored paths to preserve locally", [])
+			.option("--scratch <path...>", "Explicit disposable untracked or ignored paths", [])
+			.action((id: string, options: { notes: string; check: string[]; keep: string[]; scratch: string[] }) =>
+				record(state()[operation](id, { ...options, checks: options.check })),
+			);
+	}
+	worktree
+		.command("restore <id>")
+		.description("Restore the preserved checkout and source; leave the main worktree detached")
+		.action((id: string) => record(state().restore(id)));
+
 	program
 		.command("guide")
 		.description("Print the quest guide: the format, workflow, and rules agents follow")
@@ -225,4 +270,11 @@ function positiveSeconds(value: string): number {
 		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
 	}
 	return seconds;
+}
+
+function bytesValue(value: string): number {
+	const bytes = Number(value);
+	if (!/^\d+$/.test(value) || !Number.isSafeInteger(bytes) || bytes <= 0)
+		throw new InvalidArgumentError("bytes must be a positive safe integer");
+	return bytes;
 }
