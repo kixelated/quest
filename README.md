@@ -208,24 +208,25 @@ quest gate bun run test
 quest gate cargo build --release
 ```
 
-Every platform waits while the 1-minute load average exceeds the limit, which
-counts work from every session and user. The load average lags new work, so the
-gate admits at most one waiting command every 5 seconds rather than releasing
-every waiter at once. Windows reports no load average, so admission there is
-immediate.
+Admission is sized from the host, with no configuration. Every platform waits
+while the 1-minute load average exceeds the usable core count (honoring CPU
+affinity), or while available memory is below one command's budget: 4 GiB, or a
+quarter of RAM on smaller hosts, where RAM is capped by any container memory
+limit. Load and free memory count work from every session and user. The load
+average lags new work, so the gate admits at most one waiting command every 5
+seconds rather than releasing every waiter at once. Windows reports no load
+average and macOS counts reclaimable cache as used memory, so those signals are
+skipped there.
 
 On Linux with unified cgroup v2, writable `cgroup.kill`, and a systemd 254+ user
-manager, each command also takes one of a fixed number of slots in a user scope.
-The slot stays taken until the command's last descendant exits, even if the
-gate crashes, and cancellation kills that exact cgroup. Without a user manager,
-Linux uses load admission alone, like macOS and Windows.
+manager, each command also takes one of `min(cores, RAM / 4 GiB)` slots in a
+user scope. The slot stays taken until the command's last descendant exits,
+even if the gate crashes, and cancellation kills that exact cgroup. Without a
+user manager, Linux uses load and memory admission alone, like macOS and
+Windows.
 
-Both limits default to the CPU count; change them in
-`~/.config/quest/gate.json`, for example `{"jobs": 2, "load": 8}`. Each
-admission reads the file when it starts waiting; after lowering `jobs`,
-commands already running in higher slots finish undisturbed. A nested
-invocation runs immediately inside the admitted command. Internal compiler or
-test worker parallelism remains the command's responsibility.
+A nested invocation runs immediately inside the admitted command. Internal
+compiler or test worker parallelism remains the command's responsibility.
 
 This repository's `just check`, `just test`, `just worker-check`, and
 `just worker-test` run through the gate.

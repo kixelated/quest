@@ -14,19 +14,18 @@ before claiming a responsiveness improvement.
 ## Plan
 
 - Decided 2026-10-15: gate expensive command phases, not agent lifetimes. Use a
-  simple configurable concurrency limit, with a CPU-count default. Repository
+  simple concurrency limit derived from the host. Repository
   entrypoints invoke the gate automatically; ordinary reasoning and I/O do not
   occupy a CPU slot. No adaptive scheduler or new daemon is needed for this scope.
 - Decided 2026-10-15 (user): gate checks and CI-like suites on host load, not
   agents, because load from every session and user is what starves test timers.
   The agent-level load-average rule was removed from the spawn and complete skills.
-- Decided 2026-10-15 (user): admission uses both limits. Slots cap concurrency
-  where the platform can own descendants exactly; admission also waits while the
+- Decided 2026-10-15 (user): admission uses both. Slots cap concurrency where
+  the platform can own descendants exactly; admission also waits while the
   1-minute load average exceeds the core count, which sees work the slots cannot.
 - Decided 2026-10-15 (user): the load gate runs on every platform, and Linux adds
   systemd scope slots on top. macOS, Windows, and Linux without a user manager
-  get load-only admission rather than an unsupported error. Windows reports no
-  load average, so admission there is immediate.
+  get load and memory admission alone rather than an unsupported error.
 - Decided 2026-10-15 (user): Bun's `--no-orphans` stays a research option. Its
   best-effort registration and bounded PID-tree walks do not establish exact
   ownership by themselves.
@@ -35,10 +34,17 @@ before claiming a responsiveness improvement.
   lags new work and is sampled every 5 seconds, so waiters that all see it fall
   must not start together. Nothing is held across the command, so a crash
   leaves no stale lock.
-- Decided 2026-10-15: lowering `jobs` while commands run is safe: each admission
-  reads the limits when it starts waiting, and higher slots finish undisturbed.
+- Decided 2026-10-15 (user): limits come from host specs, with no configuration
+  file. The load limit is the usable core count (`availableParallelism`, which
+  honors CPU affinity): one runnable thread per core. Each
+  command is budgeted 4 GiB, a typical build or test stack, so Linux gets
+  `min(cores, RAM / 4 GiB)` slots (at least one), with RAM capped by a cgroup
+  memory limit. Admission also waits while available memory is below
+  `min(4 GiB, RAM / 4)`, so a small host still runs one command. macOS counts
+  reclaimable cache as used memory, so only its load is gated; Windows reports
+  no load average, so only its memory is.
 - Nested gated calls run immediately: the kernel scope identifies them on Linux,
-  and an inherited marker does where admission was by load alone.
+  and an inherited marker does where admission had no kernel scope.
 - A 10-sample probe measured about 37 ms of admission overhead for a gated
   `/bin/true`. Fairness is not promised.
 

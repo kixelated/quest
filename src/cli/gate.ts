@@ -1,5 +1,6 @@
-// Host-wide command admission. Every platform waits for the load average; on
-// Linux, systemd scope slots also cap concurrency and own orphans' lifetimes.
+// Host-wide command admission, sized from the host itself. Every platform waits
+// for CPU load and free memory; on Linux, systemd scope slots also cap
+// concurrency and own orphans' lifetimes.
 import { spawn } from "node:child_process";
 import {
 	closeSync,
@@ -12,7 +13,7 @@ import {
 	watch,
 	writeSync,
 } from "node:fs";
-import { availableParallelism, constants, homedir, loadavg } from "node:os";
+import { availableParallelism, constants, freemem, homedir, loadavg, totalmem } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -30,6 +31,8 @@ export interface GateBackend {
 export interface Host {
 	/** The 1-minute load average. */
 	load(): number;
+	/** Bytes available to a new command without swapping. */
+	memory(): number;
 	now(): number;
 	/** Atomically claim an admission window; false when another caller took it. */
 	claim(window: number): boolean;
@@ -41,9 +44,11 @@ export interface Limits {
 	jobs: number;
 	/** The highest 1-minute load average that still admits a command. */
 	load: number;
+	/** The least available memory, in bytes, that still admits a command. */
+	memory: number;
 }
 
-export type Waiting = "load" | "slots";
+export type Waiting = "load" | "memory" | "slots";
 
 /**
  * At most one admission per window across all callers. The load average lags
@@ -51,24 +56,34 @@ export type Waiting = "load" | "slots";
  */
 export const SETTLE_MS = 5000;
 
-export function gateLimits(config: unknown, cores = availableParallelism()): Limits {
-	if (typeof config !== "object" || config === null || Array.isArray(config)) {
-		throw new Error("gate configuration must be an object");
-	}
-	const { jobs = cores, load = cores } = config as { jobs?: unknown; load?: unknown };
-	if (typeof jobs !== "number" || !Number.isSafeInteger(jobs) || jobs < 1) {
-		throw new Error("gate jobs must be a positive safe integer");
-	}
-	if (typeof load !== "number" || !Number.isFinite(load) || load <= 0) {
-		throw new Error("gate load must be a positive number");
-	}
-	return { jobs, load };
+/** The memory one gated build or test stack is assumed to need. */
+export const COMMAND_MEMORY = 4 * 2 ** 30;
+
+/** Usable memory: physical RAM, or a smaller cgroup/container limit. */
+function usableMemory(): number {
+	const constrained = process.constrainedMemory?.() ?? 0;
+	return constrained > 0 ? Math.min(totalmem(), constrained) : totalmem();
+}
+
+/**
+ * Derive the limits from the host: no configuration. The load limit is one
+ * runnable thread per usable core; each slot and each admission reserves one
+ * command's memory, though never more than a quarter of a small host's RAM.
+ */
+export function hostLimits(cores = availableParallelism(), memory = usableMemory()): Limits {
+	return {
+		jobs: Math.max(1, Math.min(cores, Math.floor(memory / COMMAND_MEMORY))),
+		load: cores,
+		memory: Math.min(COMMAND_MEMORY, memory / 4),
+	};
 }
 
 /** Claims are empty files, named by window, in one per-user directory. */
 export function fileHost(directory: string): Host {
 	return {
 		load: () => loadavg()[0],
+		// macOS counts reclaimable cache as used, so only its load is gated.
+		memory: () => (process.platform === "darwin" ? Infinity : freemem()),
 		now: Date.now,
 		claim(window) {
 			mkdirSync(directory, { recursive: true });
@@ -87,13 +102,14 @@ export function fileHost(directory: string): Host {
 	};
 }
 
-/** Wait until the load admits a command and this caller wins the current window. */
-async function settle(host: Host, limit: number, signal: AbortSignal, waiting?: (reason: Waiting) => void) {
+/** Wait until the host has room for a command and this caller wins the current window. */
+async function settle(host: Host, limits: Limits, signal: AbortSignal, waiting?: (reason: Waiting) => void) {
 	for (;;) {
 		signal.throwIfAborted();
 		const now = host.now();
 		const window = Math.floor(now / SETTLE_MS);
-		if (host.load() > limit) waiting?.("load");
+		if (host.load() > limits.load) waiting?.("load");
+		else if (host.memory() < limits.memory) waiting?.("memory");
 		else if (host.claim(window)) return;
 		// Waiters wake together at the boundary, and exactly one claims the window.
 		await host.sleep((window + 1) * SETTLE_MS - now, signal);
@@ -109,7 +125,7 @@ export async function admit(
 	waiting?: (reason: Waiting) => void,
 ): Promise<number> {
 	for (;;) {
-		await settle(host, limits.load, signal, waiting);
+		await settle(host, limits, signal, waiting);
 		for (let slot = 0; slot < limits.jobs; slot++) {
 			signal.throwIfAborted();
 			const result = await backend.tryRun(slot, command, signal);
@@ -363,6 +379,7 @@ function systemd(): boolean {
 
 const notices: Record<Waiting, string> = {
 	load: "quest gate: waiting for the load average to fall",
+	memory: "quest gate: waiting for free memory",
 	slots: "quest gate: waiting for a free slot",
 };
 
@@ -387,16 +404,10 @@ export async function gate(command: string[]): Promise<number> {
 			const result = await run(command, controller.signal);
 			return interrupted || result;
 		}
-		let config: unknown = {};
-		try {
-			config = JSON.parse(readFileSync(join(homedir(), ".config", "quest", "gate.json"), "utf8"));
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		}
 		const shown = new Set<Waiting>();
 		const result = await admit(
 			command,
-			gateLimits(config),
+			hostLimits(),
 			backend,
 			fileHost(join(homedir(), ".cache", "quest", "gate")),
 			controller.signal,

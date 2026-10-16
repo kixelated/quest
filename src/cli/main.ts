@@ -57,10 +57,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("gate")
 		.summary("Run an expensive command once the host has room for it")
 		.description(
-			"Wait while the 1-minute load average exceeds the limit, admitting one waiting command every " +
-				"5 seconds. On Linux with a systemd user manager, the command also takes one of a fixed number " +
-				"of slots in a user scope until its last descendant exits. Nested calls run immediately.\n\n" +
-				'Reads ~/.config/quest/gate.json, for example {"jobs": 2, "load": 8}; both default to the CPU count.',
+			"Wait while the 1-minute load average exceeds the core count or available memory is below " +
+				"min(4 GiB, RAM/4), admitting one waiting command every 5 seconds. On Linux with a systemd " +
+				"user manager, the command also takes one of min(cores, RAM/4 GiB) slots in a user scope until " +
+				"its last descendant exits. Nested calls run immediately. Limits come from the host; there is " +
+				"no configuration.",
 		)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")
@@ -275,7 +276,7 @@ function positiveSeconds(value: string): number {
 }
 
 /** Stop option parsing before a gated executable, keeping its own flags intact. */
-function gateBoundary(argv: string[]): string[] {
+export function gateBoundary(argv: string[]): string[] {
 	let index = 0;
 	while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
 		index += argv[index] === "--root" ? 2 : 1;

@@ -1,10 +1,9 @@
 // Opt in explicitly: these tests require a real Linux systemd user manager.
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { closeSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { afterAll, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { SystemdGate } from "../src/cli/gate";
 import { tempDir } from "./fixture";
 
@@ -14,18 +13,12 @@ const runner = join(root, "test/fixtures/gate-run.ts");
 const enabled = process.env.QUEST_GATE_SYSTEMD_TESTS === "1";
 const signal = () => new AbortController().signal;
 
-// Load admission is unit-tested; a private home keeps it from holding these
-// slot tests on a busy host, and keeps their admission claims separate.
-const home = mkdtempSync(join(tmpdir(), "quest-gate-home-"));
-mkdirSync(join(home, ".config", "quest"), { recursive: true });
-writeFileSync(join(home, ".config", "quest", "gate.json"), JSON.stringify({ load: 1e9 }));
-const env = { ...process.env, HOME: home };
-afterAll(() => rmSync(home, { recursive: true, force: true }));
+// Commands run through the fixture runner, which admits on an idle host: load
+// and memory admission are unit-tested, and must not hold these on a busy host.
 
 function child(file: string, args: string[], cwd = root) {
 	const process = spawn("bun", [`--config=${join(root, "bunfig.toml")}`, file, ...args], {
 		cwd,
-		env,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	let stdout = "";
@@ -69,17 +62,18 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 	test("forwards arguments, locale, stdin and exact exit codes across directories", async () => {
 		const locale = process.env.LC_ALL ?? null;
 		const spawned = child(
-			cli,
+			runner,
 			[
-				"gate",
-				"bun",
-				"-e",
-				"process.stdin.once('data', data => { console.log(JSON.stringify([process.argv.slice(1), String(data), process.env.LC_ALL])); process.exitCode = 23; });",
-				"--",
-				"a $b",
-				"--help",
-				"--root",
-				"other",
+				JSON.stringify([
+					"bun",
+					"-e",
+					"process.stdin.once('data', data => { console.log(JSON.stringify([process.argv.slice(1), String(data), process.env.LC_ALL])); process.exitCode = 23; });",
+					"--",
+					"a $b",
+					"--help",
+					"--root",
+					"other",
+				]),
 			],
 			tempDir(),
 		);
@@ -92,12 +86,10 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 
 	test("preserves stdin, stdout and stderr as terminal descriptors", async () => {
 		const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-		const command = ["bun", cli, "gate", "/bin/sh", "-c", "test -t 0 && test -t 1 && test -t 2 && echo terminal"]
-			.map(quote)
-			.join(" ");
+		const gated = JSON.stringify(["/bin/sh", "-c", "test -t 0 && test -t 1 && test -t 2 && echo terminal"]);
+		const command = ["bun", runner, gated].map(quote).join(" ");
 		const terminal = spawn("script", ["--quiet", "--return", "--command", command, "/dev/null"], {
 			cwd: root,
-			env,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";
@@ -111,9 +103,8 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 		const file = join(tempDir(), "stderr");
 		const descriptor = openSync(file, "w");
 		writeSync(descriptor, "prefix\n");
-		const command = spawn("bun", [cli, "gate", "bun", "-e", "console.error('stderr')"], {
+		const command = spawn("bun", [runner, JSON.stringify(["bun", "-e", "console.error('stderr')"])], {
 			cwd: root,
-			env,
 			stdio: ["ignore", "ignore", descriptor],
 		});
 		closeSync(descriptor);
@@ -207,7 +198,9 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 	});
 
 	test("cancellation kills the exact owned cgroup", async () => {
-		const spawned = child(cli, ["gate", "bun", "-e", "console.log('ready'); setInterval(() => {}, 1000);"]);
+		const spawned = child(runner, [
+			JSON.stringify(["bun", "-e", "console.log('ready'); setInterval(() => {}, 1000);"]),
+		]);
 		await line(spawned.process, "ready");
 		spawned.process.kill("SIGTERM");
 		expect((await spawned.closed).code).toBe(143);
