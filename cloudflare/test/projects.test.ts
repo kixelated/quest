@@ -32,6 +32,8 @@ function github(
 		role?: string;
 		account?: number;
 		private?: boolean;
+		archived?: boolean;
+		disabled?: boolean;
 		missing?: boolean;
 		suspended?: boolean;
 		id?: number;
@@ -120,8 +122,8 @@ function github(
 				private: options.private ?? false,
 				visibility: options.private ? "private" : "public",
 				default_branch: "trunk",
-				archived: false,
-				disabled: false,
+				archived: options.archived ?? false,
+				disabled: options.disabled ?? false,
 				license: detected ? { spdx_id: detected, name: `${detected} License` } : null,
 			});
 		}
@@ -212,11 +214,15 @@ describe("project enrollment", () => {
 			quests: [{ path: "quest/first.md", title: "[S] First" }],
 		});
 		expect(await state()).toBeNull();
-		expect(calls.find((call) => call.path === "/repos/upstream/project")?.authorization).toBeNull();
-		expect(calls.find((call) => call.path.endsWith("/access_tokens"))?.body).toEqual({
-			repository_ids: [10],
-			permissions: { metadata: "read", contents: "read" },
-		});
+		expect(
+			calls
+				.filter((call) => call.path === "/repos/upstream/project")
+				.every((call) => call.authorization === "Bearer installation-token"),
+		).toBe(true);
+		expect(calls.filter((call) => call.path.endsWith("/access_tokens")).map((call) => call.body)).toEqual([
+			{ repositories: ["project"], permissions: { metadata: "read" } },
+			{ repository_ids: [10], permissions: { metadata: "read", contents: "read" } },
+		]);
 		expect(calls.some((call) => call.path === `/repos/upstream/project/git/trees/${tree}?recursive=1`)).toBe(true);
 		expect(calls.at(-1)?.path).toBe("/installation/token");
 	});
@@ -338,6 +344,23 @@ describe("project enrollment", () => {
 				),
 		).toBe(true);
 	});
+	it.each([{ archived: true }, { disabled: true }])(
+		"can stop an unavailable project without enabling it: %j",
+		async (options) => {
+			await github().service.setContributions(repo, "enrollment-test", "enabled");
+			const { service, calls } = github(options);
+			await expect(service.previewProject(repo, "enrollment-test")).rejects.toThrow("availability");
+			await expect(service.setContributions(repo, "enrollment-test", "enabled")).rejects.toThrow("availability");
+			await service.setContributions(repo, "enrollment-test", "paused");
+			expect(await state()).toMatchObject({ state: "paused" });
+			await expect(
+				github({ ...options, role: "write" }).service.setContributions(repo, "enrollment-test", "disconnected"),
+			).rejects.toThrow("maintainer authority");
+			await service.setContributions(repo, "enrollment-test", "disconnected");
+			expect(await state()).toBeNull();
+			expect(calls.some((call) => call.path.includes("/git/") || call.path === "/graphql")).toBe(false);
+		},
+	);
 	it("can pause and disconnect even after Quest files disappear or the project becomes private", async () => {
 		await github().service.setContributions(repo, "enrollment-test", "enabled");
 		const { service, calls } = github({ noQuests: true, private: true });

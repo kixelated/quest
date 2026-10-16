@@ -117,13 +117,12 @@ export class GitHubService {
 		if (state?.blocked) throw new GitHubError("GitHub installation revoked or suspended");
 	}
 
-	#repository(repo: GitHubRepository, current: Repository) {
+	#repository(repo: GitHubRepository, current: Repository, allowUnavailable = false) {
 		if (
 			current.id !== repo.id ||
 			current.owner.login.toLowerCase() !== repo.owner.toLowerCase() ||
 			current.name.toLowerCase() !== repo.name.toLowerCase() ||
-			current.archived ||
-			current.disabled
+			(!allowUnavailable && (current.archived || current.disabled))
 		)
 			throw new GitHubError("Repository identity or availability changed");
 	}
@@ -137,12 +136,13 @@ export class GitHubService {
 		}
 	}
 
-	async #withRepository<T>(
-		repo: GitHubRepository,
+	async #withInstallation<T>(
+		repo: Pick<GitHubRepository, "owner" | "name"> & { id?: number },
 		permissions: Permissions,
-		action: (token: string, current: Repository, installationId: number) => Promise<T>,
+		action: (token: string, installationId: number) => Promise<T>,
 	) {
-		const path = repositoryPath(repo);
+		if (!name(repo.owner) || !name(repo.name)) throw new GitHubError("Invalid repository");
+		const path = `/repos/${repo.owner}/${repo.name}`;
 		// Resolve the installation from the live repository; no browser-supplied
 		// installation IDs and no cached permission grants.
 		const installation = await this.#api<Installation>(this.#jwt(), `${path}/installation`);
@@ -163,14 +163,15 @@ export class GitHubService {
 			this.#jwt(),
 			`/app/installations/${installation.id}/access_tokens`,
 			"POST",
-			{ repository_ids: [repo.id], permissions: scope },
+			{
+				...(repo.id === undefined ? { repositories: [repo.name] } : { repository_ids: [repo.id] }),
+				permissions: scope,
+			},
 		);
 		if (!minted.token) throw new GitHubError("Installation token unavailable");
 		try {
-			const current = await this.#api<Repository>(minted.token, path);
-			this.#repository(repo, current);
 			await this.#gate(installation.id);
-			return await action(minted.token, current, installation.id);
+			return await action(minted.token, installation.id);
 		} finally {
 			// Do not turn a completed mutation into a retryable error if cleanup
 			// fails. GitHub also expires installation tokens after one hour.
@@ -180,6 +181,21 @@ export class GitHubService {
 				console.error({ event: "github_token_revocation_failed" });
 			}
 		}
+	}
+
+	async #withRepository<T>(
+		repo: GitHubRepository,
+		permissions: Permissions,
+		action: (token: string, current: Repository, installationId: number) => Promise<T>,
+		allowUnavailable = false,
+	) {
+		const path = repositoryPath(repo);
+		return this.#withInstallation(repo, permissions, async (token, installation) => {
+			const current = await this.#api<Repository>(token, path);
+			this.#repository(repo, current, allowUnavailable);
+			await this.#gate(installation);
+			return action(token, current, installation);
+		});
 	}
 
 	async #maintainer(token: string, repo: GitHubRepository, userId: string) {
@@ -210,12 +226,18 @@ export class GitHubService {
 		userId: string,
 		permissions: Permissions,
 		action: (token: string, current: Repository, installationId: number) => Promise<T>,
+		allowUnavailable = false,
 	) {
-		return this.#withRepository(repo, permissions, async (token, current, installationId) => {
-			await this.#maintainer(token, repo, userId);
-			await this.#gate(installationId);
-			return action(token, current, installationId);
-		});
+		return this.#withRepository(
+			repo,
+			permissions,
+			async (token, current, installationId) => {
+				await this.#maintainer(token, repo, userId);
+				await this.#gate(installationId);
+				return action(token, current, installationId);
+			},
+			allowUnavailable,
+		);
 	}
 
 	/** The operator's registered App, rather than an assumed App name. */
@@ -226,14 +248,16 @@ export class GitHubService {
 		return `https://github.com/apps/${app.slug}/installations/new`;
 	}
 
-	/** Resolve only public metadata; all subsequent reads prove authority. */
+	/** Resolve public metadata through a repository-scoped App token. */
 	async resolveRepository(owner: string, repository: string): Promise<GitHubRepository> {
 		if (!name(owner) || !name(repository)) throw new GitHubError("Use an owner/repository name");
-		const found = await this.#api<Repository>("", `/repos/${owner}/${repository}`);
-		this.#public(found);
-		const repo = { id: found.id, owner: found.owner.login, name: found.name };
-		repositoryPath(repo);
-		return repo;
+		return this.#withInstallation({ owner, name: repository }, {}, async (token) => {
+			const found = await this.#api<Repository>(token, `/repos/${owner}/${repository}`);
+			this.#public(found);
+			const repo = { id: found.id, owner: found.owner.login, name: found.name };
+			repositoryPath(repo);
+			return repo;
+		});
 	}
 
 	#public(current: Repository) {
@@ -385,6 +409,7 @@ export class GitHubService {
 						.run();
 				}
 			},
+			state !== "enabled",
 		);
 	}
 

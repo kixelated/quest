@@ -137,6 +137,11 @@ and decision inbox. It resolves the registered App's installation URL, accepts
 an explicit `owner/repository` selection, and verifies the linked GitHub
 identity's current maintain/admin authority through the existing service.
 Installing the App never creates a `github_projects` record or enables work.
+Repository selection resolves its installation using the App JWT, then reads
+metadata with a token restricted to the named repository and metadata-read
+permission. Subsequent authorized operations scope tokens by repository ID.
+Resolution uses the same installation gates and token revocation as other
+reads; it never consumes GitHub's shared anonymous repository-lookup quota.
 
 The preview reads the default branch at an exact commit, validates its Quest
 tree with the shared core, and lists ready quests. It fetches all quest blobs
@@ -151,7 +156,7 @@ without Quest files follow `/setup`; no repository writes occur during setup.
 The D1 enrollment records a project-wide enabled/paused state, distinct from
 installation permissions. Every opt-in/resume, pause, and disconnect rechecks
 current authority and provider gates. Pause/disconnect do not require valid
-Quest files or public visibility, so maintainers can stop contributions after
+Quest files, public visibility, or an active/unarchived repository, so maintainers can stop contributions after
 those conditions change. Disconnect deletes the enrollment, not the GitHub
 App installation or existing contributions. Remembered selections are only
 navigation and never confer authority. Future job coordination must recheck
