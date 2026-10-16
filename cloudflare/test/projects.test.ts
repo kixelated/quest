@@ -865,10 +865,12 @@ describe("enrolled project observations", () => {
 
 describe("project activity routes", () => {
 	const base = `${origin}/projects/github/upstream/project`;
-	async function session() {
+	let githubId = 0;
+	async function session(options: Parameters<typeof github>[0] = {}) {
 		const who = identity("github");
 		const login = await oauth(who);
-		const mock = github({ account: Number(who.id) });
+		githubId = Number(who.id);
+		const mock = github({ ...options, account: githubId });
 		vi.spyOn(globalThis, "fetch").mockImplementation(mock.request as typeof fetch);
 		const account = await env.DB.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
 			.bind(who.id)
@@ -915,5 +917,36 @@ describe("project activity routes", () => {
 		const quest = await app.request(`${base}/board/quest/first`, { headers: { Cookie: cookie } }, testEnv);
 		expect(quest.status).toBe(200);
 		expect(await quest.text()).toContain("Build first.");
+	});
+	it("keeps tree-ready quests pending until a claiming PR on an unvisited page is observed", async () => {
+		const page = activity();
+		page.pullRequests = connection([pull("human-branch", 201)], true, "pull-cursor");
+		page.refs = connection([]);
+		const cookie = await session({ activity: page });
+		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
+		const pending = await (await app.request(`${base}/board`, { headers: { Cookie: cookie } }, testEnv)).text();
+		expect(pending).toContain("Availability pending");
+		expect(pending).not.toContain(">Available<");
+		const quest = await (
+			await app.request(`${base}/board/quest/first`, { headers: { Cookie: cookie } }, testEnv)
+		).text();
+		expect(quest).toContain("Availability pending");
+		expect(quest).not.toContain("/quest-start");
+
+		const rest = github({ account: githubId, activity: { pullRequests: connection([pull()]) } });
+		vi.spyOn(globalThis, "fetch").mockImplementation(rest.request as typeof fetch);
+		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
+		const board = await (await app.request(`${base}/board`, { headers: { Cookie: cookie } }, testEnv)).text();
+		expect(board).not.toContain("Availability pending");
+		expect(board).toContain("Ready to turn in");
+	});
+	it("renders an empty board for a root-only project", async () => {
+		const cookie = await session({
+			documents: [{ path: "quest/README.md", content: "# Project\n\n## Goal\n\nBuild it.\n" }],
+		});
+		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
+		const board = await app.request(`${base}/board`, { headers: { Cookie: cookie } }, testEnv);
+		expect(board.status).toBe(200);
+		expect(await board.text()).toContain("This project has no quests yet.");
 	});
 });

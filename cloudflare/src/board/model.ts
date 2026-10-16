@@ -13,6 +13,7 @@ import type { Change, Completed, Project } from "./project";
 export type Status =
 	| { kind: "turn-in"; change: Change }
 	| { kind: "available" }
+	| { kind: "pending" }
 	| { kind: "accepted" }
 	| { kind: "blocked"; requires: Ref[] };
 
@@ -122,6 +123,9 @@ export function readBoard(project: Project): Board {
 	const docs = new Map(parsed.map((doc) => [doc.path, doc]));
 	const contents = new Map(sorted.map(({ path, content }) => [path, content]));
 	const open = new Set(ready(parsed));
+	// Observations narrow the tree's ready quests; until they are complete, an
+	// unseen change or claim may already occupy one.
+	const free = project.available === undefined ? open : new Set(project.available ?? []);
 	const changes = new Map(project.changes.map((change) => [change.quest, change]));
 
 	const name = (path: string) => {
@@ -133,7 +137,8 @@ export function readBoard(project: Project): Board {
 		const change = changes.get(doc.path);
 		if (change) return { kind: "turn-in", change };
 		if (project.claims?.includes(doc.path)) return { kind: "accepted" };
-		if (open.has(doc.path)) return { kind: "available" };
+		if (free.has(doc.path)) return { kind: "available" };
+		if (open.has(doc.path)) return { kind: "pending" };
 		const requires = blockers(parsed, doc).map((blocker) =>
 			blocker.path === null
 				? { title: blocker.text, href: null }
@@ -223,7 +228,7 @@ export function readBoard(project: Project): Board {
 	}
 
 	const all = milestones.flatMap((milestone) => flatten(milestone.items));
-	const counts = { "turn-in": 0, available: 0, blocked: 0, accepted: 0 };
+	const counts = { "turn-in": 0, available: 0, pending: 0, blocked: 0, accepted: 0 };
 	for (const q of all) counts[q.status.kind]++;
 
 	const milestoneOf = (path: string) => milestones.find((c) => c.number !== "" && path.startsWith(`${dir(c.path)}/`));

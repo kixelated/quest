@@ -45,6 +45,11 @@ export type Project = Snapshot & {
 	changes: Change[];
 	/** Observed branch claims reserve work without implying a finished PR. */
 	claims?: string[];
+	/**
+	 * Quests observations show free to start, or `null` while reconciliation is
+	 * incomplete. Absent when the quest tree alone decides.
+	 */
+	available?: string[] | null;
 	issues: Issue[];
 };
 

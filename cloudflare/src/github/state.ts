@@ -220,6 +220,9 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 	const claims = scan.claims.map((ref) => associatedQuest(ref, paths)).filter((q): q is string => q !== null);
 	const complete = scan.complete && row.invalidated === 0;
 	const occupied = new Set([...claims, ...changes.map((c) => c.quest)]);
+	const available = complete
+		? ready(snapshot.documents.map((d) => parse(d.path, d.content))).filter((path) => !occupied.has(path))
+		: [];
 	const project: Project = {
 		...snapshot,
 		name: `github/${repo.owner}/${repo.name}`,
@@ -231,14 +234,13 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 		issues: activity
 			.filter((item) => item.kind === "issue" && !item.missing && item.data?.state === "OPEN")
 			.map((item) => ({ path: `issues/${item.number}`, title: item.data!.title })),
+		available: complete ? available : null,
 	};
 	return {
 		project,
 		activity,
 		claims,
-		available: complete
-			? ready(snapshot.documents.map((d) => parse(d.path, d.content))).filter((path) => !occupied.has(path))
-			: [],
+		available,
 		complete,
 		observedAt: row.observedAt,
 		revision: row.revision,

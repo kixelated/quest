@@ -32,6 +32,8 @@ function label(status: Status, limit = Infinity): string {
 			return "Claimed";
 		case "available":
 			return "Available";
+		case "pending":
+			return "Availability pending";
 		case "blocked": {
 			const titles = status.requires.map((ref) => ref.title);
 			const shown = titles.slice(0, limit).join(", ");
@@ -159,6 +161,7 @@ function FinishedList(props: { finished: Finished[] }) {
 /** The statuses a visitor can filter the board by, in the order a contributor asks about them. */
 export const SHOWN: [Status["kind"], string][] = [
 	["available", "Available"],
+	["pending", "Availability pending"],
 	["accepted", "Claimed"],
 	["turn-in", "Ready to turn in"],
 	["blocked", "Requires others"],
@@ -175,7 +178,7 @@ function Tally(props: { board: Board; show: Status["kind"] | null }) {
 						All
 					</a>
 				</li>
-				{SHOWN.map(([kind, name]) => (
+				{SHOWN.filter(([kind]) => kind !== "pending" || props.board.counts.pending > 0).map(([kind, name]) => (
 					<li class={`ql-${kind}`}>
 						<a href={`${base}?show=${kind}`} aria-current={props.show === kind ? "page" : undefined}>
 							<Marker status={kind} />
@@ -212,17 +215,26 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 					)}
 					.
 				</p>
+				{project.available === null && (
+					<p class="muted">
+						Reconciliation with GitHub is incomplete, so availability is pending until every open change and
+						quest branch is observed.
+					</p>
+				)}
 			</header>
 
 			{milestones.map(({ milestone, items }) => (
 				<MilestoneSection milestone={milestone} items={items} />
 			))}
-			{milestones.length === 0 && (
-				<p class="ql-panel muted">
-					No quests are {SHOWN.find(([kind]) => kind === show)![1].toLowerCase()} right now.{" "}
-					<a href={boardHref(project)}>Show every quest</a>.
-				</p>
-			)}
+			{milestones.length === 0 &&
+				(show ? (
+					<p class="ql-panel muted">
+						No quests are {SHOWN.find(([kind]) => kind === show)![1].toLowerCase()} right now.{" "}
+						<a href={boardHref(project)}>Show every quest</a>.
+					</p>
+				) : (
+					<p class="ql-panel muted">This project has no quests yet.</p>
+				))}
 
 			<div class="board-foot">
 				<section class="ql-panel" aria-labelledby="finished-title">
@@ -331,6 +343,15 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 				<p>
 					A quest branch already claims this work. Review its current GitHub state before starting another
 					implementation.
+				</p>
+			</Panel>
+		);
+	if (status.kind === "pending")
+		return (
+			<Panel title="Availability pending">
+				<p class="muted">
+					Reconciliation with GitHub is incomplete, so an open change or quest branch may already claim this
+					quest. Check again once every page is observed.
 				</p>
 			</Panel>
 		);

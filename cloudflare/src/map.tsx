@@ -82,6 +82,8 @@ function text(status: Status): string {
 			return "claimed";
 		case "available":
 			return "ready";
+		case "pending":
+			return "pending";
 		case "blocked":
 			return "blocked";
 		case "turn-in":
