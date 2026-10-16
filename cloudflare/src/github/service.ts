@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
-import { check, parse, ready } from "quest/core";
+import { check, isQuest, parse, ready } from "quest/core";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 
@@ -285,6 +285,18 @@ export class GitHubService {
 		).results;
 	}
 
+	/** Let any current maintainer reach stop controls without a valid preview. */
+	async enrolledProject(owner: string, repository: string, userId: string): Promise<Enrollment | null> {
+		if (!name(owner) || !name(repository)) throw new GitHubError("Invalid repository");
+		const enrolled = await this.#env.DB.prepare(
+			"SELECT id,owner,name,state FROM github_projects WHERE owner=? COLLATE NOCASE AND name=? COLLATE NOCASE",
+		)
+			.bind(owner, repository)
+			.first<Enrollment>();
+		if (!enrolled) return null;
+		return this.#authorized(enrolled, userId, {}, async () => enrolled, true);
+	}
+
 	async #preview(
 		token: string,
 		repo: GitHubRepository,
@@ -304,7 +316,7 @@ export class GitHubService {
 		const quest = root.tree.find((entry) => entry.path === "quest" && entry.type === "tree");
 		if (!quest) throw new GitHubError("Quest files are required. Follow the existing Quest setup guide first.");
 		const entries = root.tree.filter(
-			(entry) => entry.path.startsWith("quest/") && entry.path.endsWith(".md") && entry.type === "blob",
+			(entry) => entry.path.startsWith("quest/") && isQuest(entry.path) && entry.type === "blob",
 		);
 		if (!entries.length)
 			throw new GitHubError("Quest files are required. Follow the existing Quest setup guide first.");

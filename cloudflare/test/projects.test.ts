@@ -162,17 +162,18 @@ function github(
 			const body = calls.at(-1)!.body;
 			expect(body.variables).toEqual({ owner: repo.owner, name: repo.name });
 			const blobs = Object.fromEntries(
-				snapshot.map((doc, i) => {
-					const oid = blobOid(doc.content);
-					expect(body.query).toContain(`q${i}: object(oid: "${oid}")`);
+				[...body.query.matchAll(/(q\d+): object\(oid: "([a-f0-9]{40})"\)/g)].map(([, alias, oid]) => {
+					const doc = snapshot.find((doc) => blobOid(doc.content) === oid);
+					if (!doc) throw new Error("Unknown blob");
 					return [
-						`q${i}`,
+						alias,
 						options.missingBlob
 							? null
 							: { oid, text: doc.content, isBinary: false, isTruncated: false, ...options.blob },
 					];
 				}),
 			);
+
 			return Response.json({
 				data: { repository: options.missingRepository ? null : blobs },
 				errors: options.graphqlErrors ? [{ message: "Partial result" }] : undefined,
@@ -225,6 +226,29 @@ describe("project enrollment", () => {
 		]);
 		expect(calls.some((call) => call.path === `/repos/upstream/project/git/trees/${tree}?recursive=1`)).toBe(true);
 		expect(calls.at(-1)?.path).toBe("/installation/token");
+	});
+	it.each(["AGENTS.md", "CLAUDE.md"])("ignores root and nested %s instructions like the CLI", async (filename) => {
+		const { service, calls } = github({
+			documents: [
+				...documents,
+				{ path: `quest/${filename}`, content: "Repository instructions, not a quest." },
+				{ path: `quest/nested/${filename}`, content: "Nested instructions, not a quest." },
+			],
+		});
+		expect((await service.previewProject(repo, "enrollment-test")).quests).toEqual([
+			{ path: "quest/first.md", title: "[S] First" },
+		]);
+		await service.setContributions(repo, "enrollment-test", "enabled");
+		expect(await state()).toMatchObject({ state: "enabled" });
+		expect(
+			calls
+				.filter((call) => call.path === "/graphql")
+				.every(
+					(call) =>
+						!call.body.query.includes(blobOid("Repository instructions, not a quest.")) &&
+						!call.body.query.includes(blobOid("Nested instructions, not a quest.")),
+				),
+		).toBe(true);
 	});
 	it("enables a 38-document project within Workers Free's 50 external subrequests", async () => {
 		const quests = Array.from({ length: 37 }, (_, i) => ({
@@ -414,6 +438,73 @@ describe("project enrollment", () => {
 });
 
 describe("project setup routes", () => {
+	it.each([{ private: true }, { archived: true }, { invalid: true }])(
+		"lets a replacement maintainer reach stop controls when preview fails: %j",
+		async (options) => {
+			await github().service.setContributions(repo, "enrollment-test", "enabled");
+			const who = identity("github");
+			const { session } = await oauth(who);
+			const account = await env.DB.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
+				.bind(who.id)
+				.first<{ userId: string }>();
+			expect(account!.userId).not.toBe("enrollment-test");
+			expect(await github().service.projects(account!.userId)).toEqual([]);
+			const { request } = github({ ...options, account: Number(who.id) });
+			vi.spyOn(globalThis, "fetch").mockImplementation(request as typeof fetch);
+			const response = await app.request(
+				`${origin}/projects/github/upstream/project`,
+				{ headers: { Cookie: session! } },
+				testEnv,
+			);
+			expect(response.status).toBe(403);
+			const html = await response.text();
+			expect(html).toContain('name="id" value="10"');
+			expect(html).toContain('name="state" value="paused"');
+			expect(html).toContain('name="state" value="disconnected"');
+			for (const next of ["paused", "disconnected"]) {
+				const stopped = await app.request(
+					`${origin}/projects/github/upstream/project`,
+					{
+						method: "POST",
+						headers: { Cookie: session!, Origin: origin },
+						body: new URLSearchParams({ id: "10", state: next }),
+					},
+					testEnv,
+				);
+				expect(stopped.status).toBe(303);
+			}
+			expect(await state()).toBeNull();
+		},
+	);
+
+	it("does not expose enrolled stop controls or accept their forms without current authority", async () => {
+		await github().service.setContributions(repo, "enrollment-test", "enabled");
+		const who = identity("github");
+		const { session } = await oauth(who);
+		const { request } = github({ account: Number(who.id), role: "write", private: true });
+		vi.spyOn(globalThis, "fetch").mockImplementation(request as typeof fetch);
+		const response = await app.request(
+			`${origin}/projects/github/upstream/project`,
+			{ headers: { Cookie: session! } },
+			testEnv,
+		);
+		expect(response.status).toBe(403);
+		const html = await response.text();
+		expect(html).not.toContain("Pause contributions");
+		expect(html).not.toContain("Disconnect project");
+		expect(html).not.toContain('name="id" value="10"');
+		const posted = await app.request(
+			`${origin}/projects/github/upstream/project`,
+			{
+				method: "POST",
+				headers: { Cookie: session!, Origin: origin },
+				body: new URLSearchParams({ id: "10", state: "paused" }),
+			},
+			testEnv,
+		);
+		expect(posted.status).toBe(403);
+		expect(await state()).toMatchObject({ state: "enabled" });
+	});
 	it("requires a session and same-origin posts, validates choices before provider requests", async () => {
 		expect((await app.request(`${origin}/projects`, undefined, testEnv)).headers.get("location")).toBe(
 			"/sign-in?next=/projects",

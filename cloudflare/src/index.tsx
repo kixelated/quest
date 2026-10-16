@@ -9,8 +9,8 @@ import { BoardPage, QuestPage, SHOWN, questCrumbs } from "./board/pages";
 import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
-import { GitHubError, GitHubService } from "./github/service";
-import { ProjectsPage, ProjectSetupPage, projectURL } from "./projects";
+import { type Enrollment, GitHubError, GitHubService } from "./github/service";
+import { ProjectsPage, ProjectSetupPage, ProjectStopControls, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
 import { Layout, type Page, type User } from "./layout";
 
@@ -107,8 +107,11 @@ app.get("/projects/github/:owner/:repository", async (c) => {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	if (!session) return c.redirect(`/sign-in?next=${encodeURIComponent(here(c))}`, 303);
 	const github = new GitHubService(c.env);
+	let enrolled: Enrollment | null = null;
 	try {
-		const repository = await github.resolveRepository(c.req.param("owner"), c.req.param("repository"));
+		enrolled = await github.enrolledProject(c.req.param("owner"), c.req.param("repository"), session.user.id);
+		const repository =
+			enrolled ?? (await github.resolveRepository(c.req.param("owner"), c.req.param("repository")));
 		const preview = await github.previewProject(repository, session.user.id);
 		return page(
 			c,
@@ -126,6 +129,12 @@ app.get("/projects/github/:owner/:repository", async (c) => {
 			<section class="wrap docs">
 				<h1>Project unavailable</h1>
 				<p role="alert">{error.message}</p>
+				{enrolled && (
+					<>
+						<p>You can still pause contributions or disconnect this enrolled project.</p>
+						<ProjectStopControls project={enrolled} />
+					</>
+				)}
 				<p>
 					<a href="/projects">Return to project setup</a> or <a href="/setup">set up Quest</a>.
 				</p>

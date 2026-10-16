@@ -144,7 +144,9 @@ Resolution uses the same installation gates and token revocation as other
 reads; it never consumes GitHub's shared anonymous repository-lookup quota.
 
 The preview reads the default branch at an exact commit, validates its Quest
-tree with the shared core, and lists ready quests. It fetches all quest blobs
+tree with the shared core, and lists ready quests. Blob selection uses the
+core's `isQuest` predicate, excluding root and nested `AGENTS.md`/`CLAUDE.md`
+instructions just as the CLI does. It fetches all quest blobs
 in one GraphQL read using the scoped installation token, rather than one
 external request per file. Blob IDs come from the pinned Git tree; missing,
 binary, truncated, partial, or hash-mismatched content fails closed. This keeps
@@ -159,7 +161,11 @@ current authority and provider gates. Pause/disconnect do not require valid
 Quest files, public visibility, or an active/unarchived repository, so maintainers can stop contributions after
 those conditions change. Disconnect deletes the enrollment, not the GitHub
 App installation or existing contributions. Remembered selections are only
-navigation and never confer authority. Future job coordination must recheck
+navigation and never confer authority. Any current maintainer can select an
+already enrolled repository by name and reach pause/disconnect even if it has
+become private, archived, or Quest-invalid. The enrolled-project lookup proves
+current identity and authority independently of the failing preview; it does
+not depend on being the original enroller. Future job coordination must recheck
 this state and current provider eligibility before launching new work.
 
 Contributions require a public repository whose GitHub-detected SPDX license

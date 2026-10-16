@@ -6,6 +6,28 @@ export function projectURL(owner: string, name: string) {
 	return `/projects/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
 }
 
+export function ProjectStopControls({ project }: { project: Enrollment }) {
+	const action = projectURL(project.owner, project.name);
+	return (
+		<>
+			{project.state === "enabled" && (
+				<form method="post" action={action}>
+					<input type="hidden" name="id" value={project.id} />
+					<input type="hidden" name="state" value="paused" />
+					<p>
+						<button class="button quiet">Pause contributions</button>
+					</p>
+				</form>
+			)}
+			<form method="post" action={action}>
+				<input type="hidden" name="id" value={project.id} />
+				<input type="hidden" name="state" value="disconnected" />
+				<button class="button quiet">Disconnect project</button>
+			</form>
+		</>
+	);
+}
+
 export function ProjectsPage(props: { projects: Enrollment[]; installation: string | null; error?: string }) {
 	return (
 		<section class="wrap docs projects">
@@ -41,6 +63,10 @@ export function ProjectsPage(props: { projects: Enrollment[]; installation: stri
 					<input id="repository" name="repository" placeholder="your-org/your-project" required />
 					<button class="button primary">Review project</button>
 				</form>
+				<p class="note-small">
+					Already enrolled? Select the project here to pause or disconnect, even if its eligibility has
+					changed.
+				</p>
 				<p class="note-small">
 					No Quest files yet? <a href="/setup">Follow the existing setup guide</a>, then return here. Setup is
 					a separate choice and never changes your repository automatically.
@@ -137,20 +163,7 @@ export function ProjectSetupPage(props: { preview: ProjectPreview; error?: strin
 							Pause stops new work. Disconnect removes this project's opt-in; it does not uninstall the
 							App or change existing GitHub contributions.
 						</p>
-						{preview.state === "enabled" && (
-							<form method="post" action={action}>
-								<input type="hidden" name="id" value={repo.id} />
-								<input type="hidden" name="state" value="paused" />
-								<p>
-									<button class="button quiet">Pause contributions</button>
-								</p>
-							</form>
-						)}
-						<form method="post" action={action}>
-							<input type="hidden" name="id" value={repo.id} />
-							<input type="hidden" name="state" value="disconnected" />
-							<button class="button quiet">Disconnect project</button>
-						</form>
+						<ProjectStopControls project={{ ...repo, state: preview.state }} />
 					</>
 				)}
 			</section>
