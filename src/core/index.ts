@@ -26,3 +26,4 @@ export {
 export { comparePaths, normalize } from "./path";
 export { type Blocker, blockers, label, lookup, ready, renderBlocker } from "./ready";
 export { type Finding, ROOT, check, formatFinding } from "./rules";
+export { type RankedQuest, unblocked } from "./unblocked";

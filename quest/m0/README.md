@@ -38,7 +38,6 @@ ownership-manifest design:
 - [Expensive command gate](/quest/m0/local-gate.md) - shared CPU admission across worktrees and repositories
 - [Recoverable worktrees](/quest/m0/worktree.md) - disk admission, checkpoints, release, and restore
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
-- [Rank unblocked work](/quest/m0/unblocked.md) - prioritize transitive downstream impact within each milestone
 
 - [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
