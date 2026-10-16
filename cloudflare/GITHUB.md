@@ -139,7 +139,12 @@ identity's current maintain/admin authority through the existing service.
 Installing the App never creates a `github_projects` record or enables work.
 
 The preview reads the default branch at an exact commit, validates its Quest
-tree with the shared core, and lists ready quests. It rejects private,
+tree with the shared core, and lists ready quests. It fetches all quest blobs
+in one GraphQL read using the scoped installation token, rather than one
+external request per file. Blob IDs come from the pinned Git tree; missing,
+binary, truncated, partial, or hash-mismatched content fails closed. This keeps
+enrollment's external request count independent of the number of quest files.
+It rejects private,
 unavailable, incomplete, invalid, and symlinked quest snapshots. Repositories
 without Quest files follow `/setup`; no repository writes occur during setup.
 
@@ -178,7 +183,8 @@ GitHub's detector only recognizes a limited set of license files, so custom or
 unrecognized arrangements stay ineligible even when they may be open-source.
 See the official [GitHub license API](https://docs.github.com/en/rest/licenses/licenses),
 [SPDX license list](https://spdx.org/licenses/),
-[Git trees API](https://docs.github.com/en/rest/git/trees#get-a-tree), and
+[Git trees API](https://docs.github.com/en/rest/git/trees#get-a-tree),
+[GraphQL blobs](https://docs.github.com/en/graphql/reference/git#blob), and
 [App metadata API](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app).
 
 The project-state quest owns ongoing snapshots, branches, PRs, and event

@@ -122,7 +122,8 @@ claims. Check those before you start work someone else may already be on.
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
-reply, reaction to the PR or one of its reviews, push, merge, or close:
+reply, reaction to the PR or one of its reviews, push, merge, close, removal
+from the merge queue, or disabled auto-merge:
 
 ```sh
 quest wait 101
@@ -146,7 +147,10 @@ and events sharing a timestamp; treat them as opaque, and use them only for the
 same PR. Explicit timestamps include events at that instant. Historical plain
 pushes come from repository activity; pushes observed while waiting come from new
 commit SHAs, regardless of git author dates. Force pushes come from the PR
-timeline, excluding the one that created the starting head. Actors are printed without deciding
+timeline, excluding the one that created the starting head. A merge through
+the queue prints `removed_from_merge_queue` about a second before `merged`, so a
+poll can catch the removal alone; check the PR's state before treating it as a
+failed merge. Actors are printed without deciding
 whose review counts. Check runs and edits to existing comments or reviews are
 outside this command's scope.
 
@@ -185,6 +189,7 @@ the version you pin decides what your agents follow:
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-spawn` | Triage ready quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
+| `quest-ready` | Mark a draft PR ready for review, wait for an automated review, then decide whether to merge. |
 | `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |

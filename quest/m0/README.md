@@ -7,9 +7,11 @@ line into their agent to set Quest up in any repository, plans and runs agent
 work through quests, and can remove it without losing their own content.
 It runs on macOS, Linux, and native Windows.
 
-The hosted launch is kix.quest: maintainers answer interactive prompts to
-plan issues, start ready quests, and act on new PRs. Claude Agent SDK sessions
-run in hosted isolation, funded by explicit maintainer or donor API accounts.
+The hosted launch is kix.quest, a cloud for creating software: maintainers
+answer interactive prompts, from a phone-friendly web app with push
+notifications, to plan issues, start ready quests, and act on new PRs. Their
+own Linux and macOS runners do the work through Claude Code and opencode,
+with any number of signed-in accounts, inside each project's Nix devShell.
 The GitHub App bot publishes ordinary PRs. The contest no longer gates launch.
 The standalone v0.1.0 CLI shipped on 2026-10-07; remaining work expands the
 product without changing the core's independence.
@@ -33,6 +35,6 @@ ownership-manifest design:
 
 ## Required
 
-- [Kix decision UI](/quest/m0/kix/README.md) - hosted planning and implementation through prompts, funded by explicit API allocations
+- [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

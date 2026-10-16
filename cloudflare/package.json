@@ -15,8 +15,8 @@
 	"dependencies": {
 		"@better-auth/passkey": "1.7.8",
 		"better-auth": "1.7.8",
-		"hono": "4.13.12",
-		"marked": "18.0.14",
+		"hono": "4.13.13",
+		"marked": "18.1.0",
 		"quest": "file:.."
 	},
 	"devDependencies": {

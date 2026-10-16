@@ -15,8 +15,8 @@ and a bounded test PR verify the integration before contributors are invited.
   Set it as `GITHUB_FORK_OWNER` (steps 3 and 5 of `cloudflare/GITHUB.md`).
 - Validate real installation-token behavior across upstream and
   service-owned forks.
-- Configure the operator's hosting limit and explicit API funding for the
-  rehearsal. A live test must not draw on an unidentified donor account.
+- Rehearse on the operator's own runner and an explicitly selected
+  operator account.
 - Record nonsecret setup/run instructions and deployment identifiers.
   Remove the quest when the setup condition is fulfilled.
 

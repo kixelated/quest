@@ -7,8 +7,8 @@ a pinned revision and publish accurately attributed GitHub check results.
 
 ## Plan
 
-- Use repository-defined tools rather than requiring every project to use Nix.
-  Define runner trust and which results can satisfy protections before enabling
+- Run checks inside the project's Nix devShell, like every runner job
+  (decided 2026-10-15, replacing repository-defined tools). Define runner trust and which results can satisfy protections before enabling
   authoritative checks; untrusted reports remain advisory.
 - Run untrusted code apart from signing and publication credentials.
   Keep GitHub's native checks and existing CI authoritative.
@@ -18,4 +18,4 @@ a pinned revision and publish accurately attributed GitHub check results.
 
 ## Required
 
-- [Local donor runner](/quest/m1/local/donor-runner.md) - contributed execution capacity
+- [Shared runners](/quest/m1/donor-runner.md) - contributed execution capacity

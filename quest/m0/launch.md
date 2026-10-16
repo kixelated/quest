@@ -21,8 +21,11 @@ scope. The README and the landing page belong to
   kixelated/quest#82 for the demo. v0.1.0 shipped on 2026-10-07.
 
 - Decided 2026-10-13: demonstrate the kix.quest issue-to-plan and ready-quest-to-PR
-  prompt flow. Keep API funding, operator compute, and future local integration
-  distinct; remove contest positioning. Publishing remains out of scope.
+  prompt flow; remove contest positioning. Publishing remains out of scope.
+- Decided 2026-10-15: position kix.quest as a cloud for creating software,
+  where maintainers make decisions and runners do the implementing. Show
+  answering a decision from a phone and a runner going offline. Keep future
+  cloud runners and donations out of the posts until they ship.
 
 ## Required
 

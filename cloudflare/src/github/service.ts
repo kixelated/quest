@@ -1,4 +1,4 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { createHash, createPrivateKey, sign } from "node:crypto";
 import { check, parse, ready } from "quest/core";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
@@ -279,22 +279,48 @@ export class GitHubService {
 		if (root.truncated) throw new GitHubError("Repository tree is incomplete");
 		const quest = root.tree.find((entry) => entry.path === "quest" && entry.type === "tree");
 		if (!quest) throw new GitHubError("Quest files are required. Follow the existing Quest setup guide first.");
-		const documents = [];
-		for (const entry of root.tree) {
-			if (!entry.path.startsWith("quest/") || !entry.path.endsWith(".md") || entry.type !== "blob") continue;
-			if (!["100644", "100755"].includes(entry.mode)) throw new GitHubError("Quest files must be regular files");
-			const blob = await this.#api<{ encoding: string; content: string }>(
-				token,
-				`${path}/git/blobs/${sha(entry.sha)}`,
-			);
-			if (blob.encoding !== "base64") throw new GitHubError("Quest content unavailable");
-			const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-				Buffer.from(blob.content, "base64"),
-			);
-			documents.push(parse(entry.path, content));
-		}
-		if (!documents.length)
+		const entries = root.tree.filter(
+			(entry) => entry.path.startsWith("quest/") && entry.path.endsWith(".md") && entry.type === "blob",
+		);
+		if (!entries.length)
 			throw new GitHubError("Quest files are required. Follow the existing Quest setup guide first.");
+		// Read the pinned blobs together: a REST request per file can exhaust a
+		// Worker's subrequest budget during enrollment even for a small quest tree.
+		const fields = entries.map((entry, i) => {
+			if (!["100644", "100755"].includes(entry.mode)) throw new GitHubError("Quest files must be regular files");
+			return `q${i}: object(oid: "${sha(entry.sha)}") { ... on Blob { oid text isBinary isTruncated } }`;
+		});
+		const result = await this.#api<{
+			data?: {
+				repository: Record<
+					string,
+					{ oid: string; text: string | null; isBinary: boolean | null; isTruncated: boolean } | null
+				> | null;
+			};
+			errors?: unknown[];
+		}>(token, "/graphql", "POST", {
+			query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields.join("\n")} } }`,
+			variables: { owner: repo.owner, name: repo.name },
+		});
+		if (result.errors?.length || !result.data?.repository) throw new GitHubError("Quest content unavailable");
+		const blobs = result.data.repository;
+		const documents = entries.map((entry, i) => {
+			const blob = blobs[`q${i}`];
+			if (
+				!blob ||
+				blob.oid !== entry.sha ||
+				blob.isBinary !== false ||
+				blob.isTruncated !== false ||
+				typeof blob.text !== "string"
+			)
+				throw new GitHubError("Quest content unavailable");
+			// GraphQL supplies decoded text. Verify the Git object hash so a lossy
+			// UTF-8 conversion cannot silently change the snapshot being validated.
+			const content = Buffer.from(blob.text, "utf8");
+			const oid = createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
+			if (oid !== entry.sha) throw new GitHubError("Quest content unavailable");
+			return parse(entry.path, blob.text);
+		});
 		const paths = new Set(root.tree.map((entry) => entry.path));
 		if (check(documents, (path) => paths.has(path)).length)
 			throw new GitHubError("Fix the quest tree with quest check before enabling contributions");

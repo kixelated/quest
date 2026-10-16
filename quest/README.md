@@ -13,5 +13,5 @@ earlier milestones complete.
 
 ## Required
 
-- [M0: First public release](/quest/m0/README.md) - install, set up, work, and leave, driven from one pinned binary, paired with the Kix decision UI
-- [M1: Later work](/quest/m1/README.md) - local API workers, the Claude plugin, and donated reviews and CI
+- [M0: First public release](/quest/m0/README.md) - install, set up, work, and leave, driven from one pinned binary, paired with the Kix decision UI and your own runners
+- [M1: Later work](/quest/m1/README.md) - cloud runners, a native mobile app, shared runners, and donated reviews and CI

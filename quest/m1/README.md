@@ -2,14 +2,16 @@
 
 ## Goal
 
-Extend the hosted decision UI with local API workers and a Claude Code plugin,
-donated reviews and CI, stronger local isolation, and additional login providers.
-This milestone does not gate the first release.
+Extend kix.quest with cloud runners, a native mobile app, runners shared
+with other projects, donated reviews and CI, stronger isolation, and
+additional login providers. This milestone does not gate the first release.
 
 ## Required
 
-- [Local integrations](/quest/m1/local/README.md) - explicit API-worker CLI, API workflow variants, Claude plugin, and donor runner
-- [Review and check automation](/quest/m1/automation/README.md) - donated reviews, CI, and optional Nix caching
-- [Donor isolation](/quest/m1/donor-isolation.md) - stronger boundaries for untrusted local jobs
+- [Cloud runners](/quest/m1/cloud/README.md) - one-click free cloud runners, API-key and donor funding, then paid compute
+- [Native mobile app](/quest/m1/mobile-app.md) - push notifications with quick replies to decisions
+- [Shared runners](/quest/m1/donor-runner.md) - offer your runner and accounts to other projects
+- [Review and check automation](/quest/m1/automation/README.md) - donated reviews, CI, and a shared Nix cache
+- [Donor isolation](/quest/m1/donor-isolation.md) - stronger boundaries for untrusted shared jobs
 - [ChatGPT hosted runs](/quest/m1/chatgpt-hosted.md) - conditional on provider approval and current terms
 - [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - resolve hosted-use approval before implementation

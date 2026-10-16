@@ -56,13 +56,15 @@ on Cloudflare locks active work with MoQ announcements that clear when a session
 ends. On GitHub, check the quest's remote branch and open PRs. `quest ready`
 reads dependencies in the quest tree; it does not look for these live states.
 
-You review each change, and `/quest-merge` (`$quest-merge` in Codex) merges it
-once checks and reviews pass. The quest is complete, its plan leaves the tree,
-and the quests that required it can become ready.
+You review each change: `/quest-ready` takes a draft to review, and
+`/quest-merge` (`$quest-merge` in Codex) merges it once checks and reviews pass.
+The quest is complete, its plan leaves the tree, and the quests that required it
+can become ready.
 
 ## Update or remove it
 
-Upgrade by changing the pin; the stubs stay as they are. To remove Quest, ask
+Upgrade by changing the pin, then rerun `quest init` to add stubs for new
+skills; existing stubs stay as they are. To remove Quest, ask
 your agent to follow SETUP.md to remove Quest. It exports active quests to
 GitHub issues, runs `quest uninstall`, and drops the pin. Uninstall never
 deletes your quest tree, and completed plans remain in Git history.

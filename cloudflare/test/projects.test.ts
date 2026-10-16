@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { GitHubService } from "../src/github/service";
@@ -9,6 +10,10 @@ const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const repo = { owner: "upstream", name: "project", id: 10 };
 const commit = "a".repeat(40);
 const tree = "b".repeat(40);
+function blobOid(content: string) {
+	const bytes = Buffer.from(content, "utf8");
+	return createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+}
 const documents = [
 	{
 		path: "quest/README.md",
@@ -33,6 +38,12 @@ function github(
 		truncated?: boolean;
 		noQuests?: boolean;
 		invalid?: boolean;
+		documents?: typeof documents;
+		subrequestLimit?: number;
+		graphqlErrors?: boolean;
+		missingBlob?: boolean;
+		missingRepository?: boolean;
+		blob?: { oid?: string; text?: string | null; isBinary?: boolean | null; isTruncated?: boolean };
 		symlink?: boolean;
 		license?: string | null;
 		changedLicense?: string | null;
@@ -43,6 +54,10 @@ function github(
 		onLicenseRead?: () => void;
 	} = {},
 ) {
+	const snapshot = (options.documents ?? documents).map((doc, i) => ({
+		...doc,
+		content: options.invalid && i === 1 ? "# Bad quest" : doc.content,
+	}));
 	let repositoryReads = 0;
 	let licenseReads = 0;
 	const calls: { path: string; method: string; body: any; authorization: string | null }[] = [];
@@ -55,6 +70,8 @@ function github(
 			body: init?.body && JSON.parse(String(init.body)),
 			authorization: new Headers(init?.headers).get("Authorization"),
 		});
+		if (options.subrequestLimit !== undefined && calls.length > options.subrequestLimit)
+			throw new Error("Worker subrequest limit exceeded");
 		if (url.hostname === "spdx.org") {
 			licenseReads++;
 			options.onLicenseRead?.();
@@ -126,21 +143,37 @@ function github(
 					? []
 					: [
 							{ path: "quest", type: "tree", mode: "040000", sha: "c".repeat(40) },
-							...documents.map((doc, i) => ({
+							...snapshot.map((doc) => ({
 								path: doc.path,
 								type: "blob",
 								mode: options.symlink ? "120000" : "100644",
-								sha: String(i + 1).repeat(40),
+								sha: blobOid(doc.content),
 							})),
 						],
 			});
 		if (path.includes("/git/blobs/")) {
-			const index = Number(path.split("/").at(-1)![0]) - 1;
+			const doc = snapshot.find((doc) => blobOid(doc.content) === path.split("/").at(-1));
+			if (!doc) throw new Error("Unknown blob");
+			return Response.json({ encoding: "base64", content: Buffer.from(doc.content).toString("base64") });
+		}
+		if (path === "/graphql") {
+			const body = calls.at(-1)!.body;
+			expect(body.variables).toEqual({ owner: repo.owner, name: repo.name });
+			const blobs = Object.fromEntries(
+				snapshot.map((doc, i) => {
+					const oid = blobOid(doc.content);
+					expect(body.query).toContain(`q${i}: object(oid: "${oid}")`);
+					return [
+						`q${i}`,
+						options.missingBlob
+							? null
+							: { oid, text: doc.content, isBinary: false, isTruncated: false, ...options.blob },
+					];
+				}),
+			);
 			return Response.json({
-				encoding: "base64",
-				content: Buffer.from(
-					options.invalid && index === 1 ? "# Bad quest" : documents[index].content,
-				).toString("base64"),
+				data: { repository: options.missingRepository ? null : blobs },
+				errors: options.graphqlErrors ? [{ message: "Partial result" }] : undefined,
 			});
 		}
 		throw new Error(`Unexpected GitHub request ${path}`);
@@ -185,6 +218,47 @@ describe("project enrollment", () => {
 			permissions: { metadata: "read", contents: "read" },
 		});
 		expect(calls.some((call) => call.path === `/repos/upstream/project/git/trees/${tree}?recursive=1`)).toBe(true);
+		expect(calls.at(-1)?.path).toBe("/installation/token");
+	});
+	it("enables a 38-document project within Workers Free's 50 external subrequests", async () => {
+		const quests = Array.from({ length: 37 }, (_, i) => ({
+			path: `quest/quest-${i}.md`,
+			content: `# [S] Quest ${i}\n\n## Goal\n\nBuild it.\n`,
+		}));
+		const snapshot = [
+			{
+				path: "quest/README.md",
+				content: `# Project\n\n## Goal\n\nBuild it.\n\n## Required\n\n${quests.map((q, i) => `- [Quest ${i}](/${q.path})`).join("\n")}\n`,
+			},
+			...quests,
+		];
+		const { service, calls } = github({ documents: snapshot, subrequestLimit: 50 });
+		// Enrollment routes resolve the submitted repository before enabling it.
+		await service.resolveRepository(repo.owner, repo.name);
+		await service.setContributions(repo, "enrollment-test", "enabled");
+		expect(await state()).toMatchObject({ state: "enabled" });
+		expect(calls.length).toBeLessThanOrEqual(50);
+		expect(calls.filter((call) => call.path === "/graphql")).toHaveLength(1);
+		expect(calls.some((call) => call.path.includes("/git/blobs/"))).toBe(false);
+		expect(calls.find((call) => call.path === "/graphql")?.authorization).toBe("Bearer installation-token");
+		expect(calls.at(-1)?.path).toBe("/installation/token");
+	});
+	it.each([
+		{ graphqlErrors: true },
+		{ missingBlob: true },
+		{ missingRepository: true },
+		{ blob: { isTruncated: true } },
+		{ blob: { isBinary: true } },
+		{ blob: { isBinary: null } },
+		{ blob: { text: null } },
+		{ blob: { oid: "f".repeat(40) } },
+		{ blob: { text: "# Replaced text\n\n## Goal\n\nDifferent content.\n" } },
+	])("rejects incomplete or altered batched content: %j", async (options) => {
+		const { service, calls } = github(options);
+		await expect(service.setContributions(repo, "enrollment-test", "enabled")).rejects.toThrow(
+			"Quest content unavailable",
+		);
+		expect(await state()).toBeNull();
 		expect(calls.at(-1)?.path).toBe("/installation/token");
 	});
 	it.each(["MIT", "Apache-2.0", "GPL-3.0"])("enrolls GitHub-detected OSI-approved %s licensing", async (license) => {
@@ -256,7 +330,12 @@ describe("project enrollment", () => {
 		expect(
 			calls
 				.filter((call) => call.method !== "GET")
-				.every((call) => call.path.endsWith("/access_tokens") || call.path === "/installation/token"),
+				.every(
+					(call) =>
+						call.path.endsWith("/access_tokens") ||
+						call.path === "/installation/token" ||
+						(call.path === "/graphql" && call.body.query.startsWith("query(")),
+				),
 		).toBe(true);
 	});
 	it("can pause and disconnect even after Quest files disappear or the project becomes private", async () => {

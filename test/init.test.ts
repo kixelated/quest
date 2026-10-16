@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { expect, test } from "vitest";
 
 import { REFERENCE_LINE, init, uninstall } from "../src/cli/setup";
+import { SKILLS } from "../src/cli/skills";
 import { tempDir } from "./fixture";
 
 const read = (dir: string, path: string) => readFileSync(join(dir, path), "utf8");
@@ -210,7 +211,7 @@ test.skipIf(process.platform === "win32")("existing linked skills install once a
 	mkdirSync(join(dir, ".agents"));
 	symlinkSync("../.claude/skills", join(dir, ".agents/skills"));
 	const changed = init(dir);
-	expect(changed.filter((path) => path.endsWith("SKILL.md"))).toHaveLength(10);
+	expect(changed.filter((path) => path.endsWith("SKILL.md"))).toHaveLength(SKILLS.length);
 	expect(init(dir)).toEqual([]);
 	uninstall(dir);
 	expect(existsSync(join(dir, ".claude"))).toBe(false);
