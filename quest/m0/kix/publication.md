@@ -49,7 +49,7 @@ and runners never receive the App's credentials.
   [fork API](https://docs.github.com/en/rest/repos/forks#create-a-fork),
   [PR API](https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request),
   and [installation token scopes](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation).
-
-## Required
-
-- [Job coordination](/quest/m0/kix/jobs.md) - current action and publication authorization
+- The job's `attempt` is the fence: accept a checkpoint bundle or result only
+  from the job's current `(attempt, runner)`, as `src/jobs/store.ts` does for
+  summaries. A completed job's `result` is opaque runner data to validate.
+  Bootstrap jobs publish only flake files.

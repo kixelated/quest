@@ -12,6 +12,8 @@ import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
+import { jobs } from "./jobs/routes";
+import { JobError } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -78,6 +80,7 @@ app.use("/projects/*", async (c, next) => {
 		return c.json({ error: "Invalid origin" }, 403);
 	await next();
 });
+app.route("/", jobs);
 app.get("/projects", async (c) => {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	if (!session) return c.redirect("/sign-in?next=/projects", 303);
@@ -427,6 +430,7 @@ app.post("/passkeys/delete", async (c) => {
 });
 app.onError((error, c) => {
 	if (error instanceof GitHubError) return c.json({ error: error.message }, 403);
+	if (error instanceof JobError) return c.json({ error: error.message }, 409);
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });

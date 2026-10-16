@@ -66,7 +66,30 @@ is the only one accepted. Changing the hostname orphans existing passkeys;
 people enroll new ones after signing in with a provider.
 
 GitHub is authoritative for enrolled project state. The Worker
-has no Durable Objects; D1 holds accounts, sessions, and GitHub App state.
+has no Durable Objects; D1 holds accounts, sessions, GitHub App state, and jobs.
+
+### Jobs
+
+A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
+`bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
+create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
+every request rechecks current GitHub authority. `start` takes only quests that
+observations show ready and unclaimed. `iterate` jobs are untrusted and route
+only to Linux runners that declare VM builds. Without a `flake.nix`, the route
+offers a `bootstrap` job instead. A paused project gets no new jobs and none are
+claimed. Duplicate requests return the active job for the same target.
+
+Runners are a user's own machines, registered at `POST /api/runners` and
+authenticated by a bearer token stored only as a hash. A runner calls
+`/api/runner/heartbeat` to report presence, its opaque accounts, and the
+attempts it is running, and `/api/runner/claim` to ask for work. A claim goes to
+the online, polling runner with the owner's most preferred usable account,
+unless a pin, trust, or a paused session's home runner says otherwise. Each
+claim increments the job's attempt. Checkpoints, questions, output, and results
+name their attempt and land only while it is current, so a runner that went
+offline and lost its lease to a replacement is fenced out. An account limit
+pauses the job with an account decision; kix never switches accounts on its
+own. An answer requeues the job and resumes its session where it lives.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -122,7 +145,9 @@ finished quests from history, the mocked GitHub OAuth callback, persisted
 sessions, sign-out, and rejected origins/invalid state. Login tests mock GitHub
 and Google OAuth and run real P-256 WebAuthn registration and assertions: the
 linking rules, collisions, passkey user verification, origin, signature,
-replay, and ownership. No OAuth credentials or
+replay, and ownership. Job tests race claims across runners, reassign an
+offline runner's job and fence its late writes, and cover routing, questions,
+account limits, cancellation, and maintainer-only routes. No OAuth credentials or
 Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:

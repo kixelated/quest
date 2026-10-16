@@ -30,7 +30,14 @@ interface Repository {
 	default_branch: string;
 	license?: { spdx_id: string; name: string } | null;
 }
-export class GitHubError extends Error {}
+export class GitHubError extends Error {
+	constructor(
+		message: string,
+		readonly status?: number,
+	) {
+		super(message);
+	}
+}
 export type ContributionState = "enabled" | "paused";
 export type Enrollment = GitHubRepository & { state: ContributionState };
 export type ProjectPreview = {
@@ -107,7 +114,7 @@ export class GitHubService {
 			body: body === undefined ? undefined : JSON.stringify(body),
 		});
 		// Never include provider response bodies, request headers, or secrets in errors.
-		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`);
+		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`, response.status);
 		return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 	}
 
@@ -480,6 +487,28 @@ export class GitHubService {
 				return this.#observations(repo, installation);
 			},
 		);
+	}
+
+	/**
+	 * What a new job may start from: complete observations of the default
+	 * branch, and whether that commit has a flake for the runner's devShell.
+	 */
+	jobSource(repo: GitHubRepository, userId: string) {
+		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
+			this.#public(current);
+			const enrolled = await this.#state(repo, installation);
+			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
+			const state = await this.#observations(repo, installation);
+			if (!state?.complete) throw new GitHubError("Refresh project activity before starting work");
+			let flake = true;
+			try {
+				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(state.project.commit)}`);
+			} catch (error) {
+				if (!(error instanceof GitHubError) || error.status !== 404) throw error;
+				flake = false;
+			}
+			return { state, enabled: enrolled === "enabled", flake };
+		});
 	}
 
 	previewProject(repo: GitHubRepository, userId: string) {
