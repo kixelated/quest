@@ -108,6 +108,17 @@ describe("job coordination", () => {
 		]);
 	});
 
+	it("reaches a routable job behind many older jobs that cannot route", async () => {
+		const offline = await runner("owner", "offline");
+		const online = await runner("owner", "online");
+		await connected(offline, [account("away")]);
+		await connected(online, [account("here")]);
+		for (let i = 0; i < 51; i++)
+			await job(10, "owner", { target: `issues/${i}`, pinRunner: offline.id, pinAccount: "away" }, i);
+		const id = await job(10, "owner", {}, 100);
+		expect((await run({ [online.id]: 1 }, 101)).assign).toMatchObject([{ runner: online.id, job: { id } }]);
+	});
+
 	it("routes by the owner's account preference across connected runners with free slots", async () => {
 		const first = await runner("owner", "first");
 		const second = await runner("owner", "second");
@@ -223,6 +234,10 @@ describe("job coordination", () => {
 		await store.finish(db, replacement, id, 2, done, late + 2);
 		expect(await state(id)).toMatchObject({ state: "completed", summary: "Done", result: { pr: 1 }, attempt: 2 });
 		expect((await state(id)).events.filter((e) => e.kind === "result")).toHaveLength(1);
+		// A retry carrying a different payload is not the same report.
+		await expect(store.finish(db, replacement, id, 2, { ...done, result: { pr: 2 } }, late + 3)).rejects.toThrow(
+			"no longer current",
+		);
 	});
 
 	it("keeps a job on a runner that reconnects in time and moves one a restarted runner lost", async () => {
@@ -322,6 +337,23 @@ describe("job coordination", () => {
 		const stopped = { outcome: "cancelled", summary: "Stopped after the parser", result: undefined } as const;
 		await store.finish(db, machine, running, 1, stopped, 7);
 		expect(await state(running)).toMatchObject({ state: "cancelled", summary: "Stopped after the parser" });
+
+		// Cancellation wins over a question or a result that races it.
+		const asking = await job(10, "owner", {}, 11);
+		await run({ [machine.id]: 1 }, 11);
+		await store.cancel(db, asking, "owner", 12);
+		await store.ask(db, machine, asking, 1, { summary: "Which?", session: "s", prompt: {} }, 13);
+		expect(await state(asking)).toMatchObject({ state: "cancelled" });
+		const finishing = await job(10, "owner", {}, 14);
+		await run({ [machine.id]: 1 }, 14);
+		await store.cancel(db, finishing, "owner", 15);
+		await store.finish(db, machine, finishing, 1, { outcome: "completed", summary: "Done", result: { pr: 3 } }, 16);
+		expect(await state(finishing)).toMatchObject({ state: "cancelled", summary: "Done", result: { pr: 3 } });
+		const limited = await job(10, "owner", {}, 17);
+		await run({ [machine.id]: 1 }, 17);
+		await store.cancel(db, limited, "owner", 18);
+		await store.finish(db, machine, limited, 1, { outcome: "limited", summary: "Limit", result: undefined }, 19);
+		expect(await state(limited)).toMatchObject({ state: "cancelled", questions: [] });
 
 		// A cancelled attempt whose runner vanished stops instead of moving.
 		const abandoned = await job(10, "owner", {}, 8);

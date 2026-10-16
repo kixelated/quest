@@ -241,7 +241,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		db
 			.prepare(
 				`SELECT j.* FROM jobs j JOIN github_projects p ON p.id=j.repository
- WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' ORDER BY j.createdAt,j.id LIMIT 50`,
+ WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' ORDER BY j.createdAt,j.id`,
 			)
 			.bind(owner),
 		db
@@ -260,7 +260,9 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
 	const accounts = offers!.results as Row[];
 	const assign: { runner: string; job: Claimed }[] = [];
+	// Every queued job is considered, so unroutable older ones cannot starve newer ones.
 	for (const job of candidates!.results as Job[]) {
+		if (![...free.values()].some((n) => n > 0)) break;
 		const chosen = route(
 			job,
 			accounts.map((o) => ({ ...o, free: (free.get(o.runner) ?? 0) > 0, limited: !!o.limited })),
@@ -330,7 +332,10 @@ export async function checkpoint(
 	return { cancel: !!row.cancel };
 }
 
-/** Pause the current attempt on a question, keeping its session to resume. */
+/**
+ * Pause the current attempt on a question, keeping its session to resume.
+ * A job already asked to cancel stops instead.
+ */
 export async function ask(
 	db: D1Database,
 	runner: Runner,
@@ -353,7 +358,7 @@ export async function ask(
 			.bind(job, attempt, input.summary, now, job, attempt, runner.id),
 		db
 			.prepare(
-				"UPDATE jobs SET state='waiting',summary=?,session=COALESCE(?,session),lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?)",
+				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'waiting' END,summary=?,session=COALESCE(?,session),lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?)",
 			)
 			.bind(input.summary, input.session, now, job, attempt, runner.id, id),
 	]);
@@ -382,7 +387,8 @@ export async function output(db: D1Database, runner: Runner, job: string, attemp
 
 /**
  * Finish the current attempt. An account limit pauses the job with a
- * decision instead of moving it to another account.
+ * decision instead of moving it to another account. A requested cancel wins
+ * over whatever the runner reports, keeping its partial result.
  */
 export async function finish(
 	db: D1Database,
@@ -393,6 +399,7 @@ export async function finish(
 	now: number,
 ) {
 	const body = JSON.stringify({ outcome: input.outcome, summary: input.summary });
+	const stored = input.result === undefined ? null : JSON.stringify(input.result);
 	const statements = [
 		db
 			.prepare(`INSERT INTO job_events(job,attempt,kind,body,at) SELECT ?,?,'result',?,? WHERE ${fence}`)
@@ -407,7 +414,7 @@ export async function finish(
 				.bind(runner.id, job, job, attempt, runner.id),
 			db
 				.prepare(
-					`INSERT INTO job_questions(id,job,attempt,kind,prompt,askedAt) SELECT ?,id,attempt,'account',json_object('runner',runner,'account',account),? FROM jobs WHERE id=? AND attempt=? AND runner=? AND state='running' ON CONFLICT(job,attempt) DO NOTHING`,
+					`INSERT INTO job_questions(id,job,attempt,kind,prompt,askedAt) SELECT ?,id,attempt,'account',json_object('runner',runner,'account',account),? FROM jobs WHERE id=? AND attempt=? AND runner=? AND state='running' AND cancel=0 ON CONFLICT(job,attempt) DO NOTHING`,
 				)
 				.bind(crypto.randomUUID(), now, job, attempt, runner.id),
 		);
@@ -415,12 +422,12 @@ export async function finish(
 	statements.push(
 		db
 			.prepare(
-				"UPDATE jobs SET state=?,summary=?,result=?,lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running'",
+				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE ? END,summary=?,result=?,lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running'",
 			)
 			.bind(
 				input.outcome === "limited" ? "waiting" : input.outcome,
 				input.summary,
-				input.result === undefined ? null : JSON.stringify(input.result),
+				stored,
 				now,
 				job,
 				attempt,
@@ -429,12 +436,12 @@ export async function finish(
 	);
 	const results = await db.batch(statements);
 	if (results.at(-1)!.meta.changes === 1) return;
-	// A retried report after the first one landed is accepted; anything else is fenced out.
+	// An identical retry after the first report landed is accepted; anything else is refused.
 	const landed = await db
 		.prepare(
-			"SELECT 1 FROM job_events e JOIN jobs j ON j.id=e.job WHERE e.job=? AND e.attempt=? AND e.kind='result' AND e.body=? AND j.attempt=? AND j.runner=?",
+			"SELECT 1 FROM job_events e JOIN jobs j ON j.id=e.job WHERE e.job=? AND e.attempt=? AND e.kind='result' AND e.body=? AND j.result IS ? AND j.attempt=? AND j.runner=?",
 		)
-		.bind(job, attempt, body, attempt, runner.id)
+		.bind(job, attempt, body, stored, attempt, runner.id)
 		.first();
 	if (!landed) throw new JobError("Attempt is no longer current");
 }
