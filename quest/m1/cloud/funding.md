@@ -1,54 +1,62 @@
-# [L] Fund cloud runners with API keys and donor allocations
+# [L] Fund cloud runners with maintainer API keys
 
 ## Goal
 
-A maintainer connects API keys for any provider the runner's adapters
-support, and cloud-runner jobs use them, or an eligible donor allocation
-funds them. Donors can authorize a project budget
-or fund an individual quest, inspect usage, pause funding, and revoke their
-key. Concurrent jobs respect the same durable accounting.
+A maintainer connects named API keys for providers the runner's adapters
+support, selects the account that pays for a job, inspects attributed usage,
+and pauses funding or revokes a key. A credential proxy keeps provider keys
+outside runner containers and records concurrent requests in one durable
+accounting ledger. This supplies the funding integration for the first
+cloud runners; donor allocations follow working cloud runners separately.
 
 ## Plan
 
-- Moved from m0 on 2026-10-15: own-machine runners use their machine's own
-  logins, so kix holds no provider keys until cloud runners exist.
+- Decided 2026-10-15 in the funding interview: implement maintainer API
+  funding after the m0 runner, sandbox, and opencode adapter establish the
+  execution boundary. Cloud runners then depend on this integration; funding
+  does not depend on cloud runners. Verify it with stubbed runner requests
+  before the hosted-container integration is available.
+- Own-machine runners use their machine's own logins. Hosted API-key
+  collection is an m1 cloud-runner capability, not an m0 onboarding step.
+  Building and testing the funding integration does not enable production
+  key collection before cloud runners launch.
 - Store named account/key references per user so people with multiple
   accounts select the intended payer. Keep accounts distinct; one attempt
-  uses one explicit account/allocation. Never silently switch keys or fall
+  uses one explicit account. Never silently switch keys or fall
   back to the maintainer's paid account when funding runs out.
-- Planning defaults to the maintainer's key. Donors explicitly choose
-  whether an allocation permits planning, implementation, or both. A
-  project planning allocation may fund an authorized interview before its
-  new quests exist; implementation funding only applies to eligible work.
-- Support project/month allocations and individual-quest allocations.
-  Attribute each charge once to its selected allocation and any applicable
-  donor-wide limit. A contribution is API-funded work, not transferred cash.
+- Planning and implementation use the maintainer's selected account.
+  Attribute each charge once to its account, job, and attempt. Funding
+  availability does not authorize planning or implementation by itself.
 - Keep real provider keys outside untrusted runner containers. A constrained
   credential proxy authorizes each run's supported requests, routes them
   to the chosen account, and records usage. Use revocable job credentials
-  inside executors rather than exposing the donor's key.
-- Reserve against applicable budgets atomically before admitting requests;
-  reconcile against returned usage and retain reservations for uncertain
-  outcomes. Do not give concurrent workers separate copies of a balance.
-  Stop new requests on exhaustion/revocation; in-flight requests may still
-  finish and be billed.
+  inside executors rather than exposing the maintainer's key.
+- Keep usage and request identities durable across concurrent requests,
+  restarts, and uncertain outcomes. Stop new requests when funding is paused
+  or revoked; in-flight requests may still finish and be billed. Donor budget
+  reservations belong to the later allocations quest, on this same ledger.
 - Be honest about estimates and in-flight costs. SDK `maxBudgetUsd` is a
   post-response threshold that can overshoot and resets across calls; it
-  does not implement a shared monthly cap. Use it as an additional control.
+  does not implement a shared monthly cap. Do not present it as one.
   Document provider workspace limits as an independent backstop.
-- Ordinary API keys have no documented promotional-balance or promo-only
-  control. Anthropic spends promotional credits before purchased/invoiced
-  funds. Do not advertise automatic harvesting of only unused credits, and
-  do not ask for broad Admin API credentials to accept a donation.
-- Hosted API-key use is documented; the published credit terms do not
-  explicitly approve this donation model. Clearly separate verified API
-  eligibility from assumptions about promotional funding; verify applicable
-  provider terms before making public promotional-credit claims.
 - Hosting is paid by kix.quest under a separate operator limit until
-  [paid compute](/quest/m1/cloud/billing.md) ships. Donor API
-  authorization never silently pays compute charges.
+  [paid compute](/quest/m1/cloud/billing.md) ships. API-key authorization
+  never silently pays compute charges.
+- Decided 2026-10-15: keep key setup, usage, pause/revocation, and deployment
+  instructions in the existing service documentation. No separate guide
+  quest is needed; update documentation made stale by implementation inline.
 - Sources:
   [monthly credits](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans),
   [secure SDK deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment),
   [SDK cost tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking),
   and [Console usage APIs](https://platform.claude.com/docs/en/manage-claude/usage-cost-api).
+
+## Required
+
+- [Runner](/quest/m0/kix/runner.md) - the executor and account contract
+- [Job sandbox](/quest/m0/kix/sandbox.md) - the boundary keeping provider credentials outside job commands
+- [opencode adapter](/quest/m0/kix/opencode.md) - the supported API-provider adapter
+
+## Related
+
+- [Donor allocations](/quest/m1/cloud/donors.md) - add shared budgets after cloud runners work
