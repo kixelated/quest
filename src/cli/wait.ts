@@ -223,6 +223,8 @@ async function watch(
 		const pull = object(await pullResponse.json());
 		const head = object(pull.head);
 		const currentSha = string(head.sha);
+		// Until setup finishes, a timeout resumes from this head rather than whatever is pushed next.
+		progress.resume = options.since ?? currentSha;
 		// Verify the listing belongs to this exact head before treating it as
 		// baseline membership. A racing push must never be silently swallowed.
 		let commitsPath: string | undefined = `${base}/pulls/${pr.number}/commits?per_page=100`;
