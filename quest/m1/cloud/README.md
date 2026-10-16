@@ -19,9 +19,17 @@ Decided 2026-10-15 in the decisions-not-implementations interview:
 - Hosted runners use API keys only. Provider terms make hosted subscription
   use conditional (Claude) or high-risk (Google), so subscriptions stay on
   the user's own machines.
+- Decided 2026-10-15 in the funding interview: finish the m0 runner,
+  sandbox, and opencode adapter before maintainer API funding, then integrate
+  hosted runners. Donor allocations follow working maintainer-funded cloud
+  runners. This order removes the ambiguous requirement that funding wait
+  for the cloud runners that depend on it.
+- Funding setup and operating guidance stay in existing service
+  documentation; each implementation updates the docs it changes.
 
 ## Required
 
+- [API funding](/quest/m1/cloud/funding.md) - maintainer API keys, the credential proxy, and durable usage accounting
 - [Hosted runners](/quest/m1/cloud/runners.md) - free, capped cloud runners enabled with one click
-- [API funding](/quest/m1/cloud/funding.md) - API keys and donor allocations for cloud runners
+- [Donor allocations](/quest/m1/cloud/donors.md) - shared API budgets after maintainer-funded cloud runners work
 - [Paid compute](/quest/m1/cloud/billing.md) - charge for cloud runner compute once free capacity is not enough
