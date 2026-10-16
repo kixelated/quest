@@ -99,3 +99,47 @@ test("a document that is not UTF-8 is an error", () => {
 	expect(out.code).toBe(1);
 	expect(out.stderr).toMatch(/^quest: reading quest\/m0\/epic\/one\.md: /);
 });
+
+test("unblocked prints ranked counts and paths, with deterministic JSON and a limit", () => {
+	const tree = Tree.baseline();
+	expect(tree.run("unblocked")).toEqual({ code: 0, stdout: "1\tquest/m0/epic/one.md\n", stderr: "" });
+	expect(tree.run("unblocked", "--json", "--limit", "1")).toEqual({
+		code: 0,
+		stdout: '[{"path":"quest/m0/epic/one.md","dependents":1}]\n',
+		stderr: "",
+	});
+	tree.write("quest/m0/epic/two.md", "# [S] Two\n\n## Goal\n\nWork.\n");
+	expect(JSON.parse(tree.run("unblocked", "--json", "--limit", "1").stdout)).toHaveLength(1);
+	expect(JSON.parse(tree.run("unblocked", "--json").stdout)).toHaveLength(2);
+});
+
+test("unblocked explains the count on a terminal, including NO_COLOR", () => {
+	const result = Tree.baseline().runOn({ colour: false }, "unblocked");
+	expect(result.code).toBe(0);
+	expect(result.stdout).toContain("other prerequisites may remain");
+	expect(result.stdout).toContain("1\tquest/m0/epic/one.md\n");
+});
+
+test("unblocked returns an empty JSON array for an empty milestone", () => {
+	const tree = Tree.baseline().remove("quest/m0/epic").write("quest/m0/README.md", "# M0\n\n## Goal\n\nWork.\n");
+	expect(tree.run("unblocked", "--json")).toEqual({ code: 0, stdout: "[]\n", stderr: "" });
+});
+
+test("unblocked fails without output for invalid trees and unresolved links", () => {
+	const tree = Tree.baseline().append("quest/m0/epic/one.md", "\n## Required\n\n- [Two](/quest/m0/epic/two.md)\n");
+	const cycle = tree.run("unblocked", "--json");
+	expect(cycle.code).toBe(1);
+	expect(cycle.stdout).toBe("");
+	expect(cycle.stderr).toContain("Required cycle");
+	const missing = Tree.baseline().append("quest/m0/epic/one.md", "\n[Missing](/missing.txt)\n").run("unblocked");
+	expect(missing.code).toBe(1);
+	expect(missing.stdout).toBe("");
+	expect(missing.stderr).toContain("link does not resolve");
+});
+
+test.each(["0", "-1", "1.5", "NaN", "Infinity", "9007199254740992"])("unblocked rejects invalid limit %s", (limit) => {
+	const result = Tree.baseline().run("unblocked", "--limit", limit);
+	expect(result.code).toBe(2);
+	expect(result.stdout).toBe("");
+	expect(result.stderr).toContain("limit must be a positive safe integer");
+});
