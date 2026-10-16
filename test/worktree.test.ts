@@ -47,7 +47,9 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe("recoverable worktrees", () => {
+// Each case runs 25-60 real Git processes. Process creation on the Windows ARM runner
+// costs ~80-250 ms while other test files start, so the 5 s unit-test default is too short.
+describe("recoverable worktrees", { timeout: 20_000 }, () => {
 	it("preserves the staged index, unstaged source, additions, and deletions", () => {
 		const { repo, worktrees } = fixture();
 		const record = worktrees.create(repo, "work", 10_000_000);
