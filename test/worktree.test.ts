@@ -223,13 +223,14 @@ describe("recoverable worktrees", () => {
 		const record = worktrees.create(repo, "work", 10_000_000);
 		worktrees.checkpoint(record.id, notes);
 		setPhase(home, "releasing");
+		const original = readFileSync(join(record.path, "file"), "utf8"); // CRLF under Windows autocrlf.
 		rmSync(join(record.path, "file")); // Removal stopped partway.
 		expect(worktrees.status().allocated).toBeGreaterThanOrEqual(record.reserve);
 		worktrees.release(record.id, notes);
 		expect(worktrees.status().records[0].phase).toBe("released");
 		expect(existsSync(record.path)).toBe(false);
 		worktrees.restore(record.id);
-		expect(readFileSync(join(record.path, "file"), "utf8")).toBe("original\n");
+		expect(readFileSync(join(record.path, "file"), "utf8")).toBe(original);
 	});
 	it("retries or abandons an interrupted restore from the intact checkpoint", () => {
 		const { repo, home, worktrees } = fixture();
