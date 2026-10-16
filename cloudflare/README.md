@@ -26,8 +26,8 @@ renders the repository's `docs/*.md` into `build/docs.json`, so the Markdown
 stays the single source and its relative links keep working on GitHub: links to
 other docs become `/docs/<name>` and other repository paths point at GitHub. It
 also snapshots this repository's `quest/` tree and finished quests into
-`build/board.json`, which is the board's only project until the GitHub project
-state integration supplies enrolled repositories. A shallow clone has no
+`build/board.json`, which supplies the public board. Enrolled repositories use authenticated
+GitHub snapshots through the same board model. A shallow clone has no
 history, so its board shows no finished work. It also copies `design/theme/` and `src/site.css` into `build/public/`, which the
 Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
 `/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
@@ -65,7 +65,7 @@ The passkey relying party is the hostname of `AUTH_URL`, and its exact origin
 is the only one accepted. Changing the hostname orphans existing passkeys;
 people enroll new ones after signing in with a provider.
 
-GitHub remains the planned authority for enrolled project state. The Worker
+GitHub is authoritative for enrolled project state. The Worker
 has no Durable Objects; D1 holds accounts, sessions, and GitHub App state.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker

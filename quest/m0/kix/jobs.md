@@ -49,7 +49,3 @@ duplicate results or overwrite a replacement's work.
   requests termination; preserve partial results.
 - Store checkpoint summaries as the job's progress record and raw agent
   output separately, readable only by current project maintainers.
-
-## Required
-
-- [Project state](/quest/m0/kix/repository.md) - pinned quests, existing PRs, and activity

@@ -43,6 +43,7 @@ blocked and `Required:`), with the markers and size colours.
 | Format term | Display | Marker |
 | --- | --- | --- |
 | ready | Available | amber `!` |
+| ready, while GitHub reconciliation is incomplete | Availability pending | |
 | blocked | Requires: *titles* | grey `!` |
 | live runner lock | Accepted by @*name* | |
 | open PR or change | Ready to turn in | amber `?` |
