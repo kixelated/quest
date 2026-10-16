@@ -1,5 +1,11 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import { existsSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+
+// Miniflare keeps D1 as SQLite under the OS temp dir and fsyncs every write, so
+// other processes' disk I/O stalls each statement and the route tests time out.
+// The test database is disposable: keep Miniflare's temp dir in RAM where Linux has one.
+if (existsSync("/dev/shm")) process.env.TMPDIR = "/dev/shm";
 
 // Use the deploy config's bindings locally; tests never contact a Cloudflare account.
 export default defineConfig({
