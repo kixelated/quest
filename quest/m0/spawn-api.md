@@ -28,15 +28,18 @@ quest work instead of going unused.
 - Skill only, no new CLI code. Launch each quest as a background shell job
   in its own isolated worktree, with JSON output (`--output-format json`,
   `--json`). The harness notifies the parent when the job exits, as with a
-  sub-agent; the JSON result is the report and carries the session id and
-  cost. Follow-ups resume that session (`claude -p --resume <id>`,
+  sub-agent. Read the final reply and session id from each agent's own
+  output contract: Claude prints one result object with a dollar cost;
+  Codex streams JSONL events (`thread.started` carries the thread id, the
+  last `item.completed` message is the reply) and reports token usage, not
+  cost. Cost is reported only when the agent provides it. Follow-ups resume that session (`claude -p --resume <id>`,
   `codex exec resume <id>`) in the background, in place of messaging a
   sub-agent. A headless child cannot prompt, so it follows the guide's
   fallback: put the question in its final reply and end; the parent asks the
   user and resumes the child with the answer.
 - Keys come from one environment variable the user exports, holding a list
   of keys (one per account). Each child gets one key as its provider's key
-  variable (for example `ANTHROPIC_API_KEY`) in its own environment only.
+  variable (for example `ANTHROPIC_API_KEY` or `CODEX_API_KEY`) in its own environment only.
   Never write keys to the repository, logs, prompts, reports, or PRs.
 - Rotate and drop: assign quests to keys round-robin. When a run fails
   because its key's credit is exhausted, drop that key for the rest of the
