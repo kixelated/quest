@@ -50,3 +50,24 @@ Run selected `/quest-plan` sessions in the foreground.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
+
+## API keys
+
+With an `api` argument, bill agents to API keys instead of this session's account: run each as a headless agent CLI process rather than a sub-agent.
+`QUEST_API_KEYS` lists the keys, separated by whitespace; refer to each by its position.
+An entry may be a secret reference instead of a key, such as a 1Password `op://` URI; resolve it only for its child, for example by launching the child under `op run`.
+Stop and report if the variable is unset or the agent CLI is not installed.
+Never show a key in a command, prompt, log, report, or commit: expand it from the variable inside the command.
+
+Start each process in the background, in its own isolated worktree, with JSON output, this session's model, effort, and permission mode passed explicitly, and permission prompts off, so the harness reports its exit as it would a sub-agent's.
+For example, `claude -p --output-format json --model <model> --effort <level>` or `codex exec --json`.
+Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, then unset `QUEST_API_KEYS` there so it holds no other key, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
+Read its final reply and session id from that agent's output: `claude -p` prints one result object with a dollar cost, while `codex exec --json` streams JSONL events, with the thread id in `thread.started`, the reply in the last `item.completed`, and token usage instead of cost.
+Report cost only when the agent provides it.
+Tell it that it cannot prompt, so it ends with any decisions and its recommendations in its final reply.
+Ask the user, then resume that session in the background with the answer, as you would message a sub-agent: `claude -p --resume <id>` or `codex exec resume <id>`.
+
+Assign quests to keys round-robin.
+When a run fails because its key's credit balance is exhausted, drop that key for the rest of the spawn and resume the session on the next key.
+Once every key is exhausted, start nothing new and never fall back to this session's account.
+List each interrupted quest with its worktree and session id so the user can resume it later.
