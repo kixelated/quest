@@ -1,24 +1,15 @@
 import { type Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { createAuth } from "../auth";
 import { GitHubError, GitHubService } from "../github/service";
 import type { Pull } from "../github/state";
+import { RUNNER_HEADER } from "./hub";
+import { data, id, text } from "./protocol";
 import * as store from "./store";
 import { JobError } from "./store";
 
-type Bindings = { Bindings: Env; Variables: { runner: store.Runner } };
+type Bindings = { Bindings: Env };
 export const jobs = new Hono<Bindings>();
 
-function text(value: unknown, max: number): string | null {
-	return typeof value === "string" && value.trim() !== "" && value.length <= max ? value : null;
-}
-function id(value: unknown): string | null {
-	return typeof value === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(value) ? value : null;
-}
-function attempt(value: unknown): number {
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new JobError("Attempt required");
-	return value;
-}
 async function json(c: Context): Promise<Record<string, unknown>> {
 	try {
 		const body = await c.req.json();
@@ -26,119 +17,30 @@ async function json(c: Context): Promise<Record<string, unknown>> {
 	} catch {}
 	throw new JobError("JSON object required");
 }
-// Prompts, results, and summaries are untrusted agent data stored as given.
-function data(value: unknown, max: number) {
-	if (value !== undefined && JSON.stringify(value).length > max) throw new JobError("Payload too large");
-	return value;
+
+/** The owner's hub, which holds their runners' connections and routes their jobs. */
+function hub(env: Env, owner: string) {
+	return env.RUNNERS.get(env.RUNNERS.idFromName(owner));
 }
 
-// Runners authenticate with the token their owner registered them with.
-// Runner requests carry no cookies, so they need no origin check.
-jobs.use("/api/runner/*", bodyLimit({ maxSize: 1024 * 1024 }), async (c, next) => {
+// A runner authenticates with the token its owner registered it with, then
+// holds one live connection to its owner's hub. Runner requests carry no
+// cookies, so they need no origin check.
+jobs.get("/api/runner/connect", async (c) => {
 	const token = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
 	const runner = token && (await store.authenticate(c.env.DB, token));
 	if (!runner) return c.json({ error: "Runner token required" }, 401);
-	c.set("runner", runner);
-	await next();
-});
-
-jobs.post("/api/runner/heartbeat", async (c) => {
-	const body = await json(c);
-	if (!Array.isArray(body.accounts) || !Array.isArray(body.attempts) || body.attempts.length > 100)
-		throw new JobError("Accounts and attempts required");
-	const accounts = body.accounts.map((account): store.AccountReport => {
-		const kind = account?.kind;
-		const report = {
-			id: id(account?.id),
-			provider: id(account?.provider),
-			kind,
-			label: text(account?.label, 100),
-			limited: account?.limited,
-		};
-		if (
-			!report.id ||
-			!report.provider ||
-			!report.label ||
-			(kind !== "subscription" && kind !== "api-key") ||
-			typeof report.limited !== "boolean"
-		)
-			throw new JobError("Invalid account");
-		return report as store.AccountReport;
+	if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.json({ error: "WebSocket required" }, 426);
+	const headers = new Headers(c.req.raw.headers);
+	headers.delete("Authorization");
+	headers.set(RUNNER_HEADER, JSON.stringify(runner));
+	const upgraded = await hub(c.env, runner.owner).fetch(new Request(c.req.raw, { headers }));
+	// Rewrap so shared middleware can still set headers on the upgrade.
+	return new Response(null, {
+		status: upgraded.status,
+		webSocket: upgraded.webSocket,
+		headers: new Headers(upgraded.headers),
 	});
-	if (new Set(accounts.map((a) => a.id)).size !== accounts.length) throw new JobError("Duplicate account");
-	const attempts = body.attempts.map((item) => {
-		const job = id(item?.job);
-		if (!job) throw new JobError("Invalid attempt");
-		return { job, attempt: attempt(item.attempt) };
-	});
-	return c.json({ attempts: await store.heartbeat(c.env.DB, c.var.runner, accounts, attempts, Date.now()) });
-});
-
-jobs.post("/api/runner/claim", async (c) => {
-	const job = await store.claim(c.env.DB, c.var.runner, Date.now());
-	return job ? c.json({ job }) : c.body(null, 204);
-});
-
-jobs.post("/api/runner/jobs/:job/checkpoint", async (c) => {
-	const body = await json(c);
-	const summary = text(body.summary, 4000);
-	if (!summary) throw new JobError("Summary required");
-	const session = body.session === undefined ? null : text(body.session, 200);
-	if (body.session !== undefined && !session) throw new JobError("Invalid session");
-	return c.json(
-		await store.checkpoint(
-			c.env.DB,
-			c.var.runner,
-			c.req.param("job"),
-			attempt(body.attempt),
-			summary,
-			session,
-			Date.now(),
-		),
-	);
-});
-
-jobs.post("/api/runner/jobs/:job/questions", async (c) => {
-	const body = await json(c);
-	const summary = text(body.summary, 4000);
-	const session = text(body.session, 200);
-	if (!summary || !session || body.prompt === undefined) throw new JobError("Summary, session, and prompt required");
-	const question = await store.ask(
-		c.env.DB,
-		c.var.runner,
-		c.req.param("job"),
-		attempt(body.attempt),
-		{ summary, session, prompt: data(body.prompt, 64 * 1024) },
-		Date.now(),
-	);
-	return c.json({ question });
-});
-
-jobs.post("/api/runner/jobs/:job/output", async (c) => {
-	const body = await json(c);
-	if (typeof body.text !== "string" || !body.text) throw new JobError("Output text required");
-	await store.output(c.env.DB, c.var.runner, c.req.param("job"), attempt(body.attempt), body.text, Date.now());
-	return c.body(null, 204);
-});
-
-jobs.post("/api/runner/jobs/:job/result", async (c) => {
-	const body = await json(c);
-	const summary = text(body.summary, 4000);
-	const outcome = body.outcome;
-	if (
-		!summary ||
-		(outcome !== "completed" && outcome !== "failed" && outcome !== "cancelled" && outcome !== "limited")
-	)
-		throw new JobError("Outcome and summary required");
-	await store.finish(
-		c.env.DB,
-		c.var.runner,
-		c.req.param("job"),
-		attempt(body.attempt),
-		{ outcome, summary, result: data(body.result, 64 * 1024) },
-		Date.now(),
-	);
-	return c.body(null, 204);
 });
 
 // A signed-in user registers their own machines and sees their presence.
@@ -154,7 +56,9 @@ jobs.use("/api/runners", async (c, next) => {
 });
 jobs.get("/api/runners", async (c) => {
 	c.header("Cache-Control", "no-store");
-	return c.json({ runners: await store.listRunners(c.env.DB, await signedIn(c), Date.now()) });
+	const owner = await signedIn(c);
+	const online = new Set(await hub(c.env, owner).online());
+	return c.json({ runners: await store.listRunners(c.env.DB, owner, online) });
 });
 jobs.post("/api/runners", async (c) => {
 	const owner = await signedIn(c);
@@ -274,6 +178,7 @@ jobs.post(base, async (c) => {
 		{ ...job, repository: repo.id, actor: user, pinRunner, pinAccount },
 		Date.now(),
 	);
+	await hub(c.env, user).dispatch(user);
 	return c.json(created, created.created ? 201 : 200);
 });
 
@@ -283,12 +188,15 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 	const question = id(body.question);
 	if (!question || body.answer === undefined) throw new JobError("Question and answer required");
 	await store.answer(c.env.DB, job.id, question, user, data(body.answer, 64 * 1024), Date.now());
+	// Jobs run on their requester's runners, whoever answers.
+	await hub(c.env, job.actor).dispatch(job.actor);
 	return c.body(null, 204);
 });
 
 jobs.post(`${base}/:job/cancel`, async (c) => {
 	const { user, job } = await owned(c);
 	await store.cancel(c.env.DB, job.id, user, Date.now());
+	await hub(c.env, job.actor).dispatch(job.actor);
 	return c.body(null, 204);
 });
 

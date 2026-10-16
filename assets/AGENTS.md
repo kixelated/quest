@@ -98,8 +98,8 @@ Start only ready quests.
 `quest ready [<path>]` prints what blocks a quest, or every ready quest.
 
 Work is taken when it has a live runner lock or an open change on the forge.
-On Quest on Cloudflare, active runners announce their locks over MoQ; a crashed
-session's announcement clears itself. Check those locks and open changes before
+kix.quest records each active job in its database and reassigns a job whose
+runner goes offline. Check those locks and open changes before
 starting. These states stay out of the quest file.
 
 On GitHub, if you have push access, make an empty commit and push a branch to

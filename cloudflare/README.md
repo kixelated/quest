@@ -65,8 +65,9 @@ The passkey relying party is the hostname of `AUTH_URL`, and its exact origin
 is the only one accepted. Changing the hostname orphans existing passkeys;
 people enroll new ones after signing in with a provider.
 
-GitHub is authoritative for enrolled project state. The Worker
-has no Durable Objects; D1 holds accounts, sessions, GitHub App state, and jobs.
+GitHub is authoritative for enrolled project state. D1 holds accounts,
+sessions, GitHub App state, and jobs. The one Durable Object, `RunnerHub`, holds
+runners' live connections and keeps no records of its own.
 
 ### Jobs
 
@@ -79,17 +80,30 @@ only to Linux runners that declare VM builds. Without a `flake.nix`, the route
 offers a `bootstrap` job instead. A paused project gets no new jobs and none are
 claimed. Duplicate requests return the active job for the same target.
 
-Runners are a user's own machines, registered at `POST /api/runners` and
-authenticated by a bearer token stored only as a hash. A runner calls
-`/api/runner/heartbeat` to report presence, its opaque accounts, and the
-attempts it is running, and `/api/runner/claim` to ask for work. A claim goes to
-the online, polling runner with the owner's most preferred usable account,
-unless a pin, trust, or a paused session's home runner says otherwise. Each
-claim increments the job's attempt. Checkpoints, questions, output, and results
-name their attempt and land only while it is current, so a runner that went
-offline and lost its lease to a replacement is fenced out. An account limit
-pauses the job with an account decision; kix never switches accounts on its
-own. An answer requeues the job and resumes its session where it lives.
+Runners are a user's own machines. Each one registers at `POST /api/runners`
+and gets a bearer token, which kix stores only as a hash. With that token a
+runner opens a WebSocket at `/api/runner/connect`. The connection goes to its
+owner's `RunnerHub` (`src/jobs/hub.ts`), the one place that owner's jobs are
+routed, and the open connection is the runner's presence.
+
+Over the socket the runner sends `status` messages: its opaque accounts, the
+attempts it is running, and its free job slots. It also sends `checkpoint`,
+`question`, `output`, and `result` messages. Each gets a `reply` with the same
+`id` (`src/jobs/protocol.ts`). The hub pushes `assign` and `cancel` messages
+whenever jobs or connections change.
+
+Routing gives a job to the connected runner with a free slot and the owner's
+most preferred usable account. A pin, the job's trust, or a paused session's
+home runner can override that. Each assignment increments the job's attempt.
+Runner messages name their attempt and land only while it is current.
+
+When a runner disconnects, its running jobs get a two-minute grace deadline.
+The hub's alarm moves them once it passes, so a returning runner is fenced out.
+A reconnecting runner whose first status omits a job gives it up at once.
+
+An account limit pauses the job with an account decision; kix never switches
+accounts on its own. An answer requeues the job and resumes its session on the
+runner that holds it.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -145,9 +159,11 @@ finished quests from history, the mocked GitHub OAuth callback, persisted
 sessions, sign-out, and rejected origins/invalid state. Login tests mock GitHub
 and Google OAuth and run real P-256 WebAuthn registration and assertions: the
 linking rules, collisions, passkey user verification, origin, signature,
-replay, and ownership. Job tests race claims across runners, reassign an
-offline runner's job and fence its late writes, and cover routing, questions,
-account limits, cancellation, and maintainer-only routes. No OAuth credentials or
+replay, and ownership. Job tests race dispatch passes, reassign a disconnected
+runner's job and fence its late writes, and cover routing, questions, account
+limits, and cancellation. They drive real WebSocket connections through the hub,
+including a replaced connection and the alarm that reassigns work, and check the
+maintainer-only routes. No OAuth credentials or
 Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
@@ -209,7 +225,8 @@ tombstone in `wrangler.jsonc` deletes the legacy `RepositoryCoordinator`
 Durable Object namespace, and any storage it held, from Workers deployed before
 it was removed; Wrangler reports a stale tombstone where none exists. Remove the
 tombstone after the next production deploy. This does not affect the D1 auth
-database.
+database. The same `exports` block creates the SQLite-backed `RunnerHub` class
+bound as `RUNNERS`; it stores only its owner's ID, so it needs no data migration.
 
 After deploying, verify `/health`, `/setup`, and a theme asset, then complete
 sign-in/sign-out in the browser.

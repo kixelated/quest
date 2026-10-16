@@ -57,12 +57,16 @@ replacing the hosted Agent SDK runtime:
   [authentication](https://code.claude.com/docs/en/authentication),
   [SDK input](https://code.claude.com/docs/en/agent-sdk/user-input),
   and [Agent Client Protocol](https://agentclientprotocol.com/overview/clients).
-- Speak the job API in `cloudflare/src/jobs/`: register for a bearer token
-  (`POST /api/runners`), heartbeat presence, accounts, and running attempts,
-  claim when there is capacity, and stop any attempt the service says is no
-  longer this runner's. Each account's opaque ID must stay stable across
-  restarts so its preference rank and paused sessions follow it. A CLI sign-in
-  flow and a control to reorder account preference remain here.
+- Speak the job protocol in `cloudflare/src/jobs/protocol.ts`: register for a
+  bearer token (`POST /api/runners`) and hold one WebSocket to
+  `/api/runner/connect`. Send `status` messages (accounts, running attempts,
+  free slots) when connecting and whenever they change; the first one on a
+  connection must list every attempt still running. Take `assign` and
+  `cancel` pushes, and stop any attempt the hub says is no longer this
+  runner's. Reconnect with backoff; running jobs move after two minutes
+  away. Each account's opaque ID must stay stable across restarts so its
+  preference rank and paused sessions follow it. A CLI sign-in flow and a
+  control to reorder account preference remain here.
 
 ## Required
 

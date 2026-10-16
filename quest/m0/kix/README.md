@@ -75,8 +75,9 @@ operator-paid-hosting decisions:
   pause stops new work. An explicit spawn decision can prioritize ready work
   without introducing another approval flag per quest.
 - **Keep useful infrastructure.** Retain Workers/Hono and D1 for the web
-  service. Durable database claims and HTTPS streams replace MoQ locks and
-  logs.
+  service. Durable database claims and live WebSocket connections to a
+  per-owner Durable Object (decided 2026-10-16 on kixelated/quest#135)
+  replace MoQ locks and logs.
 - **Not exclusive.** The web UI is one interface, not the only one. Every
   skill keeps working from a user's own agent (Claude Code, Codex, ...)
   without kix. The two coexist through GitHub: kix sees a local agent's

@@ -1,8 +1,9 @@
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import * as store from "../src/jobs/store";
-import { LEASE, ONLINE } from "../src/jobs/store";
+import { GRACE } from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
 
@@ -39,6 +40,9 @@ async function runner(owner: string, name: string, platform: store.Platform = "l
 function account(id: string, limited = false): store.AccountReport {
 	return { id, provider: "anthropic", kind: "subscription", label: id, limited };
 }
+async function connected(r: store.Runner, accounts: store.AccountReport[]) {
+	await store.report(db, r, accounts, [], true, 0);
+}
 async function job(repository: number, actor: string, extra: Partial<store.NewJob> = {}, now = 0) {
 	return (
 		await store.createJob(
@@ -60,6 +64,10 @@ async function job(repository: number, actor: string, extra: Partial<store.NewJo
 async function state(id: string) {
 	return (await store.readJob(db, id))!;
 }
+/** One dispatch pass over connected runners and their free slots. */
+function run(slots: Record<string, number>, now: number, owner = "owner") {
+	return store.dispatch(db, owner, new Map(Object.entries(slots)), now);
+}
 
 beforeEach(async () => {
 	await db.batch([
@@ -75,36 +83,48 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("job coordination", () => {
-	it("gives a job to exactly one of several racing runners and records the placement", async () => {
+	it("assigns a job exactly once across racing dispatch passes and records the placement", async () => {
 		const runners = await Promise.all(["a", "b", "c"].map((name) => runner("owner", name)));
-		for (const r of runners) await store.heartbeat(db, r, [account(`${r.name}-account`)], [], 1000);
+		for (const r of runners) await connected(r, [account(`${r.name}-account`)]);
 		const id = await job(10, "owner");
-		// Every runner is polling, so whichever asks first may take the job.
-		for (const r of runners) await db.prepare("UPDATE runners SET pollAt=1000 WHERE id=?").bind(r.id).run();
-		const claims = await Promise.all(runners.map((r) => store.claim(db, r, 1001)));
-		const won = claims.filter((c) => c !== null);
-		expect(won).toHaveLength(1);
-		expect(won[0]).toMatchObject({ id, attempt: 1, owner: "upstream", name: "project", state: "running" });
+		const slots = Object.fromEntries(runners.map((r) => [r.id, 1]));
+		const passes = await Promise.all([run(slots, 1), run(slots, 1), run(slots, 1)]);
+		const assigned = passes.flatMap((pass) => pass.assign);
+		expect(assigned).toHaveLength(1);
+		expect(assigned[0]!.job).toMatchObject({
+			id,
+			attempt: 1,
+			owner: "upstream",
+			name: "project",
+			state: "running",
+		});
 		expect((await state(id)).events).toEqual([
-			{ attempt: 1, kind: "claimed", body: { runner: won[0]!.runner, account: won[0]!.account }, at: 1001 },
+			{
+				attempt: 1,
+				kind: "claimed",
+				body: { runner: assigned[0]!.runner, account: assigned[0]!.job.account },
+				at: 1,
+			},
 		]);
 	});
 
-	it("routes by the owner's account preference across online runners", async () => {
+	it("routes by the owner's account preference across connected runners with free slots", async () => {
 		const first = await runner("owner", "first");
 		const second = await runner("owner", "second");
-		await store.heartbeat(db, first, [account("one")], [], 0);
-		await store.heartbeat(db, second, [account("two")], [], 0);
-		// The preferred account is on a runner that is not asking for work yet.
+		await connected(first, [account("one")]);
+		await connected(second, [account("two")]);
 		await db.prepare("UPDATE runner_accounts SET rank=0 WHERE id='two'").run();
 		const id = await job(10, "owner");
-		await store.claim(db, second, 1);
-		await db.prepare("UPDATE jobs SET state='queued',attempt=0,runner=NULL,account=NULL WHERE id=?").bind(id).run();
-		expect(await store.claim(db, first, 2)).toBeNull();
-		expect(await store.claim(db, second, 3)).toMatchObject({ id, runner: second.id, account: "two" });
-		// Once the preferred runner stops polling, the next account takes over.
-		const other = await job(10, "owner", { target: "issues/1", workflow: "plan" }, 4);
-		expect(await store.claim(db, first, 3 + ONLINE + 1)).toMatchObject({ id: other, account: "one" });
+		expect((await run({ [first.id]: 1, [second.id]: 1 }, 1)).assign).toMatchObject([
+			{ runner: second.id, job: { id, account: "two" } },
+		]);
+		// A busy preferred runner leaves the next account to take new work.
+		const other = await job(10, "owner", { workflow: "plan", target: "issues/1" }, 2);
+		expect((await run({ [first.id]: 1, [second.id]: 0 }, 3)).assign).toMatchObject([
+			{ runner: first.id, job: { id: other, account: "one" } },
+		]);
+		await job(10, "owner", { workflow: "plan", target: "issues/2" }, 4);
+		expect((await run({}, 5)).assign).toEqual([]);
 	});
 
 	it("keeps untrusted heads, pins, other owners, and paused projects away from unsuitable runners", async () => {
@@ -112,22 +132,25 @@ describe("job coordination", () => {
 		const linux = await runner("owner", "linux");
 		const vm = await runner("owner", "vm", "linux", true);
 		const stranger = await runner("other", "stranger");
-		for (const r of [mac, linux, vm, stranger]) await store.heartbeat(db, r, [account("main")], [], 0);
+		for (const r of [mac, linux, vm, stranger]) await connected(r, [account("main")]);
 		const untrusted = await job(10, "owner", { workflow: "iterate", target: "pulls/2", trusted: false });
-		expect(await store.claim(db, stranger, 1)).toBeNull();
-		expect(await store.claim(db, mac, 1)).toBeNull();
-		expect(await store.claim(db, linux, 1)).toBeNull();
-		expect(await store.claim(db, vm, 1)).toMatchObject({ id: untrusted });
+		expect((await run({ [stranger.id]: 1, [mac.id]: 1, [linux.id]: 1 }, 1)).assign).toEqual([]);
+		expect((await run({ [stranger.id]: 1 }, 1, "other")).assign).toEqual([]);
+		expect((await run({ [mac.id]: 1, [linux.id]: 1, [vm.id]: 1 }, 1)).assign).toMatchObject([
+			{ runner: vm.id, job: { id: untrusted } },
+		]);
 
+		await db.prepare("UPDATE runner_accounts SET rank=99 WHERE runner=?").bind(mac.id).run();
 		const pinned = await job(10, "owner", { pinRunner: mac.id, pinAccount: "main" }, 2);
-		expect(await store.claim(db, linux, 3)).toBeNull();
-		expect(await store.claim(db, mac, 3)).toMatchObject({ id: pinned });
+		expect((await run({ [linux.id]: 1, [mac.id]: 1 }, 3)).assign).toMatchObject([
+			{ runner: mac.id, job: { id: pinned } },
+		]);
 		await expect(job(10, "owner", { target: "x", pinRunner: stranger.id })).rejects.toThrow("Pinned runner");
 		await expect(job(10, "owner", { target: "x", pinAccount: "main" })).rejects.toThrow("together");
 
 		await project(10, "owner", "paused");
 		await job(10, "owner", { target: "issues/3", workflow: "plan" }, 4);
-		expect(await store.claim(db, linux, 5)).toBeNull();
+		expect((await run({ [linux.id]: 1 }, 5)).assign).toEqual([]);
 	});
 
 	it("returns the active job for duplicate requests and allows new work after it ends", async () => {
@@ -151,69 +174,82 @@ describe("job coordination", () => {
 		expect(await job(10, "owner")).not.toBe(id);
 	});
 
-	it("reassigns an offline runner's job and fences the returning runner out", async () => {
+	it("reassigns a disconnected runner's job after the grace period and fences it out", async () => {
 		const old = await runner("owner", "old");
 		const replacement = await runner("owner", "replacement");
-		await store.heartbeat(db, old, [account("old")], [], 0);
+		await connected(old, [account("old")]);
+		await connected(replacement, [account("new")]);
 		const id = await job(10, "owner");
-		await store.claim(db, old, 0);
+		await run({ [old.id]: 1 }, 0);
 		await store.checkpoint(db, old, id, 1, "Wrote the parser", "session-1", 10);
-		// Its lease holds while it renews, even with another runner asking.
-		await store.heartbeat(db, replacement, [account("new")], [], LEASE - 1);
-		expect(await store.claim(db, replacement, LEASE - 1)).toBeNull();
-		expect(await store.claim(db, replacement, LEASE + 11)).toMatchObject({
-			id,
-			attempt: 2,
-			runner: replacement.id,
-			// A different runner continues from the summaries, not the old session.
-			session: null,
-			events: [
-				{ kind: "claimed", attempt: 1 },
-				{ kind: "summary", attempt: 1, body: "Wrote the parser" },
-				{ kind: "claimed", attempt: 2 },
-			],
-		});
-		await expect(store.checkpoint(db, old, id, 1, "Still here", null, LEASE + 12)).rejects.toThrow(
-			"no longer current",
-		);
-		await expect(store.output(db, old, id, 1, "late output", LEASE + 12)).rejects.toThrow("no longer current");
+		expect((await run({ [old.id]: 0, [replacement.id]: 1 }, 20)).assign).toEqual([]);
+		// Disconnecting starts the grace period instead of moving the job at once.
+		expect(await run({ [replacement.id]: 1 }, 30)).toMatchObject({ assign: [], wake: 30 + GRACE });
+		expect((await run({ [replacement.id]: 1 }, 30 + GRACE - 1)).assign).toEqual([]);
+		expect((await run({ [replacement.id]: 1 }, 30 + GRACE)).assign).toMatchObject([
+			{
+				runner: replacement.id,
+				job: {
+					id,
+					attempt: 2,
+					// A different runner continues from the summaries, not the old session.
+					session: null,
+					events: [
+						{ kind: "claimed", attempt: 1 },
+						{ kind: "summary", attempt: 1, body: "Wrote the parser" },
+						{ kind: "claimed", attempt: 2 },
+					],
+				},
+			},
+		]);
+		const late = 31 + GRACE;
+		await expect(store.checkpoint(db, old, id, 1, "Still here", null, late)).rejects.toThrow("no longer current");
+		await expect(store.output(db, old, id, 1, "late output", late)).rejects.toThrow("no longer current");
 		await expect(
-			store.finish(db, old, id, 1, { outcome: "completed", summary: "Done", result: { pr: 1 } }, LEASE + 12),
+			store.finish(db, old, id, 1, { outcome: "completed", summary: "Done", result: { pr: 1 } }, late),
 		).rejects.toThrow("no longer current");
-		await expect(store.ask(db, old, id, 1, { summary: "?", session: "s", prompt: {} }, LEASE + 12)).rejects.toThrow(
+		await expect(store.ask(db, old, id, 1, { summary: "?", session: "s", prompt: {} }, late)).rejects.toThrow(
 			"no longer current",
 		);
-		expect(await store.heartbeat(db, old, [account("old")], [{ job: id, attempt: 1 }], LEASE + 12)).toEqual([
+		expect(await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], true, late)).toEqual([
 			{ job: id, attempt: 1, action: "stop" },
 		]);
-		await store.finish(
-			db,
-			replacement,
-			id,
-			2,
-			{ outcome: "completed", summary: "Done", result: { pr: 1 } },
-			LEASE + 13,
-		);
+		const done = { outcome: "completed", summary: "Done", result: { pr: 1 } } as const;
+		await store.finish(db, replacement, id, 2, done, late + 1);
 		// A retried report is accepted once; the job keeps the replacement's result.
-		await store.finish(
-			db,
-			replacement,
-			id,
-			2,
-			{ outcome: "completed", summary: "Done", result: { pr: 1 } },
-			LEASE + 14,
-		);
+		await store.finish(db, replacement, id, 2, done, late + 2);
 		expect(await state(id)).toMatchObject({ state: "completed", summary: "Done", result: { pr: 1 }, attempt: 2 });
 		expect((await state(id)).events.filter((e) => e.kind === "result")).toHaveLength(1);
+	});
+
+	it("keeps a job on a runner that reconnects in time and moves one a restarted runner lost", async () => {
+		const machine = await runner("owner", "machine");
+		await connected(machine, [account("main")]);
+		const id = await job(10, "owner");
+		await run({ [machine.id]: 1 }, 0);
+		await run({}, 1);
+		expect((await state(id)).lease).toBe(1 + GRACE);
+		const listed = [{ job: id, attempt: 1 }];
+		expect(await store.report(db, machine, [account("main")], listed, true, 2)).toEqual([
+			{ job: id, attempt: 1, action: "continue" },
+		]);
+		await run({ [machine.id]: 0 }, 3);
+		expect(await state(id)).toMatchObject({ state: "running", lease: null });
+		// Later statuses on a connection may race an assignment, so they never requeue.
+		await store.report(db, machine, [account("main")], [], false, 4);
+		expect((await state(id)).state).toBe("running");
+		// A new connection's first status is complete: a restarted runner lost it.
+		await store.report(db, machine, [account("main")], [], true, 5);
+		expect((await state(id)).state).toBe("queued");
 	});
 
 	it("pauses on a question, accepts one answer, and resumes the same session where it lives", async () => {
 		const home = await runner("owner", "home");
 		const away = await runner("owner", "away");
-		await store.heartbeat(db, home, [account("main")], [], 0);
-		await store.heartbeat(db, away, [account("spare")], [], 0);
+		await connected(home, [account("main")]);
+		await connected(away, [account("spare")]);
 		const id = await job(10, "owner");
-		await store.claim(db, home, 0);
+		await run({ [home.id]: 1 }, 0);
 		const input = { summary: "Need a decision", session: "session-1", prompt: { question: "A or B?" } };
 		const question = await store.ask(db, home, id, 1, input, 1);
 		expect(await store.ask(db, home, id, 1, input, 2)).toBe(question);
@@ -228,82 +264,81 @@ describe("job coordination", () => {
 		expect(answered.questions).toHaveLength(1);
 		expect(["A", "B"]).toContain(answered.questions[0]!.answer);
 		await expect(store.answer(db, id, question, "owner", "C", 4)).rejects.toThrow("no longer open");
-		// The other runner waits while the session's runner is online but busy.
-		await store.claim(db, away, 5);
-		await db.prepare("UPDATE runners SET pollAt=0 WHERE id=?").bind(home.id).run();
-		expect(await store.claim(db, away, 6)).toBeNull();
-		expect(await store.claim(db, home, 7)).toMatchObject({ id, attempt: 2, session: "session-1" });
+		// The other runner waits while the session's runner is connected but busy.
+		expect((await run({ [home.id]: 0, [away.id]: 1 }, 5)).assign).toEqual([]);
+		expect((await run({ [home.id]: 1, [away.id]: 1 }, 6)).assign).toMatchObject([
+			{ runner: home.id, job: { id, attempt: 2, session: "session-1" } },
+		]);
 	});
 
 	it("pauses an account-limited job with a decision instead of switching accounts", async () => {
 		const machine = await runner("owner", "machine");
-		await store.heartbeat(db, machine, [account("first"), account("second")], [], 0);
+		await connected(machine, [account("first"), account("second")]);
 		const id = await job(10, "owner");
-		expect(await store.claim(db, machine, 0)).toMatchObject({ account: "first" });
+		expect((await run({ [machine.id]: 2 }, 0)).assign).toMatchObject([{ job: { account: "first" } }]);
 		await store.finish(db, machine, id, 1, { outcome: "limited", summary: "Hit the limit", result: undefined }, 1);
 		const paused = await state(id);
 		expect(paused).toMatchObject({ state: "waiting", summary: "Hit the limit" });
 		expect(paused.questions).toMatchObject([{ kind: "account", prompt: { runner: machine.id, account: "first" } }]);
-		expect(await store.claim(db, machine, 2)).toBeNull();
+		expect((await run({ [machine.id]: 2 }, 2)).assign).toEqual([]);
 		// Other work avoids the limited account while it is flagged.
 		const other = await job(10, "owner", { workflow: "plan", target: "issues/9" }, 3);
-		expect(await store.claim(db, machine, 4)).toMatchObject({ id: other, account: "second" });
-		await expect(
-			store.answer(db, id, paused.questions[0]!.id, "owner", { runner: machine.id, account: "nope" }, 5),
-		).rejects.toThrow("owner's accounts");
-		await store.answer(db, id, paused.questions[0]!.id, "owner", { runner: machine.id, account: "first" }, 5);
+		expect((await run({ [machine.id]: 2 }, 4)).assign).toMatchObject([{ job: { id: other, account: "second" } }]);
+		const choice = paused.questions[0]!.id;
+		await expect(store.answer(db, id, choice, "owner", { runner: machine.id, account: "nope" }, 5)).rejects.toThrow(
+			"owner's accounts",
+		);
+		await store.answer(db, id, choice, "owner", { runner: machine.id, account: "first" }, 5);
 		expect(await state(id)).toMatchObject({
 			state: "queued",
 			pinRunner: machine.id,
 			pinAccount: "first",
 			session: null,
 		});
-		expect(await store.claim(db, machine, 6)).toMatchObject({ id, account: "first", attempt: 2 });
+		expect((await run({ [machine.id]: 1 }, 6)).assign).toMatchObject([
+			{ job: { id, account: "first", attempt: 2 } },
+		]);
 	});
 
 	it("cancels queued work immediately and asks running work to stop with its partial result", async () => {
 		const machine = await runner("owner", "machine");
-		await store.heartbeat(db, machine, [account("main")], [], 0);
+		await connected(machine, [account("main")]);
 		const queued = await job(10, "owner");
 		await store.cancel(db, queued, "owner", 1);
 		expect(await state(queued)).toMatchObject({ state: "cancelled" });
 		await expect(store.cancel(db, queued, "owner", 2)).rejects.toThrow("already finished");
 
 		const running = await job(10, "owner", {}, 3);
-		await store.claim(db, machine, 3);
+		await run({ [machine.id]: 1 }, 3);
 		await store.cancel(db, running, "owner", 4);
-		expect(await store.heartbeat(db, machine, [account("main")], [{ job: running, attempt: 1 }], 5)).toEqual([
+		expect((await run({ [machine.id]: 0 }, 5)).cancel).toEqual([{ job: running, attempt: 1, runner: machine.id }]);
+		expect(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], false, 5)).toEqual([
 			{ job: running, attempt: 1, action: "cancel" },
 		]);
 		expect(await store.checkpoint(db, machine, running, 1, "Stopping", null, 6)).toEqual({ cancel: true });
-		await store.finish(
-			db,
-			machine,
-			running,
-			1,
-			{ outcome: "cancelled", summary: "Stopped after the parser", result: undefined },
-			7,
-		);
+		const stopped = { outcome: "cancelled", summary: "Stopped after the parser", result: undefined } as const;
+		await store.finish(db, machine, running, 1, stopped, 7);
 		expect(await state(running)).toMatchObject({ state: "cancelled", summary: "Stopped after the parser" });
 
 		// A cancelled attempt whose runner vanished stops instead of moving.
 		const abandoned = await job(10, "owner", {}, 8);
-		await store.claim(db, machine, 8);
+		await run({ [machine.id]: 1 }, 8);
 		await store.cancel(db, abandoned, "owner", 9);
-		expect(await store.claim(db, machine, 9 + LEASE)).toBeNull();
+		await run({}, 10);
+		expect((await run({}, 10 + GRACE)).assign).toEqual([]);
 		expect(await state(abandoned)).toMatchObject({ state: "cancelled" });
 	});
 
 	it("keeps account preference order and removes accounts a runner stops reporting", async () => {
 		const first = await runner("owner", "first");
 		const second = await runner("owner", "second");
-		await store.heartbeat(db, first, [account("a"), account("b")], [], 0);
-		await store.heartbeat(db, second, [account("c")], [], 0);
-		await store.heartbeat(db, first, [account("b", true)], [], 1);
-		const [one, two] = await store.listRunners(db, "owner", 1);
+		await connected(first, [account("a"), account("b")]);
+		await connected(second, [account("c")]);
+		await store.report(db, first, [account("b", true)], [], false, 1);
+		const listed = await store.listRunners(db, "owner", new Set([first.id]));
+		const [one, two] = ["first", "second"].map((name) => listed.find((r) => r.name === name));
 		expect(one).toMatchObject({ name: "first", online: true, accounts: [{ id: "b", rank: 2, limited: 1 }] });
-		expect(two).toMatchObject({ name: "second", accounts: [{ id: "c", rank: 3 }] });
-		expect((await store.listRunners(db, "owner", 1 + ONLINE + 1))[0]!.online).toBe(false);
+		expect(two).toMatchObject({ name: "second", online: false, accounts: [{ id: "c", rank: 3 }] });
 	});
 
 	it("deletes jobs with their project on disconnect", async () => {
@@ -313,55 +348,126 @@ describe("job coordination", () => {
 	});
 });
 
-describe("runner API", () => {
-	function post(path: string, token: string | null, body: unknown) {
+describe("runner connections", () => {
+	const hub = () => env.RUNNERS.get(env.RUNNERS.idFromName("owner"));
+	const sockets: WebSocket[] = [];
+	afterEach(() => {
+		for (const ws of sockets.splice(0)) ws.close();
+	});
+
+	function request(token: string | null, upgrade = true) {
 		return app.request(
-			`${origin}/api/runner${path}`,
+			`${origin}/api/runner/connect`,
 			{
-				method: "POST",
-				headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
-				body: JSON.stringify(body),
+				headers: {
+					...(token ? { Authorization: `Bearer ${token}` } : {}),
+					...(upgrade ? { Upgrade: "websocket" } : {}),
+				},
 			},
 			testEnv,
 		);
 	}
-
-	it("requires a registered runner token", async () => {
-		expect((await post("/claim", null, {})).status).toBe(401);
-		expect((await post("/claim", "x".repeat(43), {})).status).toBe(401);
+	async function connect(token: string) {
+		const response = await request(token);
+		expect(response.status).toBe(101);
+		const ws = response.webSocket!;
+		ws.accept();
+		sockets.push(ws);
+		const inbox: unknown[] = [];
+		const waiting: ((message: unknown) => void)[] = [];
+		ws.addEventListener("message", (event) => {
+			const message = JSON.parse(event.data as string);
+			const next = waiting.shift();
+			if (next) next(message);
+			else inbox.push(message);
+		});
+		const closed = new Promise<number>((resolve) => ws.addEventListener("close", (event) => resolve(event.code)));
+		return {
+			ws,
+			closed,
+			send: (message: unknown) => ws.send(JSON.stringify(message)),
+			next: (): Promise<any> =>
+				inbox.length ? Promise.resolve(inbox.shift()) : new Promise((resolve) => waiting.push(resolve)),
+		};
+	}
+	const status = (id: number, name: string, attempts: store.Attempt[] = [], slots = 1) => ({
+		id,
+		type: "status",
+		accounts: [account(name)],
+		attempts,
+		slots,
 	});
 
-	it("runs a job through heartbeat, claim, checkpoint, output, and result", async () => {
+	it("requires a registered runner token and a WebSocket", async () => {
 		const machine = await runner("owner", "machine");
-		expect((await post("/claim", machine.token, {})).status).toBe(204);
-		expect((await post("/heartbeat", machine.token, { accounts: [{ id: "main" }], attempts: [] })).status).toBe(
-			409,
-		);
-		const beat = await post("/heartbeat", machine.token, { accounts: [account("main")], attempts: [] });
-		expect(await beat.json()).toEqual({ attempts: [] });
+		expect((await request(null)).status).toBe(401);
+		expect((await request("x".repeat(43))).status).toBe(401);
+		expect((await request(machine.token, false)).status).toBe(426);
+	});
+
+	it("pushes assignments and cancellation and fences progress over the live connection", async () => {
+		const machine = await runner("owner", "machine");
+		const live = await connect(machine.token);
+		live.send(status(1, "main"));
+		expect(await live.next()).toEqual({ type: "reply", id: 1, attempts: [] });
+		expect(await hub().online()).toEqual([machine.id]);
 		const id = await job(10, "owner", {}, Date.now());
-		const claimed = await post("/claim", machine.token, {});
-		expect(claimed.status).toBe(200);
-		const { job: work } = (await claimed.json()) as { job: store.Claimed };
-		expect(work).toMatchObject({ id, attempt: 1, revision: commit, branch: "quest/first", owner: "upstream" });
-		expect((await post(`/jobs/${id}/checkpoint`, machine.token, { attempt: 1, summary: "Halfway" })).status).toBe(
-			200,
-		);
-		expect((await post(`/jobs/${id}/output`, machine.token, { attempt: 1, text: "raw log" })).status).toBe(204);
-		expect(
-			(await post(`/jobs/${id}/checkpoint`, machine.token, { attempt: 2, summary: "Wrong attempt" })).status,
-		).toBe(409);
-		expect(
-			(await post(`/jobs/${id}/result`, machine.token, { attempt: 1, outcome: "done", summary: "x" })).status,
-		).toBe(409);
-		expect((await post(`/jobs/${id}/result`, machine.token, { attempt: 1, outcome: "completed" })).status).toBe(
-			409,
-		);
-		expect(
-			(await post(`/jobs/${id}/result`, machine.token, { attempt: 1, outcome: "completed", summary: "Done" }))
-				.status,
-		).toBe(204);
+		await hub().dispatch("owner");
+		expect(await live.next()).toMatchObject({
+			type: "assign",
+			job: { id, attempt: 1, revision: commit, branch: "quest/first", owner: "upstream", account: "main" },
+		});
+		live.send({ id: 2, type: "checkpoint", job: id, attempt: 1, summary: "Halfway" });
+		expect(await live.next()).toEqual({ type: "reply", id: 2, cancel: false });
+		live.send({ id: 3, type: "output", job: id, attempt: 1, text: "raw log" });
+		expect(await live.next()).toEqual({ type: "reply", id: 3 });
+		live.send({ id: 4, type: "checkpoint", job: id, attempt: 2, summary: "Wrong attempt" });
+		expect(await live.next()).toEqual({ type: "reply", id: 4, error: "Attempt is no longer current" });
+		live.send({ id: 5, type: "result", job: id, attempt: 1, outcome: "done", summary: "x" });
+		expect(await live.next()).toEqual({ type: "reply", id: 5, error: "Outcome and summary required" });
+		live.send({ id: 6, type: "deploy" });
+		expect(await live.next()).toEqual({ type: "reply", id: 6, error: "Unknown message type" });
+		await store.cancel(db, id, "owner", Date.now());
+		await hub().dispatch("owner");
+		expect(await live.next()).toEqual({ type: "cancel", job: id, attempt: 1 });
+		live.send({ id: 7, type: "result", job: id, attempt: 1, outcome: "cancelled", summary: "Stopped" });
+		expect(await live.next()).toEqual({ type: "reply", id: 7 });
+		expect(await state(id)).toMatchObject({ state: "cancelled", summary: "Stopped" });
 		expect(await store.readOutput(db, id)).toMatchObject([{ attempt: 1, text: "raw log" }]);
+	});
+
+	it("keeps a job across a replaced connection and reassigns it after a disconnect", async () => {
+		const first = await runner("owner", "first");
+		const second = await runner("owner", "second");
+		const old = await connect(first.token);
+		old.send(status(1, "a"));
+		await old.next();
+		const id = await job(10, "owner", {}, Date.now());
+		await hub().dispatch("owner");
+		expect(await old.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
+
+		// Reconnecting replaces the old connection; the job stays put.
+		const fresh = await connect(first.token);
+		expect(await old.closed).toBe(4000);
+		fresh.send(status(1, "a", [{ job: id, attempt: 1 }]));
+		expect(await fresh.next()).toEqual({
+			type: "reply",
+			id: 1,
+			attempts: [{ job: id, attempt: 1, action: "continue" }],
+		});
+		expect(await state(id)).toMatchObject({ state: "running", runner: first.id, lease: null });
+
+		const other = await connect(second.token);
+		other.send(status(1, "b"));
+		await other.next();
+		fresh.ws.close(1000);
+		await fresh.closed;
+		await hub().dispatch("owner");
+		expect((await state(id)).lease).toBeGreaterThan(Date.now());
+		// The grace period ends: the hub's alarm moves the job to the connected runner.
+		await db.prepare("UPDATE jobs SET lease=1 WHERE id=?").bind(id).run();
+		expect(await runDurableObjectAlarm(hub())).toBe(true);
+		expect(await other.next()).toMatchObject({ type: "assign", job: { id, attempt: 2, runner: second.id } });
 	});
 });
 
@@ -505,11 +611,11 @@ describe("job routes", () => {
 
 	it("answers, cancels, and reads raw output only for the project's current maintainers", async () => {
 		const machine = await runner(maintainer, "machine");
-		await store.heartbeat(db, machine, [account("main")], [], Date.now());
+		await connected(machine, [account("main")]);
 		const { id } = (await (await post("", { workflow: "start", target: "quest/first.md" })).json()) as {
 			id: string;
 		};
-		await store.claim(db, machine, Date.now());
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
 		await store.output(db, machine, id, 1, "secret transcript", Date.now());
 		const question = await store.ask(
 			db,

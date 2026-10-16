@@ -9,9 +9,8 @@ CREATE TABLE runners (
   -- Can build an untrusted PR's devShell in a VM.
   vm INTEGER NOT NULL DEFAULT 0 CHECK(vm IN (0,1)),
   createdAt INTEGER NOT NULL,
-  -- Last request of any kind, and last request asking for work.
-  seenAt INTEGER,
-  pollAt INTEGER
+  -- Last status over its live connection. Presence itself is the connection.
+  seenAt INTEGER
 );
 CREATE INDEX runners_owner ON runners(owner);
 -- Opaque references to agent logins held on a runner. Never tokens.
@@ -45,6 +44,7 @@ CREATE TABLE jobs (
   account TEXT,
   -- The agent session to resume on the same runner and account.
   session TEXT,
+  -- While its runner is disconnected, when the running attempt moves.
   lease INTEGER,
   cancel INTEGER NOT NULL DEFAULT 0 CHECK(cancel IN (0,1)),
   summary TEXT,

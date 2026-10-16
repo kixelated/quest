@@ -1,13 +1,13 @@
 // Durable job coordination: one authorized attempt owns a job at a time.
 //
-// Every runner write names its (job, attempt) and only lands while that
-// attempt is current. A claim increments the attempt, so a runner that went
-// offline and returns after its job was reassigned is fenced out.
+// D1 is the record. Each owner's RunnerHub Durable Object holds their
+// runners' live connections and drives these functions; every runner write
+// names its (job, attempt) and only lands while that attempt is current. An
+// assignment increments the attempt, so a runner that went offline and
+// returns after its job was reassigned is fenced out.
 
-/** A runner that asked for work this recently is online and available. */
-export const ONLINE = 60_000;
-/** A running attempt whose runner stops renewing it for this long is reassigned. */
-export const LEASE = 3 * 60_000;
+/** A disconnected runner's running jobs move to another runner after this long. */
+export const GRACE = 2 * 60_000;
 
 export type Workflow = "plan" | "start" | "iterate" | "bootstrap";
 export type JobState = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -24,6 +24,7 @@ export type AccountReport = {
 	label: string;
 	limited: boolean;
 };
+export type Attempt = { job: string; attempt: number };
 export type Job = {
 	id: string;
 	repository: number;
@@ -40,6 +41,7 @@ export type Job = {
 	runner: string | null;
 	account: string | null;
 	session: string | null;
+	/** While its runner is disconnected, when the running attempt moves. */
 	lease: number | null;
 	cancel: number;
 	summary: string | null;
@@ -58,13 +60,14 @@ export type Question = {
 	answeredAt: number | null;
 };
 export type Event = { attempt: number; kind: string; body: unknown; at: number };
-/** An online runner's usable account, as routing sees it. */
+/** A connected runner's account, as routing sees it. */
 export type Offer = {
 	runner: string;
 	account: string;
 	platform: Platform;
 	vm: number;
-	polling: boolean;
+	/** Whether the runner has a free job slot. */
+	free: boolean;
 	limited: boolean;
 };
 
@@ -98,7 +101,8 @@ export async function authenticate(db: D1Database, token: string): Promise<Runne
 		.first<Runner>();
 }
 
-export async function listRunners(db: D1Database, owner: string, now: number) {
+/** The owner's runners and accounts; `online` is the hub's live connections. */
+export async function listRunners(db: D1Database, owner: string, online: Set<string>) {
 	const [runners, accounts] = await db.batch([
 		db.prepare("SELECT id,name,platform,vm,seenAt FROM runners WHERE owner=? ORDER BY createdAt,id").bind(owner),
 		db
@@ -119,7 +123,7 @@ export async function listRunners(db: D1Database, owner: string, now: number) {
 	};
 	return (runners!.results as Row[]).map((runner) => ({
 		...runner,
-		online: runner.seenAt !== null && runner.seenAt >= now - ONLINE,
+		online: online.has(runner.id),
 		accounts: (accounts!.results as Account[]).filter((account) => account.runner === runner.id),
 	}));
 }
@@ -127,19 +131,23 @@ export async function listRunners(db: D1Database, owner: string, now: number) {
 const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? AND state='running')";
 
 /**
- * Report presence, the runner's current accounts, and the attempts it is
- * running. Renews those attempts' leases and says which to continue, cancel,
- * or stop because they are no longer this runner's.
+ * A connected runner's status: its current accounts and the attempts it is
+ * running. Says which reported attempts to continue, cancel, or stop
+ * because they are no longer this runner's. A connection's first status is complete, since nothing has been
+ * assigned over it yet, so running attempts it omits were lost and move now.
  */
-export async function heartbeat(
+export async function report(
 	db: D1Database,
 	runner: Runner,
 	accounts: AccountReport[],
-	attempts: { job: string; attempt: number }[],
+	attempts: Attempt[],
+	first: boolean,
 	now: number,
 ) {
 	const reported = JSON.stringify(accounts);
 	const running = JSON.stringify(attempts);
+	const listed =
+		"(id,attempt) IN (SELECT json_extract(value,'$.job'),json_extract(value,'$.attempt') FROM json_each(?))";
 	const results = await db.batch([
 		db.prepare("UPDATE runners SET seenAt=? WHERE id=?").bind(now, runner.id),
 		db
@@ -159,9 +167,9 @@ export async function heartbeat(
 			.bind(runner.id, runner.owner, reported),
 		db
 			.prepare(
-				"UPDATE jobs SET lease=? WHERE runner=? AND state='running' AND (id,attempt) IN (SELECT json_extract(value,'$.job'),json_extract(value,'$.attempt') FROM json_each(?))",
+				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE ?=1 AND runner=? AND state='running' AND NOT ${listed}`,
 			)
-			.bind(now + LEASE, runner.id, running),
+			.bind(now, first ? 1 : 0, runner.id, running),
 		db
 			.prepare(
 				"SELECT id,attempt,runner,state,cancel FROM jobs WHERE id IN (SELECT json_extract(value,'$.job') FROM json_each(?))",
@@ -192,70 +200,110 @@ export function route(job: Job, offers: Offer[]): Offer | null {
 	// another runner would start an unrelated agent instead.
 	if (job.session) {
 		const home = eligible.find((offer) => offer.runner === job.runner && offer.account === job.account);
-		if (home) return home.polling && !home.limited ? home : null;
+		if (home) return home.free && !home.limited ? home : null;
 	}
-	return eligible.find((offer) => offer.polling && !offer.limited) ?? null;
+	return eligible.find((offer) => offer.free && !offer.limited) ?? null;
 }
 
 export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner: string; name: string };
 
-/** Give the asking runner the oldest job routed to it, reassigning expired attempts. */
-export async function claim(db: D1Database, runner: Runner, now: number): Promise<Claimed | null> {
-	const [, , candidates, offers] = await db.batch([
-		db.prepare("UPDATE runners SET seenAt=?,pollAt=? WHERE id=?").bind(now, now, runner.id),
+/**
+ * Reconcile an owner's jobs with their connected runners and free slots.
+ * A running job has a lease exactly while its runner is disconnected; an
+ * expired lease moves the job. Then queued work is assigned. Returns what to
+ * send each runner and when to run again.
+ */
+export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
+	const connected = JSON.stringify([...slots.keys()]);
+	const [, , , , candidates, offers, cancels] = await db.batch([
+		db
+			.prepare(
+				"UPDATE jobs SET lease=NULL WHERE actor=? AND state='running' AND lease IS NOT NULL AND runner IN (SELECT value FROM json_each(?))",
+			)
+			.bind(owner, connected),
+		db
+			.prepare(
+				"UPDATE jobs SET lease=? WHERE actor=? AND state='running' AND lease IS NULL AND runner NOT IN (SELECT value FROM json_each(?))",
+			)
+			.bind(now + GRACE, owner, connected),
 		// An abandoned attempt that was asked to cancel stops rather than moving.
 		db
 			.prepare(
-				"UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND cancel=1 AND lease<?",
+				"UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND cancel=1 AND lease<=?",
 			)
-			.bind(now, runner.owner, now),
+			.bind(now, owner, now),
+		db
+			.prepare(
+				"UPDATE jobs SET state='queued',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND lease<=?",
+			)
+			.bind(now, owner, now),
 		// A paused project starts and continues nothing new.
 		db
 			.prepare(
 				`SELECT j.* FROM jobs j JOIN github_projects p ON p.id=j.repository
- WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND (j.state='queued' OR (j.state='running' AND j.lease<?))
- ORDER BY j.createdAt,j.id LIMIT 50`,
+ WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' ORDER BY j.createdAt,j.id LIMIT 50`,
 			)
-			.bind(runner.owner, now),
+			.bind(owner),
 		db
 			.prepare(
-				`SELECT a.runner,a.id AS account,r.platform,r.vm,r.pollAt>=? AS polling,a.limited FROM runner_accounts a JOIN runners r ON r.id=a.runner
- WHERE r.owner=? AND r.seenAt>=? ORDER BY a.rank,a.runner,a.id`,
+				`SELECT a.runner,a.id AS account,r.platform,r.vm,a.limited FROM runner_accounts a JOIN runners r ON r.id=a.runner
+ WHERE r.owner=? AND r.id IN (SELECT value FROM json_each(?)) ORDER BY a.rank,a.runner,a.id`,
 			)
-			.bind(now - ONLINE, runner.owner, now - ONLINE),
+			.bind(owner, connected),
+		db
+			.prepare(
+				"SELECT id AS job,attempt,runner FROM jobs WHERE actor=? AND state='running' AND cancel=1 AND runner IN (SELECT value FROM json_each(?))",
+			)
+			.bind(owner, connected),
 	]);
-	type Row = Omit<Offer, "polling" | "limited"> & { polling: number | null; limited: number };
-	const available = (offers!.results as Row[]).map((o) => ({ ...o, polling: !!o.polling, limited: !!o.limited }));
+	const free = new Map(slots);
+	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
+	const accounts = offers!.results as Row[];
+	const assign: { runner: string; job: Claimed }[] = [];
 	for (const job of candidates!.results as Job[]) {
-		const chosen = route(job, available);
-		if (chosen?.runner !== runner.id) continue;
+		const chosen = route(
+			job,
+			accounts.map((o) => ({ ...o, free: (free.get(o.runner) ?? 0) > 0, limited: !!o.limited })),
+		);
+		if (!chosen) continue;
 		const [update] = await db.batch([
 			db
 				.prepare(
-					`UPDATE jobs SET state='running',attempt=attempt+1,runner=?,account=?,session=CASE WHEN runner=? AND account=? THEN session END,lease=?,updatedAt=?
- WHERE id=? AND attempt=? AND cancel=0 AND (state='queued' OR (state='running' AND lease<?))`,
+					`UPDATE jobs SET state='running',attempt=attempt+1,runner=?,account=?,session=CASE WHEN runner=? AND account=? THEN session END,lease=NULL,updatedAt=?
+ WHERE id=? AND attempt=? AND cancel=0 AND state='queued'`,
 				)
-				.bind(runner.id, chosen.account, runner.id, chosen.account, now + LEASE, now, job.id, job.attempt, now),
+				.bind(chosen.runner, chosen.account, chosen.runner, chosen.account, now, job.id, job.attempt),
+			// changes() is the update above, so only the pass that moved the job records it.
 			db
 				.prepare(
-					"INSERT INTO job_events(job,attempt,kind,body,at) SELECT id,attempt,'claimed',json_object('runner',runner,'account',account),? FROM jobs WHERE id=? AND attempt=? AND runner=?",
+					"INSERT INTO job_events(job,attempt,kind,body,at) SELECT id,attempt,'claimed',json_object('runner',runner,'account',account),? FROM jobs WHERE changes()=1 AND id=? AND attempt=? AND runner=?",
 				)
-				.bind(now, job.id, job.attempt + 1, runner.id),
+				.bind(now, job.id, job.attempt + 1, chosen.runner),
 		]);
-		// Another runner won the race; try the next job.
+		// The job changed underneath this pass; the next one sees it.
 		if (update!.meta.changes !== 1) continue;
-		const project = await db
-			.prepare("SELECT owner,name FROM github_projects WHERE id=?")
-			.bind(job.repository)
-			.first<{ owner: string; name: string }>();
-		const claimed = await readJob(db, job.id);
-		if (!claimed || !project) return null;
-		return { ...claimed, ...project };
+		free.set(chosen.runner, free.get(chosen.runner)! - 1);
+		const [claimed, project] = await Promise.all([
+			readJob(db, job.id),
+			db
+				.prepare("SELECT owner,name FROM github_projects WHERE id=?")
+				.bind(job.repository)
+				.first<{ owner: string; name: string }>(),
+		]);
+		if (claimed && project) assign.push({ runner: chosen.runner, job: { ...claimed, ...project } });
 	}
-	return null;
+	const wake = await db
+		.prepare("SELECT MIN(lease) AS at FROM jobs WHERE actor=? AND state='running' AND lease IS NOT NULL")
+		.bind(owner)
+		.first<{ at: number | null }>();
+	return {
+		assign,
+		cancel: cancels!.results as (Attempt & { runner: string })[],
+		wake: wake?.at ?? null,
+	};
 }
 
-/** Record a checkpoint summary from the current attempt and renew its lease. */
+/** Record a checkpoint summary from the current attempt. */
 export async function checkpoint(
 	db: D1Database,
 	runner: Runner,
@@ -273,9 +321,9 @@ export async function checkpoint(
 			.bind(job, attempt, summary, now, job, attempt, runner.id),
 		db
 			.prepare(
-				"UPDATE jobs SET summary=?,session=COALESCE(?,session),lease=?,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' RETURNING cancel",
+				"UPDATE jobs SET summary=?,session=COALESCE(?,session),updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' RETURNING cancel",
 			)
-			.bind(summary, session, now + LEASE, now, job, attempt, runner.id),
+			.bind(summary, session, now, job, attempt, runner.id),
 	]);
 	const row = update!.results[0] as { cancel: number } | undefined;
 	if (!row) throw new JobError("Attempt is no longer current");

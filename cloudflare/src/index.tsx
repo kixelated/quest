@@ -435,3 +435,4 @@ app.onError((error, c) => {
 	return c.json({ error: "Request failed" }, 500);
 });
 export default app;
+export { RunnerHub } from "./jobs/hub";
