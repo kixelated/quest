@@ -7,6 +7,7 @@ import { Command, CommanderError, InvalidArgumentError, Option } from "commander
 
 import { description, version } from "../../package.json";
 import { blockers, check, formatFinding, label, lookup, ready, renderBlocker, unblocked } from "../core";
+import { gate } from "./gate";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
@@ -51,6 +52,25 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.exitOverride();
 	const root = () => program.opts<{ root: string }>().root;
+
+	program
+		.command("gate")
+		.summary("Run an expensive command once the host has room for it")
+		.description(
+			"Wait while the 1-minute load average exceeds the core count or available memory is below " +
+				"min(4 GiB, RAM/4), admitting one waiting command every 5 seconds. On Linux with a systemd " +
+				"user manager, the command also takes one of min(cores, RAM/4 GiB) slots in a user scope until " +
+				"its last descendant exits. Nested calls run immediately. Limits come from the host; there is " +
+				"no configuration.",
+		)
+		.argument("<command>", "Executable to run")
+		.argument("[args...]", "Arguments forwarded verbatim")
+		.action((command: string, args: string[]) => {
+			pending = gate([command, ...args]).catch((error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			});
+		});
 
 	program
 		.command("check")
@@ -210,7 +230,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	try {
-		program.parse(argv, { from: "user" });
+		program.parse(gateBoundary(argv), { from: "user" });
 		return pending ?? code;
 	} catch (error) {
 		if (error instanceof CommanderError) {
@@ -253,6 +273,16 @@ function positiveSeconds(value: string): number {
 		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
 	}
 	return seconds;
+}
+
+/** Stop option parsing before a gated executable, keeping its own flags intact. */
+export function gateBoundary(argv: string[]): string[] {
+	let index = 0;
+	while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
+		index += argv[index] === "--root" ? 2 : 1;
+	}
+	if (argv[index] !== "gate" || !argv[index + 1] || ["--", "-h", "--help"].includes(argv[index + 1])) return argv;
+	return [...argv.slice(0, index + 1), "--", ...argv.slice(index + 1)];
 }
 
 /** A result limit must be a positive, safe integer. */

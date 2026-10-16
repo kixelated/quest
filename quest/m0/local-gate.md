@@ -1,4 +1,4 @@
-# [M] Bound expensive commands with quest gate
+# [S] Measure quest gate under representative contention
 
 ## Goal
 
@@ -6,28 +6,49 @@
 on one host, shared across repositories and worktrees. Concurrent agent sessions
 remain useful without multiplying full-machine builds and test stacks.
 
+The gate and its automatic use by `just check` / `just test` have landed. What
+remains is measuring representative build/test contention with and without the
+gate, for example how many concurrent Worker suites hit their 5-second timeouts,
+before claiming a responsiveness improvement.
+
 ## Plan
 
 - Decided 2026-10-15: gate expensive command phases, not agent lifetimes. Use a
-  simple configurable concurrency limit, with a CPU-count default. Repository
+  simple concurrency limit derived from the host. Repository
   entrypoints invoke the gate automatically; ordinary reasoning and I/O do not
   occupy a CPU slot. No adaptive scheduler or new daemon is needed for this scope.
-- Wait before launching the command, its stack, or its test timeout clocks.
-  Preserve arguments, terminal I/O, exit status, and cancellation. Nested gated
-  calls must not deadlock or silently multiply the admitted concurrency.
-- A slot remains owned while expensive descendants run. Cover interruption,
-  crashes, concurrent acquisition, and recovery without relying on stale PID
-  guesses. Unsupported ownership semantics fail explicitly.
-- Reuse existing compiler scheduling such as mbx; this is admission for whole
-  expensive phases, not a replacement compiler scheduler. Internal worker
-  concurrency remains a separate consumer responsibility.
-- Exercise contention across processes and repositories, cancellation, nesting,
-  and exact exit propagation with small fixtures. Measure admission overhead
-  and representative contention before claiming a responsiveness improvement.
-- Update CLI help and existing usage docs inline. Keep the shared primitive
-  outside repository-specific policy and independent of the hosted runner.
+- Decided 2026-10-15 (user): gate checks and CI-like suites on host load, not
+  agents, because load from every session and user is what starves test timers.
+  The agent-level load-average rule was removed from the spawn and complete skills.
+- Decided 2026-10-15 (user): admission uses both. Slots cap concurrency where
+  the platform can own descendants exactly; admission also waits while the
+  1-minute load average exceeds the core count, which sees work the slots cannot.
+- Decided 2026-10-15 (user): the load gate runs on every platform, and Linux adds
+  systemd scope slots on top. macOS, Windows, and Linux without a user manager
+  get load and memory admission alone rather than an unsupported error.
+- Decided 2026-10-15 (user): Bun's `--no-orphans` stays a research option. Its
+  best-effort registration and bounded PID-tree walks do not establish exact
+  ownership by themselves.
+- Decided 2026-10-15: at most one admission per 5-second window across all
+  callers, claimed by exclusively creating a per-window file. The load average
+  lags new work and is sampled every 5 seconds, so waiters that all see it fall
+  must not start together. Nothing is held across the command, so a crash
+  leaves no stale lock.
+- Decided 2026-10-15 (user): limits come from host specs, with no configuration
+  file. The load limit is the usable core count (`availableParallelism`, which
+  honors CPU affinity): one runnable thread per core. Each
+  command is budgeted 4 GiB, a typical build or test stack, so Linux gets
+  `min(cores, RAM / 4 GiB)` slots (at least one), with RAM capped by a cgroup
+  memory limit. Admission also waits while available memory is below
+  `min(4 GiB, RAM / 4)`, so a small host still runs one command. macOS counts
+  reclaimable cache as used memory, so only its load is gated; Windows reports
+  no load average, so only its memory is.
+- Nested gated calls run immediately: the kernel scope identifies them on Linux,
+  and an inherited marker does where admission had no kernel scope.
+- A 10-sample probe measured about 37 ms of admission overhead for a gated
+  `/bin/true`. Fairness is not promised.
 
 ## Related
 
-- [Recoverable worktrees](/quest/m0/worktree.md) - disk admission and checkout lifetime
+- [Recoverable worktrees](/quest/m0/worktree.md) - should reuse the systemd scope backend for exact descendant ownership
 - [Own-PC runner](/quest/m0/kix/runner.md) - reuse local command supervision

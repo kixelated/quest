@@ -35,7 +35,7 @@ ownership-manifest design:
 
 ## Required
 
-- [Expensive command gate](/quest/m0/local-gate.md) - shared CPU admission across worktrees and repositories
+- [Gate contention measurements](/quest/m0/local-gate.md) - evidence that gated checks stay responsive under shared load
 - [Recoverable worktrees](/quest/m0/worktree.md) - disk admission, checkpoints, release, and restore
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 
