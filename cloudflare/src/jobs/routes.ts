@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
 import { GitHubError, GitHubService } from "../github/service";
-import type { Pull } from "../github/state";
+import type { ProjectState, Pull } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import { data, id, text } from "./protocol";
 import * as store from "./store";
@@ -96,6 +96,59 @@ jobs.get(base, async (c) => {
 	return c.json({ jobs: await store.listJobs(c.env.DB, repo.id) });
 });
 
+type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccount">;
+
+/** Resolve a requested workflow and target against current observations. */
+function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan {
+	const commit = state.project.commit;
+	const open = (kind: "issue" | "pull", prefix: string) =>
+		state.activity.find(
+			(item) =>
+				item.kind === kind &&
+				`${prefix}/${item.number}` === target &&
+				!item.missing &&
+				item.data?.state === "OPEN",
+		);
+	if (workflow === "start") {
+		if (typeof target !== "string" || !state.available.includes(target))
+			throw new JobError("Only ready, unclaimed quests on the default branch can start");
+		return { workflow, target, revision: commit, branch: target.replace(/(\/README)?\.md$/, ""), trusted: true };
+	}
+	if (workflow === "plan") {
+		if (target === undefined) {
+			const plan = crypto.randomUUID();
+			return {
+				workflow,
+				target: `plans/${plan}`,
+				revision: commit,
+				branch: `plan/${plan.slice(0, 8)}`,
+				trusted: true,
+			};
+		}
+		const issue = open("issue", "issues");
+		if (!issue) throw new JobError("Plan an open issue or start a new plan");
+		const n = issue.number;
+		return { workflow, target: `issues/${n}`, revision: commit, branch: `plan/issue-${n}`, trusted: true };
+	}
+	if (workflow === "iterate") {
+		const pull = open("pull", "pulls");
+		if (!pull) throw new JobError("Iterate on an open pull request");
+		const data = pull.data as Pull;
+		// Until the sandbox classifies commit authors, every PR head is untrusted
+		// and routes only to Linux runners that build its devShell in a VM.
+		return {
+			workflow,
+			target: `pulls/${pull.number}`,
+			revision: data.headRefOid,
+			branch: data.headRefName,
+			trusted: false,
+		};
+	}
+	if (workflow === "bootstrap")
+		return { workflow, target: "devshell", revision: commit, branch: "quest/devshell", trusted: true };
+	throw new JobError("Unknown workflow");
+}
+
 /**
  * Authorize one workflow on one target. Planning, implementation, and
  * iteration are separate requests; arriving issues and PRs only observe.
@@ -103,76 +156,23 @@ jobs.get(base, async (c) => {
 jobs.post(base, async (c) => {
 	const { user, repo, github } = await maintained(c);
 	const body = await json(c);
-	const workflow = body.workflow;
 	const pinRunner = body.runner === undefined ? null : id(body.runner);
 	const pinAccount = body.account === undefined ? null : id(body.account);
 	if ((body.runner !== undefined && !pinRunner) || (body.account !== undefined && !pinAccount))
 		throw new JobError("Invalid runner or account");
-	const source = await github.jobSource(repo, user);
-	if (!source.enabled) throw new JobError("Contributions are paused");
-	if (workflow !== "bootstrap" && !source.flake)
+	const { job, enabled, flake } = await github.jobSource(repo, user, (state) =>
+		resolve(body.workflow, body.target, state),
+	);
+	if (!enabled) throw new JobError("Contributions are paused");
+	if (job.workflow === "bootstrap") {
+		if (flake) throw new JobError("The default branch already has a flake");
+	} else if (!flake) {
+		if (job.workflow === "iterate") throw new JobError("The pull request's head has no flake devShell");
 		return c.json(
 			{ error: "A flake devShell is required; start a bootstrap job to add one", bootstrap: true },
 			409,
 		);
-	const { state } = source;
-	const commit = state.project.commit;
-	const target = body.target;
-	let job: Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccount">;
-	if (workflow === "start") {
-		if (typeof target !== "string" || !state.available.includes(target))
-			throw new JobError("Only ready, unclaimed quests on the default branch can start");
-		job = { workflow, target, revision: commit, branch: target.replace(/(\/README)?\.md$/, ""), trusted: true };
-	} else if (workflow === "plan") {
-		if (target === undefined) {
-			const plan = crypto.randomUUID();
-			job = {
-				workflow,
-				target: `plans/${plan}`,
-				revision: commit,
-				branch: `plan/${plan.slice(0, 8)}`,
-				trusted: true,
-			};
-		} else {
-			const issue = state.activity.find(
-				(item) =>
-					item.kind === "issue" &&
-					`issues/${item.number}` === target &&
-					!item.missing &&
-					item.data?.state === "OPEN",
-			);
-			if (!issue) throw new JobError("Plan an open issue or start a new plan");
-			job = {
-				workflow,
-				target: `issues/${issue.number}`,
-				revision: commit,
-				branch: `plan/issue-${issue.number}`,
-				trusted: true,
-			};
-		}
-	} else if (workflow === "iterate") {
-		const pull = state.activity.find(
-			(item) =>
-				item.kind === "pull" &&
-				`pulls/${item.number}` === target &&
-				!item.missing &&
-				item.data?.state === "OPEN",
-		);
-		if (!pull) throw new JobError("Iterate on an open pull request");
-		const data = pull.data as Pull;
-		// Until the sandbox classifies commit authors, every PR head is untrusted
-		// and routes only to Linux runners that build its devShell in a VM.
-		job = {
-			workflow,
-			target: `pulls/${pull.number}`,
-			revision: data.headRefOid,
-			branch: data.headRefName,
-			trusted: false,
-		};
-	} else if (workflow === "bootstrap") {
-		if (source.flake) throw new JobError("The default branch already has a flake");
-		job = { workflow, target: "devshell", revision: commit, branch: "quest/devshell", trusted: true };
-	} else throw new JobError("Unknown workflow");
+	}
 	const created = await store.createJob(
 		c.env.DB,
 		{ ...job, repository: repo.id, actor: user, pinRunner, pinAccount },

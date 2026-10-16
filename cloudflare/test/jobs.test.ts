@@ -146,6 +146,9 @@ describe("job coordination", () => {
 			{ runner: mac.id, job: { id: pinned } },
 		]);
 		await expect(job(10, "owner", { target: "x", pinRunner: stranger.id })).rejects.toThrow("Pinned runner");
+		await expect(job(10, "owner", { target: "x", pinRunner: mac.id, pinAccount: "missing" })).rejects.toThrow(
+			"Pinned runner or account",
+		);
 		await expect(job(10, "owner", { target: "x", pinAccount: "main" })).rejects.toThrow("together");
 
 		await project(10, "owner", "paused");
@@ -449,12 +452,17 @@ describe("runner connections", () => {
 		// Reconnecting replaces the old connection; the job stays put.
 		const fresh = await connect(first.token);
 		expect(await old.closed).toBe(4000);
+		// Until its first status, the new connection does not hold the job.
+		await hub().dispatch("owner");
+		expect((await state(id)).lease).toBeGreaterThan(Date.now());
 		fresh.send(status(1, "a", [{ job: id, attempt: 1 }]));
 		expect(await fresh.next()).toEqual({
 			type: "reply",
 			id: 1,
 			attempts: [{ job: id, attempt: 1, action: "continue" }],
 		});
+		// Passes run in order, so this one follows the pass the status started.
+		await hub().dispatch("owner");
 		expect(await state(id)).toMatchObject({ state: "running", runner: first.id, lease: null });
 
 		const other = await connect(second.token);
@@ -476,10 +484,12 @@ describe("job routes", () => {
 	let maintainer = "";
 	let cookie = "";
 	let flake = true;
+	let pullFlake = true;
 	let role = "maintain";
 
 	beforeEach(async () => {
 		flake = true;
+		pullFlake = true;
 		role = "maintain";
 		const who = identity("github");
 		cookie = (await oauth(who)).session!;
@@ -548,8 +558,11 @@ describe("job routes", () => {
 			if (path.startsWith("/user/")) return Response.json({ id: Number(who.id), login: "maintainer" });
 			if (path.endsWith("/permission"))
 				return Response.json({ user: { id: Number(who.id) }, permission: "write", role_name: role });
-			if (path === "/repos/upstream/project/contents/flake.nix" && url.searchParams.get("ref") === commit)
-				return flake ? Response.json({ type: "file" }) : new Response(null, { status: 404 });
+			const ref = url.searchParams.get("ref");
+			if (path === "/repos/upstream/project/contents/flake.nix" && (ref === commit || ref === head))
+				return (ref === commit ? flake : pullFlake)
+					? Response.json({ type: "file" })
+					: new Response(null, { status: 404 });
 			throw new Error(`Unexpected GitHub request ${path}`);
 		});
 	});
@@ -594,7 +607,16 @@ describe("job routes", () => {
 		const refused = await post("", { workflow: "start", target: "quest/first.md" });
 		expect(refused.status).toBe(409);
 		expect(await refused.json()).toMatchObject({ bootstrap: true });
+		// Iterating on the bootstrap PR checks its head, which adds the flake.
+		expect((await post("", { workflow: "iterate", target: "pulls/2" })).status).toBe(201);
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(201);
+	});
+
+	it("refuses to iterate on a pull request head without a flake", async () => {
+		pullFlake = false;
+		const refused = await post("", { workflow: "iterate", target: "pulls/2" });
+		expect(refused.status).toBe(409);
+		expect(await refused.json()).toEqual({ error: "The pull request's head has no flake devShell" });
 	});
 
 	it("refuses new work on paused projects and requests without current authority or origin", async () => {

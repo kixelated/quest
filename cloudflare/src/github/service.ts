@@ -490,24 +490,31 @@ export class GitHubService {
 	}
 
 	/**
-	 * What a new job may start from: complete observations of the default
-	 * branch, and whether that commit has a flake for the runner's devShell.
+	 * What a new job may start from: `resolve` picks it from complete
+	 * observations, then this checks whether its revision has a flake for the
+	 * runner's devShell.
 	 */
-	jobSource(repo: GitHubRepository, userId: string) {
+	jobSource<T extends { revision: string }>(
+		repo: GitHubRepository,
+		userId: string,
+		resolve: (state: ProjectState) => T,
+	) {
 		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
 			this.#public(current);
 			const enrolled = await this.#state(repo, installation);
 			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
 			const state = await this.#observations(repo, installation);
 			if (!state?.complete) throw new GitHubError("Refresh project activity before starting work");
+			// Check the revision the job will run, such as a pull request's head.
+			const job = resolve(state);
 			let flake = true;
 			try {
-				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(state.project.commit)}`);
+				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
 			} catch (error) {
 				if (!(error instanceof GitHubError) || error.status !== 404) throw error;
 				flake = false;
 			}
-			return { state, enabled: enrolled === "enabled", flake };
+			return { job, enabled: enrolled === "enabled", flake };
 		});
 	}
 

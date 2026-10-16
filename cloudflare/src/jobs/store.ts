@@ -448,11 +448,14 @@ export type NewJob = Pick<Job, "repository" | "workflow" | "target" | "revision"
 /** Create a job, or return the active job already doing the same work. */
 export async function createJob(db: D1Database, input: NewJob, now: number) {
 	if (input.pinRunner) {
+		// Routing needs both pins to match one reported account, or the job never runs.
 		const pinned = await db
-			.prepare("SELECT 1 FROM runners WHERE id=? AND owner=?")
-			.bind(input.pinRunner, input.actor)
+			.prepare(
+				"SELECT 1 FROM runners r WHERE r.id=? AND r.owner=? AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts a WHERE a.runner=r.id AND a.id=?))",
+			)
+			.bind(input.pinRunner, input.actor, input.pinAccount ?? null, input.pinAccount ?? null)
 			.first();
-		if (!pinned) throw new JobError("Pinned runner unavailable");
+		if (!pinned) throw new JobError("Pinned runner or account unavailable");
 	} else if (input.pinAccount) throw new JobError("Pin an account together with its runner");
 	const id = crypto.randomUUID();
 	const result = await db

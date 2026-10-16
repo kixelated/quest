@@ -99,9 +99,13 @@ export class RunnerHub extends DurableObject<Env> {
 	async #dispatch(owner: string, closed?: WebSocket) {
 		await this.ctx.storage.put("owner", owner);
 		const connections = this.#connections(closed);
-		const slots = new Map(
-			[...connections].map(([runner, ws]) => [runner, (ws.deserializeAttachment() as Attachment).slots ?? 0]),
-		);
+		// A connection counts once its first status arrives; until then a runner
+		// that reconnects and hangs must not hold its jobs past the grace period.
+		const slots = new Map<string, number>();
+		for (const [runner, ws] of connections) {
+			const reported = (ws.deserializeAttachment() as Attachment).slots;
+			if (reported !== null) slots.set(runner, reported);
+		}
 		const { assign, cancel, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
 		for (const { runner, job } of assign) {
 			const ws = connections.get(runner);
