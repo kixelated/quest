@@ -311,13 +311,14 @@ export class Worktrees {
 				const number = snapshot.repositories.length;
 				const target = join(directory, String(number));
 				mkdirSync(join(target, "files"), { recursive: true });
+				// Each Git process costs ~100 ms on Windows, so every query here is batched.
 				const entries = list(root, "--stage").map((entry) => {
 					const tab = entry.indexOf("\t");
-					return { mode: entry.slice(0, 6), path: entry.slice(tab + 1) };
+					return { mode: entry.slice(0, 6), stage: entry[tab - 1], path: entry.slice(tab + 1) };
 				});
 				if (entries.some((entry) => !entry.path || entry.path.includes("\0")))
 					throw new Error("invalid tracked path");
-				if (git(root, "ls-files", "--unmerged").trim())
+				if (entries.some((entry) => entry.stage !== "0"))
 					throw new Error("resolve the unmerged index before checkpointing");
 				const committed = git(root, "ls-tree", "-r", "-z", "HEAD")
 					.split("\0")
@@ -348,19 +349,23 @@ export class Worktrees {
 					mkdirSync(dirname(join(target, "files", file)), { recursive: true });
 					cpSync(source, join(target, "files", file), { dereference: false });
 				}
-				let branch: string | null = null;
-				try {
-					branch = git(root, "symbolic-ref", "--quiet", "HEAD").trim();
-				} catch {
-					/* Detached HEAD is supported. */
-				}
-				const head = git(root, "rev-parse", "HEAD").trim();
-				const index = git(root, "rev-parse", "--path-format=absolute", "--git-path", "index").trim();
+				const [head, index, config, symbolic] = git(
+					root,
+					"rev-parse",
+					"HEAD",
+					"--path-format=absolute",
+					"--git-path",
+					"index",
+					"--git-path",
+					"config",
+					"--symbolic-full-name",
+					"HEAD",
+				)
+					.trim()
+					.split("\n");
+				const branch = symbolic === "HEAD" ? null : symbolic; // Detached HEAD is supported.
 				cpSync(index, join(target, "index"));
-				if (path) {
-					const config = git(root, "rev-parse", "--path-format=absolute", "--git-path", "config").trim();
-					cpSync(config, join(target, "config"));
-				}
+				if (path) cpSync(config, join(target, "config"));
 				// A recovery commit makes staged blobs reachable without changing HEAD/index.
 				const tree = git(root, "write-tree").trim();
 				const commit = git(
@@ -377,13 +382,11 @@ export class Worktrees {
 					`Local worktree recovery ${record.id}`,
 				).trim();
 				git(root, "update-ref", `refs/quest/worktrees/${record.id}/${number}`, commit);
+				// A full bundle has no prerequisites, so `bundle verify` would only repeat its creation.
 				git(root, "bundle", "create", join(target, "history.bundle"), "--all", "--reflog", "HEAD");
-				git(root, "bundle", "verify", join(target, "history.bundle"));
 				snapshot.repositories.push({ path, head, branch, files, missing });
-				for (const file of [
-					...list(root, "--others", "--exclude-standard"),
-					...list(root, "--others", "--ignored", "--exclude-standard"),
-				]) {
+				// Without exclude patterns, --others lists untracked and ignored files alike.
+				for (const file of list(root, "--others")) {
 					const relative = path ? `${path}/${file}` : file;
 					if (!covers(keep, relative) && !covers(scratch, relative)) snapshot.unclassified.push(relative);
 				}
@@ -497,6 +500,7 @@ export class Worktrees {
 							record.repository,
 							"worktree",
 							"add",
+							"--no-checkout",
 							"--detach",
 							"--lock",
 							"--reason",
@@ -519,11 +523,13 @@ export class Worktrees {
 							if ((error as { status?: number }).status !== 5) throw error;
 						}
 						git(root, "fetch", "--no-write-fetch-head", join(source, "history.bundle"), "+refs/*:refs/*");
-						git(root, "checkout", "--detach", saved.head);
+						// Submodule gitdirs are private copies, so their branches return as saved.
+						writeFileSync(
+							join(root, ".git", "HEAD"),
+							`${saved.branch ? `ref: ${saved.branch}` : saved.head}\n`,
+						);
 					}
-					// The main checkout stays detached so a moved, deleted, or checked-out branch never blocks
-					// restore; submodule gitdirs are private copies, so their branches return as saved.
-					if (saved.branch && i > 0) git(root, "symbolic-ref", "HEAD", saved.branch);
+					// Every tracked file and the index come from the checkpoint, so nothing is checked out.
 					for (const file of saved.missing) rmSync(join(root, file), { force: true });
 					for (const file of saved.files.filter((file) => !saved.missing.includes(file))) {
 						mkdirSync(dirname(join(root, file)), { recursive: true });
@@ -532,7 +538,9 @@ export class Worktrees {
 					}
 					cpSync(
 						join(source, "index"),
-						git(root, "rev-parse", "--path-format=absolute", "--git-path", "index").trim(),
+						i === 0
+							? git(root, "rev-parse", "--path-format=absolute", "--git-path", "index").trim()
+							: join(root, ".git", "index"),
 					);
 				}
 				if (existsSync(join(record.checkpoint, "kept")))
