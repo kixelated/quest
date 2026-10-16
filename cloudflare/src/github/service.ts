@@ -1,4 +1,6 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { createHash, createPrivateKey, sign } from "node:crypto";
+import { check, isQuest, parse, ready } from "quest/core";
+import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 
 export interface GitHubRepository {
@@ -22,8 +24,25 @@ interface Repository {
 	disabled: boolean;
 	fork: boolean;
 	parent?: { id: number };
+	private: boolean;
+	visibility: string;
+	default_branch: string;
+	license?: { spdx_id: string; name: string } | null;
 }
 export class GitHubError extends Error {}
+export type ContributionState = "enabled" | "paused";
+export type Enrollment = GitHubRepository & { state: ContributionState };
+export type ProjectPreview = {
+	repository: GitHubRepository;
+	branch: string;
+	commit: string;
+	license: Repository["license"];
+	licenseError: string | null;
+	quests: { path: string; title: string }[];
+	state: ContributionState | null;
+};
+type Tree = { truncated: boolean; tree: { path: string; type: string; mode: string; sha: string }[] };
+
 interface GitHubEnvironment {
 	DB: D1Database;
 	GITHUB_APP_ID: string;
@@ -78,7 +97,7 @@ export class GitHubService {
 			method,
 			redirect: "error",
 			headers: {
-				Authorization: `Bearer ${token}`,
+				...(token ? { Authorization: `Bearer ${token}` } : {}),
 				Accept: "application/vnd.github+json",
 				"Content-Type": "application/json",
 				"User-Agent": "Quest-GitHub-App",
@@ -98,12 +117,32 @@ export class GitHubService {
 		if (state?.blocked) throw new GitHubError("GitHub installation revoked or suspended");
 	}
 
-	async #withRepository<T>(
-		repo: GitHubRepository,
+	#repository(repo: GitHubRepository, current: Repository, allowUnavailable = false) {
+		if (
+			current.id !== repo.id ||
+			current.owner.login.toLowerCase() !== repo.owner.toLowerCase() ||
+			current.name.toLowerCase() !== repo.name.toLowerCase() ||
+			(!allowUnavailable && (current.archived || current.disabled))
+		)
+			throw new GitHubError("Repository identity or availability changed");
+	}
+
+	async #license(current: Repository): Promise<string | null> {
+		try {
+			if (await osiApproved(current.license?.spdx_id, this.#fetch)) return null;
+			return "GitHub must detect an OSI-approved license. Add or correct the repository license on GitHub, then review this project again.";
+		} catch {
+			return "License approval could not be verified. Contributions cannot be enabled while SPDX license data is unavailable.";
+		}
+	}
+
+	async #withInstallation<T>(
+		repo: Pick<GitHubRepository, "owner" | "name"> & { id?: number },
 		permissions: Permissions,
-		action: (token: string, current: Repository, installationId: number) => Promise<T>,
+		action: (token: string, installationId: number) => Promise<T>,
 	) {
-		const path = repositoryPath(repo);
+		if (!name(repo.owner) || !name(repo.name)) throw new GitHubError("Invalid repository");
+		const path = `/repos/${repo.owner}/${repo.name}`;
 		// Resolve the installation from the live repository; no browser-supplied
 		// installation IDs and no cached permission grants.
 		const installation = await this.#api<Installation>(this.#jwt(), `${path}/installation`);
@@ -124,21 +163,15 @@ export class GitHubService {
 			this.#jwt(),
 			`/app/installations/${installation.id}/access_tokens`,
 			"POST",
-			{ repository_ids: [repo.id], permissions: scope },
+			{
+				...(repo.id === undefined ? { repositories: [repo.name] } : { repository_ids: [repo.id] }),
+				permissions: scope,
+			},
 		);
 		if (!minted.token) throw new GitHubError("Installation token unavailable");
 		try {
-			const current = await this.#api<Repository>(minted.token, path);
-			if (
-				current.id !== repo.id ||
-				current.owner.login.toLowerCase() !== repo.owner.toLowerCase() ||
-				current.name.toLowerCase() !== repo.name.toLowerCase() ||
-				current.archived ||
-				current.disabled
-			)
-				throw new GitHubError("Repository identity or availability changed");
 			await this.#gate(installation.id);
-			return await action(minted.token, current, installation.id);
+			return await action(minted.token, installation.id);
 		} finally {
 			// Do not turn a completed mutation into a retryable error if cleanup
 			// fails. GitHub also expires installation tokens after one hour.
@@ -148,6 +181,21 @@ export class GitHubService {
 				console.error({ event: "github_token_revocation_failed" });
 			}
 		}
+	}
+
+	async #withRepository<T>(
+		repo: GitHubRepository,
+		permissions: Permissions,
+		action: (token: string, current: Repository, installationId: number) => Promise<T>,
+		allowUnavailable = false,
+	) {
+		const path = repositoryPath(repo);
+		return this.#withInstallation(repo, permissions, async (token, installation) => {
+			const current = await this.#api<Repository>(token, path);
+			this.#repository(repo, current, allowUnavailable);
+			await this.#gate(installation);
+			return action(token, current, installation);
+		});
 	}
 
 	async #maintainer(token: string, repo: GitHubRepository, userId: string) {
@@ -177,13 +225,213 @@ export class GitHubService {
 		repo: GitHubRepository,
 		userId: string,
 		permissions: Permissions,
-		action: (token: string, current: Repository) => Promise<T>,
+		action: (token: string, current: Repository, installationId: number) => Promise<T>,
+		allowUnavailable = false,
 	) {
-		return this.#withRepository(repo, permissions, async (token, current, installationId) => {
-			await this.#maintainer(token, repo, userId);
-			await this.#gate(installationId);
-			return action(token, current);
+		return this.#withRepository(
+			repo,
+			permissions,
+			async (token, current, installationId) => {
+				await this.#maintainer(token, repo, userId);
+				await this.#gate(installationId);
+				return action(token, current, installationId);
+			},
+			allowUnavailable,
+		);
+	}
+
+	/** The operator's registered App, rather than an assumed App name. */
+	async installationURL() {
+		const app = await this.#api<{ id: number; slug: string }>(this.#jwt(), "/app");
+		if (String(app.id) !== this.#env.GITHUB_APP_ID || !/^[a-zA-Z0-9-]+$/.test(app.slug))
+			throw new GitHubError("GitHub App unavailable");
+		return `https://github.com/apps/${app.slug}/installations/new`;
+	}
+
+	/** Resolve public metadata through a repository-scoped App token. */
+	async resolveRepository(owner: string, repository: string): Promise<GitHubRepository> {
+		if (!name(owner) || !name(repository)) throw new GitHubError("Use an owner/repository name");
+		return this.#withInstallation({ owner, name: repository }, {}, async (token) => {
+			const found = await this.#api<Repository>(token, `/repos/${owner}/${repository}`);
+			this.#public(found);
+			const repo = { id: found.id, owner: found.owner.login, name: found.name };
+			repositoryPath(repo);
+			return repo;
 		});
+	}
+
+	#public(current: Repository) {
+		if (current.private !== false || current.visibility !== "public")
+			throw new GitHubError("Select a public repository");
+	}
+
+	async #state(repo: GitHubRepository, installation: number) {
+		const row = await this.#env.DB.prepare(
+			"SELECT state FROM github_projects WHERE id=? AND owner=? COLLATE NOCASE AND name=? COLLATE NOCASE AND installation=?",
+		)
+			.bind(repo.id, repo.owner, repo.name, installation)
+			.first<{ state: ContributionState }>();
+		return row?.state ?? null;
+	}
+
+	async projects(userId: string): Promise<Enrollment[]> {
+		// Remembered selections are navigation only, never an authority grant.
+		return (
+			await this.#env.DB.prepare(
+				"SELECT id,owner,name,state FROM github_projects WHERE enrolledBy=? ORDER BY owner,name",
+			)
+				.bind(userId)
+				.all<Enrollment>()
+		).results;
+	}
+
+	/** Let any current maintainer reach stop controls without a valid preview. */
+	async enrolledProject(owner: string, repository: string, userId: string): Promise<Enrollment | null> {
+		return this.#withInstallation({ owner, name: repository }, {}, async (token, installation) => {
+			const current = await this.#api<Repository>(token, `/repos/${owner}/${repository}`);
+			const repo = { id: current.id, owner: current.owner.login, name: current.name };
+			repositoryPath(repo);
+			const enrolled = await this.#env.DB.prepare("SELECT state FROM github_projects WHERE id=?")
+				.bind(repo.id)
+				.first<{ state: ContributionState }>();
+			if (!enrolled) return null;
+			await this.#maintainer(token, repo, userId);
+			await this.#gate(installation);
+			// Names are navigation metadata, not identity. A rename must not hide
+			// an existing enrollment from a current maintainer's stop controls.
+			await this.#env.DB.prepare("UPDATE github_projects SET owner=?,name=? WHERE id=?")
+				.bind(repo.owner, repo.name, repo.id)
+				.run();
+			return { ...repo, state: enrolled.state };
+		});
+	}
+
+	async #preview(
+		token: string,
+		repo: GitHubRepository,
+		current: Repository,
+		installation: number,
+	): Promise<ProjectPreview> {
+		this.#public(current);
+		if (!current.default_branch) throw new GitHubError("Repository default branch unavailable");
+		const path = repositoryPath(repo);
+		const commit = await this.#api<{ sha: string; commit: { tree: { sha: string } } }>(
+			token,
+			`${path}/commits/${encodeURIComponent(current.default_branch)}`,
+		);
+		sha(commit.sha);
+		const root = await this.#api<Tree>(token, `${path}/git/trees/${sha(commit.commit.tree.sha)}?recursive=1`);
+		if (root.truncated) throw new GitHubError("Repository tree is incomplete");
+		const quest = root.tree.find((entry) => entry.path === "quest" && entry.type === "tree");
+		if (!quest) throw new GitHubError("Quest files are required. Follow the existing Quest setup guide first.");
+		const entries = root.tree.filter(
+			(entry) => entry.path.startsWith("quest/") && isQuest(entry.path) && entry.type === "blob",
+		);
+		if (!entries.length)
+			throw new GitHubError("Quest files are required. Follow the existing Quest setup guide first.");
+		// Read the pinned blobs together: a REST request per file can exhaust a
+		// Worker's subrequest budget during enrollment even for a small quest tree.
+		const fields = entries.map((entry, i) => {
+			if (!["100644", "100755"].includes(entry.mode)) throw new GitHubError("Quest files must be regular files");
+			return `q${i}: object(oid: "${sha(entry.sha)}") { ... on Blob { oid text isBinary isTruncated } }`;
+		});
+		const result = await this.#api<{
+			data?: {
+				repository: Record<
+					string,
+					{ oid: string; text: string | null; isBinary: boolean | null; isTruncated: boolean } | null
+				> | null;
+			};
+			errors?: unknown[];
+		}>(token, "/graphql", "POST", {
+			query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields.join("\n")} } }`,
+			variables: { owner: repo.owner, name: repo.name },
+		});
+		if (result.errors?.length || !result.data?.repository) throw new GitHubError("Quest content unavailable");
+		const blobs = result.data.repository;
+		const documents = entries.map((entry, i) => {
+			const blob = blobs[`q${i}`];
+			if (
+				!blob ||
+				blob.oid !== entry.sha ||
+				blob.isBinary !== false ||
+				blob.isTruncated !== false ||
+				typeof blob.text !== "string"
+			)
+				throw new GitHubError("Quest content unavailable");
+			// GraphQL supplies decoded text. Verify the Git object hash so a lossy
+			// UTF-8 conversion cannot silently change the snapshot being validated.
+			const content = Buffer.from(blob.text, "utf8");
+			const oid = createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
+			if (oid !== entry.sha) throw new GitHubError("Quest content unavailable");
+			return parse(entry.path, blob.text);
+		});
+		const paths = new Set(root.tree.map((entry) => entry.path));
+		if (check(documents, (path) => paths.has(path)).length)
+			throw new GitHubError("Fix the quest tree with quest check before enabling contributions");
+		const available = new Set(ready(documents));
+		return {
+			repository: repo,
+			branch: current.default_branch,
+			commit: commit.sha,
+			license: current.license,
+			licenseError: await this.#license(current),
+			quests: documents
+				.filter((doc) => available.has(doc.path))
+				.map((doc) => ({ path: doc.path, title: doc.title?.text ?? doc.path })),
+			state: await this.#state(repo, installation),
+		};
+	}
+
+	previewProject(repo: GitHubRepository, userId: string) {
+		return this.#authorized(repo, userId, { contents: "read" }, (token, current, installation) =>
+			this.#preview(token, repo, current, installation),
+		);
+	}
+
+	setContributions(repo: GitHubRepository, userId: string, state: ContributionState | "disconnected") {
+		if (!["enabled", "paused", "disconnected"].includes(state)) throw new GitHubError("Invalid contribution state");
+		return this.#authorized(
+			repo,
+			userId,
+			state === "enabled" ? { contents: "read" } : {},
+			async (token, current, installation) => {
+				if (state === "enabled") {
+					const preview = await this.#preview(token, repo, current, installation);
+					if (preview.licenseError) throw new GitHubError(preview.licenseError);
+					// The repository or license can change during content reads. Check
+					// current eligibility again, rather than persisting the preview's grant.
+					const latest = await this.#api<Repository>(token, repositoryPath(repo));
+					this.#repository(repo, latest);
+					this.#public(latest);
+					if (
+						latest.default_branch !== current.default_branch ||
+						latest.license?.spdx_id !== current.license?.spdx_id
+					)
+						throw new GitHubError("Repository eligibility changed; review this project again");
+					const licenseError = await this.#license(latest);
+					if (licenseError) throw new GitHubError(licenseError);
+					await this.#maintainer(token, repo, userId);
+				}
+				// Recheck the local revocation gate after potentially long content reads.
+				await this.#gate(installation);
+				if (state === "disconnected") {
+					await this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id).run();
+				} else if (state === "paused") {
+					await this.#env.DB.prepare("UPDATE github_projects SET state='paused',updatedAt=? WHERE id=?")
+						.bind(Date.now(), repo.id)
+						.run();
+				} else {
+					await this.#env.DB.prepare(
+						`INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,?,?,?,'enabled',?,?)
+					ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,name=excluded.name,installation=excluded.installation,state=excluded.state,updatedAt=excluded.updatedAt`,
+					)
+						.bind(repo.id, repo.owner, repo.name, installation, userId, Date.now())
+						.run();
+				}
+			},
+			state !== "enabled",
+		);
 	}
 
 	// Reads also require authority: installations may contain private repositories.

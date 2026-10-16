@@ -54,6 +54,7 @@ export function Layout(props: Page & { children: Child }) {
 							Quest
 						</a>
 						<a href="/repos/quest">Quests</a>
+						<a href="/projects">Projects</a>
 						<a href="/docs">Docs</a>
 						<a href={repo}>GitHub</a>
 						<span class="account">
