@@ -55,11 +55,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("gate")
-		.summary("Admit an expensive command to a shared host slot (Linux/systemd)")
+		.summary("Run an expensive command once the host has room for it")
 		.description(
-			"Run a command in a user systemd scope; nested calls share their existing slot.\n\n" +
-				'Reads ~/.config/quest/gate.json: {"jobs": 2}; defaults to the CPU count. ' +
-				"Unsupported platforms fail explicitly.",
+			"Wait while the 1-minute load average exceeds the limit, admitting one waiting command every " +
+				"5 seconds. On Linux with a systemd user manager, the command also takes one of a fixed number " +
+				"of slots in a user scope until its last descendant exits. Nested calls run immediately.\n\n" +
+				'Reads ~/.config/quest/gate.json, for example {"jobs": 2, "load": 8}; both default to the CPU count.',
 		)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")

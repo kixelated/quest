@@ -1,9 +1,10 @@
 // Opt in explicitly: these tests require a real Linux systemd user manager.
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { closeSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 import { SystemdGate } from "../src/cli/gate";
 import { tempDir } from "./fixture";
 
@@ -13,9 +14,18 @@ const runner = join(root, "test/fixtures/gate-run.ts");
 const enabled = process.env.QUEST_GATE_SYSTEMD_TESTS === "1";
 const signal = () => new AbortController().signal;
 
+// Load admission is unit-tested; a private home keeps it from holding these
+// slot tests on a busy host, and keeps their admission claims separate.
+const home = mkdtempSync(join(tmpdir(), "quest-gate-home-"));
+mkdirSync(join(home, ".config", "quest"), { recursive: true });
+writeFileSync(join(home, ".config", "quest", "gate.json"), JSON.stringify({ load: 1e9 }));
+const env = { ...process.env, HOME: home };
+afterAll(() => rmSync(home, { recursive: true, force: true }));
+
 function child(file: string, args: string[], cwd = root) {
 	const process = spawn("bun", [`--config=${join(root, "bunfig.toml")}`, file, ...args], {
 		cwd,
+		env,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	let stdout = "";
@@ -87,6 +97,7 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 			.join(" ");
 		const terminal = spawn("script", ["--quiet", "--return", "--command", command, "/dev/null"], {
 			cwd: root,
+			env,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";
@@ -102,6 +113,7 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 		writeSync(descriptor, "prefix\n");
 		const command = spawn("bun", [cli, "gate", "bun", "-e", "console.error('stderr')"], {
 			cwd: root,
+			env,
 			stdio: ["ignore", "ignore", descriptor],
 		});
 		closeSync(descriptor);

@@ -198,36 +198,43 @@ There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting.
 
-## Gate expensive commands (Linux preview)
+## Gate expensive commands
 
-`quest gate <command> [args...]` admits expensive phases to shared host slots:
+`quest gate <command> [args...]` holds an expensive command until the host has
+room for it, across all of a user's repositories and worktrees:
 
 ```sh
 quest gate bun run test
 quest gate cargo build --release
 ```
 
-The preview requires Linux, unified cgroup v2 with writable `cgroup.kill`, and
-`systemd-run` / `systemctl` (systemd 254+) connected to a systemd user manager. Other platforms
-fail explicitly. Ordinary Quest commands remain available on every supported
-platform. Repository entrypoints do not invoke this preview automatically yet.
+Every platform waits while the 1-minute load average exceeds the limit, which
+counts work from every session and user. The load average lags new work, so the
+gate admits at most one waiting command every 5 seconds rather than releasing
+every waiter at once. Windows reports no load average, so admission there is
+immediate.
 
-All repositories and worktrees belonging to a user share the same slots. The
-limit defaults to the available CPU count; set `jobs` in
-`~/.config/quest/gate.json` to change it, for example `{"jobs": 2}`. Each
-admission reads the file when it starts waiting; after lowering the limit,
-commands already running in higher slots finish undisturbed. A nested invocation
-shares its existing kernel scope. Internal compiler or test worker parallelism
-remains the command's responsibility.
+On Linux with unified cgroup v2, writable `cgroup.kill`, and a systemd 254+ user
+manager, each command also takes one of a fixed number of slots in a user scope.
+The slot stays taken until the command's last descendant exits, even if the
+gate crashes, and cancellation kills that exact cgroup. Without a user manager,
+Linux uses load admission alone, like macOS and Windows.
+
+Both limits default to the CPU count; change them in
+`~/.config/quest/gate.json`, for example `{"jobs": 2, "load": 8}`. Each
+admission reads the file when it starts waiting; after lowering `jobs`,
+commands already running in higher slots finish undisturbed. A nested
+invocation runs immediately inside the admitted command. Internal compiler or
+test worker parallelism remains the command's responsibility.
+
+This repository's `just check`, `just test`, `just worker-check`, and
+`just worker-test` run through the gate.
 
 Arguments, working directory, environment and terminal streams pass through to
-the executable. Waiting happens before it starts. Cancellation kills its exact
-cgroup; if the gate crashes, surviving descendants retain their slot until they
-finish. Commands that deliberately move themselves into other cgroups are
-outside this cooperative admission boundary. The gate watches the kernel cgroup lifecycle for waiting, with no PID recovery guesses, polling or extra daemon.
-There is no fairness guarantee: a queued command may wait on the first occupied
-slot while another becomes available. This preview makes no measured claim of
-improved whole-machine responsiveness.
+the executable, and waiting happens before it starts. Commands that move
+themselves into other cgroups are outside the slot boundary. There is no
+fairness guarantee: a queued command may wait on the first occupied slot while
+another becomes available.
 
 ## Work with your agents
 
