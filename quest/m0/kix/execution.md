@@ -11,12 +11,15 @@ requested iteration, in the same decision UI.
 
 - Use the same runners, prompt contract, and publisher as planning instead
   of a separate agent orchestration stack.
-- Apply quest-spawn selection/readiness behavior and the existing
+- Apply quest-spawn selection/readiness behavior, including the
+  [within-milestone impact ranking](/quest/m0/unblocked.md), and the existing
   quest-start/quest-iterate workflows. A project opt-in authorizes eligible
   ready default-branch quests; explicit UI selection can prioritize work.
   Draft or blocked plans and already active/open work are not started again.
-- Each job owns an isolated worktree inside the project's Nix devShell and
-  runs applicable checks. The product does not replace a project's GitHub CI.
+- Each job owns a recoverable checkout inside the project's Nix devShell and
+  runs applicable checks. Checkpoint and release at blocking handoffs and job
+  completion, restoring on resume with unresolved work and check results.
+  The product does not replace a project's GitHub CI.
 - Questions and significant findings pause into the UI with context,
   recommendations, and choices. Explicitly selected revisions resume the
   relevant session/PR with fresh authorization.
