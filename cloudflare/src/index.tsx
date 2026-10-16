@@ -10,7 +10,7 @@ import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
-import { ProjectsPage, ProjectSetupPage, ProjectStopControls, projectURL } from "./projects";
+import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
 import { Layout, type Page, type User } from "./layout";
 
@@ -178,6 +178,70 @@ app.post("/projects/github/:owner/:repository", async (c) => {
 			403,
 		);
 	}
+});
+
+// Live enrolled-project observations use the same board model as the bundled
+// repository, but every read rechecks current GitHub maintainer authority.
+async function liveProject(c: Context<{ Bindings: Env }>, refresh = false) {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) throw new GitHubError("Sign in required");
+	const github = new GitHubService(c.env);
+	const repo = await github.enrolledProject(c.req.param("owner")!, c.req.param("repository")!, session.user.id);
+	if (!repo) throw new GitHubError("Project is not enrolled");
+	return github.projectState(repo, session.user.id, refresh);
+}
+app.get("/projects/github/:owner/:repository/state", async (c) => {
+	const state = await liveProject(c);
+	return page(
+		c,
+		{ title: "Project activity", description: "Observed GitHub project state." },
+		<ProjectStatePage owner={c.req.param("owner")} repository={c.req.param("repository")} state={state} />,
+	);
+});
+app.get("/projects/github/:owner/:repository/data", async (c) => {
+	c.header("Cache-Control", "no-store");
+	return c.json(await liveProject(c));
+});
+app.post("/projects/github/:owner/:repository/refresh", async (c) => {
+	await liveProject(c, true);
+	return c.redirect(`${projectURL(c.req.param("owner"), c.req.param("repository"))}/state`, 303);
+});
+app.get("/projects/github/:owner/:repository/board", async (c) => {
+	const state = await liveProject(c);
+	if (!state) return c.redirect(`${projectURL(c.req.param("owner"), c.req.param("repository"))}/state`, 303);
+	return page(
+		c,
+		{ title: `${state.project.title} quest log`, description: "Pinned repository quest tree." },
+		<BoardPage
+			board={readBoard(state.project)}
+			show={SHOWN.find(([kind]) => kind === c.req.query("show"))?.[0] ?? null}
+		/>,
+	);
+});
+app.get("/projects/github/:owner/:repository/board/quest/*", async (c) => {
+	const state = await liveProject(c);
+	if (!state) return c.notFound();
+	let segments: string[];
+	try {
+		segments = new URL(c.req.url).pathname.split("/").slice(6).map(decodeURIComponent);
+	} catch {
+		return c.notFound();
+	}
+	if (segments.some((segment) => segment.includes("/"))) return c.notFound();
+	const board = readBoard(state.project);
+	const doc = findQuest(board, segments.join("/"));
+	if (!doc) return c.notFound();
+	if (doc.path === "quest/README.md") return c.redirect(state.project.href!);
+	const content = state.project.documents.find((d) => d.path === doc.path)!.content;
+	return page(
+		c,
+		{
+			title: doc.title?.text ?? doc.path,
+			description: "A pinned repository quest.",
+			crumbs: questCrumbs(board, doc),
+		},
+		(user) => <QuestPage board={board} doc={doc} content={content} user={user} path={here(c)} />,
+	);
 });
 
 // The quest board: a project's milestones, then each quest's page at its path
@@ -362,6 +426,7 @@ app.post("/passkeys/delete", async (c) => {
 	return redirect(response, "/account");
 });
 app.onError((error, c) => {
+	if (error instanceof GitHubError) return c.json({ error: error.message }, 403);
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });

@@ -1,3 +1,4 @@
+import type { ProjectState, Pull } from "./github/state";
 import type { Enrollment, ProjectPreview } from "./github/service";
 import { Difficulty, Marker } from "./layout";
 import { title } from "./board/model";
@@ -175,6 +176,11 @@ export function ProjectSetupPage(props: { preview: ProjectPreview; enrollment: E
 			</section>
 			<section>
 				<h2>Ready quests</h2>
+				{props.enrollment && (
+					<p>
+						<a href={`${action}/state`}>View project activity and quest board</a>
+					</p>
+				)}
 				<p class="muted">
 					From <a href={`${href}/tree/${preview.commit}`}>{preview.branch}</a> at {preview.commit.slice(0, 7)}
 					. This preview does not start work.
@@ -203,6 +209,93 @@ export function ProjectSetupPage(props: { preview: ProjectPreview; enrollment: E
 					<p>No ready quests on the default branch yet. Update and merge your plans on GitHub.</p>
 				)}
 			</section>
+		</section>
+	);
+}
+
+export function ProjectStatePage(props: { owner: string; repository: string; state: ProjectState | null }) {
+	const base = projectURL(props.owner, props.repository);
+	const state = props.state;
+	return (
+		<section class="wrap docs projects">
+			<p>
+				<a href={base}>Project setup</a>
+			</p>
+			<h1>
+				{props.owner}/{props.repository} activity
+			</h1>
+			<form method="post" action={`${base}/refresh`}>
+				<button class="button primary">
+					{state && !state.complete ? "Continue reconciliation" : "Refresh from GitHub"}
+				</button>
+			</form>
+			<p class="muted">
+				GitHub issues and pull requests are source material. Refreshing observes activity and does not start
+				work or approve a merge.
+			</p>
+			{state ? (
+				<>
+					<p>
+						Snapshot{" "}
+						<a href={`${state.project.web}/commit/${state.project.commit}`}>
+							{state.project.commit.slice(0, 7)}
+						</a>
+						.{" "}
+						{state.complete
+							? "Reconciliation complete."
+							: "Reconciliation incomplete. Continue to include every page."}
+					</p>
+					<p>
+						<a href={`${base}/board`}>Quest board</a>
+						{" · "}
+						<a href={`${base}/data`}>Observed data</a>
+					</p>
+					<h2>Claimed quests</h2>
+					{state.claims.length ? (
+						<ul>
+							{state.claims.map((path) => (
+								<li>{path}</li>
+							))}
+						</ul>
+					) : (
+						<p>No observed branch claims.</p>
+					)}
+					<h2>Issues and pull requests</h2>
+					{state.activity.length ? (
+						<ul class="log">
+							{state.activity.map((item) => (
+								<li class="entry">
+									<a
+										class="entry-title"
+										href={`${state.project.web}/${item.kind === "pull" ? "pull" : "issues"}/${item.number}`}
+									>
+										{item.kind === "pull" ? "PR" : "Issue"} #{item.number}:{" "}
+										{item.data?.title ?? "Awaiting reconciliation"}
+									</a>
+									<span class="entry-meta">
+										{item.missing
+											? "Unavailable on GitHub"
+											: (item.data?.state ?? "New notification")}
+										{item.kind === "pull" && item.data && (
+											<>
+												{" · Checks: "}
+												{(item.data as Pull).commits.nodes.at(-1)?.commit.statusCheckRollup
+													?.state ?? "No checks"}
+												{" · Review: "}
+												{(item.data as Pull).reviewDecision ?? "No review decision"}
+											</>
+										)}
+									</span>
+								</li>
+							))}
+						</ul>
+					) : (
+						<p>No activity observed yet.</p>
+					)}
+				</>
+			) : (
+				<p>Refresh to read this enrolled project's quest tree and activity.</p>
+			)}
 		</section>
 	);
 }

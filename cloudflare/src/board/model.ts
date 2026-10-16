@@ -10,7 +10,11 @@ import type { Change, Completed, Project } from "./project";
  * A quest's most advanced state, per design/theme.md: Ready to turn in, then
  * Available or Requires.
  */
-export type Status = { kind: "turn-in"; change: Change } | { kind: "available" } | { kind: "blocked"; requires: Ref[] };
+export type Status =
+	| { kind: "turn-in"; change: Change }
+	| { kind: "available" }
+	| { kind: "accepted" }
+	| { kind: "blocked"; requires: Ref[] };
 
 /** A link to another quest, or a blocker's own words when it names none. */
 export type Ref = { title: string; href: string | null };
@@ -64,10 +68,14 @@ export function title(text: string): { size: Size | null; name: string } {
  * A quest's page: its path without `.md`, like its branch name. A README is
  * its directory's page.
  */
+export function boardHref(project: Project): string {
+	return project.href ?? `/repos/${project.name}`;
+}
+
 export function questHref(project: Project, path: string): string {
-	if (path === ROOT) return `/repos/${project.name}`;
+	if (path === ROOT) return boardHref(project);
 	const page = path.replace(/\/README\.md$/, "").replace(/\.md$/, "");
-	return `/repos/${project.name}/${encodePath(page)}`;
+	return `${boardHref(project)}/${encodePath(page)}`;
 }
 
 /**
@@ -124,6 +132,7 @@ export function readBoard(project: Project): Board {
 	const status = (doc: Doc): Status => {
 		const change = changes.get(doc.path);
 		if (change) return { kind: "turn-in", change };
+		if (project.claims?.includes(doc.path)) return { kind: "accepted" };
 		if (open.has(doc.path)) return { kind: "available" };
 		const requires = blockers(parsed, doc).map((blocker) =>
 			blocker.path === null
@@ -214,7 +223,7 @@ export function readBoard(project: Project): Board {
 	}
 
 	const all = milestones.flatMap((milestone) => flatten(milestone.items));
-	const counts = { "turn-in": 0, available: 0, blocked: 0 };
+	const counts = { "turn-in": 0, available: 0, blocked: 0, accepted: 0 };
 	for (const q of all) counts[q.status.kind]++;
 
 	const milestoneOf = (path: string) => milestones.find((c) => c.number !== "" && path.startsWith(`${dir(c.path)}/`));

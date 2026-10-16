@@ -78,6 +78,8 @@ export function chart(board: Board): Region[] {
 /** A waypoint's status in the format's own terms. */
 function text(status: Status): string {
 	switch (status.kind) {
+		case "accepted":
+			return "claimed";
 		case "available":
 			return "ready";
 		case "blocked":

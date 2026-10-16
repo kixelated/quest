@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
+import { readBoard } from "../src/board/model";
+import type { ActivityPage } from "../src/github/state";
 import { GitHubService } from "../src/github/service";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
@@ -30,6 +32,9 @@ const documents = [
 function github(
 	options: {
 		role?: string;
+		activity?: ActivityPage;
+		onActivity?: () => Promise<void>;
+		activityErrors?: boolean;
 		repositoryName?: string;
 		repositoryOwner?: string;
 		installation?: number;
@@ -107,7 +112,14 @@ function github(
 							id: options.installation ?? 5,
 							app_id: 123,
 							suspended_at: options.suspended ? "2026-10-15" : null,
-							permissions: { metadata: "read", contents: "read" },
+							permissions: {
+								metadata: "read",
+								contents: "read",
+								issues: "read",
+								pull_requests: "read",
+								checks: "read",
+								statuses: "read",
+							},
 						},
 				{ status: options.missing ? 404 : 200 },
 			);
@@ -166,6 +178,15 @@ function github(
 			return Response.json({ encoding: "base64", content: Buffer.from(doc.content).toString("base64") });
 		}
 		if (path === "/graphql") {
+			const query = JSON.parse(String(init?.body)).query as string;
+			if (!query.includes("object(oid:")) {
+				await options.onActivity?.();
+				return Response.json({
+					data: { repository: options.activity ?? activity() },
+					errors: options.activityErrors ? [{ message: "partial" }] : undefined,
+				});
+			}
+
 			const body = calls.at(-1)!.body;
 			expect(body.variables).toEqual({ owner: repositoryOwner, name: repositoryName });
 			const blobs = Object.fromEntries(
@@ -647,5 +668,252 @@ describe("project setup routes", () => {
 			expect(stopped.status).toBe(303);
 		}
 		expect(await state()).toBeNull();
+	});
+});
+
+function connection<T>(nodes: T[], more = false, cursor: string | null = null) {
+	return { nodes, pageInfo: { hasNextPage: more, endCursor: cursor } };
+}
+function issue(id = 100, number = 1) {
+	return {
+		databaseId: String(id),
+		number,
+		title: "Untrusted <script>title</script>",
+		state: "OPEN",
+		updatedAt: "2026-10-15T12:00:00Z",
+		author: { login: "human" },
+		comments: { totalCount: 0 },
+	};
+}
+function pull(branch = "quest/first", id = 200) {
+	return {
+		...issue(id, 2),
+		headRefName: branch,
+		headRefOid: commit,
+		isDraft: false,
+		reviewDecision: "CHANGES_REQUESTED",
+		reviews: { totalCount: 1 },
+		latestReviews: {
+			nodes: [{ state: "CHANGES_REQUESTED", author: { login: "reviewer" }, commit: { oid: commit } }],
+			pageInfo: { hasNextPage: false },
+		},
+		commits: { nodes: [{ commit: { oid: commit, statusCheckRollup: { state: "FAILURE" } } }] },
+	};
+}
+function activity(): ActivityPage {
+	return {
+		issues: connection([issue()]),
+		pullRequests: connection([pull(), pull("human-branch", 201)]),
+		refs: connection([{ name: "second", prefix: "refs/heads/quest/" }]),
+	};
+}
+
+describe("enrolled project observations", () => {
+	async function enrolled() {
+		await github().service.setContributions(repo, "enrollment-test", "enabled");
+	}
+	it("pins the shared board snapshot, includes human PRs, and excludes PR/branch claims from candidates", async () => {
+		await enrolled();
+		const { service, calls } = github({ subrequestLimit: 50 });
+		const state = await service.projectState(repo, "enrollment-test", true);
+		expect(state).toMatchObject({
+			complete: true,
+			available: [],
+			claims: ["quest/second.md"],
+			project: { commit, changes: [{ quest: "quest/first.md" }], issues: [{ title: issue().title }] },
+		});
+		expect(state!.activity).toHaveLength(3);
+		expect(state!.activity.filter((item) => item.kind === "pull")).toHaveLength(2);
+		expect(
+			(state!.activity.find((item) => item.id === "200")!.data as ReturnType<typeof pull>).commits.nodes[0]!
+				.commit,
+		).toMatchObject({ oid: commit, statusCheckRollup: { state: "FAILURE" } });
+		expect(readBoard(state!.project).quests.get("quest/first.md")!.status.kind).toBe("turn-in");
+		expect(readBoard(state!.project).quests.get("quest/second.md")!.status.kind).toBe("accepted");
+		expect(calls.at(-1)?.method).toBe("DELETE");
+		expect(calls.filter((call) => call.path.endsWith("/access_tokens"))[0]!.body.permissions).toEqual({
+			metadata: "read",
+			contents: "read",
+			issues: "read",
+			pull_requests: "read",
+			checks: "read",
+			statuses: "read",
+		});
+	});
+	it("coalesces reconciliation and later pushes/comments into the existing notification", async () => {
+		await enrolled();
+		const first = await github().service.projectState(repo, "enrollment-test", true);
+		const page = activity();
+		page.pullRequests!.nodes[0]!.headRefOid = "d".repeat(40);
+		page.pullRequests!.nodes[0]!.commits.nodes[0]!.commit.oid = "d".repeat(40);
+		page.issues!.nodes[0]!.comments.totalCount = 2;
+		const next = await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
+		expect(next!.activity).toHaveLength(3);
+		expect(next!.activity.map((item) => item.firstSeen)).toEqual(first!.activity.map((item) => item.firstSeen));
+		expect(next!.activity.find((item) => item.id === "100")!.data!.comments.totalCount).toBe(2);
+		expect((next!.activity.find((item) => item.id === "200")!.data as ReturnType<typeof pull>).headRefOid).toBe(
+			"d".repeat(40),
+		);
+	});
+	it("resumes independent cursors and reconciles closed entities and removed claims in later scans", async () => {
+		await enrolled();
+		const page = activity();
+		page.issues = connection([issue()], true, "issue-cursor");
+		const first = await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
+		expect(first!.complete).toBe(false);
+		expect(first!.available).toEqual([]);
+		const second = github({ activity: { issues: connection([issue(101, 3)]) } });
+		const result = await second.service.projectState(repo, "enrollment-test", true);
+		expect(result!.complete).toBe(true);
+		expect(result!.activity).toHaveLength(4);
+		const query = second.calls.filter((c) => c.path === "/graphql").at(-1)!;
+		expect(query.body.variables.issues).toBe("issue-cursor");
+		expect(query.body.query).not.toContain("pullRequests(");
+		const closed = activity();
+		closed.issues!.nodes[0]!.state = "CLOSED";
+		closed.pullRequests!.nodes.forEach((p) => (p.state = "CLOSED"));
+		closed.refs = connection([]);
+		const last = await github({ activity: closed }).service.projectState(repo, "enrollment-test", true);
+		expect(last!.project.changes).toEqual([]);
+		expect(last!.claims).toEqual([]);
+		expect(last!.available).toEqual(["quest/first.md"]);
+	});
+	it("never publishes partial GraphQL results or check state from a different PR head", async () => {
+		await enrolled();
+		await expect(
+			github({ activityErrors: true }).service.projectState(repo, "enrollment-test", true),
+		).rejects.toThrow("activity unavailable");
+		expect(await github().service.projectState(repo, "enrollment-test")).toBeNull();
+		const page = activity();
+		page.pullRequests!.nodes[0]!.commits.nodes[0]!.commit.oid = "d".repeat(40);
+		await expect(github({ activity: page }).service.projectState(repo, "enrollment-test", true)).rejects.toThrow(
+			"head changed",
+		);
+	});
+	it("rejects stale concurrent refresh publication and a disconnected enrollment", async () => {
+		await enrolled();
+		await expect(
+			github({
+				onActivity: async () => {
+					await env.DB.prepare(
+						"UPDATE github_project_state SET revision=revision+1 WHERE repository=10",
+					).run();
+				},
+			}).service.projectState(repo, "enrollment-test", true),
+		).rejects.toThrow("changed during refresh");
+		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toHaveLength(0);
+		await expect(
+			github({
+				onActivity: async () => {
+					await env.DB.prepare("DELETE FROM github_projects WHERE id=10").run();
+				},
+			}).service.projectState(repo, "enrollment-test", true),
+		).rejects.toThrow("enrollment changed");
+	});
+	it("cannot publish into a replacement cache even when its numeric revision repeats", async () => {
+		await enrolled();
+		await expect(
+			github({
+				onActivity: async () => {
+					await env.DB.batch([
+						env.DB.prepare("DELETE FROM github_project_state WHERE repository=10"),
+						env.DB.prepare("INSERT INTO github_project_state(repository,epoch) VALUES(10,'replacement')"),
+					]);
+				},
+			}).service.projectState(repo, "enrollment-test", true),
+		).rejects.toThrow("changed during refresh");
+		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toEqual([]);
+	});
+	it("clears observations when a replacement installation is explicitly enrolled", async () => {
+		await enrolled();
+		await github().service.projectState(repo, "enrollment-test", true);
+		await github({ installation: 8 }).service.setContributions(repo, "enrollment-test", "enabled");
+		expect(await github({ installation: 8 }).service.projectState(repo, "enrollment-test")).toBeNull();
+		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toEqual([]);
+	});
+
+	it.each([{ private: true }, { archived: true }, { id: 999 }, { role: "write" }, { installation: 8 }])(
+		"rechecks authority and eligibility before cached reads: %j",
+		async (options) => {
+			await enrolled();
+			await github().service.projectState(repo, "enrollment-test", true);
+			await expect(github(options).service.projectState(repo, "enrollment-test")).rejects.toThrow();
+		},
+	);
+	it("retains notification identity when an entity disappears from authoritative reconciliation", async () => {
+		await enrolled();
+		await github().service.projectState(repo, "enrollment-test", true);
+		const next = await github({
+			activity: { issues: connection([]), pullRequests: connection([]), refs: connection([]) },
+		}).service.projectState(repo, "enrollment-test", true);
+		expect(next!.activity).toHaveLength(3);
+		expect(next!.activity.every((item) => item.missing === 1)).toBe(true);
+		expect(next!.project.changes).toEqual([]);
+		expect(next!.project.issues).toEqual([]);
+	});
+
+	it("retains observations while paused, clears candidates, and cascades caches on disconnect", async () => {
+		await enrolled();
+		await github().service.projectState(repo, "enrollment-test", true);
+		await github().service.setContributions(repo, "enrollment-test", "paused");
+		expect((await github().service.projectState(repo, "enrollment-test"))!.available).toEqual([]);
+		await github().service.setContributions(repo, "enrollment-test", "disconnected");
+		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toEqual([]);
+		expect(await env.DB.prepare("SELECT * FROM github_project_state").first()).toBeNull();
+	});
+});
+
+describe("project activity routes", () => {
+	const base = `${origin}/projects/github/upstream/project`;
+	async function session() {
+		const who = identity("github");
+		const login = await oauth(who);
+		const mock = github({ account: Number(who.id) });
+		vi.spyOn(globalThis, "fetch").mockImplementation(mock.request as typeof fetch);
+		const account = await env.DB.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
+			.bind(who.id)
+			.first<{ userId: string }>();
+		await mock.service.setContributions(repo, account!.userId, "enabled");
+		return login.session!;
+	}
+	it("guards cached data and refresh forms with authentication and origin", async () => {
+		expect((await app.request(`${base}/data`, undefined, testEnv)).status).toBe(403);
+		expect(
+			(
+				await app.request(
+					`${base}/refresh`,
+					{ method: "POST", headers: { Origin: "https://evil.example" } },
+					testEnv,
+				)
+			).status,
+		).toBe(403);
+	});
+	it("renders escaped durable activity, links live board pages, and exposes current-head data", async () => {
+		const cookie = await session();
+		const posted = await app.request(
+			`${base}/refresh`,
+			{ method: "POST", headers: { Cookie: cookie, Origin: origin } },
+			testEnv,
+		);
+		expect(posted.status).toBe(303);
+		const response = await app.request(`${base}/state`, { headers: { Cookie: cookie } }, testEnv);
+		expect(response.status).toBe(200);
+		const html = await response.text();
+		expect(html).toContain("&lt;script&gt;title&lt;/script&gt;");
+		expect(html).toContain("CHANGES_REQUESTED");
+		expect(html).toContain("/board");
+		const data = await app.request(`${base}/data`, { headers: { Cookie: cookie } }, testEnv);
+		expect(data.headers.get("cache-control")).toBe("no-store");
+		expect(await data.json()).toMatchObject({ complete: true, project: { commit } });
+	});
+	it("uses the shared board and resolves nested quest routes within the authenticated project", async () => {
+		const cookie = await session();
+		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
+		const board = await app.request(`${base}/board`, { headers: { Cookie: cookie } }, testEnv);
+		expect(board.status).toBe(200);
+		expect(await board.text()).toContain(`${base.replace(origin, "")}/board/quest/first`);
+		const quest = await app.request(`${base}/board/quest/first`, { headers: { Cookie: cookie } }, testEnv);
+		expect(quest.status).toBe(200);
+		expect(await quest.text()).toContain("Build first.");
 	});
 });

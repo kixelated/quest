@@ -50,7 +50,7 @@ describe("board model", () => {
 		});
 		expect(status(board, "quest/m0/epic/taken.md")).toEqual({ kind: "available" });
 		expect(status(board, "quest/m0/epic/turned.md")?.kind).toBe("turn-in");
-		expect(board.counts).toEqual({ available: 4, blocked: 1, "turn-in": 1 });
+		expect(board.counts).toEqual({ available: 4, blocked: 1, "turn-in": 1, accepted: 0 });
 	});
 
 	it("groups milestones and epics in priority order, then unlisted quests", () => {

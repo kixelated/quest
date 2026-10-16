@@ -5,6 +5,7 @@ import { type Crumb, Difficulty, Marker, Paste, SignIn, Token, type User } from 
 import { render } from "./markdown";
 import {
 	type Board,
+	boardHref,
 	type Milestone,
 	milestoneAnchor,
 	blobHref,
@@ -27,6 +28,8 @@ function label(status: Status, limit = Infinity): string {
 	switch (status.kind) {
 		case "turn-in":
 			return "Ready to turn in";
+		case "accepted":
+			return "Claimed";
 		case "available":
 			return "Available";
 		case "blocked": {
@@ -156,13 +159,14 @@ function FinishedList(props: { finished: Finished[] }) {
 /** The statuses a visitor can filter the board by, in the order a contributor asks about them. */
 export const SHOWN: [Status["kind"], string][] = [
 	["available", "Available"],
+	["accepted", "Claimed"],
 	["turn-in", "Ready to turn in"],
 	["blocked", "Requires others"],
 ];
 
 // Counts by status, which double as filters and as the legend for the markers.
 function Tally(props: { board: Board; show: Status["kind"] | null }) {
-	const base = `/repos/${props.board.project.name}`;
+	const base = boardHref(props.board.project);
 	return (
 		<nav aria-label="Filter quests by status">
 			<ul class="tally">
@@ -216,7 +220,7 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 			{milestones.length === 0 && (
 				<p class="ql-panel muted">
 					No quests are {SHOWN.find(([kind]) => kind === show)![1].toLowerCase()} right now.{" "}
-					<a href={`/repos/${project.name}`}>Show every quest</a>.
+					<a href={boardHref(project)}>Show every quest</a>.
 				</p>
 			)}
 
@@ -256,7 +260,7 @@ const HEADINGS: Record<string, string> = { Goal: "Objectives", Closes: "Rewards"
 export function questCrumbs(board: Board, doc: Doc): Crumb[] {
 	const milestone = (group: Group) => board.milestones.find((c) => c.path === group.path && c.number !== "");
 	return [
-		{ label: board.project.title, href: `/repos/${board.project.name}` },
+		{ label: board.project.title, href: boardHref(board.project) },
 		...trail(board, doc.path).map((group) => ({
 			label: milestone(group) ? `Milestone ${milestone(group)!.number}` : group.title,
 			href: group.href,
@@ -321,12 +325,21 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 			</Panel>
 		);
 	}
+	if (status.kind === "accepted")
+		return (
+			<Panel title="Claimed">
+				<p>
+					A quest branch already claims this work. Review its current GitHub state before starting another
+					implementation.
+				</p>
+			</Panel>
+		);
 	if (status.kind === "blocked") {
 		return (
 			<Panel title="Not yet available">
 				<p class="muted">
 					This quest opens once {status.requires.length === 1 ? "the quest" : "everything"} it requires is
-					complete. Until then, pick an <a href={`/repos/${board.project.name}?show=available`}>available</a>{" "}
+					complete. Until then, pick an <a href={`${boardHref(board.project)}?show=available`}>available</a>{" "}
 					quest.
 				</p>
 			</Panel>
@@ -435,7 +448,7 @@ export function QuestPage(props: { board: Board; doc: Doc; content: string; user
 				)}
 				<section class="panel-links">
 					<p>
-						<a href={`/repos/${project.name}`}>Back to the quest log</a>
+						<a href={boardHref(project)}>Back to the quest log</a>
 						{markdown && (
 							<>
 								{" · "}

@@ -36,11 +36,15 @@ export type Issue = { path: string; title: string };
 export type Project = Snapshot & {
 	/** The project's name in URLs: `/repos/<name>`. */
 	name: string;
+	/** An authenticated board may live under project setup. */
+	href?: string;
 	/** How the project names itself, such as `kixelated/quest`. */
 	title: string;
 	/** Where the repository's other files can be read, or `null` if nowhere public. */
 	web: string | null;
 	changes: Change[];
+	/** Observed branch claims reserve work without implying a finished PR. */
+	claims?: string[];
 	issues: Issue[];
 };
 
