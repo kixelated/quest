@@ -5,37 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { GitHubService, type GitHubRepository } from "../src/github/service";
 import { deliveryRetention } from "../src/github/webhook";
+import { delivery } from "./webhook";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const repo: GitHubRepository = { owner: "upstream", name: "project", id: 10 };
 const fork: GitHubRepository = { owner: "quest-bot-forks", name: "project", id: 20 };
 
-async function delivery(
-	event: string,
-	payload: unknown,
-	id = crypto.randomUUID(),
-	changes: Record<string, string> = {},
-) {
-	const body = typeof payload === "string" ? payload : JSON.stringify(payload);
-	const key = await crypto.subtle.importKey(
-		"raw",
-		new TextEncoder().encode(env.GITHUB_WEBHOOK_SECRET),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	);
-	const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-	const signature = "sha256=" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-	return app.request(
-		"http://localhost:8787/webhooks/github",
-		{
-			method: "POST",
-			headers: { "X-GitHub-Event": event, "X-GitHub-Delivery": id, "X-Hub-Signature-256": signature, ...changes },
-			body,
-		},
-		env,
-	);
-}
 function installation(action: string) {
 	return { action, installation: { id: 5, app_id: 123 } };
 }
