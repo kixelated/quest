@@ -106,7 +106,7 @@ export function ProjectsPage(props: { projects: Enrollment[]; installation: stri
 	);
 }
 
-export function ProjectSetupPage(props: { preview: ProjectPreview; error?: string }) {
+export function ProjectSetupPage(props: { preview: ProjectPreview; enrollment: Enrollment | null; error?: string }) {
 	const { preview } = props;
 	const repo = preview.repository;
 	const href = `https://github.com/${repo.owner}/${repo.name}`;
@@ -157,13 +157,19 @@ export function ProjectSetupPage(props: { preview: ProjectPreview; error?: strin
 								: "Enable contributions"}
 					</button>
 				</form>
-				{preview.state && (
+				{props.enrollment && (
 					<>
+						{preview.state === null && (
+							<p class="note-small">
+								The App installation changed. Enable contributions explicitly for this installation, or
+								stop the previous enrollment below.
+							</p>
+						)}
 						<p class="note-small">
 							Pause stops new work. Disconnect removes this project's opt-in; it does not uninstall the
 							App or change existing GitHub contributions.
 						</p>
-						<ProjectStopControls project={{ ...repo, state: preview.state }} />
+						<ProjectStopControls project={props.enrollment} />
 					</>
 				)}
 			</section>

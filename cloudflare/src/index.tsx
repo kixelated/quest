@@ -119,7 +119,7 @@ app.get("/projects/github/:owner/:repository", async (c) => {
 				title: `${repository.owner}/${repository.name} setup`,
 				description: "Review ready quests and contribution settings.",
 			},
-			<ProjectSetupPage preview={preview} />,
+			<ProjectSetupPage preview={preview} enrollment={enrolled} />,
 		);
 	} catch (error) {
 		if (!(error instanceof GitHubError)) throw error;

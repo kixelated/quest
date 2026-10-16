@@ -31,6 +31,8 @@ function github(
 	options: {
 		role?: string;
 		repositoryName?: string;
+		repositoryOwner?: string;
+		installation?: number;
 		account?: number;
 		private?: boolean;
 		archived?: boolean;
@@ -58,7 +60,8 @@ function github(
 	} = {},
 ) {
 	const repositoryName = options.repositoryName ?? repo.name;
-	const repositoryBase = `/repos/${repo.owner}/${repositoryName}`;
+	const repositoryOwner = options.repositoryOwner ?? repo.owner;
+	const repositoryBase = `/repos/${repositoryOwner}/${repositoryName}`;
 	const snapshot = (options.documents ?? documents).map((doc, i) => ({
 		...doc,
 		content: options.invalid && i === 1 ? "# Bad quest" : doc.content,
@@ -101,7 +104,7 @@ function github(
 				options.missing
 					? {}
 					: {
-							id: 5,
+							id: options.installation ?? 5,
 							app_id: 123,
 							suspended_at: options.suspended ? "2026-10-15" : null,
 							permissions: { metadata: "read", contents: "read" },
@@ -122,7 +125,7 @@ function github(
 				...repo,
 				name: repositoryName,
 				id: options.id ?? repo.id,
-				owner: { login: repo.owner },
+				owner: { login: repositoryOwner },
 				private: options.private ?? false,
 				visibility: options.private ? "private" : "public",
 				default_branch: "trunk",
@@ -164,7 +167,7 @@ function github(
 		}
 		if (path === "/graphql") {
 			const body = calls.at(-1)!.body;
-			expect(body.variables).toEqual({ owner: repo.owner, name: repositoryName });
+			expect(body.variables).toEqual({ owner: repositoryOwner, name: repositoryName });
 			const blobs = Object.fromEntries(
 				[...body.query.matchAll(/(q\d+): object\(oid: "([a-f0-9]{40})"\)/g)].map(([, alias, oid]) => {
 					const doc = snapshot.find((doc) => blobOid(doc.content) === oid);
@@ -485,6 +488,39 @@ describe("project setup routes", () => {
 		expect(await state()).toBeNull();
 	});
 
+	it("keeps stop controls after transfer without inheriting opt-in for the new installation", async () => {
+		await github().service.setContributions(repo, "enrollment-test", "enabled");
+		const who = identity("github");
+		const { session } = await oauth(who);
+		const { request } = github({ account: Number(who.id), repositoryOwner: "receiving", installation: 6 });
+		vi.spyOn(globalThis, "fetch").mockImplementation(request as typeof fetch);
+		const route = `${origin}/projects/github/receiving/project`;
+		const response = await app.request(route, { headers: { Cookie: session! } }, testEnv);
+		expect(response.status).toBe(200);
+		const html = await response.text();
+		expect(html).toContain("The App installation changed");
+		expect(html).toContain("Enable contributions");
+		expect(html).toContain('name="state" value="paused"');
+		expect(html).toContain('name="state" value="disconnected"');
+		const row = () => env.DB.prepare("SELECT installation,state FROM github_projects WHERE id=10").first();
+		expect(await row()).toEqual({ installation: 5, state: "enabled" });
+		const post = (state: string) =>
+			app.request(
+				route,
+				{
+					method: "POST",
+					headers: { Cookie: session!, Origin: origin },
+					body: new URLSearchParams({ id: "10", state }),
+				},
+				testEnv,
+			);
+		expect((await post("paused")).status).toBe(303);
+		expect(await row()).toEqual({ installation: 5, state: "paused" });
+		expect((await post("enabled")).status).toBe(303);
+		expect(await row()).toEqual({ installation: 6, state: "enabled" });
+		expect((await post("disconnected")).status).toBe(303);
+		expect(await state()).toBeNull();
+	});
 	it("does not expose enrolled stop controls or accept their forms without current authority", async () => {
 		await github().service.setContributions(repo, "enrollment-test", "enabled");
 		const who = identity("github");

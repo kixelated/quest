@@ -167,7 +167,10 @@ become private, archived, or Quest-invalid. The enrolled-project lookup proves
 current identity and authority independently of the failing preview; it does
 not depend on being the original enroller. It matches enrollment by the durable
 GitHub repository ID, and refreshes the stored owner/name after authority is
-verified, so selecting a renamed repository recovers the same stop controls. Future job coordination must recheck
+verified, so selecting a renamed repository recovers the same stop controls. If a transfer
+or reinstall changes the App installation, those stop controls remain available
+while the new installation requires explicit opt-in; selection never silently
+reassigns an existing contribution authorization to the new installation. Future job coordination must recheck
 this state and current provider eligibility before launching new work.
 
 Contributions require a public repository whose GitHub-detected SPDX license
