@@ -45,7 +45,8 @@ export interface WaitDependencies {
 export class WaitInputError extends Error {}
 
 export class WaitTimeout extends Error {
-	constructor() {
+	/** Where to resume, when the wait got far enough to know. */
+	constructor(readonly cursor?: string) {
 		super("timed out waiting for pull request activity");
 	}
 }
@@ -120,11 +121,13 @@ export async function waitForActivity(
 	deps: WaitDependencies,
 ): Promise<string[]> {
 	const started = deps.now();
+	const progress = { resume: options.since };
 	try {
-		return await watch(pr, options, deps, started);
+		return await watch(pr, options, deps, started, progress);
 	} catch (error) {
 		// This also covers a deadline expiring while a response body is read.
-		if (options.timeout !== undefined && deps.now() - started >= options.timeout * 1000) throw new WaitTimeout();
+		if (options.timeout !== undefined && deps.now() - started >= options.timeout * 1000)
+			throw new WaitTimeout(progress.resume);
 		throw error;
 	}
 }
@@ -134,6 +137,7 @@ async function watch(
 	options: WaitOptions,
 	deps: WaitDependencies,
 	started: number,
+	progress: { resume?: string },
 ): Promise<string[]> {
 	if (options.since && !options.since.startsWith("q1.") && !SHA.test(options.since)) {
 		try {
@@ -211,6 +215,7 @@ async function watch(
 	let cursor: Cursor;
 	let historical: Activity[] = [];
 	const baselineCommits = new Set<string>();
+	let pushedTips: string[] = [];
 	if (options.since?.startsWith("q1.")) {
 		cursor = decodeCursor(options.since, name);
 	} else {
@@ -287,7 +292,8 @@ async function watch(
 		};
 		const plain = pushed.filter((row) => string(row.activity_type) !== "force_push" && after(row));
 		// A push racing setup is reported once, as a push, not again as a new commit.
-		for (const row of plain) baselineCommits.add(string(row.after));
+		pushedTips = plain.map((row) => string(row.after));
+		for (const sha of pushedTips) baselineCommits.add(sha);
 		historical = plain.map((row) => ({
 			point: string(row.timestamp),
 			time: timestamp(string(row.timestamp)),
@@ -299,6 +305,12 @@ async function watch(
 	}
 
 	const seenCommits = new Set([...baselineCommits, ...cursor.commits]);
+	// Activity found before a timeout is not printed, so resuming must find it again;
+	// a push found during setup comes back as its new commit.
+	progress.resume = encodeCursor({
+		...cursor,
+		commits: [...seenCommits].filter((sha) => !pushedTips.includes(sha)),
+	});
 	const seen = Object.fromEntries(SOURCES.map((source) => [source, new Set(cursor.marks[source].ids)])) as Record<
 		Source,
 		Set<string>

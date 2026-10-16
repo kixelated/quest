@@ -21,8 +21,9 @@ When waiting for a required review or for an enabled auto-merge to finish, run
 GitHub in a loop. Inspect the events and decide whether they satisfy the wait;
 the command does not decide whose review counts. If activity is irrelevant
 (including bot notices), call it again with `--since` set to the last field of
-its last line. Exit 3 means the deadline passed with no activity; run the same
-command again. Other failures must be reported rather than treated as activity.
+its last line. Exit 3 means the deadline passed with no activity; re-run with
+`--since` set to the printed cursor, so nothing during the first wait is missed.
+Other failures must be reported rather than treated as activity.
 Check CI with its own blocking check watcher, bounded under an hour the same
 way; check runs are not PR timeline activity. Do not wait for optional reviews.
 Run each wait so its exit wakes you, such as a background task that notifies on

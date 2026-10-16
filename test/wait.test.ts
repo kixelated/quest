@@ -272,6 +272,20 @@ test("the force push that created the starting head is not activity, even after 
 	expect(resumed[0]).toContain("review-2");
 });
 
+test("a timed-out wait prints a cursor that still reports a push landing before the retry", async () => {
+	const first = setup([pull(), response([pushed()]), response([committed(A)])]);
+	const timeout = await waitForActivity(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
+	expect(timeout).toBeInstanceOf(WaitTimeout);
+	const point = (timeout as WaitTimeout).cursor!;
+	expect(point).toMatch(/^q1\./);
+	// Rerunning without the cursor would take B as its starting head and stay silent.
+	const second = setup([response([committed(A), committed(B)])]);
+	const lines = await waitForActivity(pr, { since: point }, second.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(new RegExp(`^${B} committed `));
+	expect(second.calls.map((call) => call.path)).toEqual([timeline]);
+});
+
 test("a later force push back to a SHA pushed before the starting point is activity", async () => {
 	const fixture = setup(
 		[
@@ -408,6 +422,11 @@ test("timeout is distinct and limits both poll sleeps and rate-limit waits", asy
 		await expect(waitForActivity(pr, { timeout: 10 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
 		expect(fixture.sleeps).toEqual([10_000]);
 	}
+	// A deadline during setup can only hand back the starting point it was given.
+	const setupLimited = setup([response({ message: "rate limit" }, { "retry-after": "120" }, 429)]);
+	await expect(waitForActivity(pr, { since: POINT, timeout: 10 }, setupLimited.deps)).rejects.toMatchObject({
+		cursor: POINT,
+	});
 });
 
 test("unresolvable pushed SHA fails with a timestamp recommendation", async () => {
