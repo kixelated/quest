@@ -60,4 +60,5 @@ replacing the hosted Agent SDK runtime:
 
 ## Required
 
+- [Recoverable worktrees](/quest/m0/worktree.md) - reuse checkout supervision, checkpoints, and disk admission
 - [Job coordination](/quest/m0/kix/jobs.md) - claims, routing, presence, and the executor contract
