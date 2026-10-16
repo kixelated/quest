@@ -30,6 +30,12 @@ function fixture() {
 	worktrees.configure(100_000_000);
 	return { root, repo, home, worktrees };
 }
+/** Simulates a crash that left the only record mid-transition. */
+function setPhase(home: string, phase: string): void {
+	const registry = JSON.parse(readFileSync(join(home, "registry.json"), "utf8"));
+	registry.records[0].phase = phase;
+	writeFileSync(join(home, "registry.json"), JSON.stringify(registry));
+}
 const notes = {
 	notes: "Remaining work: finish implementation",
 	checks: ["unit tests not run"],
@@ -78,6 +84,19 @@ describe("recoverable worktrees", () => {
 		worktrees.restore(record.id);
 		expect(git(record.path, "rev-parse", "HEAD")).toBe(unique);
 	});
+	it("restores detached even after the saved branch moves", () => {
+		const { repo, worktrees } = fixture();
+		const record = worktrees.create(repo, "work", 10_000_000);
+		git(record.path, "switch", "-c", "topic");
+		writeFileSync(join(record.path, "file"), "topic\n");
+		git(record.path, "commit", "-am", "topic");
+		const unique = git(record.path, "rev-parse", "HEAD");
+		worktrees.release(record.id, notes);
+		git(repo, "branch", "-f", "topic", "main");
+		worktrees.restore(record.id);
+		expect(git(record.path, "rev-parse", "HEAD")).toBe(unique);
+		expect(() => git(record.path, "symbolic-ref", "-q", "HEAD")).toThrow();
+	});
 	it("preserves explicitly valuable ignored and untracked files while removing disposable output", () => {
 		const { repo, worktrees } = fixture();
 		const record = worktrees.create(repo, "work", 10_000_000);
@@ -116,6 +135,8 @@ describe("recoverable worktrees", () => {
 		rmSync(join(home, "lock"), { recursive: true });
 		expect(() => worktrees.create(second, "failed", 1_000_000, "nonexistent-ref")).toThrow();
 		expect(worktrees.status().records.find((record) => record.name === "failed")?.phase).toBe("creating");
+		worktrees.release("failed", notes);
+		expect(worktrees.status().records.map((record) => record.name)).toEqual(["first"]);
 	});
 	it("admits simultaneous creators atomically without oversubscribing disk", async () => {
 		const { root, repo, home, worktrees } = fixture();
@@ -197,15 +218,38 @@ describe("recoverable worktrees", () => {
 		expect(JSON.parse(readFileSync(join(checkpoint, "snapshot.json"), "utf8")).checks).toEqual(["tests not run"]);
 	});
 
-	it("records incomplete cleanup as retained capacity instead of success", () => {
+	it("finishes an interrupted release without checkpointing the partial checkout", () => {
 		const { repo, home, worktrees } = fixture();
 		const record = worktrees.create(repo, "work", 10_000_000);
 		worktrees.checkpoint(record.id, notes);
-		const registry = JSON.parse(readFileSync(join(home, "registry.json"), "utf8"));
-		registry.records[0].phase = "releasing";
-		writeFileSync(join(home, "registry.json"), JSON.stringify(registry));
+		setPhase(home, "releasing");
+		rmSync(join(record.path, "file")); // Removal stopped partway.
 		expect(worktrees.status().allocated).toBeGreaterThanOrEqual(record.reserve);
 		worktrees.release(record.id, notes);
 		expect(worktrees.status().records[0].phase).toBe("released");
+		expect(existsSync(record.path)).toBe(false);
+		worktrees.restore(record.id);
+		expect(readFileSync(join(record.path, "file"), "utf8")).toBe("original\n");
+	});
+	it("retries or abandons an interrupted restore from the intact checkpoint", () => {
+		const { repo, home, worktrees } = fixture();
+		const record = worktrees.create(repo, "work", 10_000_000);
+		writeFileSync(join(record.path, "file"), "saved\n");
+		worktrees.release(record.id, notes);
+		const partial = () => {
+			git(repo, "worktree", "add", "--detach", "--lock", "--reason", `quest worktree ${record.id}`, record.path);
+			writeFileSync(join(record.path, "file"), "partial\n");
+			setPhase(home, "restoring");
+		};
+		partial();
+		expect(() => worktrees.checkpoint(record.id, notes)).toThrow("cannot checkpoint a restoring");
+		worktrees.restore(record.id);
+		expect(readFileSync(join(record.path, "file"), "utf8")).toBe("saved\n");
+		worktrees.release(record.id, notes);
+		partial();
+		expect(worktrees.release(record.id, notes).phase).toBe("released");
+		expect(existsSync(record.path)).toBe(false);
+		worktrees.restore(record.id);
+		expect(readFileSync(join(record.path, "file"), "utf8")).toBe("saved\n");
 	});
 });

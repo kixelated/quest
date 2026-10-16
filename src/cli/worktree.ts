@@ -71,6 +71,21 @@ function save(path: string, value: unknown): void {
 	writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);
 }
+/** One spelling per path: Git prints `C:/...`, Node `C:\...`, and Windows may use 8.3 names. */
+function canonical(path: string): string {
+	return existsSync(path) ? realpathSync.native(path) : resolve(path);
+}
+/** Git's registered checkouts, with canonical paths and lock reasons. */
+function checkouts(repository: string): { path: string; locked?: string }[] {
+	return git(repository, "worktree", "list", "--porcelain", "-z")
+		.split("\0\0")
+		.flatMap((entry) => {
+			const lines = entry.split("\0");
+			const path = lines.find((line) => line.startsWith("worktree "))?.slice(9);
+			const locked = lines.find((line) => line === "locked" || line.startsWith("locked "))?.slice(7);
+			return path ? [{ path: canonical(path), locked }] : [];
+		});
+}
 function inside(root: string, path: string): boolean {
 	const value = relative(root, path);
 	return value === "" || (!isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`));
@@ -213,7 +228,7 @@ export class Worktrees {
 				);
 			if (registry.records.some((item) => item.name === name))
 				throw new Error(`worktree name already exists; use restore or another name: ${name}`);
-			const repository = realpathSync(git(root, "rev-parse", "--show-toplevel").trim());
+			const repository = canonical(git(root, "rev-parse", "--show-toplevel").trim());
 			if (inside(repository, this.home))
 				throw new Error("recovery state must live outside the disposable checkout");
 			const path = join(repository, ".worktrees", name);
@@ -243,30 +258,35 @@ export class Worktrees {
 			}
 		});
 	}
-	private owned(record: WorktreeRecord): void {
-		if (inside(record.path, realpathSync(process.cwd())))
+	/** Refuses unless this record exclusively owns the checkout; false once Git and the disk both lack it. */
+	private owned(record: WorktreeRecord): boolean {
+		const path = canonical(record.path);
+		if (inside(path, canonical(process.cwd())))
 			throw new Error("leave the checkout before checkpointing or releasing it");
-		const entries = git(record.repository, "worktree", "list", "--porcelain", "-z").split("\0\0");
-		for (const candidate of entries) {
-			const path = candidate
-				.split("\0")
-				.find((line) => line.startsWith("worktree "))
-				?.slice(9);
-			if (path && path !== record.path && inside(record.path, path))
-				throw new Error(`nested checkout is retained: ${path}`);
-		}
-		const entry = entries.find((entry) => entry.split("\0").includes(`worktree ${record.path}`));
-		if (!entry || !entry.split("\0").includes(`locked quest worktree ${record.id}`))
+		const entries = checkouts(record.repository);
+		for (const entry of entries)
+			if (entry.path !== path && inside(path, entry.path))
+				throw new Error(`nested checkout is retained: ${entry.path}`);
+		const entry = entries.find((entry) => entry.path === path);
+		if (!entry && !existsSync(path)) return false;
+		if (entry?.locked !== `quest worktree ${record.id}`)
 			throw new Error(
 				"checkout ownership/lock changed; use the owning tool, never adopt or remove a shared checkout",
 			);
+		return true;
+	}
+	/** Git removes the owned checkout and its administrative directory, even when the checkout is missing. */
+	private discard(record: WorktreeRecord): void {
+		if (!this.owned(record)) return;
+		git(record.repository, "worktree", "remove", "--force", "--force", record.path);
+		if (existsSync(record.path)) throw new Error("Git reported cleanup success but checkout is retained");
 	}
 	checkpoint(id: string, options: CheckpointOptions): WorktreeRecord {
 		return this.locked((registry) => this.checkpointLocked(this.find(registry, id), options));
 	}
 	private checkpointLocked(record: WorktreeRecord, options: CheckpointOptions): WorktreeRecord {
 		if (record.phase !== "active") throw new Error(`cannot checkpoint a ${record.phase} checkout`);
-		this.owned(record);
+		if (!this.owned(record)) throw new Error(`active checkout is missing: ${record.path}`);
 		if (!options.notes.trim())
 			throw new Error("checkpoint notes must describe unresolved work, or state that it is complete");
 		const keep = options.keep.map(childPath);
@@ -414,59 +434,45 @@ export class Worktrees {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
 			if (record.phase === "released") return record;
-			if (record.phase === "releasing" && !existsSync(record.path)) {
-				record.phase = "released";
-				record.failure = undefined;
-				return record;
+			if (record.phase === "active") {
+				this.checkpointLocked(record, options);
+				const snapshot = json<Snapshot>(join(record.checkpoint!, "snapshot.json"));
+				if (snapshot.unclassified.length)
+					throw new Error(
+						`classify untracked/ignored files with --keep or --scratch before release: ${snapshot.unclassified.slice(0, 20).join(", ")}`,
+					);
+				record.phase = "releasing";
+				save(join(this.home, "registry.json"), registry);
 			}
-			if (record.phase === "releasing") record.phase = "active";
-			this.checkpointLocked(record, options);
-			const snapshot = json<Snapshot>(join(record.checkpoint!, "snapshot.json"));
-			if (snapshot.unclassified.length)
-				throw new Error(
-					`classify untracked/ignored files with --keep or --scratch before release: ${snapshot.unclassified.slice(0, 20).join(", ")}`,
-				);
-			record.phase = "releasing";
-			save(join(this.home, "registry.json"), registry);
+			// An interrupted create, restore, or release never handed out new work, so the last
+			// checkpoint stays authoritative; checkpointing a partial checkout could corrupt it.
 			try {
-				git(record.repository, "worktree", "unlock", record.path);
-				// Git itself removes the owned checkout and its administrative directory.
-				git(record.repository, "worktree", "remove", "--force", record.path);
-				if (existsSync(record.path)) throw new Error("Git reported cleanup success but checkout is retained");
-				record.phase = "released";
-				record.failure = undefined;
-				return record;
+				this.discard(record);
 			} catch (error) {
 				record.failure = String(error);
-				if (existsSync(record.path)) {
-					try {
-						git(
-							record.repository,
-							"worktree",
-							"lock",
-							"--reason",
-							`quest worktree ${record.id}`,
-							record.path,
-						);
-					} catch {
-						/* Preserve allocation even when re-locking fails. */
-					}
-				}
 				throw new Error(`cleanup failed; allocation retained: ${record.path}: ${String(error)}`);
 			}
+			record.phase = "released";
+			record.failure = undefined;
+			// An abandoned creation has nothing to restore; free its name and reservation.
+			if (!record.checkpoint) registry.records.splice(registry.records.indexOf(record), 1);
+			return record;
 		});
 	}
 	restore(id: string): WorktreeRecord {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
 			if (record.phase === "active") {
-				this.owned(record);
+				if (!this.owned(record)) throw new Error(`active checkout is missing: ${record.path}`);
 				return record;
 			}
+			if (record.phase === "restoring") {
+				// Retry an interrupted restore from the untouched checkpoint.
+				this.discard(record);
+				record.phase = "released";
+			}
 			if (record.phase !== "released" || !record.checkpoint)
-				throw new Error(
-					`cannot restore a ${record.phase} allocation; inspect retained checkout before recovery`,
-				);
+				throw new Error(`cannot restore a ${record.phase} allocation; release finishes or abandons it`);
 			if (existsSync(record.path))
 				throw new Error("restore destination exists; refusing to adopt or overwrite it");
 			this.admit(registry, record.reserve, dirname(record.path));
@@ -515,15 +521,9 @@ export class Worktrees {
 						git(root, "fetch", "--no-write-fetch-head", join(source, "history.bundle"), "+refs/*:refs/*");
 						git(root, "checkout", "--detach", saved.head);
 					}
-					if (saved.branch) {
-						const current = git(root, "rev-parse", "--verify", saved.branch).trim();
-						if (current !== saved.head)
-							throw new Error(
-								`branch advanced since checkpoint; restored files retained detached: ${saved.branch}`,
-							);
-						if (i > 0) git(root, "symbolic-ref", "HEAD", saved.branch);
-						// Main checkout remains detached so another checkout's branch is never stolen.
-					}
+					// The main checkout stays detached so a moved, deleted, or checked-out branch never blocks
+					// restore; submodule gitdirs are private copies, so their branches return as saved.
+					if (saved.branch && i > 0) git(root, "symbolic-ref", "HEAD", saved.branch);
 					for (const file of saved.missing) rmSync(join(root, file), { force: true });
 					for (const file of saved.files.filter((file) => !saved.missing.includes(file))) {
 						mkdirSync(dirname(join(root, file)), { recursive: true });

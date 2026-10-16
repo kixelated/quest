@@ -214,9 +214,12 @@ admission. Checkpoint bytes remain charged after checkout removal. There is no
 automatic recovery-data deletion or branch deletion, including after a squash
 merge. Restore leaves the main checkout detached, preserving existing branches.
 A failed creation, restoration, or removal remains charged and visible in
-`status`; no live lock is stolen. After a crash, inspect retained state and
-ownership before manual reconciliation. This initial interface intentionally
-refuses unknown or changed checkout ownership.
+`status`. Run `restore` again to retry an interrupted restoration from its
+checkpoint, or `release` to finish an interrupted removal or abandon an
+interrupted creation or restoration; neither checkpoints the partial checkout.
+No live lock is stolen: after a crash, confirm the registry lock's owner has
+exited before removing it. This initial interface intentionally refuses unknown
+or changed checkout ownership.
 
 ## Work with your agents
 

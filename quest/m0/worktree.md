@@ -44,11 +44,17 @@ Draft implementation status:
   create/checkpoint/release/restore, private recovery metadata, full bundles,
   tracked/index preservation, explicit keep/scratch classification, initialized
   submodule history, retained failed allocations, and filesystem fixtures.
+  Interrupted create, restore, and release recover through `restore`/`release`
+  without checkpointing partial checkouts.
+- Measured 2026-10-15 on this repository: a fresh checkout is 1.6 MB, 376 MB
+  after `just install` and `just build` (node_modules), and a released
+  checkpoint retains 4.4 MB (2.2 MB history bundle). Restore takes ~0.6 s.
 - Remaining before this quest is complete: exact foreground descendant ownership
-  through cancellation/crashes and automatic reconciliation, interrupted create
-  and restore recovery, automatic release at lifecycle boundaries, concurrency
-  and cancellation fixtures, and measured real-job retained footprints. Native
-  agent lifecycle adoption remains in the related integration quest.
+  through cancellation/crashes and automatic reconciliation (including a stale
+  registry lock), automatic release at lifecycle boundaries, and cancellation
+  fixtures. Native agent lifecycle adoption remains in the related integration
+  quest. Whether that remainder splits into a quest that reuses the
+  [quest gate](/quest/m0/local-gate.md) ownership backend awaits a decision.
 - Process groups and PID files cannot prove detached descendants are stopped
   after a supervisor crash. Keep this PR draft until a supported ownership
   backend can enforce that boundary; unsupported platforms must fail explicitly.
