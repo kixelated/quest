@@ -119,6 +119,30 @@ command failed. Run `check` first to catch malformed plans. `ready` reads
 dependencies in the quest tree; it does not inspect live runner locks, open changes, or GitHub branch
 claims. Check those before you start work someone else may already be on.
 
+## Prioritize ready work
+
+`quest unblocked` ranks ready quests by milestone priority, descending number
+of distinct transitive dependents, then existing tree order. Counts include
+later milestones without moving their candidates ahead of earlier milestones.
+Structural root, milestone, and epic membership does not add to the count;
+real dependencies on an epic still reach its remaining work. Other prerequisites
+may remain for a dependent after the selected quest finishes.
+
+```console
+$ quest --root examples/export unblocked
+1	quest/m0/export.md
+
+$ quest --root examples/export unblocked --json --limit 1
+[{"path":"quest/m0/export.md","dependents":1}]
+```
+
+Each plain output line contains the count, a tab, and the path. On a terminal,
+a heading explains the count. `--json` prints an ordered array, including `[]`
+when no quests are ready; `--limit <count>` requires a positive integer.
+Invalid trees fail with diagnostics and no ranking. This command uses the same
+local readiness as `ready`; verify claims and outside conditions before starting.
+`quest-spawn` uses the ranking unless you explicitly select work in another order.
+
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread

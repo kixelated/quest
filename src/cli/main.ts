@@ -6,7 +6,7 @@ import { relative, resolve, sep } from "node:path";
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
 import { description, version } from "../../package.json";
-import { blockers, check, formatFinding, label, lookup, ready, renderBlocker } from "../core";
+import { blockers, check, formatFinding, label, lookup, ready, renderBlocker, unblocked } from "../core";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
@@ -109,6 +109,34 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	program
+		.command("unblocked")
+		.summary("Rank ready quests by milestone and downstream impact")
+		.description(
+			"Rank ready quests by milestone priority, distinct transitive dependents, then tree order.\n\n" +
+				"Counts exclude structural epic membership. Other prerequisites may remain for dependents. " +
+				"Does not check claims or outside conditions. Invalid trees fail before printing a ranking.\n\n" +
+				"Prints a count and path per line; --json prints an ordered array of {path, dependents} objects.",
+		)
+		.option("--json", "Print a deterministic JSON array")
+		.option("--limit <count>", "Maximum number of ready quests to print", positiveInteger("limit"))
+		.action((options: { json?: boolean; limit?: number }) => {
+			const docs = load(root());
+			const findings = check(docs, (path) => exists(root(), path));
+			if (findings.length > 0) {
+				for (const finding of findings) warn(formatFinding(finding));
+				code = 1;
+				return;
+			}
+			const ranked = unblocked(docs).slice(0, options.limit);
+			if (options.json) {
+				print(JSON.stringify(ranked));
+				return;
+			}
+			if (theme) print("Ready quests by milestone and downstream impact (other prerequisites may remain):");
+			for (const quest of ranked) print(`${quest.dependents}\t${quest.path}`);
+		});
+
+	program
 		.command("wait")
 		.summary("Wait for pull request activity on GitHub")
 		.description(
@@ -149,7 +177,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("capacity <bytes>")
 		.description("Set this user's shared disk budget in bytes")
 		.action((bytes: string) => {
-			state().configure(bytesValue(bytes));
+			state().configure(positiveInteger("bytes")(bytes));
 		});
 	worktree
 		.command("status")
@@ -158,7 +186,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	worktree
 		.command("create <name>")
 		.description("Create an exclusively owned detached Git worktree under .worktrees/")
-		.requiredOption("--reserve <bytes>", "Checkout, expected build growth, and checkpoint bytes", bytesValue)
+		.requiredOption(
+			"--reserve <bytes>",
+			"Checkout, expected build growth, and checkpoint bytes",
+			positiveInteger("bytes"),
+		)
 		.option("--ref <ref>", "Initial Git revision", "HEAD")
 		.action((name: string, options: { reserve: number; ref: string }) =>
 			record(state().create(root(), name, options.reserve, options.ref)),
@@ -272,9 +304,13 @@ function positiveSeconds(value: string): number {
 	return seconds;
 }
 
-function bytesValue(value: string): number {
-	const bytes = Number(value);
-	if (!/^\d+$/.test(value) || !Number.isSafeInteger(bytes) || bytes <= 0)
-		throw new InvalidArgumentError("bytes must be a positive safe integer");
-	return bytes;
+/** Parses a positive, safe integer option named `name`. */
+function positiveInteger(name: string): (value: string) => number {
+	return (value) => {
+		const count = Number(value);
+		if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count <= 0) {
+			throw new InvalidArgumentError(`${name} must be a positive safe integer`);
+		}
+		return count;
+	};
 }
