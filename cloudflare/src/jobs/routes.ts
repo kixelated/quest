@@ -225,6 +225,16 @@ jobs.post(`${base}/:job/cancel`, async (c) => {
 // Raw output stays behind a per-request maintainer check; summaries are the default view.
 jobs.get(`${base}/:job/output`, async (c) => {
 	const { job } = await owned(c);
+	// `after=<attempt>.<seq>` continues from a previous page's `next`.
+	const after = c.req.query("after");
+	const cursor = after?.match(/^(\d{1,15})\.(\d{1,15})$/);
+	if (after !== undefined && !cursor) throw new JobError("Invalid output cursor");
 	c.header("Cache-Control", "no-store");
-	return c.json({ output: await store.readOutput(c.env.DB, job.id) });
+	return c.json(
+		await store.readOutput(
+			c.env.DB,
+			job.id,
+			cursor ? { attempt: Number(cursor[1]), seq: Number(cursor[2]) } : null,
+		),
+	);
 });

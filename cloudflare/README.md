@@ -91,7 +91,8 @@ routed, and the open connection is the runner's presence.
 Over the socket the runner sends `status` messages: its opaque accounts, the
 attempts it is running, and its free job slots. It also sends `checkpoint`,
 `question`, `output`, and `result` messages. Each gets a `reply` with the same
-`id` (`src/jobs/protocol.ts`). The hub pushes `assign` and `cancel` messages
+`id` (`src/jobs/protocol.ts`). Output chunks carry a per-attempt `seq`, so a
+retried chunk lands once, and maintainers read output in pages. The hub pushes `assign` and `cancel` messages
 whenever jobs or connections change. A status that lists an assigned attempt
 acknowledges it; until then the assignment holds one of the runner's slots and
 the hub resends it, and cancelling a

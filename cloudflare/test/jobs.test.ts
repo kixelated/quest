@@ -299,7 +299,9 @@ describe("job coordination", () => {
 		]);
 		const late = 31 + GRACE;
 		await expect(store.checkpoint(db, old, id, 1, "Still here", null, late)).rejects.toThrow("no longer current");
-		await expect(store.output(db, old, id, 1, "late output", late)).rejects.toThrow("no longer current");
+		await expect(store.output(db, old, { job: id, attempt: 1, seq: 0, text: "late" }, late)).rejects.toThrow(
+			"no longer current",
+		);
 		await expect(
 			store.finish(db, old, id, 1, { outcome: "completed", summary: "Done", result: { pr: 1 } }, late),
 		).rejects.toThrow("no longer current");
@@ -500,8 +502,17 @@ describe("runner connections", () => {
 		});
 		live.send({ id: 2, type: "checkpoint", job: id, attempt: 1, summary: "Halfway" });
 		expect(await live.next()).toEqual({ type: "reply", id: 2, cancel: false });
-		live.send({ id: 3, type: "output", job: id, attempt: 1, text: "raw log" });
+		live.send({ id: 3, type: "output", job: id, attempt: 1, seq: 0, text: "raw log" });
 		expect(await live.next()).toEqual({ type: "reply", id: 3 });
+		// A retried chunk lands once; another chunk cannot reuse its number.
+		live.send({ id: 3, type: "output", job: id, attempt: 1, seq: 0, text: "raw log" });
+		expect(await live.next()).toEqual({ type: "reply", id: 3 });
+		live.send({ id: 8, type: "output", job: id, attempt: 1, seq: 0, text: "other" });
+		expect(await live.next()).toEqual({
+			type: "reply",
+			id: 8,
+			error: "A different chunk has that sequence number",
+		});
 		live.send({ id: 4, type: "checkpoint", job: id, attempt: 2, summary: "Wrong attempt" });
 		expect(await live.next()).toEqual({ type: "reply", id: 4, error: "Attempt is no longer current" });
 		live.send({ id: 5, type: "result", job: id, attempt: 1, outcome: "done", summary: "x" });
@@ -514,7 +525,10 @@ describe("runner connections", () => {
 		live.send({ id: 7, type: "result", job: id, attempt: 1, outcome: "cancelled", summary: "Stopped" });
 		expect(await live.next()).toEqual({ type: "reply", id: 7 });
 		expect(await state(id)).toMatchObject({ state: "cancelled", summary: "Stopped" });
-		expect(await store.readOutput(db, id)).toMatchObject([{ attempt: 1, text: "raw log" }]);
+		expect(await store.readOutput(db, id, null)).toMatchObject({
+			output: [{ attempt: 1, seq: 0, text: "raw log" }],
+			next: null,
+		});
 	});
 
 	it("assigns queued work to idle runners when its project resumes", async () => {
@@ -574,7 +588,7 @@ describe("runner connections", () => {
 
 describe("runner messages", () => {
 	it("limits output chunks by their UTF-8 size", () => {
-		const output = (text: string) => JSON.stringify({ id: 1, type: "output", job: "j", attempt: 1, text });
+		const output = (text: string) => JSON.stringify({ id: 1, type: "output", job: "j", attempt: 1, seq: 0, text });
 		expect(parse(output("a".repeat(1024 * 1024)))).toMatchObject({ type: "output" });
 		// Fewer than 1 Mi code units, but three bytes each.
 		expect(() => parse(output("界".repeat(400_000)))).toThrow("at most 1 MiB");
@@ -781,7 +795,8 @@ describe("job routes", () => {
 			id: string;
 		};
 		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
-		await store.output(db, machine, id, 1, "secret transcript", Date.now());
+		for (const [seq, text] of ["secret transcript", "b", "c", "d", "e"].entries())
+			await store.output(db, machine, { job: id, attempt: 1, seq, text }, Date.now());
 		const { question } = await store.ask(
 			db,
 			machine,
@@ -790,10 +805,17 @@ describe("job routes", () => {
 			{ summary: "Which?", session: "s", prompt: { q: 1 } },
 			Date.now(),
 		);
-		const output = () => app.request(`${base}/${id}/output`, { headers: { Cookie: cookie } }, testEnv);
-		expect(await (await output()).json()).toEqual({
-			output: [expect.objectContaining({ text: "secret transcript" })],
+		const output = (query = "") =>
+			app.request(`${base}/${id}/output${query}`, { headers: { Cookie: cookie } }, testEnv);
+		// Output comes in bounded pages.
+		const first = (await (await output()).json()) as { output: { text: string }[]; next: unknown };
+		expect(first.output.map((chunk) => chunk.text)).toEqual(["secret transcript", "b", "c", "d"]);
+		expect(first.next).toEqual({ attempt: 1, seq: 3 });
+		expect(await (await output("?after=1.3")).json()).toEqual({
+			output: [expect.objectContaining({ seq: 4, text: "e" })],
+			next: null,
 		});
+		expect((await output("?after=x")).status).toBe(409);
 		role = "write";
 		expect((await output()).status).toBe(403);
 		expect((await post(`/${id}/answer`, { question, answer: "A" })).status).toBe(403);

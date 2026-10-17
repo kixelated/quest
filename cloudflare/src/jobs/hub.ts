@@ -149,7 +149,7 @@ export class RunnerHub extends DurableObject<Env> {
 			case "question":
 				return store.ask(db, runner, message.job, message.attempt, message, now);
 			case "output":
-				await store.output(db, runner, message.job, message.attempt, message.text, now);
+				await store.output(db, runner, message, now);
 				return {};
 			case "result":
 				await store.finish(db, runner, message.job, message.attempt, message, now);

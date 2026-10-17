@@ -16,6 +16,10 @@ function attempt(value: unknown): number {
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new JobError("Attempt required");
 	return value;
 }
+function seq(value: unknown): number {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new JobError("Sequence required");
+	return value;
+}
 function count(value: unknown): number {
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 100)
 		throw new JobError("Slots required");
@@ -26,7 +30,7 @@ export type RunnerMessage = { id?: string | number } & (
 	| { type: "status"; accounts: AccountReport[]; attempts: Attempt[]; slots: number }
 	| ({ type: "checkpoint"; summary: string; session: string | null } & Attempt)
 	| ({ type: "question"; summary: string; session: string; prompt: unknown } & Attempt)
-	| ({ type: "output"; text: string } & Attempt)
+	| ({ type: "output"; seq: number; text: string } & Attempt)
 	| ({ type: "result"; outcome: Outcome; summary: string; result: unknown } & Attempt)
 );
 
@@ -122,7 +126,7 @@ function fields(body: Record<string, unknown>, ref: { id?: string | number }): R
 			// Each chunk is one D1 row, which caps values at 2 MB of UTF-8.
 			if (typeof body.text !== "string" || !body.text || new TextEncoder().encode(body.text).length > 1024 * 1024)
 				throw new JobError("Output text required, at most 1 MiB per message");
-			return { ...ref, type: "output", ...target(body), text: body.text };
+			return { ...ref, type: "output", ...target(body), seq: seq(body.seq), text: body.text };
 		case "result": {
 			const outcome = body.outcome;
 			if (

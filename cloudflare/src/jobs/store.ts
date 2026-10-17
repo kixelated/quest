@@ -401,14 +401,26 @@ export async function ask(
 }
 
 /** Append raw agent output from the current attempt, in any state. */
-export async function output(db: D1Database, runner: Runner, job: string, attempt: number, text: string, now: number) {
+export async function output(
+	db: D1Database,
+	runner: Runner,
+	{ job, attempt, seq, text }: Attempt & { seq: number; text: string },
+	now: number,
+) {
 	const result = await db
 		.prepare(
-			"INSERT INTO job_output(job,attempt,text,at) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=?)",
+			"INSERT INTO job_output(job,attempt,seq,text,at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=?) ON CONFLICT(job,attempt,seq) DO NOTHING",
 		)
-		.bind(job, attempt, text, now, job, attempt, runner.id)
+		.bind(job, attempt, seq, text, now, job, attempt, runner.id)
 		.run();
-	if (result.meta.changes !== 1) throw new JobError("Attempt is no longer current");
+	if (result.meta.changes === 1) return;
+	// A retry of a chunk that already landed.
+	const stored = await db
+		.prepare("SELECT text FROM job_output WHERE job=? AND attempt=? AND seq=?")
+		.bind(job, attempt, seq)
+		.first<{ text: string }>();
+	if (!stored) throw new JobError("Attempt is no longer current");
+	if (stored.text !== text) throw new JobError("A different chunk has that sequence number");
 }
 
 /**
@@ -480,52 +492,47 @@ export type NewJob = Pick<Job, "repository" | "workflow" | "target" | "revision"
 
 /** Create a job, or return the active job already doing the same work. */
 export async function createJob(db: D1Database, input: NewJob, now: number) {
-	if (input.pinRunner) {
-		// Routing needs both pins to match one reported account, or the job never runs.
-		const pinned = await db
+	if (input.pinAccount && !input.pinRunner) throw new JobError("Pin an account together with its runner");
+	// Routing needs both pins to match one reported account, or the job never runs.
+	const pinnable =
+		"(? IS NULL OR EXISTS(SELECT 1 FROM runners r WHERE r.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1)) AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts a WHERE a.runner=r.id AND a.id=?))))";
+	const runner = input.pinRunner ?? null;
+	const account = input.pinAccount ?? null;
+	const trusted = input.trusted ? 1 : 0;
+	const pin = [runner, runner, input.actor, trusted, account, account];
+	const id = crypto.randomUUID();
+	// The insert checks the project and pins again, since a pause or a
+	// runner's status can commit after the request read them.
+	const [insert, active, enabled, pinned] = await db.batch([
+		db
 			.prepare(
-				"SELECT 1 FROM runners r WHERE r.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1)) AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts a WHERE a.runner=r.id AND a.id=?))",
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,id,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled' AND ${pinnable}`,
 			)
 			.bind(
-				input.pinRunner,
+				id,
+				input.workflow,
+				input.target,
+				input.revision,
+				input.branch,
 				input.actor,
-				input.trusted ? 1 : 0,
-				input.pinAccount ?? null,
-				input.pinAccount ?? null,
-			)
-			.first();
-		if (!pinned) throw new JobError("Pinned runner or account unavailable");
-	} else if (input.pinAccount) throw new JobError("Pin an account together with its runner");
-	const id = crypto.randomUUID();
-	const result = await db
-		.prepare(
-			`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,id,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled'`,
-		)
-		.bind(
-			id,
-			input.workflow,
-			input.target,
-			input.revision,
-			input.branch,
-			input.actor,
-			input.trusted ? 1 : 0,
-			input.pinRunner ?? null,
-			input.pinAccount ?? null,
-			now,
-			now,
-			input.repository,
-		)
-		.run();
-	if (result.meta.changes === 1) return { id, created: true };
-	const [active, enabled] = await db.batch([
+				trusted,
+				runner,
+				account,
+				now,
+				now,
+				input.repository,
+				...pin,
+			),
 		db
 			.prepare("SELECT id FROM jobs WHERE repository=? AND target=? AND state IN ('queued','running','waiting')")
 			.bind(input.repository, input.target),
-		// A pause that commits after the request read the project still wins.
 		db.prepare("SELECT 1 FROM github_projects WHERE id=? AND state='enabled'").bind(input.repository),
+		db.prepare(`SELECT ${pinnable} AS ok`).bind(...pin),
 	]);
+	if (insert!.meta.changes === 1) return { id, created: true };
 	if (!enabled!.results.length) throw new JobError("Contributions are paused");
+	if (!(pinned!.results[0] as { ok: number }).ok) throw new JobError("Pinned runner or account unavailable");
 	const found = active!.results[0] as { id: string } | undefined;
 	if (!found) throw new JobError("Job changed; try again");
 	return { id: found.id, created: false };
@@ -656,11 +663,15 @@ export async function cancel(db: D1Database, job: string, user: string, now: num
 	if (stopped!.meta.changes + asked!.meta.changes === 0) throw new JobError("Job already finished");
 }
 
-export async function readOutput(db: D1Database, job: string) {
-	return (
-		await db
-			.prepare("SELECT attempt,text,at FROM job_output WHERE job=? ORDER BY rowid")
-			.bind(job)
-			.all<{ attempt: number; text: string; at: number }>()
-	).results;
+/** A page of raw output, at most a few MiB, in order; `next` continues it. */
+export async function readOutput(db: D1Database, job: string, after: { attempt: number; seq: number } | null) {
+	const page = 4;
+	const { results } = await db
+		.prepare(
+			"SELECT attempt,seq,text,at FROM job_output WHERE job=? AND (attempt,seq)>(?,?) ORDER BY attempt,seq LIMIT ?",
+		)
+		.bind(job, after?.attempt ?? 0, after?.seq ?? -1, page)
+		.all<{ attempt: number; seq: number; text: string; at: number }>();
+	const last = results.length === page ? results.at(-1)! : null;
+	return { output: results, next: last && { attempt: last.attempt, seq: last.seq } };
 }

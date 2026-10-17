@@ -80,11 +80,13 @@ CREATE TABLE job_questions (
   answeredAt INTEGER,
   UNIQUE(job,attempt)
 );
--- Raw agent output, readable only by current project maintainers.
+-- Raw agent output, readable only by current project maintainers. The
+-- runner numbers each attempt's chunks, so a retried chunk lands once.
 CREATE TABLE job_output (
   job TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   attempt INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
   text TEXT NOT NULL,
-  at INTEGER NOT NULL
+  at INTEGER NOT NULL,
+  PRIMARY KEY(job,attempt,seq)
 );
-CREATE INDEX job_output_job ON job_output(job);
