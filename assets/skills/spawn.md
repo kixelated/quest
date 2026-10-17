@@ -55,13 +55,16 @@ Leave the worktree you are running in and any holding uncommitted work; list tho
 
 With an `api` argument, bill agents to API keys instead of this session's account: run each as a headless agent CLI process rather than a sub-agent.
 `QUEST_API_KEYS` lists the keys, separated by whitespace; refer to each by its position.
-An entry may be a secret reference instead of a key, such as a 1Password `op://` URI; resolve it only for its child, for example by launching the child under `op run`.
+An entry may be a secret reference instead of a key, such as a 1Password `op://` URI.
+Resolve every reference in one secret-manager invocation when the spawn starts, such as `op inject` on a template listing each reference, so the user approves at most one prompt and can leave; a 1Password service account token in `OP_SERVICE_ACCOUNT_TOKEN` makes it promptless.
+Keep the resolved keys in a file only the user can read, in memory-backed storage such as `$XDG_RUNTIME_DIR` when available, and delete it when the spawn ends.
+Children run as the same user and could read that file, so this limits which key each child is given, not what it can reach.
 Stop and report if the variable is unset or the agent CLI is not installed.
-Never show a key in a command, prompt, log, report, or commit: expand it from the variable inside the command.
+Never show a key in a command, prompt, log, report, or commit: expand it from that file inside the command.
 
 Start each process in the background, in its own isolated worktree, with JSON output, this session's model, effort, and permission mode passed explicitly, and permission prompts off, so the harness reports its exit as it would a sub-agent's.
 For example, `claude -p --output-format json --model <model> --effort <level>` or `codex exec --json`.
-Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, then unset `QUEST_API_KEYS` there so it holds no other key, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
+Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, then unset `QUEST_API_KEYS` and secret-manager tokens such as `OP_SERVICE_ACCOUNT_TOKEN` there so it holds no other key, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
 Read its final reply and session id from that agent's output: `claude -p` prints one result object with a dollar cost, while `codex exec --json` streams JSONL events, with the thread id in `thread.started`, the reply in the last `item.completed`, and token usage instead of cost.
 Report cost only when the agent provides it.
 Tell it that it cannot prompt, so it ends with any decisions and its recommendations in its final reply.
