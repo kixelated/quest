@@ -218,11 +218,12 @@ export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner
  * expired lease moves the job. Then queued work is assigned. Returns what to
  * send each runner and when to run again. Every assignment its runner has
  * not acknowledged is sent again, since a delivery can be lost after the
- * claim commits; `fresh` marks those claimed in this pass.
+ * claim commits. Until acknowledged, an assignment holds one of the runner's
+ * reported free slots, which it could not count yet.
  */
 export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
 	const connected = JSON.stringify([...slots.keys()]);
-	const [, , , , candidates, offers, cancels] = await db.batch([
+	const [, , , , candidates, offers, cancels, pending] = await db.batch([
 		db
 			.prepare(
 				"UPDATE jobs SET lease=NULL WHERE actor=? AND state='running' AND lease IS NOT NULL AND runner IN (SELECT value FROM json_each(?))",
@@ -262,11 +263,17 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 				"SELECT id AS job,attempt,runner FROM jobs WHERE actor=? AND state='running' AND cancel=1 AND runner IN (SELECT value FROM json_each(?))",
 			)
 			.bind(owner, connected),
+		db
+			.prepare(
+				"SELECT runner,COUNT(*) AS n FROM jobs WHERE actor=? AND state='running' AND delivered=0 GROUP BY runner",
+			)
+			.bind(owner),
 	]);
 	const free = new Map(slots);
+	for (const { runner, n } of pending!.results as { runner: string; n: number }[])
+		if (free.has(runner)) free.set(runner, free.get(runner)! - n);
 	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
 	const accounts = offers!.results as Row[];
-	const fresh = new Set<string>();
 	// Every queued job is considered, so unroutable older ones cannot starve newer ones.
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
@@ -292,7 +299,6 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		// The job or its project changed underneath this pass; the next one sees it.
 		if (update!.meta.changes !== 1) continue;
 		free.set(chosen.runner, free.get(chosen.runner)! - 1);
-		fresh.add(job.id);
 	}
 	const undelivered = await db
 		.prepare(
@@ -301,10 +307,10 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		)
 		.bind(owner, connected)
 		.all<{ id: string; runner: string; owner: string; name: string }>();
-	const assign: { runner: string; job: Claimed; fresh: boolean }[] = [];
+	const assign: { runner: string; job: Claimed }[] = [];
 	for (const { id, runner, ...project } of undelivered.results) {
 		const job = await readJob(db, id);
-		if (job) assign.push({ runner, job: { ...job, ...project }, fresh: fresh.has(id) });
+		if (job) assign.push({ runner, job: { ...job, ...project } });
 	}
 	const wake = await db
 		.prepare("SELECT MIN(lease) AS at FROM jobs WHERE actor=? AND state='running' AND lease IS NOT NULL")
@@ -495,11 +501,10 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const result = await db
 		.prepare(
 			`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- VALUES(?,?,?,?,?,?,?,?,?,?,'queued',?,?)`,
+ SELECT ?,id,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled'`,
 		)
 		.bind(
 			id,
-			input.repository,
 			input.workflow,
 			input.target,
 			input.revision,
@@ -510,15 +515,21 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 			input.pinAccount ?? null,
 			now,
 			now,
+			input.repository,
 		)
 		.run();
 	if (result.meta.changes === 1) return { id, created: true };
-	const active = await db
-		.prepare("SELECT id FROM jobs WHERE repository=? AND target=? AND state IN ('queued','running','waiting')")
-		.bind(input.repository, input.target)
-		.first<{ id: string }>();
-	if (!active) throw new JobError("Job changed; try again");
-	return { id: active.id, created: false };
+	const [active, enabled] = await db.batch([
+		db
+			.prepare("SELECT id FROM jobs WHERE repository=? AND target=? AND state IN ('queued','running','waiting')")
+			.bind(input.repository, input.target),
+		// A pause that commits after the request read the project still wins.
+		db.prepare("SELECT 1 FROM github_projects WHERE id=? AND state='enabled'").bind(input.repository),
+	]);
+	if (!enabled!.results.length) throw new JobError("Contributions are paused");
+	const found = active!.results[0] as { id: string } | undefined;
+	if (!found) throw new JobError("Job changed; try again");
+	return { id: found.id, created: false };
 }
 
 export async function readJob(db: D1Database, id: string) {

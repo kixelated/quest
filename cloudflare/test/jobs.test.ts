@@ -94,9 +94,9 @@ describe("job coordination", () => {
 		const id = await job(10, "owner");
 		const slots = Object.fromEntries(runners.map((r) => [r.id, 1]));
 		const passes = await Promise.all([run(slots, 1), run(slots, 1), run(slots, 1)]);
-		// A pass may resend another's undelivered claim, but only one pass claims it.
-		const assigned = passes.flatMap((pass) => pass.assign).filter((a) => a.fresh);
-		expect(assigned).toHaveLength(1);
+		// A pass may resend another's unacknowledged claim, but only one pass claims it.
+		const assigned = passes.flatMap((pass) => pass.assign);
+		expect(new Set(assigned.map((a) => `${a.runner}/${a.job.attempt}`)).size).toBe(1);
 		expect(assigned[0]!.job).toMatchObject({
 			id,
 			attempt: 1,
@@ -118,16 +118,15 @@ describe("job coordination", () => {
 		const machine = await runner("owner", "machine");
 		await connected(machine, [account("main")]);
 		const id = await job(10, "owner");
-		expect((await run({ [machine.id]: 1 }, 1, "owner", false)).assign).toMatchObject([
-			{ job: { id }, fresh: true },
-		]);
-		// The delivery was lost: the next pass sends it again without claiming anew.
-		expect((await run({ [machine.id]: 0 }, 2, "owner", false)).assign).toMatchObject([
-			{ job: { id, attempt: 1 }, fresh: false },
-		]);
+		const next = await job(10, "owner", { target: "issues/1", workflow: "plan" }, 1);
+		expect((await run({ [machine.id]: 1 }, 1, "owner", false)).assign).toMatchObject([{ job: { id } }]);
+		// The delivery was lost, so the runner still reports its slot free. The
+		// assignment holds that slot and is sent again rather than claimed anew.
+		expect((await run({ [machine.id]: 1 }, 2, "owner", false)).assign).toMatchObject([{ job: { id, attempt: 1 } }]);
 		await store.report(db, machine, [account("main")], [{ job: id, attempt: 1 }], false, 3);
 		expect((await run({ [machine.id]: 0 }, 4, "owner", false)).assign).toEqual([]);
 		await store.finish(db, machine, id, 1, { outcome: "completed", summary: "Done", result: undefined }, 5);
+		await store.cancel(db, next, "owner", 5);
 
 		const lost = await job(10, "owner", {}, 6);
 		await run({ [machine.id]: 1 }, 7, "owner", false);
@@ -193,9 +192,11 @@ describe("job coordination", () => {
 		).rejects.toThrow("Pinned runner or account");
 		await expect(job(10, "owner", { target: "x", pinAccount: "main" })).rejects.toThrow("together");
 
-		await project(10, "owner", "paused");
+		// A pause wins over a job queued before it and a request that read the project before it.
 		await job(10, "owner", { target: "issues/3", workflow: "plan" }, 4);
+		await project(10, "owner", "paused");
 		expect((await run({ [linux.id]: 1 }, 5)).assign).toEqual([]);
+		await expect(job(10, "owner", { target: "issues/4", workflow: "plan" }, 6)).rejects.toThrow("paused");
 	});
 
 	it("returns the active job for duplicate requests and allows new work after it ends", async () => {
