@@ -134,16 +134,14 @@ const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? A
  * A connected runner's status: its current accounts and the attempts it is
  * running. Listing an attempt acknowledges its assignment. Says which
  * reported attempts to continue, cancel, or stop because they are no longer
- * this runner's. A connection's first status is complete, since nothing has
- * been assigned over it yet, so running attempts it omits were lost and move
- * now.
+ * this runner's. An acknowledged attempt the status omits was lost, so it
+ * moves now; an unacknowledged one may still be on its way.
  */
 export async function report(
 	db: D1Database,
 	runner: Runner,
 	accounts: AccountReport[],
 	attempts: Attempt[],
-	first: boolean,
 	now: number,
 ) {
 	const reported = JSON.stringify(accounts);
@@ -169,9 +167,9 @@ export async function report(
 			.bind(runner.id, runner.owner, reported),
 		db
 			.prepare(
-				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE ?=1 AND runner=? AND state='running' AND NOT ${listed}`,
+				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE runner=? AND state='running' AND delivered=1 AND NOT ${listed}`,
 			)
-			.bind(now, first ? 1 : 0, runner.id, running),
+			.bind(now, runner.id, running),
 		db
 			.prepare(`UPDATE jobs SET delivered=1 WHERE runner=? AND state='running' AND delivered=0 AND ${listed}`)
 			.bind(runner.id, running),

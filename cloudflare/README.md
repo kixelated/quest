@@ -104,7 +104,7 @@ Runner messages name their attempt and land only while it is current.
 
 When a runner disconnects, its running jobs get a two-minute grace deadline.
 The hub's alarm moves them once it passes, so a returning runner is fenced out.
-A reconnecting runner whose first status omits a job gives it up at once.
+A status that omits an acknowledged job gives it up at once.
 
 An account limit pauses the job with an account decision; kix never switches
 accounts on its own. An answer requeues the job and resumes its session on the

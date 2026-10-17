@@ -131,14 +131,7 @@ export class RunnerHub extends DurableObject<Env> {
 		const now = Date.now();
 		switch (message.type) {
 			case "status": {
-				const attempts = await store.report(
-					db,
-					runner,
-					message.accounts,
-					message.attempts,
-					attachment.slots === null,
-					now,
-				);
+				const attempts = await store.report(db, runner, message.accounts, message.attempts, now);
 				attachment.slots = message.slots;
 				ws.serializeAttachment(attachment);
 				return { attempts };

@@ -43,7 +43,7 @@ function account(id: string, limited = false): store.AccountReport {
 	return { id, provider: "anthropic", kind: "subscription", label: id, limited };
 }
 async function connected(r: store.Runner, accounts: store.AccountReport[]) {
-	await store.report(db, r, accounts, [], true, 0);
+	await store.report(db, r, accounts, [], 0);
 }
 async function job(repository: number, actor: string, extra: Partial<store.NewJob> = {}, now = 0) {
 	return (
@@ -172,7 +172,7 @@ describe("job coordination", () => {
 		// The delivery was lost, so the runner still reports its slot free. The
 		// assignment holds that slot and is sent again rather than claimed anew.
 		expect((await run({ [machine.id]: 1 }, 2, "owner", false)).assign).toMatchObject([{ job: { id, attempt: 1 } }]);
-		await store.report(db, machine, [account("main")], [{ job: id, attempt: 1 }], false, 3);
+		await store.report(db, machine, [account("main")], [{ job: id, attempt: 1 }], 3);
 		expect((await run({ [machine.id]: 0 }, 4, "owner", false)).assign).toEqual([]);
 		await store.finish(db, machine, id, 1, { outcome: "completed", summary: "Done", result: undefined }, 5);
 		await store.cancel(db, next, "owner", 5);
@@ -306,7 +306,7 @@ describe("job coordination", () => {
 		await expect(store.ask(db, old, id, 1, { summary: "?", session: "s", prompt: {} }, late)).rejects.toThrow(
 			"no longer current",
 		);
-		expect(await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], true, late)).toEqual([
+		expect(await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], late)).toEqual([
 			{ job: id, attempt: 1, action: "stop" },
 		]);
 		const done = { outcome: "completed", summary: "Done", result: { pr: 1 } } as const;
@@ -329,17 +329,18 @@ describe("job coordination", () => {
 		await run({}, 1);
 		expect((await state(id)).lease).toBe(1 + GRACE);
 		const listed = [{ job: id, attempt: 1 }];
-		expect(await store.report(db, machine, [account("main")], listed, true, 2)).toEqual([
+		expect(await store.report(db, machine, [account("main")], listed, 2)).toEqual([
 			{ job: id, attempt: 1, action: "continue" },
 		]);
 		await run({ [machine.id]: 0 }, 3);
 		expect(await state(id)).toMatchObject({ state: "running", lease: null });
-		// Later statuses on a connection may race an assignment, so they never requeue.
-		await store.report(db, machine, [account("main")], [], false, 4);
-		expect((await state(id)).state).toBe("running");
-		// A new connection's first status is complete: a restarted runner lost it.
-		await store.report(db, machine, [account("main")], [], true, 5);
+		// A status that omits an acknowledged attempt means the runner lost it.
+		await store.report(db, machine, [account("main")], [], 4);
 		expect((await state(id)).state).toBe("queued");
+		// An unacknowledged assignment may still be on its way, so it stays.
+		await run({ [machine.id]: 1 }, 5, "owner", false);
+		await store.report(db, machine, [account("main")], [], 6);
+		expect(await state(id)).toMatchObject({ state: "running", attempt: 2 });
 	});
 
 	it("pauses on a question, accepts one answer, and resumes the same session where it lives", async () => {
@@ -414,7 +415,7 @@ describe("job coordination", () => {
 		await run({ [machine.id]: 1 }, 3);
 		await store.cancel(db, running, "owner", 4);
 		expect((await run({ [machine.id]: 0 }, 5)).cancel).toEqual([{ job: running, attempt: 1, runner: machine.id }]);
-		expect(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], false, 5)).toEqual([
+		expect(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], 5)).toEqual([
 			{ job: running, attempt: 1, action: "cancel" },
 		]);
 		expect(await store.checkpoint(db, machine, running, 1, "Stopping", null, 6)).toEqual({ cancel: true });
@@ -455,7 +456,7 @@ describe("job coordination", () => {
 		const second = await runner("owner", "second");
 		await connected(first, [account("a"), account("b")]);
 		await connected(second, [account("c")]);
-		await store.report(db, first, [account("b", true)], [], false, 1);
+		await store.report(db, first, [account("b", true)], [], 1);
 		const listed = await store.listRunners(db, "owner", new Set([first.id]));
 		const [one, two] = ["first", "second"].map((name) => listed.find((r) => r.name === name));
 		expect(one).toMatchObject({ name: "first", online: true, accounts: [{ id: "b", rank: 2, limited: 1 }] });
