@@ -34,10 +34,13 @@ with no total cap:
   each chunk's upload. Reads ignore an index row whose object is already gone.
 - Disconnecting a project deletes its jobs' output objects immediately, along
   with the job records it already deletes. R2 cannot join the D1 batch, so
-  write the object before its index row and insert the row only while the job
-  still exists. When that insert fails, delete the object just written.
-  Disconnect deletes each job's `output/<job>/` prefix after its D1 delete
-  commits, so an upload racing it is removed by one side or the other.
+  reserve each chunk first: insert its index row with the text's hash, only
+  while the job exists and the `seq` is unused or holds the same hash. A
+  conflicting chunk is refused before anything reaches R2, so it can never
+  overwrite accepted output. Then write the object and mark the row complete;
+  if the row is gone by then, delete the object just written. Disconnect
+  deletes each job's `output/<job>/` prefix after its D1 delete commits, so an
+  upload racing it is removed by one side or the other.
 - No data migration: kix.quest is not deployed yet
   ([deploy](/quest/m0/kix/deploy.md)), so replace `job_output.text` rather
   than copying existing rows.
