@@ -160,6 +160,10 @@ describe("job coordination", () => {
 		await expect(job(10, "owner", { target: "x", pinRunner: mac.id, pinAccount: "missing" })).rejects.toThrow(
 			"Pinned runner or account",
 		);
+		// An untrusted head can only pin a runner that builds it in a VM.
+		await expect(
+			job(10, "owner", { workflow: "iterate", target: "pulls/9", trusted: false, pinRunner: linux.id }),
+		).rejects.toThrow("Pinned runner or account");
 		await expect(job(10, "owner", { target: "x", pinAccount: "main" })).rejects.toThrow("together");
 
 		await project(10, "owner", "paused");
@@ -271,6 +275,9 @@ describe("job coordination", () => {
 		const input = { summary: "Need a decision", session: "session-1", prompt: { question: "A or B?" } };
 		const question = await store.ask(db, home, id, 1, input, 1);
 		expect(await store.ask(db, home, id, 1, input, 2)).toBe(question);
+		await expect(store.ask(db, home, id, 1, { ...input, prompt: { question: "C?" } }, 2)).rejects.toThrow(
+			"no longer current",
+		);
 		expect(await state(id)).toMatchObject({ state: "waiting", lease: null, session: "session-1" });
 		await expect(store.answer(db, id, "missing", "owner", "A", 3)).rejects.toThrow("no longer open");
 		await Promise.allSettled([

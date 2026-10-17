@@ -16,8 +16,9 @@ type Attachment = { runner: store.Runner; slots: number | null };
  * stays disconnected for the grace period.
  */
 export class RunnerHub extends DurableObject<Env> {
-	// Passes interleave at each D1 await; run them one at a time.
-	#pass: Promise<unknown> = Promise.resolve();
+	// Handlers interleave at each D1 await. Runner messages and dispatch passes
+	// run one at a time, so a pass cannot assign from a status it has outlived.
+	#serial: Promise<unknown> = Promise.resolve();
 
 	async fetch(request: Request) {
 		const runner = JSON.parse(request.headers.get(RUNNER_HEADER)!) as store.Runner;
@@ -31,11 +32,11 @@ export class RunnerHub extends DurableObject<Env> {
 	}
 
 	async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
-		const attachment = ws.deserializeAttachment() as Attachment;
+		const { owner } = (ws.deserializeAttachment() as Attachment).runner;
 		let message: RunnerMessage | undefined;
 		try {
-			message = parse(raw);
-			const reply = await this.#handle(ws, attachment, message);
+			const parsed = (message = parse(raw));
+			const reply = await this.#run(() => this.#handle(ws, ws.deserializeAttachment() as Attachment, parsed));
 			ws.send(JSON.stringify({ type: "reply", id: message.id, ...reply }));
 		} catch (error) {
 			if (!(error instanceof JobError))
@@ -52,8 +53,7 @@ export class RunnerHub extends DurableObject<Env> {
 				}),
 			);
 		}
-		if (message && message.type !== "output" && message.type !== "checkpoint")
-			await this.dispatch(attachment.runner.owner);
+		if (message && message.type !== "output" && message.type !== "checkpoint") await this.dispatch(owner);
 	}
 
 	async webSocketClose(ws: WebSocket, code: number) {
@@ -83,9 +83,13 @@ export class RunnerHub extends DurableObject<Env> {
 	}
 
 	#queue(owner: string, closed?: WebSocket) {
-		const pass = this.#pass.then(() => this.#dispatch(owner, closed));
-		this.#pass = pass.catch(() => {});
-		return pass;
+		return this.#run(() => this.#dispatch(owner, closed));
+	}
+
+	#run<T>(task: () => Promise<T>): Promise<T> {
+		const run = this.#serial.then(task);
+		this.#serial = run.catch(() => {});
+		return run;
 	}
 
 	#connections(closed?: WebSocket) {

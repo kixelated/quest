@@ -363,12 +363,21 @@ export async function ask(
 			.bind(input.summary, input.session, now, job, attempt, runner.id, id),
 	]);
 	if (question!.meta.changes === 1) return id;
-	// A retried request after the first one landed.
+	// An identical retry after the first request landed; anything else is refused.
 	const existing = await db
 		.prepare(
-			"SELECT q.id FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.job=? AND q.attempt=? AND j.attempt=? AND j.runner=?",
+			"SELECT q.id FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.job=? AND q.attempt=? AND q.kind=? AND q.prompt=? AND j.summary=? AND j.session IS COALESCE(?,j.session) AND j.attempt=? AND j.runner=?",
 		)
-		.bind(job, attempt, attempt, runner.id)
+		.bind(
+			job,
+			attempt,
+			input.kind ?? "agent",
+			JSON.stringify(input.prompt),
+			input.summary,
+			input.session,
+			attempt,
+			runner.id,
+		)
 		.first<{ id: string }>();
 	if (!existing) throw new JobError("Attempt is no longer current");
 	return existing.id;
@@ -458,9 +467,15 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 		// Routing needs both pins to match one reported account, or the job never runs.
 		const pinned = await db
 			.prepare(
-				"SELECT 1 FROM runners r WHERE r.id=? AND r.owner=? AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts a WHERE a.runner=r.id AND a.id=?))",
+				"SELECT 1 FROM runners r WHERE r.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1)) AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts a WHERE a.runner=r.id AND a.id=?))",
 			)
-			.bind(input.pinRunner, input.actor, input.pinAccount ?? null, input.pinAccount ?? null)
+			.bind(
+				input.pinRunner,
+				input.actor,
+				input.trusted ? 1 : 0,
+				input.pinAccount ?? null,
+				input.pinAccount ?? null,
+			)
 			.first();
 		if (!pinned) throw new JobError("Pinned runner or account unavailable");
 	} else if (input.pinAccount) throw new JobError("Pin an account together with its runner");
@@ -534,10 +549,10 @@ export async function listJobs(db: D1Database, repository: number) {
 export async function answer(db: D1Database, job: string, question: string, user: string, reply: unknown, now: number) {
 	const open = await db
 		.prepare(
-			"SELECT q.kind,j.actor FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
+			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
 		)
 		.bind(question, job)
-		.first<{ kind: "agent" | "account"; actor: string }>();
+		.first<{ kind: "agent" | "account"; actor: string; trusted: number }>();
 	if (!open) throw new JobError("Question is no longer open");
 	let pin: { runner: string; account: string } | null = null;
 	if (open.kind === "account") {
@@ -547,11 +562,11 @@ export async function answer(db: D1Database, job: string, question: string, user
 			typeof choice.account === "string" &&
 			(await db
 				.prepare(
-					"SELECT 1 FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE a.runner=? AND a.id=? AND r.owner=?",
+					"SELECT 1 FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE a.runner=? AND a.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1))",
 				)
-				.bind(choice.runner, choice.account, open.actor)
+				.bind(choice.runner, choice.account, open.actor, open.trusted)
 				.first());
-		if (!owned) throw new JobError("Choose one of the job owner's accounts");
+		if (!owned) throw new JobError("Choose one of the job owner's accounts that can run it");
 		pin = { runner: choice!.runner as string, account: choice!.account as string };
 	}
 	const answered = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND answeredBy=? AND answeredAt=?)";
