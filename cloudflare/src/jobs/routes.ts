@@ -98,6 +98,11 @@ jobs.get(base, async (c) => {
 
 type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccount">;
 
+/** Whether Git accepts `name` as a branch, per `git check-ref-format`. */
+export function refName(name: string) {
+	return !/[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{|\/\/|(^|\/)\.|\.lock($|\/)|[/.]$|^\/|^@$/.test(name);
+}
+
 /** Resolve a requested workflow and target against current observations. */
 function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan {
 	const commit = state.project.commit;
@@ -112,7 +117,9 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan 
 	if (workflow === "start") {
 		if (typeof target !== "string" || !state.available.includes(target))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
-		return { workflow, target, revision: commit, branch: target.replace(/(\/README)?\.md$/, ""), trusted: true };
+		const branch = target.replace(/(\/README)?\.md$/, "");
+		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");
+		return { workflow, target, revision: commit, branch, trusted: true };
 	}
 	if (workflow === "plan") {
 		if (target === undefined) {

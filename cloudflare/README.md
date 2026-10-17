@@ -90,7 +90,9 @@ Over the socket the runner sends `status` messages: its opaque accounts, the
 attempts it is running, and its free job slots. It also sends `checkpoint`,
 `question`, `output`, and `result` messages. Each gets a `reply` with the same
 `id` (`src/jobs/protocol.ts`). The hub pushes `assign` and `cancel` messages
-whenever jobs or connections change.
+whenever jobs or connections change. A status that lists an assigned attempt
+acknowledges it; the hub resends the assignment until then, and cancelling a
+job whose assignment was never acknowledged stops it at once.
 
 Routing gives a job to the connected runner with a free slot and the owner's
 most preferred usable account. A pin, the job's trust, or a paused session's

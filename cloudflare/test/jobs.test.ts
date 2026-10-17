@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
+import { refName } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
 
@@ -64,9 +65,13 @@ async function job(repository: number, actor: string, extra: Partial<store.NewJo
 async function state(id: string) {
 	return (await store.readJob(db, id))!;
 }
-/** One dispatch pass over connected runners and their free slots. */
-function run(slots: Record<string, number>, now: number, owner = "owner") {
-	return store.dispatch(db, owner, new Map(Object.entries(slots)), now);
+/** One dispatch pass over connected runners and their free slots, whose runners acknowledge what they receive. */
+async function run(slots: Record<string, number>, now: number, owner = "owner", deliver = true) {
+	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now);
+	if (deliver)
+		for (const { job } of pass.assign)
+			await db.prepare("UPDATE jobs SET delivered=1 WHERE id=?").bind(job.id).run();
+	return pass;
 }
 
 beforeEach(async () => {
@@ -89,7 +94,8 @@ describe("job coordination", () => {
 		const id = await job(10, "owner");
 		const slots = Object.fromEntries(runners.map((r) => [r.id, 1]));
 		const passes = await Promise.all([run(slots, 1), run(slots, 1), run(slots, 1)]);
-		const assigned = passes.flatMap((pass) => pass.assign);
+		// A pass may resend another's undelivered claim, but only one pass claims it.
+		const assigned = passes.flatMap((pass) => pass.assign).filter((a) => a.fresh);
 		expect(assigned).toHaveLength(1);
 		expect(assigned[0]!.job).toMatchObject({
 			id,
@@ -106,6 +112,27 @@ describe("job coordination", () => {
 				at: 1,
 			},
 		]);
+	});
+
+	it("resends an assignment until its runner acknowledges it, and cancels one never delivered", async () => {
+		const machine = await runner("owner", "machine");
+		await connected(machine, [account("main")]);
+		const id = await job(10, "owner");
+		expect((await run({ [machine.id]: 1 }, 1, "owner", false)).assign).toMatchObject([
+			{ job: { id }, fresh: true },
+		]);
+		// The delivery was lost: the next pass sends it again without claiming anew.
+		expect((await run({ [machine.id]: 0 }, 2, "owner", false)).assign).toMatchObject([
+			{ job: { id, attempt: 1 }, fresh: false },
+		]);
+		await store.report(db, machine, [account("main")], [{ job: id, attempt: 1 }], false, 3);
+		expect((await run({ [machine.id]: 0 }, 4, "owner", false)).assign).toEqual([]);
+		await store.finish(db, machine, id, 1, { outcome: "completed", summary: "Done", result: undefined }, 5);
+
+		const lost = await job(10, "owner", {}, 6);
+		await run({ [machine.id]: 1 }, 7, "owner", false);
+		await store.cancel(db, lost, "owner", 8);
+		expect(await state(lost)).toMatchObject({ state: "cancelled" });
 	});
 
 	it("reaches a routable job behind many older jobs that cannot route", async () => {
@@ -459,6 +486,13 @@ describe("runner connections", () => {
 			type: "assign",
 			job: { id, attempt: 1, revision: commit, branch: "quest/first", owner: "upstream", account: "main" },
 		});
+		// Listing the attempt acknowledges the assignment, so the hub stops resending it.
+		live.send(status(20, "main", [{ job: id, attempt: 1 }], 0));
+		expect(await live.next()).toEqual({
+			type: "reply",
+			id: 20,
+			attempts: [{ job: id, attempt: 1, action: "continue" }],
+		});
 		live.send({ id: 2, type: "checkpoint", job: id, attempt: 1, summary: "Halfway" });
 		expect(await live.next()).toEqual({ type: "reply", id: 2, cancel: false });
 		live.send({ id: 3, type: "output", job: id, attempt: 1, text: "raw log" });
@@ -515,6 +549,22 @@ describe("runner connections", () => {
 		await db.prepare("UPDATE jobs SET lease=1 WHERE id=?").bind(id).run();
 		expect(await runDurableObjectAlarm(hub())).toBe(true);
 		expect(await other.next()).toMatchObject({ type: "assign", job: { id, attempt: 2, runner: second.id } });
+	});
+});
+
+describe("branch names", () => {
+	it("accepts what git check-ref-format accepts", () => {
+		for (const name of ["quest/m0/kix/jobs", "quest/v1.2/x", "plan/issue-4"]) expect(refName(name)).toBe(true);
+		for (const name of [
+			"quest/fix bug",
+			"quest/a..b",
+			"quest/.hidden",
+			"quest/x.lock",
+			"quest/a:b",
+			"quest/x/",
+			"@",
+		])
+			expect(refName(name)).toBe(false);
 	});
 });
 

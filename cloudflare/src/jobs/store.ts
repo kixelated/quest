@@ -132,9 +132,11 @@ const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? A
 
 /**
  * A connected runner's status: its current accounts and the attempts it is
- * running. Says which reported attempts to continue, cancel, or stop
- * because they are no longer this runner's. A connection's first status is complete, since nothing has been
- * assigned over it yet, so running attempts it omits were lost and move now.
+ * running. Listing an attempt acknowledges its assignment. Says which
+ * reported attempts to continue, cancel, or stop because they are no longer
+ * this runner's. A connection's first status is complete, since nothing has
+ * been assigned over it yet, so running attempts it omits were lost and move
+ * now.
  */
 export async function report(
 	db: D1Database,
@@ -170,6 +172,9 @@ export async function report(
 				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE ?=1 AND runner=? AND state='running' AND NOT ${listed}`,
 			)
 			.bind(now, first ? 1 : 0, runner.id, running),
+		db
+			.prepare(`UPDATE jobs SET delivered=1 WHERE runner=? AND state='running' AND delivered=0 AND ${listed}`)
+			.bind(runner.id, running),
 		db
 			.prepare(
 				"SELECT id,attempt,runner,state,cancel FROM jobs WHERE id IN (SELECT json_extract(value,'$.job') FROM json_each(?))",
@@ -211,7 +216,9 @@ export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner
  * Reconcile an owner's jobs with their connected runners and free slots.
  * A running job has a lease exactly while its runner is disconnected; an
  * expired lease moves the job. Then queued work is assigned. Returns what to
- * send each runner and when to run again.
+ * send each runner and when to run again. Every assignment its runner has
+ * not acknowledged is sent again, since a delivery can be lost after the
+ * claim commits; `fresh` marks those claimed in this pass.
  */
 export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
 	const connected = JSON.stringify([...slots.keys()]);
@@ -259,7 +266,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 	const free = new Map(slots);
 	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
 	const accounts = offers!.results as Row[];
-	const assign: { runner: string; job: Claimed }[] = [];
+	const fresh = new Set<string>();
 	// Every queued job is considered, so unroutable older ones cannot starve newer ones.
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
@@ -271,8 +278,8 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		const [update] = await db.batch([
 			db
 				.prepare(
-					`UPDATE jobs SET state='running',attempt=attempt+1,runner=?,account=?,session=CASE WHEN runner=? AND account=? THEN session END,lease=NULL,updatedAt=?
- WHERE id=? AND attempt=? AND cancel=0 AND state='queued'`,
+					`UPDATE jobs SET state='running',attempt=attempt+1,runner=?,account=?,session=CASE WHEN runner=? AND account=? THEN session END,lease=NULL,delivered=0,updatedAt=?
+ WHERE id=? AND attempt=? AND cancel=0 AND state='queued' AND EXISTS(SELECT 1 FROM github_projects WHERE id=jobs.repository AND state='enabled')`,
 				)
 				.bind(chosen.runner, chosen.account, chosen.runner, chosen.account, now, job.id, job.attempt),
 			// changes() is the update above, so only the pass that moved the job records it.
@@ -282,17 +289,22 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 				)
 				.bind(now, job.id, job.attempt + 1, chosen.runner),
 		]);
-		// The job changed underneath this pass; the next one sees it.
+		// The job or its project changed underneath this pass; the next one sees it.
 		if (update!.meta.changes !== 1) continue;
 		free.set(chosen.runner, free.get(chosen.runner)! - 1);
-		const [claimed, project] = await Promise.all([
-			readJob(db, job.id),
-			db
-				.prepare("SELECT owner,name FROM github_projects WHERE id=?")
-				.bind(job.repository)
-				.first<{ owner: string; name: string }>(),
-		]);
-		if (claimed && project) assign.push({ runner: chosen.runner, job: { ...claimed, ...project } });
+		fresh.add(job.id);
+	}
+	const undelivered = await db
+		.prepare(
+			`SELECT j.id,j.runner,p.owner,p.name FROM jobs j JOIN github_projects p ON p.id=j.repository
+ WHERE j.actor=? AND j.state='running' AND j.delivered=0 AND j.cancel=0 AND j.runner IN (SELECT value FROM json_each(?)) ORDER BY j.createdAt,j.id`,
+		)
+		.bind(owner, connected)
+		.all<{ id: string; runner: string; owner: string; name: string }>();
+	const assign: { runner: string; job: Claimed; fresh: boolean }[] = [];
+	for (const { id, runner, ...project } of undelivered.results) {
+		const job = await readJob(db, id);
+		if (job) assign.push({ runner, job: { ...job, ...project }, fresh: fresh.has(id) });
 	}
 	const wake = await db
 		.prepare("SELECT MIN(lease) AS at FROM jobs WHERE actor=? AND state='running' AND lease IS NOT NULL")
@@ -602,8 +614,8 @@ export async function answer(db: D1Database, job: string, question: string, user
 }
 
 /**
- * Stop a job. Queued and waiting jobs stop now; a running attempt is asked to
- * cancel and reports its partial result.
+ * Stop a job. Queued, waiting, and never-acknowledged jobs stop now; a
+ * running attempt is asked to cancel and reports its partial result.
  */
 export async function cancel(db: D1Database, job: string, user: string, now: number) {
 	const [, stopped, asked] = await db.batch([
@@ -614,7 +626,7 @@ export async function cancel(db: D1Database, job: string, user: string, now: num
 			.bind(user, now, job),
 		db
 			.prepare(
-				"UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE id=? AND state IN ('queued','waiting')",
+				"UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE id=? AND (state IN ('queued','waiting') OR (state='running' AND delivered=0))",
 			)
 			.bind(now, job),
 		db.prepare("UPDATE jobs SET cancel=1,updatedAt=? WHERE id=? AND state='running'").bind(now, job),

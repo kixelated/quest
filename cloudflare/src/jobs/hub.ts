@@ -111,11 +111,14 @@ export class RunnerHub extends DurableObject<Env> {
 			if (reported !== null) slots.set(runner, reported);
 		}
 		const { assign, cancel, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
-		for (const { runner, job } of assign) {
+		for (const { runner, job, fresh } of assign) {
 			const ws = connections.get(runner);
 			if (!ws) continue;
-			const attachment = ws.deserializeAttachment() as Attachment;
-			ws.serializeAttachment({ ...attachment, slots: Math.max(0, (attachment.slots ?? 0) - 1) });
+			// A resent assignment already took its slot.
+			if (fresh) {
+				const attachment = ws.deserializeAttachment() as Attachment;
+				ws.serializeAttachment({ ...attachment, slots: Math.max(0, (attachment.slots ?? 0) - 1) });
+			}
 			ws.send(JSON.stringify({ type: "assign", job }));
 		}
 		for (const { runner, job, attempt } of cancel)

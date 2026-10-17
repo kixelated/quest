@@ -46,6 +46,9 @@ CREATE TABLE jobs (
   session TEXT,
   -- While its runner is disconnected, when the running attempt moves.
   lease INTEGER,
+  -- Whether the runner has listed the current attempt in a status; until
+  -- then the hub resends the assignment.
+  delivered INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
   cancel INTEGER NOT NULL DEFAULT 0 CHECK(cancel IN (0,1)),
   summary TEXT,
   result TEXT,
