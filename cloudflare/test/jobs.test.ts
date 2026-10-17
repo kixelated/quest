@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
-import { refName } from "../src/jobs/routes";
+import { refName, resume } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
 
@@ -515,6 +515,21 @@ describe("runner connections", () => {
 		expect(await store.readOutput(db, id)).toMatchObject([{ attempt: 1, text: "raw log" }]);
 	});
 
+	it("assigns queued work to idle runners when its project resumes", async () => {
+		const machine = await runner("owner", "machine");
+		const live = await connect(machine.token);
+		const id = await job(10, "owner", {}, Date.now());
+		await project(10, "owner", "paused");
+		live.send(status(1, "main"));
+		expect(await live.next()).toEqual({ type: "reply", id: 1, attempts: [] });
+		await hub().dispatch("owner");
+		expect(await state(id)).toMatchObject({ state: "queued" });
+		// Resuming sends no runner event, so the resume itself dispatches.
+		await project(10, "owner");
+		await resume(env, 10);
+		expect(await live.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
+	});
+
 	it("keeps a job across a replaced connection and reassigns it after a disconnect", async () => {
 		const first = await runner("owner", "first");
 		const second = await runner("owner", "second");
@@ -557,7 +572,8 @@ describe("runner connections", () => {
 
 describe("branch names", () => {
 	it("accepts what git check-ref-format accepts", () => {
-		for (const name of ["quest/m0/kix/jobs", "quest/v1.2/x", "plan/issue-4"]) expect(refName(name)).toBe(true);
+		for (const name of ["quest/m0/kix/jobs", "quest/v1.2/x", "plan/issue-4", "quest/fix|parser"])
+			expect(refName(name)).toBe(true);
 		for (const name of [
 			"quest/fix bug",
 			"quest/a..b",

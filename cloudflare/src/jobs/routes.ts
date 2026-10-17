@@ -23,6 +23,14 @@ function hub(env: Env, owner: string) {
 	return env.RUNNERS.get(env.RUNNERS.idFromName(owner));
 }
 
+/** Dispatch for everyone with queued work on a project that resumed, since no runner event may follow. */
+export async function resume(env: Env, repository: number) {
+	const { results } = await env.DB.prepare("SELECT DISTINCT actor FROM jobs WHERE repository=? AND state='queued'")
+		.bind(repository)
+		.all<{ actor: string }>();
+	await Promise.all(results.map(({ actor }) => hub(env, actor).dispatch(actor)));
+}
+
 // A runner authenticates with the token its owner registered it with, then
 // holds one live connection to its owner's hub. Runner requests carry no
 // cookies, so they need no origin check.

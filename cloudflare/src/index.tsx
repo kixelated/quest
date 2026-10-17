@@ -12,7 +12,7 @@ import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
-import { jobs } from "./jobs/routes";
+import { jobs, resume } from "./jobs/routes";
 import { JobError } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 
@@ -162,6 +162,7 @@ app.post("/projects/github/:owner/:repository", async (c) => {
 			session.user.id,
 			state,
 		);
+		if (state === "enabled") await resume(c.env, Number(id));
 		return c.redirect(
 			state === "disconnected" ? "/projects" : projectURL(c.req.param("owner"), c.req.param("repository")),
 			303,
