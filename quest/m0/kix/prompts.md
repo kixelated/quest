@@ -39,7 +39,7 @@ or reconnecting preserves the current question and submitted answers.
 - Reuse the established visual identity and existing components where they
   help. Maps, status grids, and configuration screens are not the primary
   signed-in experience. Preserve keyboard and accessible form behavior.
-
-## Required
-
-- [Job coordination](/quest/m0/kix/jobs.md) - durable questions and authorized answers
+- Build on the job routes under `/projects/github/<owner>/<repo>/jobs`:
+  create, list, answer, cancel, and raw output, each rechecking maintainer
+  authority. A job waiting on an `account` question takes a
+  `{ runner, account }` answer; a missing `flake.nix` returns `bootstrap: true`.

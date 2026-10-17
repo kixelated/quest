@@ -75,8 +75,9 @@ operator-paid-hosting decisions:
   pause stops new work. An explicit spawn decision can prioritize ready work
   without introducing another approval flag per quest.
 - **Keep useful infrastructure.** Retain Workers/Hono and D1 for the web
-  service. Durable database claims and HTTPS streams replace MoQ locks and
-  logs.
+  service. Durable database claims and live WebSocket connections to a
+  per-owner Durable Object (decided 2026-10-16 on kixelated/quest#135)
+  replace MoQ locks and logs.
 - **Not exclusive.** The web UI is one interface, not the only one. Every
   skill keeps working from a user's own agent (Claude Code, Codex, ...)
   without kix. The two coexist through GitHub: kix sees a local agent's
@@ -90,7 +91,6 @@ operator-paid-hosting decisions:
 
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
-- [Job coordination](/quest/m0/kix/jobs.md) - durable claims, routing to online runners, reassignment, and HTTPS progress
 - [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode

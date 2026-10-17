@@ -30,9 +30,18 @@ interface Repository {
 	default_branch: string;
 	license?: { spdx_id: string; name: string } | null;
 }
-export class GitHubError extends Error {}
+export class GitHubError extends Error {
+	constructor(
+		message: string,
+		readonly status?: number,
+	) {
+		super(message);
+	}
+}
 export type ContributionState = "enabled" | "paused";
 export type Enrollment = GitHubRepository & { state: ContributionState };
+/** A running job attempt whose project was disconnected, which its runner must stop. */
+export type Stopped = { actor: string; runner: string; job: string; attempt: number };
 export type ProjectPreview = {
 	repository: GitHubRepository;
 	branch: string;
@@ -107,7 +116,7 @@ export class GitHubService {
 			body: body === undefined ? undefined : JSON.stringify(body),
 		});
 		// Never include provider response bodies, request headers, or secrets in errors.
-		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`);
+		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`, response.status);
 		return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 	}
 
@@ -482,12 +491,42 @@ export class GitHubService {
 		);
 	}
 
+	/**
+	 * What a new job may start from: `resolve` picks it from complete
+	 * observations, then this checks whether its revision has a flake for the
+	 * runner's devShell.
+	 */
+	jobSource<T extends { revision: string }>(
+		repo: GitHubRepository,
+		userId: string,
+		resolve: (state: ProjectState) => T,
+	) {
+		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
+			this.#public(current);
+			const enrolled = await this.#state(repo, installation);
+			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
+			const state = await this.#observations(repo, installation);
+			if (!state?.complete) throw new GitHubError("Refresh project activity before starting work");
+			// Check the revision the job will run, such as a pull request's head.
+			const job = resolve(state);
+			let flake = true;
+			try {
+				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
+			} catch (error) {
+				if (!(error instanceof GitHubError) || error.status !== 404) throw error;
+				flake = false;
+			}
+			return { job, enabled: enrolled === "enabled", flake };
+		});
+	}
+
 	previewProject(repo: GitHubRepository, userId: string) {
 		return this.#authorized(repo, userId, { contents: "read" }, (token, current, installation) =>
 			this.#preview(token, repo, current, installation),
 		);
 	}
 
+	/** Change a project's contribution state, returning the running job attempts a disconnect removed. */
 	setContributions(repo: GitHubRepository, userId: string, state: ContributionState | "disconnected") {
 		if (!["enabled", "paused", "disconnected"].includes(state)) throw new GitHubError("Invalid contribution state");
 		return this.#authorized(
@@ -515,8 +554,16 @@ export class GitHubService {
 				// Recheck the local revocation gate after potentially long content reads.
 				await this.#gate(installation);
 				if (state === "disconnected") {
-					await this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id).run();
-				} else if (state === "paused") {
+					// Jobs go with the project, so read the running attempts in the same transaction.
+					const [running] = await this.#env.DB.batch<Stopped>([
+						this.#env.DB.prepare(
+							"SELECT actor,runner,id AS job,attempt FROM jobs WHERE repository=? AND state='running'",
+						).bind(repo.id),
+						this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id),
+					]);
+					return running!.results;
+				}
+				if (state === "paused") {
 					await this.#env.DB.prepare("UPDATE github_projects SET state='paused',updatedAt=? WHERE id=?")
 						.bind(Date.now(), repo.id)
 						.run();
@@ -534,6 +581,7 @@ export class GitHubService {
 						).bind(repo.id, repo.owner, repo.name, installation, userId, Date.now()),
 					]);
 				}
+				return [];
 			},
 			state !== "enabled",
 		);

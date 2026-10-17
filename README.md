@@ -57,8 +57,8 @@ on it, so the quests that required it can become ready. The finished plan stays
 in Git history, beside the code that completed it.
 
 Work is taken through a live runner lock or an open change on the forge.
-Quest on Cloudflare uses MoQ announcements to lock active work; crashed
-sessions clear their announcements automatically. On GitHub, a pushed quest
+kix.quest records each active job in its database and reassigns a job whose
+runner goes offline. On GitHub, a pushed quest
 branch claims the work. These states stay out of the plan file.
 
 ## Try it
