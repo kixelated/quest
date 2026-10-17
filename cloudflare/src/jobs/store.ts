@@ -363,7 +363,7 @@ export async function ask(
 	now: number,
 ) {
 	const id = crypto.randomUUID();
-	const [question] = await db.batch([
+	const [question, , update] = await db.batch([
 		db
 			.prepare(
 				`INSERT INTO job_questions(id,job,attempt,kind,prompt,askedAt) SELECT ?,?,?,?,?,? WHERE ${fence} ON CONFLICT(job,attempt) DO NOTHING`,
@@ -376,15 +376,16 @@ export async function ask(
 			.bind(job, attempt, input.summary, now, job, attempt, runner.id),
 		db
 			.prepare(
-				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'waiting' END,summary=?,session=COALESCE(?,session),lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?)",
+				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'waiting' END,summary=?,session=COALESCE(?,session),lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?) RETURNING cancel",
 			)
 			.bind(input.summary, input.session, now, job, attempt, runner.id, id),
 	]);
-	if (question!.meta.changes === 1) return id;
+	if (question!.meta.changes === 1)
+		return { question: id, cancel: !!(update!.results[0] as { cancel: number }).cancel };
 	// An identical retry after the first request landed; anything else is refused.
 	const existing = await db
 		.prepare(
-			"SELECT q.id FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.job=? AND q.attempt=? AND q.kind=? AND q.prompt=? AND j.summary=? AND j.session IS COALESCE(?,j.session) AND j.attempt=? AND j.runner=?",
+			"SELECT q.id,j.cancel FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.job=? AND q.attempt=? AND q.kind=? AND q.prompt=? AND j.summary=? AND j.session IS COALESCE(?,j.session) AND j.attempt=? AND j.runner=?",
 		)
 		.bind(
 			job,
@@ -396,9 +397,9 @@ export async function ask(
 			attempt,
 			runner.id,
 		)
-		.first<{ id: string }>();
+		.first<{ id: string; cancel: number }>();
 	if (!existing) throw new JobError("Attempt is no longer current");
-	return existing.id;
+	return { question: existing.id, cancel: !!existing.cancel };
 }
 
 /** Append raw agent output from the current attempt, in any state. */

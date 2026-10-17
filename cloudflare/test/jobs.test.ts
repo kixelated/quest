@@ -301,8 +301,8 @@ describe("job coordination", () => {
 		const id = await job(10, "owner");
 		await run({ [home.id]: 1 }, 0);
 		const input = { summary: "Need a decision", session: "session-1", prompt: { question: "A or B?" } };
-		const question = await store.ask(db, home, id, 1, input, 1);
-		expect(await store.ask(db, home, id, 1, input, 2)).toBe(question);
+		const { question } = await store.ask(db, home, id, 1, input, 1);
+		expect(await store.ask(db, home, id, 1, input, 2)).toEqual({ question, cancel: false });
 		await expect(store.ask(db, home, id, 1, { ...input, prompt: { question: "C?" } }, 2)).rejects.toThrow(
 			"no longer current",
 		);
@@ -377,7 +377,9 @@ describe("job coordination", () => {
 		const asking = await job(10, "owner", {}, 11);
 		await run({ [machine.id]: 1 }, 11);
 		await store.cancel(db, asking, "owner", 12);
-		await store.ask(db, machine, asking, 1, { summary: "Which?", session: "s", prompt: {} }, 13);
+		// The reply tells the runner to stop, since no pass pushes cancellation for a stopped job.
+		const asked = await store.ask(db, machine, asking, 1, { summary: "Which?", session: "s", prompt: {} }, 13);
+		expect(asked).toMatchObject({ cancel: true });
 		expect(await state(asking)).toMatchObject({ state: "cancelled" });
 		const finishing = await job(10, "owner", {}, 14);
 		await run({ [machine.id]: 1 }, 14);
@@ -729,7 +731,7 @@ describe("job routes", () => {
 		};
 		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
 		await store.output(db, machine, id, 1, "secret transcript", Date.now());
-		const question = await store.ask(
+		const { question } = await store.ask(
 			db,
 			machine,
 			id,

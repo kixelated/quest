@@ -63,7 +63,7 @@ replacing the hosted Agent SDK runtime:
   free slots) when connecting and whenever they change; the first one on a
   connection must list every attempt still running. Take `assign` and
   `cancel` pushes, and stop any attempt the hub says is no longer this
-  runner's. Acknowledge an `assign` by sending a status that lists it; the
+  runner's or whose `checkpoint` or `question` reply says `cancel`. Acknowledge an `assign` by sending a status that lists it; the
   hub resends it until then, so treat a repeated assignment as one. Reconnect with backoff; running jobs move after two minutes
   away. Each account's opaque ID must stay stable across restarts so its
   preference rank and paused sessions follow it. A CLI sign-in flow and a
