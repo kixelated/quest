@@ -24,11 +24,14 @@ with no total cap:
   tiny chunks cannot multiply rows and objects before the byte cap is reached.
   Once either is reached, refuse further chunks with `truncated`, record the
   truncation once so the disclosure shows it, and never fail the job.
-- Keep a compact per-attempt record (bytes and chunks accepted, highest `seq`,
+- Make `seq` contiguous per attempt, starting at 0: the service accepts only
+  the next `seq`, or an idempotent retry of one whose row remains. The runner
+  protocol is unpublished and the runner sends chunks in order, so this
+  replaces today's acceptance of any unused `seq`.
+- Keep a compact per-attempt record (bytes and chunks accepted, next `seq`,
   truncated) that outlives the expiring index rows while the attempt can still
-  send output. Expiry then cannot give capacity back, and a replayed `seq` at
-  or below the highest accepted one is only accepted as an idempotent retry
-  while its row remains, and refused after that.
+  send output. Expiry then cannot give capacity back, and a replay of an
+  expired `seq` is refused rather than reclaimed.
 - Retention: a bucket lifecycle rule deletes `output/` objects 30 days after
   upload, and a daily Worker cron deletes their index rows. The clock runs from
   each chunk's upload. Reads ignore an index row whose object is already gone.
@@ -39,8 +42,10 @@ with no total cap:
   conflicting chunk is refused before anything reaches R2, so it can never
   overwrite accepted output. Then write the object and mark the row complete;
   if the row is gone by then, delete the object just written. Disconnect
-  deletes each job's `output/<job>/` prefix after its D1 delete commits, so an
-  upload racing it is removed by one side or the other.
+  records a cleanup row per job in the same D1 batch that deletes the
+  project, then deletes each `output/<job>/` prefix and its cleanup row. The
+  daily cron retries any cleanup row left by a crash or failed R2 call, so an
+  upload racing a disconnect is removed by one side or the other.
 - No data migration: kix.quest is not deployed yet
   ([deploy](/quest/m0/kix/deploy.md)), so replace `job_output.text` rather
   than copying existing rows.
