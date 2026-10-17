@@ -37,8 +37,9 @@ replacing the hosted Agent SDK runtime:
   steps. The runner sends the summary and a work-in-progress bundle; the
   service publishes it to the job's fenced branch, so another runner can
   continue after reassignment. Runners never hold GitHub App credentials.
-- Raw agent output is uploaded for retention behind the maintainer-only
-  disclosure; it is never streamed to the UI by default.
+- Raw agent output is uploaded for [retention](/quest/m0/kix/output.md)
+  behind the maintainer-only disclosure; it is never streamed to the UI by
+  default.
 - A job that hits an account limit pauses with a decision to switch
   accounts. The runner never rotates accounts automatically.
 - Use the existing guide and skills as workflow sources. Explicitly load
