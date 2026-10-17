@@ -502,6 +502,10 @@ describe("runner connections", () => {
 		});
 		live.send({ id: 2, type: "checkpoint", job: id, attempt: 1, summary: "Halfway" });
 		expect(await live.next()).toEqual({ type: "reply", id: 2, cancel: false });
+		// A retried checkpoint is recorded once.
+		live.send({ id: 2, type: "checkpoint", job: id, attempt: 1, summary: "Halfway" });
+		expect(await live.next()).toEqual({ type: "reply", id: 2, cancel: false });
+		expect((await state(id)).events.filter((e) => e.kind === "summary")).toHaveLength(1);
 		live.send({ id: 3, type: "output", job: id, attempt: 1, seq: 0, text: "raw log" });
 		expect(await live.next()).toEqual({ type: "reply", id: 3 });
 		// A retried chunk lands once; another chunk cannot reuse its number.

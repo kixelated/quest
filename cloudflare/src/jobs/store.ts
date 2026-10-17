@@ -332,11 +332,13 @@ export async function checkpoint(
 	now: number,
 ) {
 	const [, update] = await db.batch([
+		// A retried checkpoint repeats the job's latest event, which it does not record again.
 		db
 			.prepare(
-				`INSERT INTO job_events(job,attempt,kind,body,at) SELECT ?,?,'summary',json_quote(?),? WHERE ${fence}`,
+				`INSERT INTO job_events(job,attempt,kind,body,at) SELECT ?,?,'summary',json_quote(?),? WHERE ${fence}
+ AND NOT EXISTS(SELECT 1 FROM job_events WHERE rowid=(SELECT MAX(rowid) FROM job_events WHERE job=?) AND attempt=? AND kind='summary' AND body=json_quote(?))`,
 			)
-			.bind(job, attempt, summary, now, job, attempt, runner.id),
+			.bind(job, attempt, summary, now, job, attempt, runner.id, job, attempt, summary),
 		db
 			.prepare(
 				"UPDATE jobs SET summary=?,session=COALESCE(?,session),updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' RETURNING cancel",
