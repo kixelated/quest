@@ -41,7 +41,9 @@ with no total cap:
   while the job exists and the `seq` is unused or holds the same hash. A
   conflicting chunk is refused before anything reaches R2, so it can never
   overwrite accepted output. Then write the object and mark the row complete;
-  if the row is gone by then, delete the object just written. Disconnect
+  if the row is gone by then, delete the object just written. A retry that
+  matches a completed row succeeds without writing again, so retries never
+  restart an object's 30-day lifecycle. Disconnect
   records a cleanup row per job in the same D1 batch that deletes the
   project, then deletes each `output/<job>/` prefix and its cleanup row. The
   daily cron retries any cleanup row left by a crash or failed R2 call, so an
