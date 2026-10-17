@@ -12,7 +12,7 @@ import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
-import { jobs, resume } from "./jobs/routes";
+import { jobs, resume, stop } from "./jobs/routes";
 import { JobError } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 
@@ -157,12 +157,13 @@ app.post("/projects/github/:owner/:repository", async (c) => {
 	)
 		return c.json({ error: "Invalid project choice" }, 400);
 	try {
-		await new GitHubService(c.env).setContributions(
+		const stopped = await new GitHubService(c.env).setContributions(
 			{ id: Number(id), owner: c.req.param("owner"), name: c.req.param("repository") },
 			session.user.id,
 			state,
 		);
 		if (state === "enabled") await resume(c.env, Number(id));
+		await stop(c.env, stopped);
 		return c.redirect(
 			state === "disconnected" ? "/projects" : projectURL(c.req.param("owner"), c.req.param("repository")),
 			303,

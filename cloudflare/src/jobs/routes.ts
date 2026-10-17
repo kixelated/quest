@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
-import { GitHubError, GitHubService } from "../github/service";
+import { GitHubError, GitHubService, type Stopped } from "../github/service";
 import type { ProjectState, Pull } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import { data, id, text } from "./protocol";
@@ -29,6 +29,13 @@ export async function resume(env: Env, repository: number) {
 		.bind(repository)
 		.all<{ actor: string }>();
 	await Promise.all(results.map(({ actor }) => hub(env, actor).dispatch(actor)));
+}
+
+/** Stop the running attempts of a disconnected project, whose job records are already gone. */
+export async function stop(env: Env, attempts: Stopped[]) {
+	const actors = new Map<string, Stopped[]>();
+	for (const a of attempts) actors.set(a.actor, [...(actors.get(a.actor) ?? []), a]);
+	await Promise.all([...actors].map(([actor, list]) => hub(env, actor).stop(list)));
 }
 
 // A runner authenticates with the token its owner registered it with, then

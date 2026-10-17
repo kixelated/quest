@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
+import { parse } from "../src/jobs/protocol";
 import { refName, resume } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
@@ -86,6 +87,54 @@ beforeEach(async () => {
 	await project(10, "owner");
 });
 afterEach(() => vi.restoreAllMocks());
+
+const sockets: WebSocket[] = [];
+afterEach(() => {
+	for (const ws of sockets.splice(0)) ws.close();
+});
+
+function request(token: string | null, upgrade = true) {
+	return app.request(
+		`${origin}/api/runner/connect`,
+		{
+			headers: {
+				...(token ? { Authorization: `Bearer ${token}` } : {}),
+				...(upgrade ? { Upgrade: "websocket" } : {}),
+			},
+		},
+		testEnv,
+	);
+}
+async function connect(token: string) {
+	const response = await request(token);
+	expect(response.status).toBe(101);
+	const ws = response.webSocket!;
+	ws.accept();
+	sockets.push(ws);
+	const inbox: unknown[] = [];
+	const waiting: ((message: unknown) => void)[] = [];
+	ws.addEventListener("message", (event) => {
+		const message = JSON.parse(event.data as string);
+		const next = waiting.shift();
+		if (next) next(message);
+		else inbox.push(message);
+	});
+	const closed = new Promise<number>((resolve) => ws.addEventListener("close", (event) => resolve(event.code)));
+	return {
+		ws,
+		closed,
+		send: (message: unknown) => ws.send(JSON.stringify(message)),
+		next: (): Promise<any> =>
+			inbox.length ? Promise.resolve(inbox.shift()) : new Promise((resolve) => waiting.push(resolve)),
+	};
+}
+const status = (id: number, name: string, attempts: store.Attempt[] = [], slots = 1) => ({
+	id,
+	type: "status",
+	accounts: [account(name)],
+	attempts,
+	slots,
+});
 
 describe("job coordination", () => {
 	it("assigns a job exactly once across racing dispatch passes and records the placement", async () => {
@@ -422,54 +471,6 @@ describe("job coordination", () => {
 
 describe("runner connections", () => {
 	const hub = () => env.RUNNERS.get(env.RUNNERS.idFromName("owner"));
-	const sockets: WebSocket[] = [];
-	afterEach(() => {
-		for (const ws of sockets.splice(0)) ws.close();
-	});
-
-	function request(token: string | null, upgrade = true) {
-		return app.request(
-			`${origin}/api/runner/connect`,
-			{
-				headers: {
-					...(token ? { Authorization: `Bearer ${token}` } : {}),
-					...(upgrade ? { Upgrade: "websocket" } : {}),
-				},
-			},
-			testEnv,
-		);
-	}
-	async function connect(token: string) {
-		const response = await request(token);
-		expect(response.status).toBe(101);
-		const ws = response.webSocket!;
-		ws.accept();
-		sockets.push(ws);
-		const inbox: unknown[] = [];
-		const waiting: ((message: unknown) => void)[] = [];
-		ws.addEventListener("message", (event) => {
-			const message = JSON.parse(event.data as string);
-			const next = waiting.shift();
-			if (next) next(message);
-			else inbox.push(message);
-		});
-		const closed = new Promise<number>((resolve) => ws.addEventListener("close", (event) => resolve(event.code)));
-		return {
-			ws,
-			closed,
-			send: (message: unknown) => ws.send(JSON.stringify(message)),
-			next: (): Promise<any> =>
-				inbox.length ? Promise.resolve(inbox.shift()) : new Promise((resolve) => waiting.push(resolve)),
-		};
-	}
-	const status = (id: number, name: string, attempts: store.Attempt[] = [], slots = 1) => ({
-		id,
-		type: "status",
-		accounts: [account(name)],
-		attempts,
-		slots,
-	});
-
 	it("requires a registered runner token and a WebSocket", async () => {
 		const machine = await runner("owner", "machine");
 		expect((await request(null)).status).toBe(401);
@@ -567,6 +568,15 @@ describe("runner connections", () => {
 		await db.prepare("UPDATE jobs SET lease=1 WHERE id=?").bind(id).run();
 		expect(await runDurableObjectAlarm(hub())).toBe(true);
 		expect(await other.next()).toMatchObject({ type: "assign", job: { id, attempt: 2, runner: second.id } });
+	});
+});
+
+describe("runner messages", () => {
+	it("limits output chunks by their UTF-8 size", () => {
+		const output = (text: string) => JSON.stringify({ id: 1, type: "output", job: "j", attempt: 1, text });
+		expect(parse(output("a".repeat(1024 * 1024)))).toMatchObject({ type: "output" });
+		// Fewer than 1 Mi code units, but three bytes each.
+		expect(() => parse(output("界".repeat(400_000)))).toThrow("at most 1 MiB");
 	});
 });
 
@@ -682,6 +692,30 @@ describe("job routes", () => {
 			testEnv,
 		);
 	}
+
+	it("stops a disconnected project's running jobs over their runners' connections", async () => {
+		const machine = await runner(maintainer, "machine");
+		const live = await connect(machine.token);
+		live.send(status(1, "main"));
+		await live.next();
+		const id = await job(10, maintainer, {}, Date.now());
+		await env.RUNNERS.get(env.RUNNERS.idFromName(maintainer)).dispatch(maintainer);
+		expect(await live.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
+		live.send(status(2, "main", [{ job: id, attempt: 1 }], 0));
+		await live.next();
+		const response = await app.request(
+			`${origin}/projects/github/upstream/project`,
+			{
+				method: "POST",
+				headers: { Cookie: cookie, Origin: origin },
+				body: new URLSearchParams({ id: "10", state: "disconnected" }),
+			},
+			testEnv,
+		);
+		expect(response.status).toBe(303);
+		expect(await live.next()).toEqual({ type: "cancel", job: id, attempt: 1 });
+		expect(await store.readJob(db, id)).toBeNull();
+	});
 
 	it("authorizes each workflow against current observations and deduplicates requests", async () => {
 		const started = await post("", { workflow: "start", target: "quest/first.md" });

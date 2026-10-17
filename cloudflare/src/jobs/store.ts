@@ -595,11 +595,22 @@ export async function answer(db: D1Database, job: string, question: string, user
 	}
 	const answered = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND answeredBy=? AND answeredAt=?)";
 	const statements = [
+		// The runner may drop the chosen account after the check above.
 		db
 			.prepare(
-				"UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=? WHERE id=? AND job=? AND answer IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting')",
+				"UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=? WHERE id=? AND job=? AND answer IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts WHERE runner=? AND id=?))",
 			)
-			.bind(JSON.stringify(reply), user, now, question, job, job),
+			.bind(
+				JSON.stringify(reply),
+				user,
+				now,
+				question,
+				job,
+				job,
+				pin?.runner ?? null,
+				pin?.runner ?? null,
+				pin?.account ?? null,
+			),
 	];
 	if (pin)
 		statements.push(
@@ -622,7 +633,8 @@ export async function answer(db: D1Database, job: string, question: string, user
 				.bind(now, job, question, user, now),
 		);
 	const results = await db.batch(statements);
-	if (results[0]!.meta.changes !== 1) throw new JobError("Question is no longer open");
+	if (results[0]!.meta.changes !== 1)
+		throw new JobError(pin ? "Question is no longer open or the account is gone" : "Question is no longer open");
 }
 
 /**

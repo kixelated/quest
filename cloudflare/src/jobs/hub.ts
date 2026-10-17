@@ -77,6 +77,13 @@ export class RunnerHub extends DurableObject<Env> {
 		return [...this.#connections().keys()];
 	}
 
+	/** Tell connected runners to stop attempts whose records are gone. */
+	stop(attempts: (store.Attempt & { runner: string })[]) {
+		const connections = this.#connections();
+		for (const { runner, job, attempt } of attempts)
+			connections.get(runner)?.send(JSON.stringify({ type: "cancel", job, attempt }));
+	}
+
 	/** Reconcile and assign the owner's jobs. The Worker calls this after changing them. */
 	async dispatch(owner: string) {
 		await this.#queue(owner);

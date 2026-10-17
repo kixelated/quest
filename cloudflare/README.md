@@ -78,8 +78,9 @@ every request rechecks current GitHub authority. `start` takes only quests that
 observations show ready and unclaimed. `iterate` jobs are untrusted and route
 only to Linux runners that declare VM builds. Without a `flake.nix`, the route
 offers a `bootstrap` job instead. A paused project gets no new jobs and none are
-claimed; resuming it dispatches the jobs that waited. Duplicate requests return
-the active job for the same target.
+claimed; resuming it dispatches the jobs that waited. Disconnecting a project
+deletes its jobs and tells their runners to stop. Duplicate requests return the
+active job for the same target.
 
 Runners are a user's own machines. Each one registers at `POST /api/runners`
 and gets a bearer token, which kix stores only as a hash. With that token a

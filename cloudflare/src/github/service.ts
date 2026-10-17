@@ -40,6 +40,8 @@ export class GitHubError extends Error {
 }
 export type ContributionState = "enabled" | "paused";
 export type Enrollment = GitHubRepository & { state: ContributionState };
+/** A running job attempt whose project was disconnected, which its runner must stop. */
+export type Stopped = { actor: string; runner: string; job: string; attempt: number };
 export type ProjectPreview = {
 	repository: GitHubRepository;
 	branch: string;
@@ -524,6 +526,7 @@ export class GitHubService {
 		);
 	}
 
+	/** Change a project's contribution state, returning the running job attempts a disconnect removed. */
 	setContributions(repo: GitHubRepository, userId: string, state: ContributionState | "disconnected") {
 		if (!["enabled", "paused", "disconnected"].includes(state)) throw new GitHubError("Invalid contribution state");
 		return this.#authorized(
@@ -551,8 +554,16 @@ export class GitHubService {
 				// Recheck the local revocation gate after potentially long content reads.
 				await this.#gate(installation);
 				if (state === "disconnected") {
-					await this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id).run();
-				} else if (state === "paused") {
+					// Jobs go with the project, so read the running attempts in the same transaction.
+					const [running] = await this.#env.DB.batch<Stopped>([
+						this.#env.DB.prepare(
+							"SELECT actor,runner,id AS job,attempt FROM jobs WHERE repository=? AND state='running'",
+						).bind(repo.id),
+						this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id),
+					]);
+					return running!.results;
+				}
+				if (state === "paused") {
 					await this.#env.DB.prepare("UPDATE github_projects SET state='paused',updatedAt=? WHERE id=?")
 						.bind(Date.now(), repo.id)
 						.run();
@@ -570,6 +581,7 @@ export class GitHubService {
 						).bind(repo.id, repo.owner, repo.name, installation, userId, Date.now()),
 					]);
 				}
+				return [];
 			},
 			state !== "enabled",
 		);
