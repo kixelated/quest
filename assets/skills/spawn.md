@@ -67,7 +67,7 @@ For example, `claude -p --output-format json --model <model> --effort <level>` o
 Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, then unset `QUEST_API_KEYS` and secret-manager tokens such as `OP_SERVICE_ACCOUNT_TOKEN` there so it holds no other key, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
 Read its final reply and session id from that agent's output: `claude -p` prints one result object with a dollar cost, while `codex exec --json` streams JSONL events, with the thread id in `thread.started`, the reply in the last `item.completed`, and token usage instead of cost.
 Report cost only when the agent provides it.
-Tell it that it cannot prompt, so it ends with any decisions and its recommendations in its final reply.
+Tell it that it cannot prompt, so it ends with any decisions and its recommendations in its final reply, and that ending its turn ends the process and kills its background commands, so it waits in the foreground.
 Ask the user, then resume that session in the background with the answer, as you would message a sub-agent: `claude -p --resume <id>` or `codex exec resume <id>`.
 
 Assign quests to keys round-robin.

@@ -30,6 +30,9 @@ Run each wait so its exit wakes you, such as a background task that notifies on
 exit, and end your turn until then. Never poll its output or rerun it under a
 foreground time limit; each wake rereads your whole context. The hour bound
 keeps that reread cached; a wake after the prompt cache expires rewrites it all.
+A headless process ends when its turn ends, killing its background commands:
+run each wait in the foreground instead, bounded by the shell's own time limit,
+and re-run it with `--since` until it returns activity.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
