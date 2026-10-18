@@ -18,7 +18,7 @@ It stops to ask only when a choice is truly consequential.
 
 Fix merge conflicts and failing CI checks.
 Address the automated review findings already posted, without waiting on optional reviewers: fix those you agree with and comment on any you decline.
-One round only; never request a review.
+One round only; never request a review, including by toggling a ready PR to draft and back.
 
 Push your changes to the PR and update its summary.
 Summarize the changes made, and offer `/quest-plan` for follow-ups that belong outside this PR.
