@@ -11,6 +11,7 @@ Fix any mechanical issues with the PR, such as merge conflicts and failing CI ch
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
 Automated reviewers often find something new on every push, so stop after three rounds of fixing their findings on the PR.
 Report what remains unresolved with a recommendation, and let the user decide whether to merge, iterate, or keep reviewing.
+Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.
 Interactively prompt the user with your recommendation and any alternatives.
