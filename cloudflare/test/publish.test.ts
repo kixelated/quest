@@ -306,6 +306,7 @@ describe("runner publication", () => {
 				file("src/first.ts", "export {};\n"),
 				file("scripts/run.sh", "#!/bin/sh\n", true),
 				{ path: "logo.bin", content: Buffer.from([0, 1, 2, 255]).toString("base64") },
+				{ ...file("latest", "scripts/run.sh"), symlink: true },
 				{ path: "quest/first.md", content: null },
 			],
 		});
@@ -322,6 +323,7 @@ describe("runner publication", () => {
 			{ path: "src/first.ts", mode: "100644", type: "blob", content: "export {};\n" },
 			{ path: "scripts/run.sh", mode: "100755", type: "blob", content: "#!/bin/sh\n" },
 			{ path: "logo.bin", mode: "100644", type: "blob", sha: expect.stringMatching(/^[a-f0-9]{40}$/) },
+			{ path: "latest", mode: "120000", type: "blob", content: "scripts/run.sh" },
 			{ path: "quest/first.md", mode: "100644", type: "blob", sha: null },
 		]);
 		// Every Git write uses the fork-scoped token; the upstream token is read-only metadata.
@@ -705,6 +707,7 @@ describe("runner publication", () => {
 			{ job: id, attempt: 1, head: null, message: "m", changes: [file("../a", "1")] },
 			{ job: id, attempt: 1, head: null, message: "m", changes: [file("a", "1"), file("a", "2")] },
 			{ job: id, attempt: 1, head: null, message: "m", changes: [{ path: "a", content: "not base64!" }] },
+			{ job: id, attempt: 1, head: null, message: "m", changes: [{ ...file("a", "b", true), symlink: true }] },
 			{ job: id, attempt: 1, head: null },
 		])
 			expect((await publish(body)).status).toBe(409);

@@ -56,7 +56,8 @@ export class GitHubError extends Error {
 export class PublicationBlocked extends GitHubError {}
 
 /** One file a publication sets or, with null content, deletes. */
-export type Change = { path: string; content: Uint8Array | null; executable: boolean };
+/** One path's new content, or null to delete it, with its Git mode: a file, an executable, or a symlink. */
+export type Change = { path: string; content: Uint8Array | null; mode: "100644" | "100755" | "120000" };
 /** What a job may publish: its workflow, its target, and its one branch. */
 export type Contribution = {
 	workflow: "plan" | "start" | "iterate" | "bootstrap";
@@ -783,7 +784,7 @@ export class GitHubService {
 				const base = await this.#api<{ tree: { sha: string } }>(token, `${path}/git/commits/${sha(parent)}`);
 				const tree = [];
 				for (const change of changes) {
-					const mode = change.executable ? "100755" : "100644";
+					const mode = change.mode;
 					if (change.content === null) {
 						tree.push({ path: change.path, mode, type: "blob", sha: null });
 						continue;

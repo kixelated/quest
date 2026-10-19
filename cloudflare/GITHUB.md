@@ -62,8 +62,9 @@ A running job publishes its work at `POST /api/runner/publish`, authenticated
 with its runner's bearer token (`src/jobs/publish.ts`). The JSON request names
 the `job` and `attempt`, the commit the changes build on (`head`, or `null`
 before the job's branch exists), a commit `message`, and `changes`: up to 500
-files, 16 MiB in all, each `{ path, content, executable? }` with base64
-content, or `null` content to delete. An optional `pull: { title, body, draft }`
+files, 16 MiB in all, each `{ path, content, executable?, symlink? }` with
+base64 content, or `null` content to delete. A symlink's content is its target.
+Submodule changes cannot be published. An optional `pull: { title, body, draft }`
 opens or updates the job's pull request, and `session` names the agent session
 to resume if the publication needs a decision. Checkpoints publish work in
 progress the same way, so a reassigned job continues from its branch. The reply

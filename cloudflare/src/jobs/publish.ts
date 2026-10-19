@@ -68,13 +68,16 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	const changes = list.map((item: Record<string, unknown> | null): Change => {
 		const path = item?.path;
 		if (typeof path !== "string" || !validPath(path)) throw new JobError("Invalid change path");
-		if (item!.executable !== undefined && typeof item!.executable !== "boolean")
-			throw new JobError("Invalid executable flag");
+		const { executable, symlink } = item!;
+		if (executable !== undefined && typeof executable !== "boolean") throw new JobError("Invalid executable flag");
+		if (symlink !== undefined && typeof symlink !== "boolean") throw new JobError("Invalid symlink flag");
+		if (executable && symlink) throw new JobError("A symlink cannot be executable");
 		if (item!.content !== null && typeof item!.content !== "string")
 			throw new JobError("Change content must be base64, or null to delete");
 		const content = item!.content === null ? null : base64(item!.content as string);
 		bytes += content?.length ?? 0;
-		return { path, content, executable: item!.executable === true };
+		// A symlink's content is its target. Submodules have no representation here.
+		return { path, content, mode: symlink ? "120000" : executable ? "100755" : "100644" };
 	});
 	if (bytes > LIMITS.bytes) throw new JobError("Publication too large");
 	if (new Set(changes.map((change) => change.path)).size !== changes.length)
