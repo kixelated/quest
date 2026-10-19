@@ -119,17 +119,11 @@ async function decide(db: D1Database, runner: Runner, input: Publication, prompt
 }
 
 /**
- * Commit the changes to the job's branch, unless the branch is not where the
- * job left it. A commit whose outcome went unrecorded is adopted first, so an
- * interrupted publication is never mistaken for someone else's write.
+ * The job's branch head, unless the branch is not where the job left it. A
+ * commit whose outcome went unrecorded is adopted first, so an interrupted
+ * publication is never mistaken for someone else's write.
  */
-async function commit(
-	db: D1Database,
-	runner: Runner,
-	job: store.Publishing,
-	input: Publication,
-	branch: Branch,
-): Promise<string> {
+async function verify(db: D1Database, job: store.Publishing, input: Publication, branch: Branch) {
 	const current = await branch.head();
 	let head = job.head;
 	if (current !== head && job.pending && current === job.pending) {
@@ -143,6 +137,18 @@ async function commit(
 				: `The branch ${job.branch} changed outside this job.`,
 		);
 	if (input.head !== head) throw new JobError(`The job's branch is at ${head ?? "no commit yet"}; continue from it`);
+	return head;
+}
+
+/** Commit the changes on the verified `head` of the job's branch. */
+async function commit(
+	db: D1Database,
+	runner: Runner,
+	job: store.Publishing,
+	input: Publication,
+	branch: Branch,
+	head: string | null,
+): Promise<string> {
 	const next = await branch.commit(head ?? job.revision, input.changes, input.message!);
 	// Check the fence again immediately before the write that makes the commit visible.
 	await store.claim(db, runner, job.id, job.attempt, head, next, Date.now());
@@ -166,14 +172,13 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 	if (refused.length) return decide(db, runner, input, { type: "publication", refused });
 	const github = new GitHubService(env);
 	const upstream: GitHubRepository = { owner: job.owner, name: job.name, id: job.repository };
-	let head = job.head;
+	let head: string | null;
 	try {
-		if (input.changes.length)
-			head = await github.contribute(upstream, job.actor, job, (branch) =>
-				commit(db, runner, job, input, branch),
-			);
-		else if (input.head !== head)
-			throw new JobError(`The job's branch is at ${head ?? "no commit yet"}; continue from it`);
+		// A pull request opens from the branch, so a delivery alone still checks where it is.
+		head = await github.contribute(upstream, job.actor, job, async (branch) => {
+			const head = await verify(db, job, input, branch);
+			return input.changes.length ? commit(db, runner, job, input, branch, head) : head;
+		});
 	} catch (error) {
 		if (error instanceof PublicationBlocked)
 			return decide(db, runner, input, { type: "publication", blocked: error.message });

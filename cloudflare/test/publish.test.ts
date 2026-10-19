@@ -40,6 +40,8 @@ function fakeGitHub() {
 		head: { id: 10, name: "project", owner: { login: "upstream" } } as any,
 		/** Apply the next ref update, then fail as if the response were lost. */
 		loseMove: false,
+		/** GitHub's clock, for pull request creation times. */
+		now: 0,
 	};
 	const repos: Record<string, any> = {
 		"upstream/project": { id: 10, fork: false, default_branch: "main" },
@@ -130,10 +132,15 @@ function fakeGitHub() {
 		}
 		if (repo === "upstream/project" && rest === "/pulls" && method === "GET") {
 			const head = url.searchParams.get("head");
+			const state = url.searchParams.get("state") ?? "open";
 			return json(
-				pulls.filter(
-					(pull) => pull.state === "open" && `${pull.head.repo.owner.login}:${pull.head.ref}` === head,
-				),
+				pulls
+					.filter(
+						(pull) =>
+							(state === "all" || pull.state === state) &&
+							`${pull.head.repo.owner.login}:${pull.head.ref}` === head,
+					)
+					.reverse(),
 			);
 		}
 		if (repo === "upstream/project" && rest === "/pulls" && method === "POST") {
@@ -145,6 +152,7 @@ function fakeGitHub() {
 				node_id: `PR_${pulls.length}`,
 				html_url: `https://github.com/upstream/project/pull/${100 + pulls.length}`,
 				state: "open",
+				created_at: new Date(fake.now).toISOString(),
 				draft: body.draft,
 				title: body.title,
 				body: body.body,
@@ -549,7 +557,51 @@ describe("runner publication", () => {
 		const closed = await publish({ job: id, attempt: 1, head, pull: { title: "T", body: "B3" } });
 		expect(closed.status).toBe(403);
 		expect(await closed.json()).toEqual({ error: expect.stringContaining("was closed") });
+		// Nor is one closed after a delivery whose outcome went unrecorded.
+		await db.prepare("UPDATE jobs SET pull=NULL WHERE id=?").bind(id).run();
+		const unrecorded = await publish({ job: id, attempt: 1, head, pull: { title: "T", body: "B3" } });
+		expect(await unrecorded.json()).toEqual({ error: expect.stringContaining("was closed") });
 		expect(github.pulls).toHaveLength(1);
+	});
+
+	it("opens a new pull request when only earlier work's closed one shares the branch", async () => {
+		github.pulls.push({
+			number: 99,
+			state: "closed",
+			created_at: new Date(0).toISOString(),
+			head: {
+				ref: "quest/first",
+				sha: prHead,
+				repo: { id: 20, name: "project", owner: { login: "quest-bot-forks" } },
+			},
+		});
+		const id = await running();
+		await db.prepare("UPDATE jobs SET createdAt=5000 WHERE id=?").bind(id).run();
+		github.now = 6000;
+		const response = await publish({
+			job: id,
+			attempt: 1,
+			head: null,
+			message: "m",
+			changes: [file("a", "1")],
+			pull: { title: "T", body: "B" },
+		});
+		expect(await response.json()).toMatchObject({ pull: { number: 101 } });
+	});
+
+	it("pauses a delivery alone when the branch moved outside the job", async () => {
+		const id = await running();
+		const { head } = (await (
+			await publish({ job: id, attempt: 1, head: null, message: "one", changes: [file("a", "1")] })
+		).json()) as { head: string };
+		github.refs.set("quest-bot-forks/project:quest/first", prHead);
+		const response = await publish({ job: id, attempt: 1, head, session: "s", pull: { title: "T", body: "B" } });
+		expect(response.status).toBe(202);
+		expect((await job(id)).questions[0]).toMatchObject({
+			kind: "publication",
+			prompt: { blocked: "The branch quest/first changed outside this job." },
+		});
+		expect(github.pulls).toEqual([]);
 	});
 
 	it("keeps publishing a paused project's branch but opens no pull request", async () => {

@@ -41,6 +41,7 @@ interface PullHead {
 	draft: boolean;
 	title: string;
 	body: string | null;
+	created_at: string;
 	head: { ref: string; sha: string; repo: { id: number; name: string; owner: { login: string } } | null };
 }
 export class GitHubError extends Error {
@@ -62,6 +63,8 @@ export type Contribution = {
 	target: string;
 	branch: string;
 	pull: number | null;
+	/** When the job was created, in milliseconds; older pull requests on its branch are not its own. */
+	createdAt: number;
 };
 /** The one branch a job may write, on the repository the service resolved for it. */
 export interface Branch {
@@ -849,10 +852,17 @@ export class GitHubService {
 			const fork = await this.#fork(upstream, upstream.name, {}, async (_token, fork) => fork);
 			const pulls = `${repositoryPath(upstream)}/pulls`;
 			const label = `${fork.owner.login}:${job.branch}`;
-			const open = async () =>
-				(await this.#api<PullHead[]>(token, `${pulls}?state=open&head=${encodeURIComponent(label)}`))[0] ??
-				null;
-			let pull = job.pull ? await this.#api<PullHead>(token, `${pulls}/${number(job.pull)}`) : await open();
+			// An unrecorded earlier delivery may have opened one, which the maintainer may since have closed.
+			// GitHub reports whole seconds, so compare against the second the job was created in.
+			const since = Math.floor(job.createdAt / 1000) * 1000;
+			const opened = async () =>
+				(
+					await this.#api<PullHead[]>(
+						token,
+						`${pulls}?state=all&per_page=100&head=${encodeURIComponent(label)}`,
+					)
+				).find((pull) => Date.parse(pull.created_at) >= since) ?? null;
+			let pull = job.pull ? await this.#api<PullHead>(token, `${pulls}/${number(job.pull)}`) : await opened();
 			if (pull && (pull.head.repo?.id !== fork.id || pull.head.ref !== job.branch))
 				throw new GitHubError("The job's pull request no longer comes from its branch");
 			if (pull && pull.state !== "open")
@@ -872,10 +882,10 @@ export class GitHubService {
 						maintainer_can_modify: false,
 					});
 				} catch (error) {
-					// An interrupted earlier delivery may have opened it already.
+					// A concurrent delivery may have opened it first.
 					if (!(error instanceof GitHubError) || error.status !== 422) throw error;
-					pull = await open();
-					if (!pull) throw error;
+					pull = await opened();
+					if (pull?.state !== "open") throw error;
 				}
 			}
 			if (pull.title !== input.title || pull.body !== input.body)
