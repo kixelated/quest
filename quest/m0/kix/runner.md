@@ -77,6 +77,10 @@ replacing the hosted Agent SDK runtime:
   Fetch the job's branch to continue a reassigned job; a `202` decision reply
   pauses the attempt like a question. Publication in `cloudflare/GITHUB.md`
   has the contract.
+- Add a runner and account settings page as a secondary view off the
+  decision inbox: each runner's online state, its accounts, and the
+  preference-order control. Decided 2026-10-18 as a follow-up of the
+  decision inbox (#144), folded here rather than its own quest.
 
 ## Required
 

@@ -95,6 +95,9 @@ operator-paid-hosting decisions:
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Decision inbox](/quest/m0/kix/prompts.md) - a simple prompt UI with new-issue and new-PR notifications
+- [Webhook reconcile](/quest/m0/kix/reconcile.md) - new issues and PRs arrive in the inbox ready to act on, without a manual refresh
+- [Inbox merge](/quest/m0/kix/merge.md) - PR items merge the reviewed head through GitHub's rules
+- [Co-maintainer inbox](/quest/m0/kix/members.md) - every current maintainer sees enrolled projects in their inbox
 - [Output retention](/quest/m0/kix/output.md) - raw agent output in R2, kept 30 days and capped at 64 MiB per attempt
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions
