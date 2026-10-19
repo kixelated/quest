@@ -3,9 +3,12 @@
 // An attempt's chunks arrive in order, `seq` 0, 1, 2, ... Each is reserved
 // first: an index row records its text's hash while the job exists, so a
 // conflicting chunk is refused before anything reaches R2. The object is
-// written next and the row marked complete. R2 cannot join a D1 batch, so a
-// disconnect that deletes the job between those steps leaves no row to
-// complete, and the upload deletes its own object.
+// written next and the row marked complete, only while the attempt is
+// current. A chunk is reserved only once the one before it is complete, so an
+// attempt's one pending chunk is its last, and readers that see complete rows
+// never page past a chunk that may still land. R2 cannot join a D1 batch, so
+// a disconnect or reassignment between those steps leaves no row to complete,
+// and the upload deletes its own object.
 import { JobError, type Attempt, type Runner } from "./store";
 
 type Storage = Pick<Env, "DB" | "OUTPUT">;
@@ -53,7 +56,8 @@ export async function append(
 			5,
 		),
 		statement(
-			`INSERT INTO job_output(job,attempt,seq,hash,at) SELECT ?1,?2,?4,?6,?7 FROM job_output_attempts WHERE ${next} AND truncated=0 AND ${current}`,
+			`INSERT INTO job_output(job,attempt,seq,hash,at) SELECT ?1,?2,?4,?6,?7 FROM job_output_attempts WHERE ${next} AND truncated=0 AND ${current}
+ AND NOT EXISTS(SELECT 1 FROM job_output WHERE job=?1 AND attempt=?2 AND seq=?4-1 AND complete=0)`,
 			7,
 		),
 		statement(
@@ -81,11 +85,13 @@ export async function append(
 		const name = key(job, attempt, seq);
 		await bucket.put(name, text);
 		const done = await db
-			.prepare("UPDATE job_output SET complete=1 WHERE job=? AND attempt=? AND seq=? AND hash=?")
-			.bind(job, attempt, seq, hash)
+			.prepare(
+				`UPDATE job_output SET complete=1 WHERE job=?1 AND attempt=?2 AND seq=?4 AND hash=?5 AND ${current}`,
+			)
+			.bind(job, attempt, runner.id, seq, hash)
 			.run();
 		if (done.meta.changes === 1) return {};
-		// The job was disconnected while the object was written.
+		// The job was disconnected or reassigned while the object was written.
 		await bucket.delete(name);
 		throw new JobError("Attempt is no longer current");
 	}
@@ -93,11 +99,15 @@ export async function append(
 		throw new JobError("Attempt is no longer current");
 	if (seq < row.next) throw new JobError("That chunk has expired");
 	if (row.truncated) return { truncated: true };
+	if (seq === row.next) throw new JobError(`Chunk ${seq - 1} is not stored yet`);
 	throw new JobError(`Expected sequence ${row.next}`);
 }
 
 /**
- * A page of raw output, at most a few MiB, in order; `next` continues it.
+ * A page of stored raw output, at most a few MiB, in order; `next` continues
+ * it. Only stored chunks are listed: an attempt's one pending chunk is its
+ * last and lands only while the attempt is current, so a cursor never passes
+ * a chunk that may still land.
  * `truncated` lists the attempts whose output reached the cap.
  */
 export async function read(
@@ -109,7 +119,7 @@ export async function read(
 	const [rows, capped] = await db.batch([
 		db
 			.prepare(
-				"SELECT attempt,seq,at FROM job_output WHERE job=? AND (attempt,seq)>(?,?) ORDER BY attempt,seq LIMIT ?",
+				"SELECT attempt,seq,at FROM job_output WHERE job=? AND complete=1 AND (attempt,seq)>(?,?) ORDER BY attempt,seq LIMIT ?",
 			)
 			.bind(job, after?.attempt ?? 0, after?.seq ?? -1, page),
 		db.prepare("SELECT attempt FROM job_output_attempts WHERE job=? AND truncated=1 ORDER BY attempt").bind(job),

@@ -115,9 +115,9 @@ runner that holds it.
 
 Runners upload raw agent output as `output` messages of at most 1 MiB of UTF-8
 (`src/jobs/output.ts`). Each attempt numbers its chunks with a contiguous `seq`
-from 0 and sends them in order: kix accepts only the attempt's next `seq`, or
-an identical retry of a chunk it still holds, which succeeds without writing
-again. A different chunk with a used `seq` is refused, and so is a retry of an
+from 0 and sends them in order: kix accepts only the attempt's next `seq`,
+once the chunk before it is stored, or an identical retry of a chunk it still
+holds, which succeeds without writing again. A different chunk with a used `seq` is refused, and so is a retry of an
 expired one. Each chunk is one R2 object at `output/<job>/<attempt>/<seq>`,
 readable as soon as it lands, and D1 keeps a small index row per chunk plus each
 attempt's totals.

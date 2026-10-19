@@ -635,6 +635,32 @@ describe("raw output", () => {
 		expect((await output.read(env, id, null)).output).toMatchObject([{ seq: 0, text: "kept" }]);
 	});
 
+	it("never pages past a chunk that may still land", async () => {
+		const { machine, id } = await started();
+		const failing = { DB: db, OUTPUT: { put: () => Promise.reject(new Error("R2 down")) } as unknown as R2Bucket };
+		for (const seq of [0, 1, 2]) await output.append(env, machine, chunk(id, seq, `${seq}`), 2);
+		await expect(output.append(failing, machine, chunk(id, 3, "3"), 2)).rejects.toThrow("R2 down");
+		// The pending chunk would fill the page; the cursor stops before it.
+		expect(await output.read(env, id, null)).toMatchObject({
+			output: [{ seq: 0 }, { seq: 1 }, { seq: 2 }],
+			next: null,
+		});
+		// Later chunks wait for it, so it stays the attempt's last.
+		await expect(output.append(env, machine, chunk(id, 4, "4"), 3)).rejects.toThrow("Chunk 3 is not stored yet");
+		expect(await output.append(env, machine, chunk(id, 3, "3"), 3)).toEqual({});
+		expect(await output.read(env, id, null)).toMatchObject({
+			output: [{}, {}, {}, { seq: 3 }],
+			next: { attempt: 1, seq: 3 },
+		});
+		expect(await output.append(env, machine, chunk(id, 4, "4"), 3)).toEqual({});
+		await expect(output.append(failing, machine, chunk(id, 5, "5"), 4)).rejects.toThrow("R2 down");
+		// Once the job is reassigned, a late retry cannot land behind a reader's cursor.
+		await db.prepare("UPDATE jobs SET attempt=2 WHERE id=?").bind(id).run();
+		await expect(output.append(env, machine, chunk(id, 5, "5"), 5)).rejects.toThrow("no longer current");
+		expect(await object(id, 5)).toBeNull();
+		expect(await output.read(env, id, { attempt: 1, seq: 3 })).toMatchObject({ output: [{ seq: 4 }], next: null });
+	});
+
 	it("refuses chunks past the attempt's cap as truncated while the job carries on", async () => {
 		const { machine, id } = await started();
 		expect(await output.append(env, machine, chunk(id, 0, "kept"), 2)).toEqual({});
