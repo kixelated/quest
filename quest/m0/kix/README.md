@@ -94,7 +94,6 @@ operator-paid-hosting decisions:
 - [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
-- [Decision inbox](/quest/m0/kix/prompts.md) - a simple prompt UI with new-issue and new-PR notifications
 - [Output retention](/quest/m0/kix/output.md) - raw agent output in R2, kept 30 days and capped at 64 MiB per attempt
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions

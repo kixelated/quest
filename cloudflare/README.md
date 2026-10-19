@@ -111,6 +111,35 @@ An account limit pauses the job with an account decision; kix never switches
 accounts on its own. An answer requeues the job and resumes its session on the
 runner that holds it.
 
+A `question` carries one round of independent questions
+(`src/jobs/prompt.ts`): `{ kind, questions: [{ header?, question, options:
+[{ label, description?, recommended? }], multiple? }] }`, where `kind` is
+`decision` (the default) or `permission` for a tool permission request. The
+service refuses a prompt it cannot render. An agent question's answer is
+`{ answers: [{ choices, text? }] }`, one per question, naming offered labels,
+the maintainer's own words, or both; an account question's answer is
+`{ runner, account }`. A job request may name the `revision` the maintainer
+saw, and is refused once observations moved past it.
+
+### Decision inbox
+
+After signing in, a maintainer lands on `/inbox` (`src/inbox/`): one active
+decision thread across the projects they enrolled, then what is up next, what
+is in progress, and their projects. Each item is one job target (`issues/1`,
+`pulls/2`, a quest path), so an issue, its planning job, and that job's
+questions stay one item, and webhook updates and reconnects never add another
+prompt. Agents waiting on an answer come first, then failed jobs, new pull
+requests, new issues, and ready quests. An item offers only actions that
+would work: none on a paused project, and only a refresh while observations
+are incomplete. Every action is a plain form post to the job routes, which
+recheck authority and return to the inbox; prompts render as escaped text and
+never preselect the recommendation.
+
+Each maintainer's read state lives in `inbox_items`, keyed by a version of what
+the item showed (a question, a GitHub change, a quest's text). A newer version
+is unread again, and skipping an item lasts until it changes. A finished or
+stopped job sets its item aside the same way.
+
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
 and readiness the CLI runs.
@@ -169,7 +198,9 @@ replay, and ownership. Job tests race dispatch passes, reassign a disconnected
 runner's job and fence its late writes, and cover routing, questions, account
 limits, and cancellation. They drive real WebSocket connections through the hub,
 including a replaced connection and the alarm that reassigns work, and check the
-maintainer-only routes. No OAuth credentials or
+maintainer-only routes. Inbox tests answer prompts through the forms, reject
+stale revisions and repeated answers, coalesce duplicate webhooks, and hide a
+project whose maintainer lost authority. No OAuth credentials or
 Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:

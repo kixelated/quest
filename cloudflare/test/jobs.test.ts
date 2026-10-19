@@ -5,34 +5,18 @@ import app from "../src/index";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
 import { parse } from "../src/jobs/protocol";
+import { formAnswer, parseAnswer, parsePrompt } from "../src/jobs/prompt";
 import { refName, resume } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
-import { identity, oauth, origin } from "./login-fixtures";
+import { origin } from "./login-fixtures";
+import { commit, head, maintainerOf, project } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const db = env.DB;
-const commit = "a".repeat(40);
-const head = "d".repeat(40);
-const documents = [
-	{
-		path: "quest/README.md",
-		content: "# Project\n\n## Goal\n\nBuild it.\n\n## Required\n\n- [First](/quest/first.md)\n",
-	},
-	{ path: "quest/first.md", content: "# [S] First\n\n## Goal\n\nBuild first.\n" },
-];
-
 async function user(id: string) {
 	await db
 		.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
 		.bind(id, id, `${id}@example.test`)
-		.run();
-}
-async function project(id: number, owner: string, state: "enabled" | "paused" = "enabled") {
-	await db
-		.prepare(
-			"INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,'upstream','project',5,?,?,0) ON CONFLICT(id) DO UPDATE SET state=excluded.state",
-		)
-		.bind(id, state, owner)
 		.run();
 }
 async function runner(owner: string, name: string, platform: store.Platform = "linux", vm = false) {
@@ -597,6 +581,48 @@ describe("runner messages", () => {
 		// Fewer than 1 Mi code units, but three bytes each.
 		expect(() => parse(output("界".repeat(400_000)))).toThrow("at most 1 MiB");
 	});
+
+	it("accepts only prompts the inbox can render", () => {
+		const question = (prompt: unknown) =>
+			parse(JSON.stringify({ type: "question", job: "j", attempt: 1, summary: "Why", session: "s", prompt }));
+		const ask = { question: "Which?", options: [{ label: "A", recommended: true }, { label: "B" }] };
+		expect(question({ questions: [ask] })).toMatchObject({ prompt: { kind: "decision", questions: [ask] } });
+		expect(question({ kind: "permission", questions: [{ question: "Run it?", options: [] }] })).toMatchObject({
+			prompt: { kind: "permission" },
+		});
+		expect(() => question({ q: 1 })).toThrow("1 to 10 questions");
+		expect(() => question({ kind: "chat", questions: [ask] })).toThrow("Invalid prompt");
+		expect(() => question({ questions: [{ ...ask, options: [{ label: "A" }, { label: "A" }] }] })).toThrow(
+			"unique",
+		);
+		expect(() => question({ questions: [{ question: " ", options: [] }] })).toThrow("Invalid prompt");
+	});
+
+	it("checks answers against their prompt", () => {
+		const prompt = parsePrompt({
+			questions: [
+				{ question: "One?", options: [{ label: "A" }, { label: "B" }] },
+				{ question: "Many?", options: [{ label: "X" }, { label: "Y" }], multiple: true },
+				{ question: "Say", options: [] },
+			],
+		});
+		const answer = (...answers: unknown[]) => parseAnswer(prompt, { answers });
+		expect(answer({ choices: ["A"] }, { choices: ["X", "Y"] }, { choices: [], text: " Hi " })).toEqual({
+			answers: [{ choices: ["A"] }, { choices: ["X", "Y"] }, { choices: [], text: "Hi" }],
+		});
+		// Free text can stand in for, or add to, a choice.
+		expect(answer({ text: "C" }, { choices: ["X"], text: "why" }, { text: "Hi" }).answers[0]).toEqual({
+			choices: [],
+			text: "C",
+		});
+		expect(() => answer({ choices: ["A", "B"] }, { choices: ["X"] }, { text: "Hi" })).toThrow("offered options");
+		expect(() => answer({ choices: ["Z"] }, { choices: ["X"] }, { text: "Hi" })).toThrow("offered options");
+		expect(() => answer({ choices: ["A"] }, { choices: [] }, { text: "Hi" })).toThrow("every question");
+		expect(() => answer({ choices: ["A"] })).toThrow("every question");
+		expect(formAnswer(prompt, { q0: "B", q1: ["X", "Y"], "q1-text": "", "q2-text": "Hello" })).toEqual({
+			answers: [{ choices: ["B"] }, { choices: ["X", "Y"] }, { choices: [], text: "Hello" }],
+		});
+	});
 });
 
 describe("branch names", () => {
@@ -620,88 +646,10 @@ describe("job routes", () => {
 	const base = `${origin}/projects/github/upstream/project/jobs`;
 	let maintainer = "";
 	let cookie = "";
-	let flake = true;
-	let pullFlake = true;
-	let role = "maintain";
+	let github: Awaited<ReturnType<typeof maintainerOf>>["github"];
 
 	beforeEach(async () => {
-		flake = true;
-		pullFlake = true;
-		role = "maintain";
-		const who = identity("github");
-		cookie = (await oauth(who)).session!;
-		maintainer = (await db
-			.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
-			.bind(who.id)
-			.first<{ userId: string }>())!.userId;
-		await project(10, maintainer);
-		const snapshot = { commit, date: "2026-10-16", documents, completed: [] };
-		const scan = { id: "scan", issues: false, pulls: false, refs: false, claims: [], complete: true };
-		const pull = {
-			databaseId: "21",
-			number: 2,
-			title: "Fix",
-			state: "OPEN",
-			updatedAt: "2026-10-16T00:00:00Z",
-			author: null,
-			comments: { totalCount: 0 },
-			headRefName: "contributor/fix",
-			headRefOid: head,
-		};
-		const issue = {
-			databaseId: "11",
-			number: 1,
-			title: "Idea",
-			state: "OPEN",
-			updatedAt: "2026-10-16T00:00:00Z",
-			author: null,
-			comments: { totalCount: 0 },
-		};
-		await db.batch([
-			db
-				.prepare(
-					"INSERT INTO github_project_state(repository,epoch,snapshot,scan,observedAt) VALUES(10,'e',?,?,0)",
-				)
-				.bind(JSON.stringify(snapshot), JSON.stringify(scan)),
-			db
-				.prepare(
-					"INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt,data,seenIn) VALUES(10,'pull','21',2,0,0,?,'scan'),(10,'issue','11',1,0,0,?,'scan')",
-				)
-				.bind(JSON.stringify(pull), JSON.stringify(issue)),
-		]);
-		vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-			const url = new URL(String(input));
-			const path = url.pathname;
-			if (path.endsWith("/installation"))
-				return Response.json({
-					id: 5,
-					app_id: 123,
-					suspended_at: null,
-					permissions: { metadata: "read", contents: "read" },
-				});
-			if (path.endsWith("/access_tokens")) return Response.json({ token: "installation-token" });
-			if (path === "/installation/token") return new Response(null, { status: 204 });
-			if (path === "/repos/upstream/project")
-				return Response.json({
-					id: 10,
-					name: "project",
-					owner: { login: "upstream" },
-					private: false,
-					visibility: "public",
-					default_branch: "trunk",
-					archived: false,
-					disabled: false,
-				});
-			if (path.startsWith("/user/")) return Response.json({ id: Number(who.id), login: "maintainer" });
-			if (path.endsWith("/permission"))
-				return Response.json({ user: { id: Number(who.id) }, permission: "write", role_name: role });
-			const ref = url.searchParams.get("ref");
-			if (path === "/repos/upstream/project/contents/flake.nix" && (ref === commit || ref === head))
-				return (ref === commit ? flake : pullFlake)
-					? Response.json({ type: "file" })
-					: new Response(null, { status: 404 });
-			throw new Error(`Unexpected GitHub request ${path}`);
-		});
+		({ user: maintainer, cookie, github } = await maintainerOf());
 	});
 
 	function post(path: string, body: unknown, headers: Record<string, string> = { Cookie: cookie, Origin: origin }) {
@@ -764,7 +712,7 @@ describe("job routes", () => {
 	});
 
 	it("offers a devShell bootstrap job instead of starting without a flake", async () => {
-		flake = false;
+		github.flake = false;
 		const refused = await post("", { workflow: "start", target: "quest/first.md" });
 		expect(refused.status).toBe(409);
 		expect(await refused.json()).toMatchObject({ bootstrap: true });
@@ -774,7 +722,7 @@ describe("job routes", () => {
 	});
 
 	it("refuses to iterate on a pull request head without a flake", async () => {
-		pullFlake = false;
+		github.pullFlake = false;
 		const refused = await post("", { workflow: "iterate", target: "pulls/2" });
 		expect(refused.status).toBe(409);
 		expect(await refused.json()).toEqual({ error: "The pull request's head has no flake devShell" });
@@ -785,9 +733,9 @@ describe("job routes", () => {
 			403,
 		);
 		expect((await post("", { workflow: "plan" }, { Origin: origin })).status).toBe(403);
-		role = "write";
+		github.role = "write";
 		expect((await post("", { workflow: "plan" })).status).toBe(403);
-		role = "maintain";
+		github.role = "maintain";
 		await project(10, maintainer, "paused");
 		expect((await post("", { workflow: "plan" })).status).toBe(409);
 	});
@@ -806,7 +754,11 @@ describe("job routes", () => {
 			machine,
 			id,
 			1,
-			{ summary: "Which?", session: "s", prompt: { q: 1 } },
+			{
+				summary: "Which?",
+				session: "s",
+				prompt: { questions: [{ question: "Which?", options: [{ label: "A" }] }] },
+			},
 			Date.now(),
 		);
 		const output = (query = "") =>
@@ -820,12 +772,16 @@ describe("job routes", () => {
 			next: null,
 		});
 		expect((await output("?after=x")).status).toBe(409);
-		role = "write";
+		github.role = "write";
 		expect((await output()).status).toBe(403);
-		expect((await post(`/${id}/answer`, { question, answer: "A" })).status).toBe(403);
-		role = "maintain";
-		expect((await post(`/${id}/answer`, { question, answer: "A" })).status).toBe(204);
-		expect((await post(`/${id}/answer`, { question, answer: "B" })).status).toBe(409);
+		const a = { answers: [{ choices: ["A"] }] };
+		expect((await post(`/${id}/answer`, { question, answer: a })).status).toBe(403);
+		github.role = "maintain";
+		// An answer must fit the prompt it answers.
+		expect((await post(`/${id}/answer`, { question, answer: "A" })).status).toBe(409);
+		expect((await post(`/${id}/answer`, { question, answer: { answers: [{ choices: ["Z"] }] } })).status).toBe(409);
+		expect((await post(`/${id}/answer`, { question, answer: a })).status).toBe(204);
+		expect((await post(`/${id}/answer`, { question, answer: a })).status).toBe(409);
 		expect((await post(`/${id}/cancel`, {})).status).toBe(204);
 		expect(await state(id)).toMatchObject({ state: "cancelled" });
 		expect((await post(`/missing/cancel`, {})).status).toBe(409);

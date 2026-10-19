@@ -32,5 +32,4 @@ Decided 2026-10-15 in the decisions-not-implementations interview:
 ## Required
 
 - [Runner](/quest/m0/kix/runner.md) - the checkpoint tool, summaries, and retained raw output
-- [Decision inbox](/quest/m0/kix/prompts.md) - the signed-in shell the cards sit beside
 - [Output retention](/quest/m0/kix/output.md) - the bounded raw output behind the disclosure
