@@ -9,8 +9,9 @@ If a draft, stop and offer `/quest-ready` instead.
 
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
-Automated reviewers often find something new on every push, so stop after three rounds of fixing their findings on the PR.
-Report what remains unresolved with a recommendation, and let the user decide whether to merge, iterate, or keep reviewing.
+Automated reviewers often find something new on every push, so keep fixing their findings without asking, but checkpoint the design.
+Every fourth review round since the PR's last design change (one that reshapes the approach; fixing a finding is not one), stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
+Report that judgment and what remains unresolved, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
 Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.
