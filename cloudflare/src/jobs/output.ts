@@ -86,12 +86,21 @@ export async function append(
 		await bucket.put(name, text);
 		const done = await db
 			.prepare(
-				`UPDATE job_output SET complete=1 WHERE job=?1 AND attempt=?2 AND seq=?4 AND hash=?5 AND ${current}`,
+				`UPDATE job_output SET complete=1,at=?6 WHERE job=?1 AND attempt=?2 AND seq=?4 AND hash=?5 AND ${current}`,
 			)
-			.bind(job, attempt, runner.id, seq, hash)
+			// Retention starts with the upload, as the bucket lifecycle's does.
+			.bind(job, attempt, runner.id, seq, hash, now)
 			.run();
 		if (done.meta.changes === 1) return {};
-		// The job was disconnected or reassigned while the object was written.
+		// The job was disconnected or reassigned while the object was written. A
+		// disconnect's cleanup may already have listed the prefix, so queue
+		// another in case this delete fails.
+		await db
+			.prepare(
+				"INSERT OR IGNORE INTO output_cleanup(job,at) SELECT ?1,?2 WHERE NOT EXISTS(SELECT 1 FROM jobs WHERE id=?1)",
+			)
+			.bind(job, now)
+			.run();
 		await bucket.delete(name);
 		throw new JobError("Attempt is no longer current");
 	}

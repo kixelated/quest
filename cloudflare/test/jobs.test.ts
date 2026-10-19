@@ -632,7 +632,10 @@ describe("raw output", () => {
 		// The reservation holds the sequence number for that text.
 		await expect(output.append(env, machine, chunk(id, 0, "changed"), 3)).rejects.toThrow("A different chunk");
 		expect(await output.append(env, machine, chunk(id, 0, "kept"), 3)).toEqual({});
-		expect((await output.read(env, id, null)).output).toMatchObject([{ seq: 0, text: "kept" }]);
+		// Retention counts from the successful upload, as the bucket lifecycle does.
+		expect((await output.read(env, id, null)).output).toEqual([{ attempt: 1, seq: 0, at: 3, text: "kept" }]);
+		expect(await output.append(env, machine, chunk(id, 0, "kept"), 4)).toEqual({});
+		expect((await output.read(env, id, null)).output).toMatchObject([{ at: 3 }]);
 	});
 
 	it("never pages past a chunk that may still land", async () => {
@@ -719,6 +722,25 @@ describe("raw output", () => {
 		};
 		await expect(output.append(racing, machine, chunk(id, 0, "racing"), 2)).rejects.toThrow("no longer current");
 		expect(await object(id, 0)).toBeNull();
+	});
+
+	it("queues a cleanup when an upload racing a disconnect cannot delete its object", async () => {
+		const { machine, id } = await started();
+		const racing = {
+			DB: db,
+			OUTPUT: {
+				put: async (key: string, value: string) => {
+					await db.prepare("DELETE FROM github_projects WHERE id=10").run();
+					return env.OUTPUT.put(key, value);
+				},
+				delete: () => Promise.reject(new Error("R2 down")),
+			} as unknown as R2Bucket,
+		};
+		await expect(output.append(racing, machine, chunk(id, 0, "racing"), 2)).rejects.toThrow("R2 down");
+		expect(await object(id, 0)).not.toBeNull();
+		await worker.scheduled(createScheduledController(), env);
+		expect(await object(id, 0)).toBeNull();
+		expect((await db.prepare("SELECT job FROM output_cleanup").all()).results).toEqual([]);
 	});
 
 	it("retries a failed output cleanup from the daily cron", async () => {

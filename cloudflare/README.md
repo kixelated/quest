@@ -138,7 +138,8 @@ deletes `output/` objects, and a daily cron (`triggers.crons` in
 already gone. Disconnecting a project queues its jobs' output for deletion in
 the same D1 batch that deletes the jobs, then deletes each `output/<job>/`
 prefix at once. The cron retries any deletion that failed. An upload racing the
-disconnect finds its index row gone and deletes its own object.
+disconnect finds its index row gone, queues its job's prefix for the cron again,
+and deletes its own object.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
