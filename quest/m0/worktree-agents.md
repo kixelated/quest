@@ -12,6 +12,9 @@ checkout without waiting for the parent chat to end or the PR to merge.
   for expensive phases. Remove the skill's physical-core agent-count and load
   average admission rules once command admission is integrated. Disk capacity
   gates checkout allocation, not the number of reasoning agents.
+- A 2026-10-19 transcript audit counted 1,731 load-average polling commands
+  in moq-dev/moq and moq-dev/moq.pro sessions since Oct 14, so the remaining
+  agent-level load rules still cost tokens until this lands.
 - A foreground CLI wrapper only owns its child commands. Native agent tools
   need explicit ownership and suspend/resume integration; a helper that exits
   after creating a directory cannot infer when such an agent has finished.
