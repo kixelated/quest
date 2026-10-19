@@ -26,6 +26,11 @@ delivery. Follow the Deployment section of `cloudflare/README.md` and steps 1,
   git and agent worktrees.
 - Apply the D1 migrations, including `0002_github.sql`, with
   `bun run wrangler d1 migrations apply DB --remote` before deploying.
+- Once raw output retention (#142) merges, create the `quest-output` R2
+  bucket and its 30-day `output/` lifecycle rule before deploying, as #142
+  adds to the README's Deployment section, and confirm the rule with
+  `bun run wrangler r2 bucket lifecycle list quest-output`. Until then,
+  `main` has no R2 binding and needs no bucket. Decided 2026-10-18.
 - Add the `kix.quest` zone to the Worker's Cloudflare account. Keep the
   Worker name, D1 database ID, and `AUTH_SECRET`; do not create a new
   production database.
