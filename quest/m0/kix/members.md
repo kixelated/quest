@@ -16,12 +16,13 @@ only projects the viewer enrolled (`enrolledBy`):
   list maintainers.
 - Membership only decides which projects the inbox lists. It is not
   authority: every action still rechecks the maintainer per request.
-- Any failed maintainer check drops that user's membership along with their
-  read and skip state for the project. The enrolling user is a member like
-  any other.
+- A maintainer check that GitHub answers with a denial drops that user's
+  membership along with their read and skip state for the project. A check
+  that cannot complete (an outage or rate limit) fails the request and leaves
+  membership as it is. The enrolling user is a member like any other.
 - Disconnecting a project removes its memberships with it.
-- Test a co-maintainer joining, a revoked maintainer dropping out, and a
-  non-maintainer never joining.
+- Test a co-maintainer joining, a revoked maintainer dropping out, a
+  rate-limited check keeping membership, and a non-maintainer never joining.
 
 ## Required
 
