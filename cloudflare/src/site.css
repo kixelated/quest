@@ -1238,7 +1238,9 @@ a.entry-title:hover {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 }
+/* Entry meta sits in a log row's second column; in the thread it spans the one column. */
 .decision-meta {
+	grid-column: auto;
 	color: var(--ql-muted);
 }
 .decision-form {

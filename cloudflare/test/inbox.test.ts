@@ -82,7 +82,7 @@ describe("decision inbox", () => {
 		// The pull request is the active decision, bound to the head on screen.
 		const active = thread(html);
 		expect(active).toContain("Fix");
-		expect(active).toContain("Checks: SUCCESS");
+		expect(active).toContain("Checks: success");
 		expect(active).toContain(`name="revision" value="${head}"`);
 		expect(active).toContain("Iterate on this PR");
 		expect(active).toContain("Review on GitHub");

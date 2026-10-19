@@ -55,6 +55,9 @@ function progress(item: Item, runners: Runners, user: string) {
 	return null;
 }
 
+// GitHub's enums, such as CHANGES_REQUESTED, read as plain words.
+const words = (value: string) => value.toLowerCase().replaceAll("_", " ");
+
 function Context(props: { item: Item }) {
 	const data = props.item.activity?.data;
 	if (!data) return null;
@@ -68,8 +71,8 @@ function Context(props: { item: Item }) {
 			{pull && (
 				<>
 					{pull.isDraft && <span>Draft</span>}
-					<span>Checks: {pull.commits.nodes.at(-1)?.commit.statusCheckRollup?.state ?? "none"}</span>
-					<span>Review: {pull.reviewDecision ?? "none yet"}</span>
+					<span>Checks: {words(pull.commits.nodes.at(-1)?.commit.statusCheckRollup?.state ?? "none")}</span>
+					<span>Review: {pull.reviewDecision ? words(pull.reviewDecision) : "none yet"}</span>
 				</>
 			)}
 		</p>
