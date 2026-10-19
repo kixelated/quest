@@ -1,6 +1,6 @@
 import type { Pull } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
-import { inboxURL } from "../jobs/routes";
+import { PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
@@ -201,7 +201,7 @@ function PublicationForm(props: { item: Item }) {
 				<label class="free" for="publication-text">
 					Tell the agent how to continue
 				</label>
-				<textarea id="publication-text" name="text" rows={3} maxlength={1000} required />
+				<textarea id="publication-text" name="text" rows={3} maxlength={PUBLICATION_REPLY} required />
 			</fieldset>
 			<button class="button primary">Send to the agent</button>
 		</form>

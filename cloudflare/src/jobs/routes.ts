@@ -267,13 +267,32 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 		question.id,
 		user,
 		// An agent's answer must fit its prompt; the store checks an account choice against the owner's accounts.
-		question.kind === "agent" ? parseAnswer(parsePrompt(question.prompt), answer) : data(answer, 1024),
+		question.kind === "agent"
+			? parseAnswer(parsePrompt(question.prompt), answer)
+			: question.kind === "publication"
+				? publicationReply(answer)
+				: data(answer, 1024),
 		Date.now(),
 	);
 	// Jobs run on their requester's runners, whoever answers.
 	await hub(c.env, job.actor).dispatch(job.actor);
 	return reply(c, form, job, null);
 });
+
+/** The longest reply to a publication decision, in characters as the inbox form counts them. */
+export const PUBLICATION_REPLY = 1000;
+
+/**
+ * A publication decision's answer is the maintainer's own words, limited by
+ * length rather than encoding. Forms submit line breaks as CRLF but count them
+ * as one character, so they are normalized first.
+ */
+function publicationReply(answer: unknown) {
+	if (typeof answer !== "string" || !answer.trim()) throw new JobError("Reply in your own words");
+	const text = answer.replaceAll("\r\n", "\n");
+	if (text.length > PUBLICATION_REPLY) throw new JobError(`Reply in at most ${PUBLICATION_REPLY} characters`);
+	return text;
+}
 
 /** An inbox form's answer: the chosen options, a publication reply's text, or the chosen `runner:account`. */
 function formReply(question: store.Question, form: Form) {

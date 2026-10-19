@@ -256,14 +256,22 @@ describe("decision inbox", () => {
 		expect(active).toContain("Publishing needs your decision");
 		// Runner-supplied paths are escaped.
 		expect(active).toContain("<code>&lt;src&gt;/index.ts</code>: Planning publishes only quest files");
-		const answered = await submit(`${jobs}/${id}/answer`, [
-			["question", question],
-			["text", "Drop the source change"],
-		]);
-		expect(answered.status).toBe(303);
+		// The form's limit counts characters, not their JSON escapes, and a line break as one.
+		const text = `Drop the source change. ${'"\\\n'.repeat(325)}x`;
+		expect(text).toHaveLength(1000);
+		// Browsers submit a textarea's line breaks as CRLF.
+		const sent = (reply: string) =>
+			submit(`${jobs}/${id}/answer`, [
+				["question", question],
+				["text", reply.replaceAll("\n", "\r\n")],
+			]);
+		const long = await sent(`${text}y`);
+		expect(long.status).toBe(409);
+		expect(await long.text()).toContain("Reply in at most 1000 characters");
+		expect((await sent(text)).status).toBe(303);
 		const job = (await store.readJob(db, id))!;
 		expect(job.state).toBe("queued");
-		expect(job.questions[0]!.answer).toBe("Drop the source change");
+		expect(job.questions[0]!.answer).toBe(text);
 		expect(thread(await inbox({ project: "10", item: "quest/first.md" }))).toContain("Drop the source change");
 	});
 
