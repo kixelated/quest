@@ -11,3 +11,6 @@ CREATE TABLE inbox_items (
   skipped TEXT,
   PRIMARY KEY(user, repository, item)
 );
+
+-- The inbox reads each target's latest job.
+CREATE INDEX jobs_target ON jobs(repository, target, createdAt);

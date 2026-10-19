@@ -174,9 +174,10 @@ are incomplete. Every action is a plain form post to the job routes, which
 recheck authority and return to the inbox; prompts render as escaped text and
 never preselect the recommendation. A `publication` decision lists the refused
 paths or why the branch is blocked, and takes the maintainer's reply as text.
-The inbox reads every queued, running, and waiting job and each target's
-latest failure, so an older decision is never cut off by the job history's
-limit. Retrying a failed planning interview keeps its `plans/<id>` target.
+The inbox reads each target's latest job however old it is: every one that
+awaits a decision, and any other whose issue, pull request, or quest is still
+observed, so finished work stays set aside. Retrying a failed planning
+interview keeps its `plans/<id>` target.
 
 Each maintainer's read state lives in `inbox_items`, keyed by a version of what
 the item showed (a question, a GitHub change, a quest's text). A newer version

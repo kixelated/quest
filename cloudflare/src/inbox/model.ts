@@ -4,11 +4,13 @@
 // of adding prompts. Agent text and GitHub data stay untrusted display data.
 
 import { parse } from "quest/core";
+import { encodePath } from "../board/model";
 import { GitHubError, type Enrollment, GitHubService } from "../github/service";
 import type { Activity, ProjectState } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { hub } from "../jobs/routes";
 import * as store from "../jobs/store";
+import { projectURL } from "../projects";
 
 export type JobView = NonNullable<Awaited<ReturnType<typeof store.readJob>>>;
 export type QuestionView = JobView["questions"][number];
@@ -64,13 +66,13 @@ function kindOf(target: string): Kind {
 
 /** A quest's page on the project's board: its path without `.md`, or its epic's directory. */
 export function questHref(project: Enrollment, path: string) {
-	return `/projects/github/${project.owner}/${project.name}/board/${path.replace(/(\/README)?\.md$/, "")}`;
+	return `${projectURL(project.owner, project.name)}/board/${encodePath(path.replace(/(\/README)?\.md$/, ""))}`;
 }
 
-type Entity = Pick<Item, "kind" | "title" | "href" | "activity" | "version" | "at">;
+export type Entity = Pick<Item, "kind" | "title" | "href" | "activity" | "version" | "at">;
 
-/** The open issues, open pull requests, and ready quests a maintainer can act on. */
-function entities(project: Enrollment, state: ProjectState | null) {
+/** The open issues, open pull requests, and ready quests a maintainer can act on, by job target. */
+export function entities(project: Enrollment, state: ProjectState | null) {
 	const found = new Map<string, Entity>();
 	if (!state) return found;
 	const web = `https://github.com/${project.owner}/${project.name}`;
@@ -116,13 +118,15 @@ function fallback(project: Enrollment, target: string): Entity {
 	return { kind, title, href, activity: null, version: "", at: 0 };
 }
 
-/** Build one project's items from its observations, its latest jobs, and the maintainer's read state. */
-export function decisions(view: ProjectView, jobs: JobView[], reads: Read[]): Item[] {
-	const { project, state } = view;
+/**
+ * Build one project's items from its observed `found` entities, its latest
+ * jobs, and the maintainer's read state.
+ */
+export function decisions(view: ProjectView, found: Map<string, Entity>, jobs: JobView[], reads: Read[]): Item[] {
+	const { project } = view;
 	const latest = new Map<string, JobView>();
 	// Jobs arrive newest first.
 	for (const job of jobs) if (!latest.has(job.target)) latest.set(job.target, job);
-	const found = entities(project, state);
 	const items: Item[] = [];
 	for (const target of new Set([...found.keys(), ...latest.keys()])) {
 		const entity = found.get(target);
@@ -208,11 +212,12 @@ export async function load(env: Env, user: string) {
 		}),
 	);
 	const usable = projects.filter((view) => !view.error);
+	const found = usable.map((view) => entities(view.project, view.state));
 	const [reads, jobs] = await Promise.all([
 		env.DB.prepare("SELECT repository,item,seen,skipped FROM inbox_items WHERE user=?").bind(user).all<Read>(),
-		Promise.all(usable.map((view) => store.listInboxJobs(env.DB, view.project.id))),
+		Promise.all(usable.map((view, i) => store.listInboxJobs(env.DB, view.project.id, [...found[i]!.keys()]))),
 	]);
-	const items = usable.flatMap((view, i) => decisions(view, jobs[i]!, reads.results));
+	const items = usable.flatMap((view, i) => decisions(view, found[i]!, jobs[i]!, reads.results));
 	// Jobs run on their requester's runners, so presence comes from each requester's hub.
 	const actors = [...new Set(items.flatMap((item) => (item.job ? [item.job.actor] : [])))];
 	const runners = new Map<string, Runners>(

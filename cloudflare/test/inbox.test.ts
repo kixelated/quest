@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
+import { questHref } from "../src/inbox/model";
 import * as store from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
@@ -276,8 +277,21 @@ describe("decision inbox", () => {
 		expect(active).not.toContain("Try again");
 	});
 
-	it("keeps older questions and failures beyond the newest fifty jobs", async () => {
+	it("keeps each target's latest job however many newer jobs there are", async () => {
 		const { id, runner } = await running();
+		await store.createJob(
+			db,
+			{
+				repository: 10,
+				actor: user,
+				workflow: "iterate",
+				target: "pulls/2",
+				revision: head,
+				branch: "contributor/fix",
+				trusted: false,
+			},
+			2,
+		);
 		const failed = await store.createJob(
 			db,
 			{
@@ -321,7 +335,10 @@ describe("decision inbox", () => {
 			db.prepare("UPDATE jobs SET state='completed' WHERE id NOT IN (?,?)").bind(id, failed.id),
 			db.prepare("UPDATE jobs SET state='failed' WHERE id=?").bind(failed.id),
 		]);
-		expect(thread(await inbox())).toContain("Still there?");
+		const html = await inbox();
+		expect(thread(html)).toContain("Still there?");
+		// The pull request's finished job still sets it aside rather than offering it as new work.
+		expect(html).toMatch(/Skipped and finished \(1\)[\s\S]*Fix/);
 		// The failure stays a failure, not fresh work on the issue.
 		const issue = thread(await inbox({ project: "10", item: "issues/1" }));
 		expect(issue).toContain("Failed");
@@ -351,6 +368,12 @@ describe("decision inbox", () => {
 		const active = thread(await inbox({ project: "10", item: "quest/gone.md" }));
 		expect(active).toContain("This quest is no longer ready to start");
 		expect(active).not.toContain("Try again");
+	});
+
+	it("encodes quest paths in board links", () => {
+		const enrolled = { owner: "upstream", name: "project" } as Parameters<typeof questHref>[0];
+		expect(questHref(enrolled, "quest/a#b?.md")).toBe("/projects/github/upstream/project/board/quest/a%23b%3F");
+		expect(questHref(enrolled, "quest/epic/README.md")).toBe("/projects/github/upstream/project/board/quest/epic");
 	});
 
 	it("skips an item until it changes", async () => {

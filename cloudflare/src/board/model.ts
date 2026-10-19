@@ -88,7 +88,7 @@ export function blobHref(project: Project, path: string, fragment = ""): string 
 	return project.web ? `${project.web}/blob/${project.commit}/${encodePath(path)}${fragment}` : null;
 }
 
-function encodePath(path: string): string {
+export function encodePath(path: string): string {
 	return path.split("/").map(encodeURIComponent).join("/");
 }
 
