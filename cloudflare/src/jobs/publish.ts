@@ -2,6 +2,7 @@
 // data; the service checks them against the job's workflow, commits them to
 // the job's one branch, and opens or updates its pull request. Nothing a runner
 // sends is executed, and runners never receive GitHub credentials.
+import { isQuest } from "quest/core";
 import { type Branch, type Change, GitHubService, PublicationBlocked, type GitHubRepository } from "../github/service";
 import { id, text } from "./protocol";
 import * as store from "./store";
@@ -40,7 +41,8 @@ export function refusal(workflow: Workflow, path: string): string | null {
 		return "Changing GitHub Actions workflows needs the workflows permission, which the App does not request";
 	if (workflow === "bootstrap" && path !== "flake.nix" && path !== "flake.lock")
 		return "A devShell bootstrap publishes only flake.nix and flake.lock";
-	if (workflow === "plan" && !path.startsWith("quest/")) return "Planning publishes only quest files";
+	if (workflow === "plan" && !(path.startsWith("quest/") && isQuest(path)))
+		return "Planning publishes only quest files";
 	return null;
 }
 
@@ -186,9 +188,11 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 	}
 	if (!input.pull) return { head };
 	if (!head) throw new JobError("Publish the job's changes before opening its pull request");
+	// The attempt may have ended, or been asked to stop, while the branch was written.
+	const current = await store.publishing(db, runner, input.job, input.attempt);
 	// Planning PRs always await maintainer review; so does work that was asked to stop.
-	const draft = input.pull.draft || job.workflow === "plan" || job.cancel === 1;
-	const pull = await github.deliver(upstream, job.actor, job, { ...input.pull, draft });
+	const draft = input.pull.draft || current.workflow === "plan" || current.cancel === 1;
+	const pull = await github.deliver(upstream, current.actor, current, { ...input.pull, draft });
 	await store.delivered(db, job.id, pull.number);
 	return { head, pull };
 }

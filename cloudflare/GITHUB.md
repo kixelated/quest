@@ -78,7 +78,8 @@ and moves one branch. Before writing anything it checks, in order:
   increments the attempt, which fences out the previous runner.
 - Every path is a plain work-tree path: no `.git`, `.` or `..` segment, no
   absolute path, backslash, or control character. Each workflow publishes
-  only its own changes: `plan` only `quest/`, `bootstrap` only `flake.nix` and
+  only its own changes: `plan` only quest documents under `quest/` (Markdown
+  other than `AGENTS.md` and `CLAUDE.md`), `bootstrap` only `flake.nix` and
   `flake.lock`, `start` and `iterate` their task's changes. No workflow changes
   `.github/workflows/`, because the App does not request the workflows
   permission. A refused change pauses the job with a `publication` decision

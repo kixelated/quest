@@ -42,6 +42,8 @@ function fakeGitHub() {
 		loseMove: false,
 		/** GitHub's clock, for pull request creation times. */
 		now: 0,
+		/** Runs while a branch is created, as if the job changed meanwhile. */
+		onCreate: null as null | (() => Promise<unknown>),
 	};
 	const repos: Record<string, any> = {
 		"upstream/project": { id: 10, fork: false, default_branch: "main" },
@@ -116,6 +118,7 @@ function fakeGitHub() {
 			const key = `${repo}:${body.ref.slice("refs/heads/".length)}`;
 			if (refs.has(key)) return json({ message: "Reference already exists" }, 422);
 			refs.set(key, body.sha);
+			await fake.onCreate?.();
 			return json({ object: { sha: body.sha } }, 201);
 		}
 		if (ref && method === "PATCH") {
@@ -280,6 +283,8 @@ describe("publication policy", () => {
 	it("limits each workflow to the changes it may publish", () => {
 		expect(refusal("plan", "quest/m0/one.md")).toBeNull();
 		expect(refusal("plan", "src/index.ts")).toContain("quest files");
+		for (const path of ["quest/tool.sh", "quest/AGENTS.md", "quest/m0/CLAUDE.md"])
+			expect(refusal("plan", path)).toContain("quest files");
 		expect(refusal("bootstrap", "flake.nix")).toBeNull();
 		expect(refusal("bootstrap", "flake.lock")).toBeNull();
 		expect(refusal("bootstrap", "justfile")).toContain("flake");
@@ -587,6 +592,21 @@ describe("runner publication", () => {
 			pull: { title: "T", body: "B" },
 		});
 		expect(await response.json()).toMatchObject({ pull: { number: 101 } });
+	});
+
+	it("rechecks the attempt and its cancellation after writing the branch, before delivering", async () => {
+		const stopped = await running();
+		github.onCreate = () => db.prepare("UPDATE jobs SET cancel=1 WHERE id=?").bind(stopped).run();
+		const changes = [file("a", "1")];
+		const pull = { title: "T", body: "B", draft: false };
+		const draft = await publish({ job: stopped, attempt: 1, head: null, message: "m", changes, pull });
+		expect(await draft.json()).toMatchObject({ pull: { draft: true } });
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(stopped).run();
+		const ended = await running({ target: "quest/second.md", branch: "quest/second" });
+		github.onCreate = () => db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(ended).run();
+		const late = await publish({ job: ended, attempt: 1, head: null, message: "m", changes, pull });
+		expect(await late.json()).toEqual({ error: "Attempt is no longer current" });
+		expect(github.pulls).toHaveLength(1);
 	});
 
 	it("pauses a delivery alone when the branch moved outside the job", async () => {
