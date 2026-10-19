@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
 import { JobError } from "./store";
@@ -149,8 +150,8 @@ export class RunnerHub extends DurableObject<Env> {
 			case "question":
 				return store.ask(db, runner, message.job, message.attempt, message, now);
 			case "output":
-				await store.output(db, runner, message, now);
-				return {};
+				// Past the attempt's cap the reply says `truncated`, and the job carries on.
+				return output.append(this.env, runner, message, now);
 			case "result":
 				await store.finish(db, runner, message.job, message.attempt, message, now);
 				return {};

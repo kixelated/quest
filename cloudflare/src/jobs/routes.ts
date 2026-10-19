@@ -3,6 +3,7 @@ import { createAuth } from "../auth";
 import { GitHubError, GitHubService, type Stopped } from "../github/service";
 import type { ProjectState, Pull } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
+import * as output from "./output";
 import { data, id, text } from "./protocol";
 import * as store from "./store";
 import { JobError } from "./store";
@@ -231,10 +232,6 @@ jobs.get(`${base}/:job/output`, async (c) => {
 	if (after !== undefined && !cursor) throw new JobError("Invalid output cursor");
 	c.header("Cache-Control", "no-store");
 	return c.json(
-		await store.readOutput(
-			c.env.DB,
-			job.id,
-			cursor ? { attempt: Number(cursor[1]), seq: Number(cursor[2]) } : null,
-		),
+		await output.read(c.env, job.id, cursor ? { attempt: Number(cursor[1]), seq: Number(cursor[2]) } : null),
 	);
 });
