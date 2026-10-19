@@ -2,7 +2,7 @@
 // and a mocked GitHub that answers the requests authority checks make.
 import { env } from "cloudflare:workers";
 import { vi } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 import { identity, oauth } from "./login-fixtures";
 
 const db = env.DB;
@@ -51,7 +51,8 @@ export const issue = {
 
 /**
  * Sign in a GitHub user, enroll project 10 for them with an open issue #1 and
- * pull request #2, and mock GitHub. `github` changes what the mock reports.
+ * pull request #2, and mock GitHub. `github` changes what the mock reports, and
+ * `mock` reinstalls it after another sign-in replaces it.
  */
 export async function maintainerOf() {
 	const github = { flake: true, pullFlake: true, role: "maintain" };
@@ -76,7 +77,7 @@ export async function maintainerOf() {
 			)
 			.bind(JSON.stringify(pull), JSON.stringify(issue)),
 	]);
-	vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+	const mock = async (input: RequestInfo | URL) => {
 		const url = new URL(String(input));
 		const path = url.pathname;
 		if (path.endsWith("/installation"))
@@ -99,17 +100,27 @@ export async function maintainerOf() {
 				archived: false,
 				disabled: false,
 			});
-		if (path.startsWith("/user/")) return Response.json({ id: Number(who.id), login: "maintainer" });
-		if (path.endsWith("/permission"))
-			return Response.json({ user: { id: Number(who.id) }, permission: "write", role_name: github.role });
+		if (path.startsWith("/user/")) {
+			const id = path.split("/").at(-1)!;
+			return Response.json({ id: Number(id), login: `person${id}` });
+		}
+		// Only the signed-in maintainer holds the maintain role; anyone else may read.
+		const permission = path.match(/\/collaborators\/person(\d+)\/permission$/);
+		if (permission)
+			return Response.json(
+				permission[1] === who.id
+					? { user: { id: Number(who.id) }, permission: "write", role_name: github.role }
+					: { user: { id: Number(permission[1]) }, permission: "read", role_name: "read" },
+			);
 		const ref = url.searchParams.get("ref");
 		if (path === "/repos/upstream/project/contents/flake.nix" && (ref === commit || ref === head))
 			return (ref === commit ? github.flake : github.pullFlake)
 				? Response.json({ type: "file" })
 				: new Response(null, { status: 404 });
 		throw new Error(`Unexpected GitHub request ${path}`);
-	});
-	return { user, cookie, github };
+	};
+	vi.spyOn(globalThis, "fetch").mockImplementation(mock);
+	return { user, cookie, github, mock };
 }
 
 /** Deliver a signed GitHub webhook. */

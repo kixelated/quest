@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { createPublicKey, verify } from "node:crypto";
 import { privateKey } from "./github-key";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 import { GitHubService, type GitHubRepository } from "../src/github/service";
 import { deliveryRetention } from "../src/github/webhook";
 import { delivery } from "./project-fixtures";

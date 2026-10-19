@@ -554,11 +554,15 @@ export class GitHubService {
 				// Recheck the local revocation gate after potentially long content reads.
 				await this.#gate(installation);
 				if (state === "disconnected") {
-					// Jobs go with the project, so read the running attempts in the same transaction.
+					// Jobs go with the project, so read the running attempts in the same transaction,
+					// and queue the deletion of any output objects, which R2 cannot do in it.
 					const [running] = await this.#env.DB.batch<Stopped>([
 						this.#env.DB.prepare(
 							"SELECT actor,runner,id AS job,attempt FROM jobs WHERE repository=? AND state='running'",
 						).bind(repo.id),
+						this.#env.DB.prepare(
+							"INSERT OR IGNORE INTO output_cleanup(job,at) SELECT DISTINCT a.job,? FROM job_output_attempts a JOIN jobs j ON j.id=a.job WHERE j.repository=?",
+						).bind(Date.now(), repo.id),
 						this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id),
 					]);
 					return running!.results;

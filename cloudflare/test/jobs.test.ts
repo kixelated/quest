@@ -1,14 +1,15 @@
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { createScheduledController, runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/index";
+import worker, { app } from "../src/index";
+import * as output from "../src/jobs/output";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
 import { parse } from "../src/jobs/protocol";
 import { formAnswer, parseAnswer, parsePrompt } from "../src/jobs/prompt";
 import { refName, resume } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
-import { origin } from "./login-fixtures";
+import { identity, oauth, origin } from "./login-fixtures";
 import { commit, head, maintainerOf, project } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
@@ -65,6 +66,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM runners"),
 		db.prepare("DELETE FROM github_projects"),
 		db.prepare("DELETE FROM github_installations"),
+		db.prepare("DELETE FROM output_cleanup"),
 	]);
 	await user("owner");
 	await user("other");
@@ -283,7 +285,7 @@ describe("job coordination", () => {
 		]);
 		const late = 31 + GRACE;
 		await expect(store.checkpoint(db, old, id, 1, "Still here", null, late)).rejects.toThrow("no longer current");
-		await expect(store.output(db, old, { job: id, attempt: 1, seq: 0, text: "late" }, late)).rejects.toThrow(
+		await expect(output.append(env, old, { job: id, attempt: 1, seq: 0, text: "late" }, late)).rejects.toThrow(
 			"no longer current",
 		);
 		await expect(
@@ -513,9 +515,10 @@ describe("runner connections", () => {
 		live.send({ id: 7, type: "result", job: id, attempt: 1, outcome: "cancelled", summary: "Stopped" });
 		expect(await live.next()).toEqual({ type: "reply", id: 7 });
 		expect(await state(id)).toMatchObject({ state: "cancelled", summary: "Stopped" });
-		expect(await store.readOutput(db, id, null)).toMatchObject({
+		expect(await output.read(env, id, null)).toMatchObject({
 			output: [{ attempt: 1, seq: 0, text: "raw log" }],
 			next: null,
+			truncated: [],
 		});
 	});
 
@@ -571,6 +574,170 @@ describe("runner connections", () => {
 		await db.prepare("UPDATE jobs SET lease=1 WHERE id=?").bind(id).run();
 		expect(await runDurableObjectAlarm(hub())).toBe(true);
 		expect(await other.next()).toMatchObject({ type: "assign", job: { id, attempt: 2, runner: second.id } });
+	});
+});
+
+describe("raw output", () => {
+	async function started() {
+		const machine = await runner("owner", "machine");
+		await connected(machine, [account("main")]);
+		const id = await job(10, "owner");
+		await run({ [machine.id]: 1 }, 1);
+		return { machine, id };
+	}
+	const chunk = (job: string, seq: number, text: string) => ({ job, attempt: 1, seq, text });
+	const object = (job: string, seq: number) => env.OUTPUT.head(`output/${job}/1/${seq}`);
+	const totals = (job: string) =>
+		db.prepare("SELECT next,bytes,truncated FROM job_output_attempts WHERE job=?").bind(job).first();
+
+	it("accepts each attempt's chunks in order and retries without writing again", async () => {
+		const { machine, id } = await started();
+		await expect(output.append(env, machine, chunk(id, 1, "early"), 2)).rejects.toThrow("Expected sequence 0");
+		expect(await output.append(env, machine, chunk(id, 0, "first"), 2)).toEqual({});
+		const written = (await object(id, 0))!.version;
+		expect(await output.append(env, machine, chunk(id, 0, "first"), 3)).toEqual({});
+		expect((await object(id, 0))!.version).toBe(written);
+		// A conflicting chunk is refused before it reaches R2.
+		await expect(output.append(env, machine, chunk(id, 0, "other"), 3)).rejects.toThrow("A different chunk");
+		expect((await object(id, 0))!.version).toBe(written);
+		expect(await output.append(env, machine, chunk(id, 1, "界"), 4)).toEqual({});
+		expect(await totals(id)).toEqual({ next: 2, bytes: 8, truncated: 0 });
+		// Another of the owner's runners cannot write into or replay this attempt.
+		const other = await runner("owner", "other");
+		await expect(output.append(env, other, chunk(id, 2, "x"), 5)).rejects.toThrow("no longer current");
+		await expect(output.append(env, other, chunk(id, 0, "first"), 5)).rejects.toThrow("no longer current");
+	});
+
+	it("completes a reserved chunk when a retry follows a failed object write", async () => {
+		const { machine, id } = await started();
+		const failing = { DB: db, OUTPUT: { put: () => Promise.reject(new Error("R2 down")) } as unknown as R2Bucket };
+		await expect(output.append(failing, machine, chunk(id, 0, "kept"), 2)).rejects.toThrow("R2 down");
+		expect(await object(id, 0)).toBeNull();
+		// The reservation holds the sequence number for that text.
+		await expect(output.append(env, machine, chunk(id, 0, "changed"), 3)).rejects.toThrow("A different chunk");
+		expect(await output.append(env, machine, chunk(id, 0, "kept"), 3)).toEqual({});
+		// Retention counts from the successful upload, as the bucket lifecycle does.
+		expect((await output.read(env, id, null)).output).toEqual([{ attempt: 1, seq: 0, at: 3, text: "kept" }]);
+		expect(await output.append(env, machine, chunk(id, 0, "kept"), 4)).toEqual({});
+		expect((await output.read(env, id, null)).output).toMatchObject([{ at: 3 }]);
+	});
+
+	it("never pages past a chunk that may still land", async () => {
+		const { machine, id } = await started();
+		const failing = { DB: db, OUTPUT: { put: () => Promise.reject(new Error("R2 down")) } as unknown as R2Bucket };
+		for (const seq of [0, 1, 2]) await output.append(env, machine, chunk(id, seq, `${seq}`), 2);
+		await expect(output.append(failing, machine, chunk(id, 3, "3"), 2)).rejects.toThrow("R2 down");
+		// The pending chunk would fill the page; the cursor stops before it.
+		expect(await output.read(env, id, null)).toMatchObject({
+			output: [{ seq: 0 }, { seq: 1 }, { seq: 2 }],
+			next: null,
+		});
+		// Later chunks wait for it, so it stays the attempt's last.
+		await expect(output.append(env, machine, chunk(id, 4, "4"), 3)).rejects.toThrow("Chunk 3 is not stored yet");
+		expect(await output.append(env, machine, chunk(id, 3, "3"), 3)).toEqual({});
+		expect(await output.read(env, id, null)).toMatchObject({
+			output: [{}, {}, {}, { seq: 3 }],
+			next: { attempt: 1, seq: 3 },
+		});
+		expect(await output.append(env, machine, chunk(id, 4, "4"), 3)).toEqual({});
+		await expect(output.append(failing, machine, chunk(id, 5, "5"), 4)).rejects.toThrow("R2 down");
+		// Once the job is reassigned, a late retry cannot land behind a reader's cursor.
+		await db.prepare("UPDATE jobs SET attempt=2 WHERE id=?").bind(id).run();
+		await expect(output.append(env, machine, chunk(id, 5, "5"), 5)).rejects.toThrow("no longer current");
+		expect(await object(id, 5)).toBeNull();
+		expect(await output.read(env, id, { attempt: 1, seq: 3 })).toMatchObject({ output: [{ seq: 4 }], next: null });
+	});
+
+	it("refuses chunks past the attempt's cap as truncated while the job carries on", async () => {
+		const { machine, id } = await started();
+		expect(await output.append(env, machine, chunk(id, 0, "kept"), 2)).toEqual({});
+		await db
+			.prepare("UPDATE job_output_attempts SET bytes=? WHERE job=?")
+			.bind(output.MAX_BYTES - 4, id)
+			.run();
+		expect(await output.append(env, machine, chunk(id, 1, "12345"), 3)).toEqual({ truncated: true });
+		// Smaller and later chunks are refused too, so the kept output stays a prefix.
+		expect(await output.append(env, machine, chunk(id, 1, "1"), 4)).toEqual({ truncated: true });
+		expect(await output.append(env, machine, chunk(id, 2, "1"), 4)).toEqual({ truncated: true });
+		expect(await object(id, 1)).toBeNull();
+		expect(await totals(id)).toEqual({ next: 1, bytes: output.MAX_BYTES - 4, truncated: 1 });
+		expect(await store.checkpoint(db, machine, id, 1, "Still going", null, 5)).toEqual({ cancel: false });
+		expect(await state(id)).toMatchObject({ state: "running", summary: "Still going" });
+		expect(await output.read(env, id, null)).toMatchObject({
+			output: [{ seq: 0, text: "kept" }],
+			truncated: [1],
+		});
+	});
+
+	it("caps the number of chunks per attempt", async () => {
+		const { machine, id } = await started();
+		await output.append(env, machine, chunk(id, 0, "x"), 2);
+		await db.prepare("UPDATE job_output_attempts SET next=? WHERE job=?").bind(output.MAX_CHUNKS, id).run();
+		expect(await output.append(env, machine, chunk(id, output.MAX_CHUNKS, "x"), 3)).toEqual({ truncated: true });
+		expect(await totals(id)).toMatchObject({ next: output.MAX_CHUNKS, truncated: 1 });
+	});
+
+	it("forgets chunks after the retention period without giving back their capacity", async () => {
+		const { machine, id } = await started();
+		const now = Date.now();
+		await output.append(env, machine, chunk(id, 0, "old"), now - output.RETENTION - 1);
+		await output.append(env, machine, chunk(id, 1, "new"), now);
+		await worker.scheduled(createScheduledController(), env);
+		expect(await output.read(env, id, null)).toMatchObject({ output: [{ seq: 1, text: "new" }], next: null });
+		// An expired sequence number is never reclaimed, and the attempt keeps counting.
+		await expect(output.append(env, machine, chunk(id, 0, "old"), now)).rejects.toThrow("That chunk has expired");
+		expect(await totals(id)).toEqual({ next: 2, bytes: 6, truncated: 0 });
+		// Reads skip a row whose object the bucket lifecycle already deleted.
+		await env.OUTPUT.delete(`output/${id}/1/1`);
+		expect(await output.read(env, id, null)).toEqual({ output: [], next: null, truncated: [] });
+	});
+
+	it("deletes its own object when the job is disconnected during the write", async () => {
+		const { machine, id } = await started();
+		const racing = {
+			DB: db,
+			OUTPUT: {
+				put: async (key: string, value: string) => {
+					await db.prepare("DELETE FROM github_projects WHERE id=10").run();
+					return env.OUTPUT.put(key, value);
+				},
+				delete: (key: string) => env.OUTPUT.delete(key),
+			} as unknown as R2Bucket,
+		};
+		await expect(output.append(racing, machine, chunk(id, 0, "racing"), 2)).rejects.toThrow("no longer current");
+		expect(await object(id, 0)).toBeNull();
+	});
+
+	it("queues a cleanup when an upload racing a disconnect cannot delete its object", async () => {
+		const { machine, id } = await started();
+		const racing = {
+			DB: db,
+			OUTPUT: {
+				put: async (key: string, value: string) => {
+					await db.prepare("DELETE FROM github_projects WHERE id=10").run();
+					return env.OUTPUT.put(key, value);
+				},
+				delete: () => Promise.reject(new Error("R2 down")),
+			} as unknown as R2Bucket,
+		};
+		await expect(output.append(racing, machine, chunk(id, 0, "racing"), 2)).rejects.toThrow("R2 down");
+		expect(await object(id, 0)).not.toBeNull();
+		await worker.scheduled(createScheduledController(), env);
+		expect(await object(id, 0)).toBeNull();
+		expect((await db.prepare("SELECT job FROM output_cleanup").all()).results).toEqual([]);
+	});
+
+	it("retries a failed output cleanup from the daily cron", async () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		await env.OUTPUT.put("output/gone/1/0", "orphan");
+		await db.prepare("INSERT INTO output_cleanup(job,at) VALUES('gone',0)").run();
+		const failing = { DB: db, OUTPUT: { list: () => Promise.reject(new Error("R2 down")) } as unknown as R2Bucket };
+		await output.purge(failing);
+		expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: "output_cleanup_failed" }));
+		expect((await db.prepare("SELECT job FROM output_cleanup").all()).results).toEqual([{ job: "gone" }]);
+		await output.retain(env, Date.now());
+		expect(await env.OUTPUT.head("output/gone/1/0")).toBeNull();
+		expect((await db.prepare("SELECT job FROM output_cleanup").all()).results).toEqual([]);
 	});
 });
 
@@ -647,9 +814,10 @@ describe("job routes", () => {
 	let maintainer = "";
 	let cookie = "";
 	let github: Awaited<ReturnType<typeof maintainerOf>>["github"];
+	let mock: Awaited<ReturnType<typeof maintainerOf>>["mock"];
 
 	beforeEach(async () => {
-		({ user: maintainer, cookie, github } = await maintainerOf());
+		({ user: maintainer, cookie, github, mock } = await maintainerOf());
 	});
 
 	function post(path: string, body: unknown, headers: Record<string, string> = { Cookie: cookie, Origin: origin }) {
@@ -660,7 +828,7 @@ describe("job routes", () => {
 		);
 	}
 
-	it("stops a disconnected project's running jobs over their runners' connections", async () => {
+	it("stops a disconnected project's running jobs and deletes their output", async () => {
 		const machine = await runner(maintainer, "machine");
 		const live = await connect(machine.token);
 		live.send(status(1, "main"));
@@ -670,6 +838,11 @@ describe("job routes", () => {
 		expect(await live.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
 		live.send(status(2, "main", [{ job: id, attempt: 1 }], 0));
 		await live.next();
+		for (const seq of [0, 1]) {
+			live.send({ id: 3, type: "output", job: id, attempt: 1, seq, text: `chunk ${seq}` });
+			expect(await live.next()).toEqual({ type: "reply", id: 3 });
+		}
+		expect((await env.OUTPUT.list({ prefix: `output/${id}/` })).objects).toHaveLength(2);
 		const response = await app.request(
 			`${origin}/projects/github/upstream/project`,
 			{
@@ -682,6 +855,11 @@ describe("job routes", () => {
 		expect(response.status).toBe(303);
 		expect(await live.next()).toEqual({ type: "cancel", job: id, attempt: 1 });
 		expect(await store.readJob(db, id)).toBeNull();
+		expect((await env.OUTPUT.list({ prefix: `output/${id}/` })).objects).toEqual([]);
+		expect(await db.prepare("SELECT job FROM output_cleanup").all()).toMatchObject({ results: [] });
+		// The runner's late chunk finds no job.
+		live.send({ id: 4, type: "output", job: id, attempt: 1, seq: 2, text: "late" });
+		expect(await live.next()).toEqual({ type: "reply", id: 4, error: "Attempt is no longer current" });
 	});
 
 	it("authorizes each workflow against current observations and deduplicates requests", async () => {
@@ -748,7 +926,7 @@ describe("job routes", () => {
 		};
 		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
 		for (const [seq, text] of ["secret transcript", "b", "c", "d", "e"].entries())
-			await store.output(db, machine, { job: id, attempt: 1, seq, text }, Date.now());
+			await output.append(env, machine, { job: id, attempt: 1, seq, text }, Date.now());
 		const { question } = await store.ask(
 			db,
 			machine,
@@ -761,19 +939,28 @@ describe("job routes", () => {
 			},
 			Date.now(),
 		);
-		const output = (query = "") =>
+		const page = (query = "") =>
 			app.request(`${base}/${id}/output${query}`, { headers: { Cookie: cookie } }, testEnv);
 		// Output comes in bounded pages.
-		const first = (await (await output()).json()) as { output: { text: string }[]; next: unknown };
+		const first = (await (await page()).json()) as { output: { text: string }[]; next: unknown };
 		expect(first.output.map((chunk) => chunk.text)).toEqual(["secret transcript", "b", "c", "d"]);
 		expect(first.next).toEqual({ attempt: 1, seq: 3 });
-		expect(await (await output("?after=1.3")).json()).toEqual({
+		expect(await (await page("?after=1.3")).json()).toEqual({
 			output: [expect.objectContaining({ seq: 4, text: "e" })],
 			next: null,
+			truncated: [],
 		});
-		expect((await output("?after=x")).status).toBe(409);
+		expect((await page("?after=x")).status).toBe(409);
+		// Signed-out visitors and other signed-in users never see raw output.
+		expect((await app.request(`${base}/${id}/output`, {}, testEnv)).status).toBe(403);
+		const stranger = (await oauth(identity("github"))).session!;
+		vi.spyOn(globalThis, "fetch").mockImplementation(mock);
+		const refused = await app.request(`${base}/${id}/output`, { headers: { Cookie: stranger } }, testEnv);
+		expect(refused.status).toBe(403);
+		expect(await refused.json()).toEqual({ error: "Current GitHub maintainer authority required" });
+		// A maintainer whose role was revoked is refused on the next request.
 		github.role = "write";
-		expect((await output()).status).toBe(403);
+		expect((await page()).status).toBe(403);
 		const a = { answers: [{ choices: ["A"] }] };
 		expect((await post(`/${id}/answer`, { question, answer: a })).status).toBe(403);
 		github.role = "maintain";

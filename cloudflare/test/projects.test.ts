@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 import { readBoard } from "../src/board/model";
 import type { ActivityPage } from "../src/github/state";
 import { GitHubService } from "../src/github/service";

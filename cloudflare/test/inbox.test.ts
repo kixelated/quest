@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 import * as store from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";

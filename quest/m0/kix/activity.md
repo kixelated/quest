@@ -32,4 +32,3 @@ Decided 2026-10-15 in the decisions-not-implementations interview:
 ## Required
 
 - [Runner](/quest/m0/kix/runner.md) - the checkpoint tool, summaries, and retained raw output
-- [Output retention](/quest/m0/kix/output.md) - the bounded raw output behind the disclosure
