@@ -24,8 +24,10 @@ export type InboxProps = {
 const kinds = { pull: "Pull request", issue: "Issue", quest: "Ready quest", plan: "Plan", devshell: "Bootstrap" };
 
 function needLabel(item: Item) {
-	if (item.need === "answer")
+	if (item.need === "answer") {
+		if (item.question?.kind === "publication") return "Publishing needs your decision";
 		return item.prompt?.kind === "permission" ? "Tool permission request" : "Waiting for your decision";
+	}
 	if (item.need === "account") return "Account limited";
 	if (item.need === "retry") return "Failed";
 	if (item.need === "start")
@@ -99,6 +101,7 @@ function History(props: { item: Item }) {
 					if (q.kind === "account") {
 						return <li>Chose an account to continue on.</li>;
 					}
+					if (q.kind === "publication") return <li>{typeof q.answer === "string" ? q.answer : ""}</li>;
 					const prompt = parsed(q);
 					const replies = (q.answer as { answers?: { choices: string[]; text?: string }[] }).answers ?? [];
 					return (
@@ -163,6 +166,44 @@ function AgentForm(props: { item: Item; prompt: Prompt }) {
 				</fieldset>
 			))}
 			<button class="button primary">{prompt.questions.length > 1 ? "Submit answers" : "Submit answer"}</button>
+		</form>
+	);
+}
+
+/** A publication decision's prompt. kix wrote it, but its paths came from the runner. */
+function publication(question: QuestionView) {
+	const prompt = question.prompt as { refused?: unknown; blocked?: unknown } | null;
+	return {
+		refused: Array.isArray(prompt?.refused) ? (prompt.refused as { path: string; reason: string }[]) : [],
+		blocked: typeof prompt?.blocked === "string" ? prompt.blocked : null,
+	};
+}
+
+/** Work kix would not publish as is; the maintainer's reply resumes the agent's session. */
+function PublicationForm(props: { item: Item }) {
+	const { item } = props;
+	const { refused, blocked } = publication(item.question!);
+	return (
+		<form method="post" action={`${jobsURL(item)}/${item.job!.id}/answer`} class="decision-form">
+			<input type="hidden" name="question" value={item.question!.id} />
+			<fieldset class="ask">
+				<legend>The agent's work was not published</legend>
+				{blocked && <p>{blocked}</p>}
+				{refused.length > 0 && (
+					<ul>
+						{refused.map((change) => (
+							<li>
+								<code>{change.path}</code>: {change.reason}
+							</li>
+						))}
+					</ul>
+				)}
+				<label class="free" for="publication-text">
+					Tell the agent how to continue
+				</label>
+				<textarea id="publication-text" name="text" rows={3} maxlength={1000} required />
+			</fieldset>
+			<button class="button primary">Send to the agent</button>
 		</form>
 	);
 }
@@ -249,8 +290,10 @@ function Refresh(props: { project: Item["project"] }) {
 function Actions(props: { item: Item; view: ProjectView | undefined }) {
 	const { item, view } = props;
 	const base = projectURL(item.project.owner, item.project.name);
-	const reason = item.need === "start" || item.need === "retry" ? blocked(item, view) : null;
-	const job = item.need === "start" || item.need === "retry" ? work(item, view!) : null;
+	const starts = item.need === "start" || item.need === "retry";
+	const reason = starts ? blocked(item, view) : null;
+	// Only an unblocked item has the observations its work is bound to.
+	const job = starts && !reason ? work(item, view!) : null;
 	const active = item.job && ["queued", "running", "waiting"].includes(item.job.state) && !item.job.cancel;
 	return (
 		<div class="decision-actions">
@@ -311,7 +354,9 @@ function Thread(props: { item: Item; view: ProjectView | undefined; runners: Run
 			)}
 			<History item={item} />
 			{item.need === "answer" &&
-				(item.prompt ? (
+				(item.question?.kind === "publication" ? (
+					<PublicationForm item={item} />
+				) : item.prompt ? (
 					<AgentForm item={item} prompt={item.prompt} />
 				) : (
 					<p role="alert">

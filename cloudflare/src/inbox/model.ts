@@ -210,7 +210,7 @@ export async function load(env: Env, user: string) {
 	const usable = projects.filter((view) => !view.error);
 	const [reads, jobs] = await Promise.all([
 		env.DB.prepare("SELECT repository,item,seen,skipped FROM inbox_items WHERE user=?").bind(user).all<Read>(),
-		Promise.all(usable.map((view) => store.listJobs(env.DB, view.project.id))),
+		Promise.all(usable.map((view) => store.listInboxJobs(env.DB, view.project.id))),
 	]);
 	const items = usable.flatMap((view, i) => decisions(view, jobs[i]!, reads.results));
 	// Jobs run on their requester's runners, so presence comes from each requester's hub.

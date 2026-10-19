@@ -172,7 +172,10 @@ requests, new issues, and ready quests. An item offers only actions that
 would work: none on a paused project, and only a refresh while observations
 are incomplete. Every action is a plain form post to the job routes, which
 recheck authority and return to the inbox; prompts render as escaped text and
-never preselect the recommendation.
+never preselect the recommendation. A `publication` decision lists the refused
+paths or why the branch is blocked, and takes the maintainer's reply as text.
+The inbox reads every queued, running, and waiting job, so an older decision
+is never cut off by the job history's limit.
 
 Each maintainer's read state lives in `inbox_items`, keyed by a version of what
 the item showed (a question, a GitHub change, a quest's text). A newer version

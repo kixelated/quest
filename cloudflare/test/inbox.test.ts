@@ -237,6 +237,77 @@ describe("decision inbox", () => {
 		expect(await store.readJob(db, id)).toMatchObject({ state: "queued", pinAccount: "spare" });
 	});
 
+	it("asks how to continue when publishing needs a decision", async () => {
+		const { id, runner } = await running();
+		const prompt = {
+			type: "publication",
+			refused: [{ path: "<src>/index.ts", reason: "Planning publishes only quest files" }],
+		};
+		const { question } = await store.ask(
+			db,
+			runner,
+			id,
+			1,
+			{ kind: "publication", summary: "Publishing needs a decision", session: "s", prompt },
+			3,
+		);
+		const active = thread(await inbox());
+		expect(active).toContain("Publishing needs your decision");
+		// Runner-supplied paths are escaped.
+		expect(active).toContain("<code>&lt;src&gt;/index.ts</code>: Planning publishes only quest files");
+		const answered = await submit(`${jobs}/${id}/answer`, [
+			["question", question],
+			["text", "Drop the source change"],
+		]);
+		expect(answered.status).toBe(303);
+		const job = (await store.readJob(db, id))!;
+		expect(job.state).toBe("queued");
+		expect(job.questions[0]!.answer).toBe("Drop the source change");
+		expect(thread(await inbox({ project: "10", item: "quest/first.md" }))).toContain("Drop the source change");
+	});
+
+	it("offers a refresh for a failed job whose pull request is no longer observed", async () => {
+		const { id, runner } = await running("iterate", "pulls/2");
+		await store.finish(db, runner, id, 1, { outcome: "failed", summary: "Broke.", result: null }, 3);
+		await db.prepare("DELETE FROM github_project_activity WHERE kind='pull'").run();
+		const active = thread(await inbox({ project: "10", item: "pulls/2" }));
+		expect(active).toContain("Failed");
+		expect(active).toContain("Refresh to read this from GitHub.");
+		expect(active).not.toContain("Try again");
+	});
+
+	it("keeps an older job's question beyond the newest fifty jobs", async () => {
+		const { id, runner } = await running();
+		await store.ask(
+			db,
+			runner,
+			id,
+			1,
+			{
+				summary: "Asked early.",
+				session: "s",
+				prompt: { questions: [{ question: "Still there?", options: [] }] },
+			},
+			3,
+		);
+		for (let i = 0; i < 50; i++)
+			await store.createJob(
+				db,
+				{
+					repository: 10,
+					actor: user,
+					workflow: "start",
+					target: `quest/later-${i}.md`,
+					revision: commit,
+					branch: `quest/later-${i}`,
+					trusted: true,
+				},
+				10 + i,
+			);
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id<>?").bind(id).run();
+		expect(thread(await inbox())).toContain("Still there?");
+	});
+
 	it("skips an item until it changes", async () => {
 		const skipped = await submit("/projects/github/upstream/project/skip", [
 			["item", "issues/1"],

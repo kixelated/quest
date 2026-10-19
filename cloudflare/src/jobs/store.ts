@@ -629,6 +629,20 @@ export async function listJobs(db: D1Database, repository: number) {
 }
 
 /**
+ * The inbox's jobs, newest first: the 50 newest plus every queued, running, or
+ * waiting job, so an older job awaiting a decision is never cut off.
+ */
+export async function listInboxJobs(db: D1Database, repository: number) {
+	const rows = await db
+		.prepare(
+			"SELECT id FROM jobs WHERE repository=?1 AND (state IN ('queued','running','waiting') OR id IN (SELECT id FROM jobs WHERE repository=?1 ORDER BY createdAt DESC,id LIMIT 50)) ORDER BY createdAt DESC,id",
+		)
+		.bind(repository)
+		.all<{ id: string }>();
+	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+}
+
+/**
  * Answer the job's open question once, then requeue it. An account decision
  * pins the chosen account and starts a new session from the job's summaries.
  */

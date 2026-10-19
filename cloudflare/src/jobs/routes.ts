@@ -273,9 +273,10 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 	return reply(c, form, job, null);
 });
 
-/** An inbox form's answer: the chosen options, or the chosen `runner:account`. */
+/** An inbox form's answer: the chosen options, a publication reply's text, or the chosen `runner:account`. */
 function formReply(question: store.Question, form: Form) {
 	if (question.kind === "agent") return formAnswer(parsePrompt(question.prompt), form);
+	if (question.kind === "publication") return typeof form.text === "string" ? form.text : undefined;
 	const [runner, account] = typeof form.account === "string" ? form.account.split(":") : [];
 	return runner && account ? { runner, account } : undefined;
 }
