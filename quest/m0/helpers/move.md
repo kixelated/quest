@@ -23,9 +23,12 @@ commands avoid making them.
 - Decided 2026-10-19 (user): `rm` also drops every `Required` link to a
   finished milestone, meaning a milestone README with no `## Required` left
   ([finished milestone links](/quest/m0/milestone-links.md)). That covers a
-  milestone this `rm` just emptied and any links that were already stale. It
-  repeats until nothing changes, so `rm` never leaves a tree that fails that
-  check. Whichever of the two quests lands second wires it up.
+  milestone this `rm` just emptied and any links that were already stale. As
+  in that check, the root's own entry for the milestone stays: it is
+  membership, not a blocker, and dropping it would leave the milestone
+  unlisted. It repeats until nothing changes, so `rm` never leaves a tree
+  that fails either check. Whichever of the two quests lands second wires it
+  up.
 - Both report prose mentions of the path and mentions outside `quest/`
   without editing them, and run `quest check` on the result.
 - Neither touches branches or PRs, since renaming an open PR's head branch
@@ -38,5 +41,5 @@ commands avoid making them.
   `quest mv`.
 - Test moving a quest, moving an epic, deleting a quest listed under several
   Required and Related sections, deleting a milestone's last child while
-  another quest requires that milestone, refusing a non-empty epic without `-r`, and
+  another quest requires that milestone (the root still lists it), refusing a non-empty epic without `-r`, and
   a destination that already exists, and refusing to move a claimed quest.
