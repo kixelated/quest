@@ -16,6 +16,8 @@ sessions), since `quest ready` checks no claims.
   branch, then pushes an empty commit with the explicit refspec
   `refs/heads/<branch>:refs/heads/<branch>`, never forcing. A rejected push
   means someone else holds the claim, which makes the push the atomic check.
+  Give each claim commit a random nonce, so two claimers on the same base,
+  identity, and second never build the same commit and both see success.
   Distinct exit codes separate "taken" from a failure.
 - Decided (user): `quest claim --release <quest>` deletes the remote claim
   branch only while its tip is still the empty claim commit and it has no

@@ -22,11 +22,14 @@ commands avoid making them.
   Required. Removing an epic with children requires `-r`, as with `git rm`.
 - Both report prose mentions of the path and mentions outside `quest/`
   without editing them, and run `quest check` on the result.
-- Neither touches branches or PRs: a claimed quest's branch keeps its old
-  name, and renaming an open PR's head branch closes the PR.
+- Neither touches branches or PRs, since renaming an open PR's head branch
+  closes the PR. `mv` refuses while the quest, or any quest under a moved
+  epic, has a claim branch or open PR, because the old branch name would no
+  longer be recognized as its claim. Use the same lookup as `quest claim`,
+  so whichever lands second reuses it.
 - Put the link rewriting in the core as a pure edit of documents; the CLI
   owns git. Update the `delete` and `audit` skills to use `quest rm` and
   `quest mv`.
 - Test moving a quest, moving an epic, deleting a quest listed under several
   Required and Related sections, refusing a non-empty epic without `-r`, and
-  a destination that already exists.
+  a destination that already exists, and refusing to move a claimed quest.
