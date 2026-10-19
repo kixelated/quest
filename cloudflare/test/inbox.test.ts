@@ -276,8 +276,21 @@ describe("decision inbox", () => {
 		expect(active).not.toContain("Try again");
 	});
 
-	it("keeps an older job's question beyond the newest fifty jobs", async () => {
+	it("keeps older questions and failures beyond the newest fifty jobs", async () => {
 		const { id, runner } = await running();
+		const failed = await store.createJob(
+			db,
+			{
+				repository: 10,
+				actor: user,
+				workflow: "plan",
+				target: "issues/1",
+				revision: commit,
+				branch: "plan/issue-1",
+				trusted: true,
+			},
+			2,
+		);
 		await store.ask(
 			db,
 			runner,
@@ -304,8 +317,40 @@ describe("decision inbox", () => {
 				},
 				10 + i,
 			);
-		await db.prepare("UPDATE jobs SET state='completed' WHERE id<>?").bind(id).run();
+		await db.batch([
+			db.prepare("UPDATE jobs SET state='completed' WHERE id NOT IN (?,?)").bind(id, failed.id),
+			db.prepare("UPDATE jobs SET state='failed' WHERE id=?").bind(failed.id),
+		]);
 		expect(thread(await inbox())).toContain("Still there?");
+		// The failure stays a failure, not fresh work on the issue.
+		const issue = thread(await inbox({ project: "10", item: "issues/1" }));
+		expect(issue).toContain("Failed");
+		expect(issue).toContain("Try again");
+	});
+
+	it("retries a failed planning interview on its own target", async () => {
+		const target = `plans/${crypto.randomUUID()}`;
+		const { id, runner } = await running("plan", target);
+		await store.finish(db, runner, id, 1, { outcome: "failed", summary: "Broke.", result: null }, 3);
+		const active = thread(await inbox({ project: "10", item: target }));
+		expect(active).toContain(`name="target" value="${target}"`);
+		const retried = await submit(jobs, [
+			["workflow", "plan"],
+			["target", target],
+			["revision", commit],
+		]);
+		expect(retried.status).toBe(303);
+		const [latest] = await store.listJobs(db, 10);
+		expect(latest).toMatchObject({ target, state: "queued" });
+		expect(latest!.id).not.toBe(id);
+	});
+
+	it("offers no retry for a failed quest that is no longer ready", async () => {
+		const { id, runner } = await running("start", "quest/gone.md");
+		await store.finish(db, runner, id, 1, { outcome: "failed", summary: "Broke.", result: null }, 3);
+		const active = thread(await inbox({ project: "10", item: "quest/gone.md" }));
+		expect(active).toContain("This quest is no longer ready to start");
+		expect(active).not.toContain("Try again");
 	});
 
 	it("skips an item until it changes", async () => {

@@ -186,8 +186,10 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan 
 		return { workflow, target, revision: commit, branch, trusted: true };
 	}
 	if (workflow === "plan") {
-		if (target === undefined) {
-			const plan = crypto.randomUUID();
+		// A new interview gets its own target; retrying one keeps it, replacing the failure.
+		const retry = typeof target === "string" ? target.match(/^plans\/([0-9a-f-]{36})$/)?.[1] : undefined;
+		if (target === undefined || retry) {
+			const plan = retry ?? crypto.randomUUID();
 			return {
 				workflow,
 				target: `plans/${plan}`,

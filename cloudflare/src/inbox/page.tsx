@@ -256,7 +256,9 @@ function AccountForm(props: { item: Item; runners: Runners }) {
 function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
 	if (!view?.state?.complete) return "GitHub reported changes. Refresh to start new work from current state.";
-	if (item.kind !== "quest" && item.kind !== "plan" && item.kind !== "devshell" && !item.activity?.data)
+	if (item.kind === "quest" && !view.state.available.includes(item.target))
+		return "This quest is no longer ready to start, such as when it is claimed or removed.";
+	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
 		return "Refresh to read this from GitHub.";
 	return null;
 }
@@ -273,7 +275,8 @@ function work(item: Item, view: ProjectView) {
 		};
 	if (item.kind === "issue")
 		return { workflow: "plan", target: item.target, revision: commit, label: "Plan this issue" };
-	if (item.kind === "plan") return { workflow: "plan", revision: commit, label: "Start a new plan" };
+	// Only a failed interview is an item, so this retries it on the same target.
+	if (item.kind === "plan") return { workflow: "plan", target: item.target, revision: commit, label: "Try again" };
 	if (item.kind === "devshell") return { workflow: "bootstrap", revision: commit, label: "Add a devShell" };
 	return { workflow: "start", target: item.target, revision: commit, label: "Start this quest" };
 }
