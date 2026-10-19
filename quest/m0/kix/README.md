@@ -100,6 +100,7 @@ operator-paid-hosting decisions:
 - [Inbox merge](/quest/m0/kix/merge.md) - PR items merge the reviewed head through GitHub's rules
 - [Co-maintainer inbox](/quest/m0/kix/members.md) - every current maintainer sees enrolled projects in their inbox
 - [Answer flow](/quest/m0/kix/answer-flow.md) - move to the next decision after an answer, with neutral refusals
+- [Retry from the branch](/quest/m0/kix/retry.md) - a retried job continues from the head its failed attempt published
 - [Decision paper trail](/quest/m0/kix/paper-trail.md) - planning PRs carry the recorded questions and answers, rendered by the service
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions
