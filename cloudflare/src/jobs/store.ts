@@ -629,6 +629,24 @@ export async function listJobs(db: D1Database, repository: number) {
 }
 
 /**
+ * The inbox's jobs, newest first: each target's latest job, however old, when
+ * it awaits a decision (queued, running, waiting, or failed) or its target is
+ * one of the `observed` issues, pull requests, or ready quests.
+ */
+export async function listInboxJobs(db: D1Database, repository: number, observed: string[]) {
+	const rows = await db
+		.prepare(
+			`SELECT id FROM jobs j WHERE repository=?1
+				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
+				AND (state IN ('queued','running','waiting','failed') OR target IN (SELECT value FROM json_each(?2)))
+			ORDER BY createdAt DESC,id`,
+		)
+		.bind(repository, JSON.stringify(observed))
+		.all<{ id: string }>();
+	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+}
+
+/**
  * Answer the job's open question once, then requeue it. An account decision
  * pins the chosen account and starts a new session from the job's summaries.
  */

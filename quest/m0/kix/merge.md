@@ -25,7 +25,3 @@ offer only "Review on GitHub":
   maintainer's click.
 - Test a moved head, a refused merge, a squash-only repository, and a
   non-maintainer.
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the PR items that show the button

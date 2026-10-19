@@ -38,7 +38,3 @@ paper trail from the agent's quest files and PR body:
   account question must not appear. Cover hostile prompts with Markdown,
   `@user` and `@org/team` mentions, bare URLs, issue and cross-repository
   references, and closing keywords.
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the recorded prompt and answer format this renders

@@ -4,6 +4,7 @@ import { GitHubError, GitHubService, refName, type Stopped } from "../github/ser
 import type { ProjectState, Pull } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import * as output from "./output";
+import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
 import { data, id, text } from "./protocol";
 import { LIMITS, parsePublication, publish } from "./publish";
 import * as store from "./store";
@@ -20,8 +21,42 @@ async function json(c: Context): Promise<Record<string, unknown>> {
 	throw new JobError("JSON object required");
 }
 
+/** Whether a request came from an HTML form, such as the decision inbox, rather than the JSON API. */
+export function fromForm(c: Context) {
+	return /^(application\/x-www-form-urlencoded|multipart\/form-data)\b/.test(c.req.header("Content-Type") ?? "");
+}
+type Form = Record<string, string | File | (string | File)[]>;
+/** A JSON body, or a form's non-empty text fields. */
+async function input(c: Context): Promise<{ body: Record<string, unknown>; form: Form | null }> {
+	if (!fromForm(c)) return { body: await json(c), form: null };
+	const form = await c.req.parseBody({ all: true });
+	const body = Object.fromEntries(Object.entries(form).filter(([, v]) => typeof v === "string" && v !== ""));
+	return { body, form };
+}
+/** Answer the JSON API, or return a form to the decision it acted on. */
+function reply(
+	c: Context,
+	form: Form | null,
+	item: { repository: number; target: string },
+	body: unknown,
+	status: 200 | 201 = 200,
+) {
+	if (form) return c.redirect(inboxURL(item.repository, item.target), 303);
+	return body === null ? c.body(null, 204) : c.json(body, status);
+}
+export function inboxURL(repository: number, target: string) {
+	return `/inbox?${new URLSearchParams({ project: String(repository), item: target })}`;
+}
+
+/** The default branch has no flake for the job's devShell; a bootstrap job can add one. */
+export class BootstrapRequired extends JobError {
+	constructor() {
+		super("A flake devShell is required; start a bootstrap job to add one");
+	}
+}
+
 /** The owner's hub, which holds their runners' connections and routes their jobs. */
-function hub(env: Env, owner: string) {
+export function hub(env: Env, owner: string) {
 	return env.RUNNERS.get(env.RUNNERS.idFromName(owner));
 }
 
@@ -151,8 +186,10 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan 
 		return { workflow, target, revision: commit, branch, trusted: true };
 	}
 	if (workflow === "plan") {
-		if (target === undefined) {
-			const plan = crypto.randomUUID();
+		// A new interview gets its own target; retrying one keeps it, replacing the failure.
+		const retry = typeof target === "string" ? target.match(/^plans\/([0-9a-f-]{36})$/)?.[1] : undefined;
+		if (target === undefined || retry) {
+			const plan = retry ?? crypto.randomUUID();
 			return {
 				workflow,
 				target: `plans/${plan}`,
@@ -191,7 +228,7 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan 
  */
 jobs.post(base, async (c) => {
 	const { user, repo, github } = await maintained(c);
-	const body = await json(c);
+	const { body, form } = await input(c);
 	const pinRunner = body.runner === undefined ? null : id(body.runner);
 	const pinAccount = body.account === undefined ? null : id(body.account);
 	if ((body.runner !== undefined && !pinRunner) || (body.account !== undefined && !pinAccount))
@@ -199,15 +236,15 @@ jobs.post(base, async (c) => {
 	const { job, enabled, flake } = await github.jobSource(repo, user, (state) =>
 		resolve(body.workflow, body.target, state),
 	);
+	// A decision binds the revision the maintainer saw, such as a pull request's head.
+	if (body.revision !== undefined && body.revision !== job.revision)
+		throw new JobError("This changed on GitHub since you looked; review it again");
 	if (!enabled) throw new JobError("Contributions are paused");
 	if (job.workflow === "bootstrap") {
 		if (flake) throw new JobError("The default branch already has a flake");
 	} else if (!flake) {
 		if (job.workflow === "iterate") throw new JobError("The pull request's head has no flake devShell");
-		return c.json(
-			{ error: "A flake devShell is required; start a bootstrap job to add one", bootstrap: true },
-			409,
-		);
+		throw new BootstrapRequired();
 	}
 	const created = await store.createJob(
 		c.env.DB,
@@ -215,25 +252,61 @@ jobs.post(base, async (c) => {
 		Date.now(),
 	);
 	await hub(c.env, user).dispatch(user);
-	return c.json(created, created.created ? 201 : 200);
+	return reply(c, form, { repository: repo.id, target: job.target }, created, created.created ? 201 : 200);
 });
 
 jobs.post(`${base}/:job/answer`, async (c) => {
 	const { user, job } = await owned(c);
-	const body = await json(c);
-	const question = id(body.question);
-	if (!question || body.answer === undefined) throw new JobError("Question and answer required");
-	await store.answer(c.env.DB, job.id, question, user, data(body.answer, 64 * 1024), Date.now());
+	const { body, form } = await input(c);
+	const question = job.questions.find((q) => q.id === id(body.question));
+	const answer = question && (form ? formReply(question, form) : body.answer);
+	if (!question || answer === undefined) throw new JobError("Question and answer required");
+	await store.answer(
+		c.env.DB,
+		job.id,
+		question.id,
+		user,
+		// An agent's answer must fit its prompt; the store checks an account choice against the owner's accounts.
+		question.kind === "agent"
+			? parseAnswer(parsePrompt(question.prompt), answer)
+			: question.kind === "publication"
+				? publicationReply(answer)
+				: data(answer, 1024),
+		Date.now(),
+	);
 	// Jobs run on their requester's runners, whoever answers.
 	await hub(c.env, job.actor).dispatch(job.actor);
-	return c.body(null, 204);
+	return reply(c, form, job, null);
 });
+
+/** The longest reply to a publication decision, in characters as the inbox form counts them. */
+export const PUBLICATION_REPLY = 1000;
+
+/**
+ * A publication decision's answer is the maintainer's own words, limited by
+ * length rather than encoding. Forms submit line breaks as CRLF but count them
+ * as one character, so they are normalized first.
+ */
+function publicationReply(answer: unknown) {
+	if (typeof answer !== "string" || !answer.trim()) throw new JobError("Reply in your own words");
+	const text = answer.replaceAll("\r\n", "\n");
+	if (text.length > PUBLICATION_REPLY) throw new JobError(`Reply in at most ${PUBLICATION_REPLY} characters`);
+	return text;
+}
+
+/** An inbox form's answer: the chosen options, a publication reply's text, or the chosen `runner:account`. */
+function formReply(question: store.Question, form: Form) {
+	if (question.kind === "agent") return formAnswer(parsePrompt(question.prompt), form);
+	if (question.kind === "publication") return typeof form.text === "string" ? form.text : undefined;
+	const [runner, account] = typeof form.account === "string" ? form.account.split(":") : [];
+	return runner && account ? { runner, account } : undefined;
+}
 
 jobs.post(`${base}/:job/cancel`, async (c) => {
 	const { user, job } = await owned(c);
 	await store.cancel(c.env.DB, job.id, user, Date.now());
 	await hub(c.env, job.actor).dispatch(job.actor);
-	return c.body(null, 204);
+	return reply(c, fromForm(c) ? {} : null, job, null);
 });
 
 // Raw output stays behind a per-request maintainer check; summaries are the default view.

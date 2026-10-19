@@ -30,7 +30,3 @@ proxy hangs in the agent sandbox on a DNS lookup of "dummy":
   the Worker tests where practical.
 - Document the command in `cloudflare/README.md` as the way to check UI
   changes in a browser.
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the inbox state the seed covers

@@ -27,7 +27,3 @@ someone reads the project from GitHub:
   per-request recheck.
 - Test with duplicate deliveries, a burst of deliveries, a failed read, and a
   webhook for a paused or disconnected project.
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the webhook items this fills in

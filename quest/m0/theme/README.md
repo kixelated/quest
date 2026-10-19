@@ -116,5 +116,4 @@ Decided while planning on 2026-10-05, amended 2026-10-14 where noted:
 
 ## Related
 
-- [Decision inbox](/quest/m0/kix/prompts.md) - the primary hosted workflow
 - [Launch material](/quest/m0/launch.md) - posts, quickstart, demo, and comparison written in the same voice

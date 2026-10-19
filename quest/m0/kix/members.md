@@ -23,7 +23,3 @@ only projects the viewer enrolled (`enrolledBy`):
 - Disconnecting a project removes its memberships with it.
 - Test a co-maintainer joining, a revoked maintainer dropping out, a
   rate-limited check keeping membership, and a non-maintainer never joining.
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the inbox and its read state

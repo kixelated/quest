@@ -18,7 +18,3 @@ a refused "Refresh from GitHub":
 - Retitle the refused-action page neutrally (for example "Couldn't do
   that"), with the specific reason and a link back to the item.
 - Keep the form posts working without JavaScript. Update the inbox tests.
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the answer and refusal pages this changes

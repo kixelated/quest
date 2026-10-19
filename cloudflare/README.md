@@ -111,6 +111,16 @@ An account limit pauses the job with an account decision; kix never switches
 accounts on its own. An answer requeues the job and resumes its session on the
 runner that holds it.
 
+A `question` carries one round of independent questions
+(`src/jobs/prompt.ts`): `{ kind, questions: [{ header?, question, options:
+[{ label, description?, recommended? }], multiple? }] }`, where `kind` is
+`decision` (the default) or `permission` for a tool permission request. The
+service refuses a prompt it cannot render. An agent question's answer is
+`{ answers: [{ choices, text? }] }`, one per question, naming offered labels,
+the maintainer's own words, or both; an account question's answer is
+`{ runner, account }`. A job request may name the `revision` the maintainer
+saw, and is refused once observations moved past it.
+
 The current attempt publishes its work over HTTPS at `POST /api/runner/publish`,
 not over its connection, so slow GitHub writes never hold up the hub. It sends
 file changes as data; the Worker commits them as the GitHub App to the job's
@@ -149,6 +159,30 @@ the same D1 batch that deletes the jobs, then deletes each `output/<job>/`
 prefix at once. The cron retries any deletion that failed. An upload racing the
 disconnect finds its index row gone, queues its job's prefix for the cron again,
 and deletes its own object.
+
+### Decision inbox
+
+After signing in, a maintainer lands on `/inbox` (`src/inbox/`): one active
+decision thread across the projects they enrolled, then what is up next, what
+is in progress, and their projects. Each item is one job target (`issues/1`,
+`pulls/2`, a quest path), so an issue, its planning job, and that job's
+questions stay one item, and webhook updates and reconnects never add another
+prompt. Agents waiting on an answer come first, then failed jobs, new pull
+requests, new issues, and ready quests. An item offers only actions that
+would work: none on a paused project, and only a refresh while observations
+are incomplete. Every action is a plain form post to the job routes, which
+recheck authority and return to the inbox; prompts render as escaped text and
+never preselect the recommendation. A `publication` decision lists the refused
+paths or why the branch is blocked, and takes the maintainer's reply as text.
+The inbox reads each target's latest job however old it is: every one that
+awaits a decision, and any other whose issue, pull request, or quest is still
+observed, so finished work stays set aside. Retrying a failed planning
+interview keeps its `plans/<id>` target.
+
+Each maintainer's read state lives in `inbox_items`, keyed by a version of what
+the item showed (a question, a GitHub change, a quest's text). A newer version
+is unread again, and skipping an item lasts until it changes. A finished or
+stopped job sets its item aside the same way.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -212,8 +246,10 @@ maintainer-only routes. Publication tests run against a stateful fake of
 GitHub's Git and pull request APIs: fenced and stale writes, workflow path
 limits and their decisions, lost branch updates and deliveries, iterated heads,
 and token scopes. Output tests use local R2 for chunk ordering, retries, the
-caps, expiry, and cleanup after a disconnect. No OAuth credentials or
-Cloudflare account are required for checks.
+caps, expiry, and cleanup after a disconnect. Inbox tests answer prompts
+through the forms, reject stale revisions and repeated answers, coalesce
+duplicate webhooks, and hide a project whose maintainer lost authority. No
+OAuth credentials or Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
 

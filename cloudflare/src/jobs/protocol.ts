@@ -1,4 +1,5 @@
 // Runner messages over the live connection. Every field is untrusted input.
+import { type Prompt, parsePrompt } from "./prompt";
 import { type AccountReport, type Attempt, JobError, type Outcome } from "./store";
 
 export function text(value: unknown, max: number): string | null {
@@ -29,7 +30,7 @@ function count(value: unknown): number {
 export type RunnerMessage = { id?: string | number } & (
 	| { type: "status"; accounts: AccountReport[]; attempts: Attempt[]; slots: number }
 	| ({ type: "checkpoint"; summary: string; session: string | null } & Attempt)
-	| ({ type: "question"; summary: string; session: string; prompt: unknown } & Attempt)
+	| ({ type: "question"; summary: string; session: string; prompt: Prompt } & Attempt)
 	| ({ type: "output"; seq: number; text: string } & Attempt)
 	| ({ type: "result"; outcome: Outcome; summary: string; result: unknown } & Attempt)
 );
@@ -119,7 +120,7 @@ function fields(body: Record<string, unknown>, ref: { id?: string | number }): R
 				...target(body),
 				summary,
 				session,
-				prompt: data(body.prompt, 64 * 1024),
+				prompt: parsePrompt(data(body.prompt, 64 * 1024)),
 			};
 		}
 		case "output":
