@@ -111,6 +111,15 @@ An account limit pauses the job with an account decision; kix never switches
 accounts on its own. An answer requeues the job and resumes its session on the
 runner that holds it.
 
+The current attempt publishes its work over HTTPS at `POST /api/runner/publish`,
+not over its connection, so slow GitHub writes never hold up the hub. It sends
+file changes as data; the Worker commits them as the GitHub App to the job's
+one branch, which a reassigned attempt continues from, and opens or updates
+the job's pull request. Each job records its branch's `head` and its `pull`.
+Changes a workflow may not publish pause the job with a `publication`
+decision. [GITHUB.md](GITHUB.md#publication) describes the request, its
+validation, and how interrupted publications are reconciled.
+
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
 and readiness the CLI runs.
@@ -169,7 +178,10 @@ replay, and ownership. Job tests race dispatch passes, reassign a disconnected
 runner's job and fence its late writes, and cover routing, questions, account
 limits, and cancellation. They drive real WebSocket connections through the hub,
 including a replaced connection and the alarm that reassigns work, and check the
-maintainer-only routes. No OAuth credentials or
+maintainer-only routes. Publication tests run against a stateful fake of
+GitHub's Git and pull request APIs: fenced and stale writes, workflow path
+limits and their decisions, lost branch updates and deliveries, iterated heads,
+and token scopes. No OAuth credentials or
 Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:

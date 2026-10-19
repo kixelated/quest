@@ -71,6 +71,12 @@ replacing the hosted Agent SDK runtime:
   away. Each account's opaque ID must stay stable across restarts so its
   preference rank and paused sessions follow it. A CLI sign-in flow and a
   control to reorder account preference remain here.
+- Publish checkpoints and results with `POST /api/runner/publish` before the
+  `checkpoint` or `result` message: changed files as base64 data on the job's
+  `head`, plus the pull request's title, body, and draft flag on delivery.
+  Fetch the job's branch to continue a reassigned job; a `202` decision reply
+  pauses the attempt like a question. Publication in `cloudflare/GITHUB.md`
+  has the contract.
 
 ## Required
 

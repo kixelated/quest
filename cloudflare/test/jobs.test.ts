@@ -5,7 +5,8 @@ import app from "../src/index";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
 import { parse } from "../src/jobs/protocol";
-import { refName, resume } from "../src/jobs/routes";
+import { refName } from "../src/github/service";
+import { resume } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
 

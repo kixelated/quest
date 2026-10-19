@@ -8,14 +8,14 @@ and installation tokens stay inside the Worker; agents receive neither.
 
 ## Permissions and events
 
-| Repository permission | Why the installation grants it                                              | Per-operation token                                        |
-| --------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Metadata: read        | Resolve repository identity and maintainer authority                        | Every operation                                            |
-| Contents: write       | Read quest files, publish approved quests to service forks, explicit merges | Read for quest reads; write only for publishing or merging |
-| Issues: write         | Read native issues and publish approved comments                            | Read or write for that operation                           |
-| Pull requests: write  | Observe, create approved draft PRs, explicitly merge an exact head          | Read or write for that operation                           |
-| Checks: read          | Observe checks on a commit                                                  | Check reads only                                           |
-| Commit statuses: read | Observe legacy CI status contexts                                           | Check reads only                                           |
+| Repository permission | Why the installation grants it                                              | Per-operation token                                            |
+| --------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Metadata: read        | Resolve repository identity and maintainer authority                        | Every operation                                                |
+| Contents: write       | Read quest files, write job branches on service forks and iterated PR heads | Read for quest reads; write only for that publication or merge |
+| Issues: write         | Read native issues and publish approved comments                            | Read or write for that operation                               |
+| Pull requests: write  | Observe, open and update job PRs, explicitly merge an exact head            | Read or write for that operation                               |
+| Checks: read          | Observe checks on a commit                                                  | Check reads only                                               |
+| Commit statuses: read | Observe legacy CI status contexts                                           | Check reads only                                               |
 
 The manifest subscribes to push, issues, issue comments, pull requests, reviews,
 checks and statuses. GitHub also sends installation lifecycle and repository
@@ -29,8 +29,9 @@ does not retry a successful write. GitHub also expires tokens after an hour.
 ## Trusted boundary
 
 `src/github/service.ts` provides specific server-only operations for quest
-reads, issue/PR reads, check/status reads, comments, approved quest publication,
-draft PR creation, and an explicitly authorized merge with an expected head SHA.
+reads, issue/PR reads, check/status reads, comments, job publication (see
+[Publication](#publication)), and an explicitly authorized merge with an
+expected head SHA.
 Callers pass a user ID obtained from an authenticated local session. The service
 resolves its linked OAuth account, looks up the current GitHub login by numeric
 ID, and verifies current repository admin or maintain authority. A browser's
@@ -42,25 +43,120 @@ These methods are integration primitives, not public HTTP routes or an agent
 tool interface. Their trusted caller owns the user's approval of the exact
 output/action, product policy, branch protections and review/check gating.
 Webhook receipt never supplies that approval. No automatic comments, PRs,
-merges or runner launches occur. Check reads accept a page number (default 1) and return up to 100 checks
+merges or runner launches occur; a job publishes only what its maintainer
+authorized, on behalf of that maintainer's current authority. Check reads accept a page number (default 1) and return up to 100 checks
 and status contexts with GitHub's totals; callers must request additional pages
 before treating the result as complete or approving a merge.
 
 The App does not own repositories. Configure `GITHUB_FORK_OWNER` as a separate
-service-controlled namespace and install the App on each provisioned fork.
-The operator provisions forks using GitHub's fork flow, subject to organization
-policy and private-fork restrictions. An installation token cannot impersonate
-a user to own a fork; access to upstream does not grant access to its fork.
-Destination permissions/installations must be supplied independently. No fork
-creation or organization provisioning permission is requested by this service.
-Publication is restricted to `quest/*.md` on an existing `quest/...` branch in
-that namespace. The service verifies the fork's immediate parent ID is the
-upstream ID. PR creation uses an upstream-scoped token and an explicit head
-owner and repository; for organization cross-repository PRs GitHub requires
-`head_repo`. Installation tokens cannot span two owners, so the fork-scoped
-token only pushes and the upstream token cannot grant maintainer edits on the
-fork branch; PRs are created with `maintainer_can_modify: false`.
-Agents cannot choose another namespace or obtain Git credentials.
+service-controlled namespace and install the App on it. The operator provisions
+each upstream's fork there under the upstream's repository name, using GitHub's
+fork flow, subject to organization policy and private-fork restrictions. An
+installation token cannot impersonate a user to own a fork; access to upstream
+does not grant access to its fork. No fork creation or organization
+provisioning permission is requested by this service.
+
+## Publication
+
+A running job publishes its work at `POST /api/runner/publish`, authenticated
+with its runner's bearer token (`src/jobs/publish.ts`). The JSON request names
+the `job` and `attempt`, the commit the changes build on (`head`, or `null`
+before the job's branch exists), a commit `message`, and `changes`: up to 500
+files, 16 MiB in all, each `{ path, content, executable? }` with base64
+content, or `null` content to delete. An optional `pull: { title, body, draft }`
+opens or updates the job's pull request, and `session` names the agent session
+to resume if the publication needs a decision. Checkpoints publish work in
+progress the same way, so a reassigned job continues from its branch. The reply
+is `{ head, pull? }`, or `202 { decision, cancel }` when the job paused.
+
+Submitted files are data. The publisher never checks them out or runs their
+scripts or hooks: it writes blobs, a tree, and a commit with the Git Data API
+and moves one branch. Before writing anything it checks, in order:
+
+- The request comes from the job's current `(attempt, runner)` while it runs.
+  A cancelling attempt may still publish its partial work. A reassignment
+  increments the attempt, which fences out the previous runner.
+- Every path is a plain work-tree path: no `.git`, `.` or `..` segment, no
+  absolute path, backslash, or control character. Each workflow publishes
+  only its own changes: `plan` only `quest/`, `bootstrap` only `flake.nix` and
+  `flake.lock`, `start` and `iterate` their task's changes. No workflow changes
+  `.github/workflows/`, because the App does not request the workflows
+  permission. A refused change pauses the job with a `publication` decision
+  listing each path and reason, instead of being dropped; the maintainer's
+  answer resumes the agent's session.
+- The job's requester still holds maintainer authority, and the repository's
+  identity, visibility, installation, and enrollment are checked live, as for
+  every other operation.
+- The branch is where the job left it: absent before the first publication,
+  then the last commit kix published. A `head` that differs gets a reply naming
+  the commit to continue from. A branch changed outside the job, or one that
+  earlier work left on the fork, becomes a decision; it is never overwritten.
+
+`plan`, `start`, and `bootstrap` jobs write their branch on the service fork
+`GITHUB_FORK_OWNER/<repository>`, whose immediate parent must be the upstream's
+repository ID. An `iterate` job writes its pull request's actual head: an
+upstream branch through an upstream-scoped token, or a service fork branch.
+GitHub gives an installation no write access to a contributor's fork, so that
+case pauses with a decision reporting the blocked update; kix never opens a
+replacement pull request. No job writes a repository's default branch, and no
+runner ever receives a credential.
+
+The App authors the commits as well as the pull requests: the service sets no
+author or committer, so GitHub attributes and signs them as the App.
+Contributor and model attribution comes from the agent's commit message and
+pull request body, written to the repository's own instructions.
+
+Interruptions are reconciled before anything is replayed. The service creates
+the commit, records it as pending under the attempt fence, and then moves the
+branch with a fast-forward-only update. If the outcome is lost, the next
+publication finds the pending commit on the branch and adopts it; until then,
+for up to two minutes, other publications of the job wait. GitHub cannot check
+kix's fence, so the fence is rechecked immediately before that update: a
+fenced-out attempt's write lands only if it passed the check before the
+reassignment, and the fast-forward check means it can never overwrite newer
+work. Delivery looks for the branch's open pull request before creating one,
+and reconciles a refused creation the same way, so a retry never opens a
+duplicate. A pull request the maintainer closed is not replaced.
+
+Planning pull requests are always drafts, as are those of jobs asked to stop.
+Other jobs set `draft`, which defaults to `true` while decisions or unfinished
+work remain; a later delivery with `draft: false` marks the pull request ready.
+kix never converts a ready pull request back. Delivery requires an enabled
+project; a paused project's running jobs can still preserve their work on their
+branches. Pull requests use `maintainer_can_modify: false`, because an
+upstream-scoped token cannot grant edits on the fork branch.
+
+GitHub keeps pull request status, checks, and reviews. `mergePullRequest`
+merges only an exact head a maintainer explicitly chose, with the first method
+the repository allows: squash, then a merge commit, then rebase. GitHub's
+branch rules and refusals stand, and an agent's recommendation is never
+approval.
+
+Fork pull requests do not make privileged CI safe. Workflows that run a pull
+request's code with secrets or write tokens, such as `pull_request_target` or
+`workflow_run` jobs that check out its head, run contributed code with upstream
+credentials. Upstream workflows must treat kix pull requests as untrusted
+contributions like any other fork's. kix grants contributed code no upstream
+credentials and never runs it in the publisher. Keep Actions disabled and
+secrets absent on service forks, since the bot pushes contributed code there.
+
+Installation grants are broader than any one publication: `contents: write`
+and `pull_requests: write` cover every installed repository. Each token names
+one repository ID and only the permissions that step needs. Fork writes get
+`contents: write` on the fork alone, pull request delivery gets
+`pull_requests: write` on the upstream alone, and only an iteration on an
+upstream head gets upstream `contents: write`. That token could write any
+unprotected upstream branch; the service restricts it to the pull request's
+head and refuses the default branch, and repositories should still protect
+their default branch.
+
+Mocked tests cover this path. These GitHub behaviors still need a live check
+against real installations ([operator setup](../quest/m0/kix/operator-setup.md)):
+creating a fork-headed pull request with an upstream installation token while
+the fork belongs to another installation; creating a fork commit whose parent
+is an upstream commit pushed after the fork was made; GitHub's signature on
+App-authored API commits; and pushing an upstream pull request head with an
+installation token under the repository's branch rules.
 
 ## Webhooks and revocation
 
@@ -101,9 +197,10 @@ reconcile current provider state rather than replay issue/PR payloads as facts.
    intact. Keep the existing `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` for OAuth
    login; they are separate credentials. Never commit conversion responses,
    PEM keys, installation tokens or `.dev.vars`.
-3. Set `GITHUB_FORK_OWNER` to the service-controlled namespace. Provision its
-   forks/branches and install the public App there and on selected upstream
-   repositories. Existing installations must accept permission increases before
+3. Set `GITHUB_FORK_OWNER` to the service-controlled namespace. Fork each
+   pilot upstream into it under the same repository name, disable Actions on
+   those forks and keep secrets off them, and install the public App there and
+   on selected upstream repositories. Existing installations must accept permission increases before
    operations needing those grants become available. GitHub's installation
    UI, not browser form claims, chooses repository access.
 4. Run `bun run wrangler d1 migrations apply DB --remote`, then the normal
