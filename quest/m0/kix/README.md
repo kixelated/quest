@@ -102,7 +102,6 @@ operator-paid-hosting decisions:
 - [Answer flow](/quest/m0/kix/answer-flow.md) - move to the next decision after an answer, with neutral refusals
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions
-- [Bot publication](/quest/m0/kix/publication.md) - validated agent results become normal GitHub PRs
 - [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

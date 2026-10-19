@@ -14,7 +14,12 @@ and a bounded test PR verify the integration before contributors are invited.
   distinct from that namespace; do not assume an App can own a fork by itself.
   Set it as `GITHUB_FORK_OWNER` (steps 3 and 5 of `cloudflare/GITHUB.md`).
 - Validate real installation-token behavior across upstream and
-  service-owned forks.
+  service-owned forks, which publication's tests only mock (Publication in
+  `cloudflare/GITHUB.md`): an upstream token opening a pull request whose head
+  is on the fork's separate installation, a fork commit whose parent is an
+  upstream commit pushed after the fork was made, GitHub's signature on the
+  App's API commits, and an iteration pushing an upstream pull request head
+  under branch rules. Disable Actions on the service forks.
 - Rehearse on the operator's own runner and an explicitly selected
   operator account.
 - Record nonsecret setup/run instructions and deployment identifiers.
@@ -23,4 +28,3 @@ and a bounded test PR verify the integration before contributors are invited.
 ## Required
 
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the live origin and registered App
-- [Bot publication](/quest/m0/kix/publication.md) - the integration exercised by the test PR

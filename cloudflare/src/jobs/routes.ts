@@ -1,10 +1,11 @@
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
-import { GitHubError, GitHubService, type Stopped } from "../github/service";
+import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
 import type { ProjectState, Pull } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import * as output from "./output";
 import { data, id, text } from "./protocol";
+import { LIMITS, parsePublication, publish } from "./publish";
 import * as store from "./store";
 import { JobError } from "./store";
 
@@ -42,9 +43,12 @@ export async function stop(env: Env, attempts: Stopped[]) {
 // A runner authenticates with the token its owner registered it with, then
 // holds one live connection to its owner's hub. Runner requests carry no
 // cookies, so they need no origin check.
-jobs.get("/api/runner/connect", async (c) => {
+async function machine(c: Context<Bindings>) {
 	const token = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-	const runner = token && (await store.authenticate(c.env.DB, token));
+	return (token && (await store.authenticate(c.env.DB, token))) || null;
+}
+jobs.get("/api/runner/connect", async (c) => {
+	const runner = await machine(c);
 	if (!runner) return c.json({ error: "Runner token required" }, 401);
 	if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.json({ error: "WebSocket required" }, 426);
 	const headers = new Headers(c.req.raw.headers);
@@ -57,6 +61,20 @@ jobs.get("/api/runner/connect", async (c) => {
 		webSocket: upgraded.webSocket,
 		headers: new Headers(upgraded.headers),
 	});
+});
+
+// A running attempt publishes its work over HTTPS rather than its connection,
+// so slow GitHub writes never hold up the hub's other runner messages.
+jobs.post("/api/runner/publish", async (c) => {
+	const runner = await machine(c);
+	if (!runner) return c.json({ error: "Runner token required" }, 401);
+	const length = Number(c.req.header("Content-Length"));
+	if (!Number.isSafeInteger(length) || length > LIMITS.request)
+		return c.json({ error: `A Content-Length of at most ${LIMITS.request} bytes is required` }, 413);
+	const result = await publish(c.env, runner, parsePublication(await json(c)));
+	if (!("decision" in result)) return c.json(result);
+	await hub(c.env, runner.owner).dispatch(runner.owner);
+	return c.json(result, 202);
 });
 
 // A signed-in user registers their own machines and sees their presence.
@@ -113,11 +131,6 @@ jobs.get(base, async (c) => {
 });
 
 type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccount">;
-
-/** Whether Git accepts `name` as a branch, per `git check-ref-format`. */
-export function refName(name: string) {
-	return !/[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{|\/\/|(^|\/)\.|\.lock($|\/)|[/.]$|^\/|^@$/.test(name);
-}
 
 /** Resolve a requested workflow and target against current observations. */
 function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan {

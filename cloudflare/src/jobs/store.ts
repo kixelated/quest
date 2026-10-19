@@ -46,13 +46,21 @@ export type Job = {
 	cancel: number;
 	summary: string | null;
 	result: string | null;
+	/** The commit the job's branch holds; null until its first publication. */
+	head: string | null;
+	/** A commit whose branch update may be in flight, and since when. */
+	pending: string | null;
+	pendingAt: number | null;
+	/** The pull request this job delivered. */
+	pull: number | null;
 	createdAt: number;
 	updatedAt: number;
 };
+export type QuestionKind = "agent" | "account" | "publication";
 export type Question = {
 	id: string;
 	attempt: number;
-	kind: "agent" | "account";
+	kind: QuestionKind;
 	prompt: unknown;
 	answer: unknown;
 	answeredBy: string | null;
@@ -359,7 +367,7 @@ export async function ask(
 	runner: Runner,
 	job: string,
 	attempt: number,
-	input: { kind?: "agent" | "account"; summary: string; session: string | null; prompt: unknown },
+	input: { kind?: QuestionKind; summary: string; session: string | null; prompt: unknown },
 	now: number,
 ) {
 	const id = crypto.randomUUID();
@@ -463,6 +471,74 @@ export async function finish(
 	if (!landed) throw new JobError("Attempt is no longer current");
 }
 
+/** How long an unrecorded branch update blocks another publication of the same job. */
+export const PENDING = 2 * 60_000;
+
+export type Publishing = Job & { owner: string; name: string; project: "enabled" | "paused" };
+
+/** The job a publication is for, only while the publishing attempt is current. */
+export async function publishing(db: D1Database, runner: Runner, job: string, attempt: number) {
+	const row = await db
+		.prepare(
+			"SELECT j.*,p.owner,p.name,p.state AS project FROM jobs j JOIN github_projects p ON p.id=j.repository WHERE j.id=? AND j.attempt=? AND j.runner=? AND j.state='running'",
+		)
+		.bind(job, attempt, runner.id)
+		.first<Publishing>();
+	if (!row) throw new JobError("Attempt is no longer current");
+	return row;
+}
+
+/** Record a pending commit that the branch shows landed after all. */
+export async function adopt(db: D1Database, job: string, head: string | null, pending: string, now: number) {
+	await db
+		.prepare(
+			"UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND head IS ? AND pending=?",
+		)
+		.bind(now, job, head, pending)
+		.run();
+}
+
+/**
+ * Reserve the branch update to `commit`, immediately before making it: only
+ * while the attempt is current, the branch is where the job last saw it, and
+ * no other update of it may still be in flight.
+ */
+export async function claim(
+	db: D1Database,
+	runner: Runner,
+	job: string,
+	attempt: number,
+	head: string | null,
+	commit: string,
+	now: number,
+) {
+	const result = await db
+		.prepare(
+			"UPDATE jobs SET pending=?,pendingAt=?,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' AND head IS ? AND (pending IS NULL OR pendingAt<=?)",
+		)
+		.bind(commit, now, now, job, attempt, runner.id, head, now - PENDING)
+		.run();
+	if (result.meta.changes !== 1)
+		throw new JobError("Attempt is no longer current, or another publication of this job is in flight");
+}
+
+/** Record whether the reserved branch update landed. The branch's head follows it either way. */
+export async function settle(db: D1Database, job: string, commit: string, landed: boolean, now: number) {
+	await db
+		.prepare(
+			landed
+				? "UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?"
+				: "UPDATE jobs SET pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?",
+		)
+		.bind(now, job, commit)
+		.run();
+}
+
+/** Remember the pull request a job delivered, so later deliveries update it. */
+export async function delivered(db: D1Database, job: string, pull: number) {
+	await db.prepare("UPDATE jobs SET pull=? WHERE id=?").bind(pull, job).run();
+}
+
 export type NewJob = Pick<Job, "repository" | "workflow" | "target" | "revision" | "branch" | "actor"> & {
 	trusted: boolean;
 	pinRunner?: string | null;
@@ -485,8 +561,8 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const [insert, active, enabled, pinned] = await db.batch([
 		db
 			.prepare(
-				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,id,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled' AND ${pinnable}`,
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,id,?,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled' AND ${pinnable}`,
 			)
 			.bind(
 				id,
@@ -494,6 +570,8 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				input.target,
 				input.revision,
 				input.branch,
+				// An iteration continues the pull request's existing head branch.
+				input.workflow === "iterate" ? input.revision : null,
 				input.actor,
 				trusted,
 				runner,
@@ -560,7 +638,7 @@ export async function answer(db: D1Database, job: string, question: string, user
 			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
 		)
 		.bind(question, job)
-		.first<{ kind: "agent" | "account"; actor: string; trusted: number }>();
+		.first<{ kind: QuestionKind; actor: string; trusted: number }>();
 	if (!open) throw new JobError("Question is no longer open");
 	let pin: { runner: string; account: string } | null = null;
 	if (open.kind === "account") {
