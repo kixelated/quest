@@ -15,8 +15,9 @@ paper trail from the agent's quest files and PR body:
 
 - The service renders the section from the job's stored questions and
   answers (the decision inbox's prompt contract) when it creates or updates
-  the planning PR. Include only `decision` questions. Operational kinds such
-  as `account` and `publication` stay out, since they can name runners and
+  the planning PR. Include only answered `agent` questions whose prompt is a
+  `decision`, not a `permission` request. Operational question kinds such as
+  `account` and `publication` stay out, since they can name runners and
   accounts in a public PR.
 - Prompts and answers are untrusted text. Escaping Markdown is not enough:
   also neutralize GitHub's own semantics, so no `@` mention notifies anyone,
