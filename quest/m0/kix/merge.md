@@ -11,10 +11,10 @@ using a method the repository allows, or shows GitHub's refusal plainly.
 Decided 2026-10-18 as a follow-up of the decision inbox (#144), whose PR items
 offer only "Review on GitHub":
 
-- Build on the bot publication's merge: bound to the current head, with the
-  method picked from the repository's allowed methods (squash, then merge
-  commit, then rebase). Keep that logic in publication and only add the
-  inbox action here.
+- Build on `mergePullRequest` in `cloudflare/src/github/service.ts`: bound
+  to the current head, with the method picked from the repository's allowed
+  methods (squash, then merge commit, then rebase). Keep that logic there and
+  only add the inbox action here.
 - Show the button only when it can work: the PR is open, the viewer passes
   the per-request maintainer check, and GitHub reports it mergeable. Otherwise
   keep "Review on GitHub".
@@ -25,7 +25,3 @@ offer only "Review on GitHub":
   maintainer's click.
 - Test a moved head, a refused merge, a squash-only repository, and a
   non-maintainer.
-
-## Required
-
-- [Bot publication](/quest/m0/kix/publication.md) - the head-bound merge and method selection

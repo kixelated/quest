@@ -32,4 +32,3 @@ interview runs on one of their runners; they never see a terminal.
 ## Required
 
 - [Runner](/quest/m0/kix/runner.md) - planning sessions, questions, and resumption
-- [Bot publication](/quest/m0/kix/publication.md) - draft planning PRs and recorded decisions

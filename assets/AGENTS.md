@@ -65,6 +65,9 @@ Run it after creating or updating quests.
 
 ## Questions
 
+Make every reference you show the user clickable: link issues, PRs, and commits by full URL, as in `[owner/repo#123](https://github.com/owner/repo/pull/123)`, never a bare `#123`.
+Sub-agents report those URLs so the parent can link them.
+
 Block on user decisions.
 Explain the quest or PR, the decision, and your recommendation, then ask synchronously with a blocking interactive question tool when available and allowed in the current mode.
 Do not use asynchronous question tools.
