@@ -8,7 +8,7 @@ Run the plan interview for a quest that recurs: once it finishes, the same quest
 The argument (if provided) is the work to repeat, or an existing quest to make recurring.
 
 Agents working the quest never load this skill, so the quest carries its own recurrence.
-Its Plan says, in its own words, that the PR finishing it also adds the next occurrence at the same name directly under the next milestone (`m1` to `m2`), linked from that milestone's `Required`, creating the milestone and its root link if it does not exist yet.
+Its Plan says, in its own words, that the PR finishing it also adds the next occurrence at the same path below the next milestone (`m1/perf/audit.md` to `m2/perf/audit.md`), linked from its parent's `Required`, creating the milestone or any missing parent epic along with its link.
 The next occurrence keeps the Goal and recurrence, and its Plan carries forward what this occurrence learned (baselines, results, what to check first).
 
 Also settle in the interview what each occurrence delivers, what it carries forward, where it ranks in its milestone, and whether anything ends the recurrence.
