@@ -210,7 +210,7 @@ the version you pin decides what your agents follow:
 | Skill | What it does |
 | --- | --- |
 | `quest-plan` | Ask the questions that turn an idea into scoped quests. |
-| `quest-recurring` | Plan a quest that is re-created in the next milestone each time it finishes. |
+| `quest-recurring` | Plan a quest whose finishing PR creates its next occurrence, and what gates it. |
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
