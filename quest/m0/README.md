@@ -35,6 +35,7 @@ ownership-manifest design:
 
 ## Required
 
+- [Finished milestone links](/quest/m0/milestone-links.md) - `quest check` flags a Required link to a milestone with no Required left, so its dependents get unblocked
 - [Expensive command gate](/quest/m0/local-gate.md) - shared CPU admission across worktrees and repositories
 - [Recoverable worktrees](/quest/m0/worktree.md) - disk admission, checkpoints, release, and restore
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
