@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as projects from "../src/board/project";
-import app from "../src/index";
+import { app } from "../src/index";
 
 afterEach(() => vi.restoreAllMocks());
 

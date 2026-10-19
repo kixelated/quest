@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/auth";
-import app from "../src/index";
+import { app } from "../src/index";
 import { authenticator, cookie, enrolled, identity, oauth, options, origin, verify } from "./login-fixtures";
 
 afterEach(() => vi.restoreAllMocks());

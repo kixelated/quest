@@ -123,7 +123,7 @@ function fields(body: Record<string, unknown>, ref: { id?: string | number }): R
 			};
 		}
 		case "output":
-			// Each chunk is one D1 row, which caps values at 2 MB of UTF-8.
+			// Each chunk is one R2 object; the bound keeps a page of output to a few MiB.
 			if (typeof body.text !== "string" || !body.text || new TextEncoder().encode(body.text).length > 1024 * 1024)
 				throw new JobError("Output text required, at most 1 MiB per message");
 			return { ...ref, type: "output", ...target(body), seq: seq(body.seq), text: body.text };
