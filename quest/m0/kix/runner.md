@@ -71,6 +71,10 @@ replacing the hosted Agent SDK runtime:
   away. Each account's opaque ID must stay stable across restarts so its
   preference rank and paused sessions follow it. A CLI sign-in flow and a
   control to reorder account preference remain here.
+- Add a runner and account settings page as a secondary view off the
+  decision inbox: each runner's online state, its accounts, and the
+  preference-order control. Decided 2026-10-18 as a follow-up of the
+  decision inbox (#144), folded here rather than its own quest.
 
 ## Required
 
