@@ -402,29 +402,6 @@ export async function ask(
 	return { question: existing.id, cancel: !!existing.cancel };
 }
 
-/** Append raw agent output from the current attempt, in any state. */
-export async function output(
-	db: D1Database,
-	runner: Runner,
-	{ job, attempt, seq, text }: Attempt & { seq: number; text: string },
-	now: number,
-) {
-	const result = await db
-		.prepare(
-			"INSERT INTO job_output(job,attempt,seq,text,at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=?) ON CONFLICT(job,attempt,seq) DO NOTHING",
-		)
-		.bind(job, attempt, seq, text, now, job, attempt, runner.id)
-		.run();
-	if (result.meta.changes === 1) return;
-	// A retry of a chunk that already landed.
-	const stored = await db
-		.prepare("SELECT text FROM job_output WHERE job=? AND attempt=? AND seq=?")
-		.bind(job, attempt, seq)
-		.first<{ text: string }>();
-	if (!stored) throw new JobError("Attempt is no longer current");
-	if (stored.text !== text) throw new JobError("A different chunk has that sequence number");
-}
-
 /**
  * Finish the current attempt. An account limit pauses the job with a
  * decision instead of moving it to another account. A requested cancel wins
@@ -663,17 +640,4 @@ export async function cancel(db: D1Database, job: string, user: string, now: num
 		db.prepare("UPDATE jobs SET cancel=1,updatedAt=? WHERE id=? AND state='running'").bind(now, job),
 	]);
 	if (stopped!.meta.changes + asked!.meta.changes === 0) throw new JobError("Job already finished");
-}
-
-/** A page of raw output, at most a few MiB, in order; `next` continues it. */
-export async function readOutput(db: D1Database, job: string, after: { attempt: number; seq: number } | null) {
-	const page = 4;
-	const { results } = await db
-		.prepare(
-			"SELECT attempt,seq,text,at FROM job_output WHERE job=? AND (attempt,seq)>(?,?) ORDER BY attempt,seq LIMIT ?",
-		)
-		.bind(job, after?.attempt ?? 0, after?.seq ?? -1, page)
-		.all<{ attempt: number; seq: number; text: string; at: number }>();
-	const last = results.length === page ? results.at(-1)! : null;
-	return { output: results, next: last && { attempt: last.attempt, seq: last.seq } };
 }

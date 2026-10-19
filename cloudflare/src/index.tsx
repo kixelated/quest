@@ -12,11 +12,12 @@ import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
+import { purge, retain } from "./jobs/output";
 import { jobs, resume, stop } from "./jobs/routes";
 import { JobError } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
 // policy, which would fail the origin check on /sign-in and /sign-out.
 app.use(secureHeaders({ referrerPolicy: "same-origin" }));
@@ -164,6 +165,7 @@ app.post("/projects/github/:owner/:repository", async (c) => {
 		);
 		if (state === "enabled") await resume(c.env, Number(id));
 		await stop(c.env, stopped);
+		if (state === "disconnected") await purge(c.env);
 		return c.redirect(
 			state === "disconnected" ? "/projects" : projectURL(c.req.param("owner"), c.req.param("repository")),
 			303,
@@ -436,5 +438,10 @@ app.onError((error, c) => {
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });
-export default app;
+export default {
+	fetch: app.fetch,
+	async scheduled(_controller, env) {
+		await retain(env, Date.now());
+	},
+} satisfies ExportedHandler<Env>;
 export { RunnerHub } from "./jobs/hub";

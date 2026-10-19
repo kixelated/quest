@@ -37,9 +37,13 @@ replacing the hosted Agent SDK runtime:
   steps. The runner sends the summary and a work-in-progress bundle; the
   service publishes it to the job's fenced branch, so another runner can
   continue after reassignment. Runners never hold GitHub App credentials.
-- Raw agent output is uploaded for [retention](/quest/m0/kix/output.md)
-  behind the maintainer-only disclosure; it is never streamed to the UI by
-  default.
+- Raw agent output is uploaded as `output` chunks behind the maintainer-only
+  disclosure; it is never streamed to the UI by default. Send each attempt's
+  chunks in order with a contiguous `seq` from 0, batched so an attempt stays
+  under 4096 chunks, and retry a failed chunk with the same `seq` and text. A
+  `truncated` reply means the attempt reached its 64 MiB cap: stop uploading
+  and keep the job running. See the Worker's
+  [raw output notes](/cloudflare/README.md#raw-output).
 - A job that hits an account limit pauses with a decision to switch
   accounts. The runner never rotates accounts automatically.
 - Use the existing guide and skills as workflow sources. Explicitly load

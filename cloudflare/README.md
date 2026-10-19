@@ -66,8 +66,9 @@ is the only one accepted. Changing the hostname orphans existing passkeys;
 people enroll new ones after signing in with a provider.
 
 GitHub is authoritative for enrolled project state. D1 holds accounts,
-sessions, GitHub App state, and jobs. The one Durable Object, `RunnerHub`, holds
-runners' live connections and keeps no records of its own.
+sessions, GitHub App state, and jobs. The R2 bucket bound as `OUTPUT` holds raw
+agent output. The one Durable Object, `RunnerHub`, holds runners' live
+connections and keeps no records of its own.
 
 ### Jobs
 
@@ -79,8 +80,8 @@ observations show ready and unclaimed. `iterate` jobs are untrusted and route
 only to Linux runners that declare VM builds. Without a `flake.nix`, the route
 offers a `bootstrap` job instead. A paused project gets no new jobs and none are
 claimed; resuming it dispatches the jobs that waited. Disconnecting a project
-deletes its jobs and tells their runners to stop. Duplicate requests return the
-active job for the same target.
+deletes its jobs and their output and tells their runners to stop. Duplicate
+requests return the active job for the same target.
 
 Runners are a user's own machines. Each one registers at `POST /api/runners`
 and gets a bearer token, which kix stores only as a hash. With that token a
@@ -91,8 +92,7 @@ routed, and the open connection is the runner's presence.
 Over the socket the runner sends `status` messages: its opaque accounts, the
 attempts it is running, and its free job slots. It also sends `checkpoint`,
 `question`, `output`, and `result` messages. Each gets a `reply` with the same
-`id` (`src/jobs/protocol.ts`). Output chunks carry a per-attempt `seq`, so a
-retried chunk lands once, and maintainers read output in pages. The hub pushes `assign` and `cancel` messages
+`id` (`src/jobs/protocol.ts`). The hub pushes `assign` and `cancel` messages
 whenever jobs or connections change. A status that lists an assigned attempt
 acknowledges it; until then the assignment holds one of the runner's slots and
 the hub resends it, and cancelling a
@@ -110,6 +110,36 @@ A status that omits an acknowledged job gives it up at once.
 An account limit pauses the job with an account decision; kix never switches
 accounts on its own. An answer requeues the job and resumes its session on the
 runner that holds it.
+
+### Raw output
+
+Runners upload raw agent output as `output` messages of at most 1 MiB of UTF-8
+(`src/jobs/output.ts`). Each attempt numbers its chunks with a contiguous `seq`
+from 0 and sends them in order: kix accepts only the attempt's next `seq`,
+once the chunk before it is stored, or an identical retry of a chunk it still
+holds, which succeeds without writing again. A different chunk with a used `seq` is refused, and so is a retry of an
+expired one. Each chunk is one R2 object at `output/<job>/<attempt>/<seq>`,
+readable as soon as it lands, and D1 keeps a small index row per chunk plus each
+attempt's totals.
+
+An attempt keeps at most 64 MiB and 4096 chunks. The chunk that would pass
+either cap, and every later one, gets a reply with `truncated: true` instead of
+an error; the job keeps running and its summaries are unaffected. Expiring
+chunks never give that capacity back.
+
+Maintainers read output at `GET /projects/github/<owner>/<repo>/jobs/<job>/output`,
+in pages of four chunks ordered by `(attempt, seq)`; `?after=<attempt>.<seq>`
+continues from a page's `next`, and `truncated` lists the attempts that reached
+the cap. Every request rechecks current maintainer authority.
+
+Output is kept for 30 days from each chunk's upload. A bucket lifecycle rule
+deletes `output/` objects, and a daily cron (`triggers.crons` in
+`wrangler.jsonc`) deletes their index rows; reads skip a row whose object is
+already gone. Disconnecting a project queues its jobs' output for deletion in
+the same D1 batch that deletes the jobs, then deletes each `output/<job>/`
+prefix at once. The cron retries any deletion that failed. An upload racing the
+disconnect finds its index row gone, queues its job's prefix for the cron again,
+and deletes its own object.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -169,7 +199,8 @@ replay, and ownership. Job tests race dispatch passes, reassign a disconnected
 runner's job and fence its late writes, and cover routing, questions, account
 limits, and cancellation. They drive real WebSocket connections through the hub,
 including a replaced connection and the alarm that reassigns work, and check the
-maintainer-only routes. No OAuth credentials or
+maintainer-only routes. Output tests use local R2 for chunk ordering, retries,
+the caps, expiry, and cleanup after a disconnect. No OAuth credentials or
 Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
@@ -192,7 +223,14 @@ from CI. In the Nix shell, enter `cloudflare/` and authenticate:
 cd cloudflare
 bun run wrangler login
 bun run wrangler d1 create quest-auth
+bun run wrangler r2 bucket create quest-output
+bun run wrangler r2 bucket lifecycle add quest-output output-expiry output/ --expire-days 30
 ```
+
+The lifecycle rule is bucket configuration, not part of `wrangler.jsonc`, so
+check it on an existing bucket with
+`bun run wrangler r2 bucket lifecycle list quest-output`. Keep it at the
+30 days the Worker's cron uses (`RETENTION` in `src/jobs/output.ts`).
 
 The checked-in config deploys to `https://kix.quest` as a Workers custom
 domain, which requires the `kix.quest` zone in the same Cloudflare account;
@@ -200,9 +238,10 @@ domain, which requires the `kix.quest` zone in the same Cloudflare account;
 authentication origin and supplies generated absolute links.
 
 For an existing deployment, retain the Worker name, D1 database ID, and
-`AUTH_SECRET` so account data is preserved. The `d1 create` command above is
+`AUTH_SECRET` so account data is preserved. The `create` commands above are
 for a fresh deployment only. For another environment, change `routes`,
-`AUTH_URL`, Worker name, account, database, and OAuth credentials together.
+`AUTH_URL`, Worker name, account, database, bucket, and OAuth credentials
+together.
 
 Register the production GitHub OAuth app with callback
 `https://kix.quest/api/auth/callback/github`. For Google sign-in, also register
