@@ -40,6 +40,7 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [Claim quests](/quest/m0/helpers/claim.md) - `quest claim`, `--release`, and `quest unblocked --unclaimed`
 - [Named gate lock](/quest/m0/helpers/gate-lock.md) - `quest gate --lock <name>` serializes check-then-merge
 - [Unattended triage](/quest/m0/helpers/afk.md) - an `afk` argument that only asks about merges and deletes
+- [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 
 ## Related
 
