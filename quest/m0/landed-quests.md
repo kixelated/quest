@@ -21,7 +21,11 @@ and `merge` enables auto-merge without looking at the file.
 
 Non-goals: judging whether a rewrite is a faithful remainder (the agent and
 reviewers still do), and PRs not on a quest branch, such as a contributor's
-fork branch that implements a quest; those skip the guard.
+fork branch that implements a quest; those skip the guard. Merges that
+bypass the merge skill, such as a maintainer's click on GitHub or in the
+[decision inbox](/quest/m0/kix/merge.md), are guarded only where the
+repository runs the guard as a required check; the hosted service has no
+checkout to diff.
 
 ## Plan
 
@@ -48,8 +52,10 @@ Decided 2026-10-20 (user, planned from moq-dev/moq):
   nothing locally), and a skill step alone with no code.
 - A modified file passes even if the edit does not trim the quest (a link
   fix, say). Accepted: the guard is a floor against forgetting, not a review.
-- `assets/skills/merge.md` runs `quest check --base <base> --branch <head>`
-  with the PR's base and head ref names before enabling auto-merge. On a
+- `assets/skills/merge.md` fetches the PR's base and head, then runs
+  `quest check --base <remote>/<base> --branch <head>` on a checkout of the
+  PR head before enabling auto-merge. A stale or missing local base branch
+  would put the merge base before the quest existed and skip it. On a
   finding, it fixes the branch: delete the quest and its links, or rewrite it
   to the remainder the PR body names, then push, re-check, and continue. It
   asks the user only when what remains is unclear. `/quest-complete` and
