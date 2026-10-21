@@ -331,8 +331,8 @@ This deliberately avoids GitHub's bounded, delayed activity feed; GitHub does
 [not automatically redeliver failed webhooks](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries).
 There is no scheduled background poll in this stage.
 
-Each webhook that names an issue or PR, or that invalidates candidates (below),
-asks for a background read of its enabled project once its delivery commits.
+Each webhook that names an issue or PR (a comment on a PR names the PR by its
+number), or that invalidates candidates (below), asks for a background read of its enabled project once its delivery commits.
 The read runs after the response (`waitUntil`) with the App's read-only,
 repository-scoped installation token, and is the same read as a refresh: one
 page of each pass, plus every entity a webhook named since it was last read,
@@ -342,10 +342,13 @@ and a closed one stops showing as open. A lease in `github_project_state` lets
 one read run at a time per project: it answers every request made before it
 started, requests made during it get one more read, and duplicate deliveries
 never reach it, so a burst costs one or two reads rather than one each. A
-per-entity webhook count lets a read clear only the updates it saw. Paused and
-disconnected projects are not read. A failed or rate-limited read is recorded
-and shown next to the refresh fallback, and is not retried: the next webhook or
-a refresh reads again. Checks, statuses and other pushes name no entity and
+per-entity webhook count lets a read clear only the updates it saw. One
+invocation reads at most three rounds, to stay within a Worker's subrequest
+budget; a request left after them waits for the next webhook or a refresh.
+Paused and disconnected projects are not read. A failed or rate-limited read is
+recorded and shown next to the refresh fallback, and is not retried: only a
+request made during it, such as the webhook whose revision bump failed it, gets
+another round, and otherwise the next webhook or a refresh reads again. Checks, statuses and other pushes name no entity and
 change no candidate, so they cost no read.
 
 The inbox also treats a PR whose row still says open as closed once a

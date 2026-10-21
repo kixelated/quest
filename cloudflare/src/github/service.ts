@@ -592,8 +592,11 @@ export class GitHubService {
 	 * deliveries costs one or two reads rather than one each. This publishes
 	 * observations only. It checks no maintainer, so it neither grants nor
 	 * caches authority; every page and action still rechecks whoever acts. A
-	 * failure is recorded for the inbox and not retried: the next webhook or a
-	 * refresh reads again.
+	 * failure is recorded for the inbox and not retried: only a request made
+	 * during the failed read, such as the webhook whose revision bump failed
+	 * it, gets another round. Each invocation reads at most three rounds to
+	 * stay within one Worker invocation's subrequest budget; a request left
+	 * after them waits for the next webhook or a refresh.
 	 */
 	async observe(id: number) {
 		const db = this.#env.DB;
@@ -635,7 +638,6 @@ export class GitHubService {
 				)
 				.bind(failure, more ? 1 : 0, id, lease)
 				.run();
-			if (failure) return;
 		}
 	}
 

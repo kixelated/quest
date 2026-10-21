@@ -154,6 +154,16 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 				),
 			);
 		}
+		// A comment on a PR carries the PR's number, but under its issue ID, so
+		// it marks the PR's row by number. An untracked PR waits for history.
+		const discussed = !pull && issue?.pull_request && positiveId(issue.number);
+		if (discussed)
+			statements.push(
+				c.env.DB.prepare(
+					`UPDATE github_project_activity SET changedAt=?,stale=stale+1
+			WHERE repository=? AND kind='pull' AND number=? AND ${pending} AND ${enrolled}`,
+				).bind(now, repository, issue.number, delivery, digest, event, repository, installation),
+			);
 		const invalidating = invalidates(event, payload);
 		if (invalidating)
 			statements.push(
@@ -163,7 +173,7 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 			);
 		// What the inbox shows changed: ask for a background read. CI and other
 		// pushes change neither, so they cost no read.
-		if (named || invalidating) {
+		if (named || discussed || invalidating) {
 			reads = statements.length;
 			statements.push(
 				c.env.DB.prepare(

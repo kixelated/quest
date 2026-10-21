@@ -1053,6 +1053,47 @@ describe("webhook reconciliation", () => {
 		for (const id of ["102", "103", "104"]) expect(await row(id)).toMatchObject({ stale: 0 });
 	});
 
+	it("reads again when a webhook during a read fails its revision check", async () => {
+		await enrolled();
+		let started!: () => void;
+		const reading = new Promise<void>((resolve) => (started = resolve));
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		let first = true;
+		const { calls } = mocked({
+			entities: { 5: issue(102, 5) },
+			onActivity: async () => {
+				if (!first) return;
+				first = false;
+				started();
+				await gate;
+			},
+		});
+		const pending = opened(102, 5);
+		await reading;
+		// A new PR head bumps the revision the read in progress publishes against.
+		const synchronized = { ...event, action: "synchronize", pull_request: { id: 200, number: 2 } };
+		expect((await delivery("pull_request", synchronized, undefined, {}, testEnv)).status).toBe(202);
+		release();
+		await pending;
+		expect(reads(calls)).toHaveLength(2);
+		expect(await row("102")).toMatchObject({ stale: 0 });
+		expect((await github().service.projectState(repo, "enrollment-test"))!.failure).toBeNull();
+	});
+
+	it("rereads a PR by number after a comment on it", async () => {
+		await enrolled();
+		const { calls } = mocked({ entities: { 2: { ...pull(), comments: { totalCount: 3 } } } });
+		const comment = { ...event, action: "created", issue: { id: 999, number: 2, pull_request: {} } };
+		expect((await delivery("issue_comment", comment, undefined, {}, testEnv)).status).toBe(202);
+		expect(reads(calls)).toHaveLength(1);
+		expect(reads(calls)[0]!.body.query).toContain("s0:pullRequest(number:2)");
+		const read = await row("200");
+		expect(read).toMatchObject({ stale: 0 });
+		expect(JSON.parse(read!.data!).comments).toEqual({ totalCount: 3 });
+		expect(await row("999")).toBeNull();
+	});
+
 	it("records a failed read without retrying, and a later webhook reads again", async () => {
 		await enrolled();
 		const failed = mocked({ activityErrors: true });
