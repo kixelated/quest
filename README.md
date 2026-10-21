@@ -53,8 +53,10 @@ own quest, and it becomes ready once its children have merged. The top folders
 (`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
-on it, so the quests that required it can become ready. The finished plan stays
-in Git history, beside the code that completed it.
+on it, so the quests that required it can become ready. Milestones are never
+deleted, so a PR that finishes one (its README has no `Required` left) removes
+the links to that milestone too; `quest check` flags any it misses. The
+finished plan stays in Git history, beside the code that completed it.
 
 Work is taken through a live runner lock or an open change on the forge.
 kix.quest records each active job in its database and reassigns a job whose
