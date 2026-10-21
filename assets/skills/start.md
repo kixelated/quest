@@ -13,9 +13,9 @@ Update your checkout, run `quest ready`, then confirm the quest is still ready a
 Check the forge for a live runner lock or an open change; on GitHub, check the quest's upstream branch and open PRs from any fork.
 Confirm you can write in your worktree; if you cannot, stop and report without claiming.
 Claim it as `quest guide` describes.
-Release work you cannot finish; on GitHub, delete its branch claim, close any claim PR, and remove your isolated worktree.
+Release work you cannot finish; on GitHub, close its claim PR, delete its branch, and remove your isolated worktree.
 
-Implement the quest until it is complete, or some blocker is hit, then create a PR.
+Implement the quest until it is complete, or some blocker is hit, then push to its PR and update the description.
 Never write to or clean up a directory other agents share, such as a session scratchpad.
 
 When done, explain the result in a few lines and summarize any issues encountered.
