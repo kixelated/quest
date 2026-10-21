@@ -1,5 +1,14 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	linkSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,7 +61,7 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		mkdirSync(join(record.path, "cache", "nested"), { recursive: true });
 		writeFileSync(join(record.path, "cache", "nested", "artifact"), "disposable");
 		const status = git(record.path, "status", "--porcelain=v1");
-		expect(worktrees.release(record.id, ["cache/", "missing"]).phase).toBe("released");
+		expect(worktrees.release(record.id, ["cache/", "cache/nested", "missing"]).phase).toBe("released");
 		expect(existsSync(join(record.path, "cache"))).toBe(false);
 		expect(git(record.path, "status", "--porcelain=v1")).toBe(status);
 		expect(git(record.path, "rev-parse", "HEAD")).toBe(head);
@@ -74,6 +83,10 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		expect(() => worktrees.release(record.id, ["new"])).toThrow("ignored by Git: new");
 		expect(() => worktrees.release(record.id, ["../outside"])).toThrow("relative path");
 		expect(() => worktrees.release(record.id, [".git"])).toThrow("relative path");
+		expect(() => worktrees.release(record.id, [".GIT"])).toThrow("relative path");
+		// Any other alias of the .git entry, here a hard link that an ignore rule matches.
+		linkSync(join(record.path, ".git"), join(record.path, ".env"));
+		expect(() => worktrees.release(record.id, [".env"])).toThrow(".git entry: .env");
 		expect(readFileSync(join(record.path, "new"), "utf8")).toBe("source");
 		expect(readFileSync(join(record.path, "cache", "forced"), "utf8")).toBe("tracked despite the ignore rule");
 		expect(worktrees.status().records[0].phase).toBe("active");

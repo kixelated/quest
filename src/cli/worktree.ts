@@ -11,6 +11,7 @@ import {
 	realpathSync,
 	renameSync,
 	rmSync,
+	statSync,
 	statfsSync,
 	writeFileSync,
 } from "node:fs";
@@ -53,6 +54,15 @@ function entry(path: string): Stats | undefined {
 		throw error;
 	}
 }
+/** The filesystem holding a path, or its nearest existing ancestor. */
+function device(path: string): number {
+	try {
+		return statSync(path).dev;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(path) === path) throw error;
+		return device(dirname(path));
+	}
+}
 /** One spelling per path: Git prints `C:/...`, Node `C:\...`, and Windows may use 8.3 names. */
 function canonical(path: string): string {
 	return existsSync(path) ? realpathSync.native(path) : resolve(path);
@@ -72,7 +82,7 @@ function childPath(path: string): string {
 	if (
 		!path ||
 		isAbsolute(path) ||
-		path.split(/[\\/]/).some((part) => part === ".." || part === ".git") ||
+		path.split(/[\\/]/).some((part) => part === ".." || part.toLowerCase() === ".git") ||
 		resolve("/", path) === "/"
 	) {
 		throw new Error(`expected a relative path without .. or .git: ${path}`);
@@ -156,25 +166,33 @@ export class Worktrees {
 		if (!record) throw new Error(`unknown worktree: ${id}`);
 		return record;
 	}
-	/** Bytes on disk, plus the growth active reservations still expect. Released checkouts keep only what remains. */
-	private usage(registry: Registry): { used: number; growth: number } {
+	/**
+	 * Bytes on disk, plus the growth active reservations still expect. Released checkouts keep only
+	 * what remains. `local` is the expected growth on the filesystem holding `parent`.
+	 */
+	private usage(registry: Registry, parent?: string): { used: number; growth: number; local: number } {
+		const target = parent === undefined ? undefined : device(parent);
 		let used = 0;
 		let growth = 0;
+		let local = 0;
 		for (const record of registry.records) {
 			const bytes = diskUsage(record.path);
 			used += bytes;
-			if (record.phase !== "released") growth += Math.max(0, record.reserve - bytes);
+			if (record.phase === "released") continue;
+			const expected = Math.max(0, record.reserve - bytes);
+			growth += expected;
+			if (target !== undefined && device(record.path) === target) local += expected;
 		}
-		return { used, growth };
+		return { used, growth, local };
 	}
 	private admit(registry: Registry, reserve: number, parent: string): void {
-		const { used, growth } = this.usage(registry);
+		const { used, growth, local } = this.usage(registry, parent);
 		if (used + growth + reserve > registry.capacity)
 			throw new Error(
 				`disk capacity exceeded: ${used + growth} allocated + ${reserve} requested > ${registry.capacity}`,
 			);
 		const fs = statfsSync(parent);
-		if (Number(fs.bavail) * Number(fs.bsize) < growth + reserve)
+		if (Number(fs.bavail) * Number(fs.bsize) < local + reserve)
 			throw new Error("insufficient free space after accounting for concurrent build reservations");
 	}
 	/** Capacity persists; reducing it below existing allocations is rejected. */
@@ -258,6 +276,13 @@ export class Worktrees {
 				);
 			const root = canonical(record.path);
 			const paths = scratch.map(childPath).filter((path) => present(root, path)); // Reruns skip pruned paths.
+			const admin = entry(join(root, ".git"));
+			for (const path of paths) {
+				// Case folding and other platform aliases can still name the checkout's .git entry.
+				const stat = entry(join(root, path));
+				if (admin && stat?.dev === admin.dev && stat.ino === admin.ino)
+					throw new Error(`scratch path is the checkout's .git entry: ${path}`);
+			}
 			if (paths.length) {
 				const tracked = git(root, "--literal-pathspecs", "ls-files", "-z", "--", ...paths)
 					.split("\0")
@@ -267,8 +292,8 @@ export class Worktrees {
 				const matched = ignored(root, paths);
 				const unignored = paths.filter((path) => !matched.has(path));
 				if (unignored.length) throw new Error(`scratch must be ignored by Git: ${unignored.join(", ")}`);
-				// Removal unlinks symlinks rather than following them.
-				for (const path of paths) rmSync(join(root, path), { recursive: true });
+				// Removal unlinks symlinks rather than following them; force skips paths an overlapping parent removed.
+				for (const path of paths) rmSync(join(root, path), { recursive: true, force: true });
 			}
 			record.phase = "released";
 			return record;
