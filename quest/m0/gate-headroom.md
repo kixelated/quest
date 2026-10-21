@@ -80,10 +80,10 @@ burst of 8 took 104 s gated versus 19 s ungated.
 - **Ctrl-C once.** In both `quest gate` and `quest worktree run`
   (`src/cli/supervise.ts`), a terminal Ctrl-C reaches the child directly and
   again through the forwarder. Share one fix between them. On Unix, while
-  Quest is in the terminal's foreground process group, skip forwarding SIGINT
-  and SIGHUP, which the terminal also delivers to the child; always forward
-  SIGTERM, which a terminal never sends.
-  A SIGINT sent with `kill` to Quest alone is then not forwarded. On Windows,
+  Quest is in the terminal's foreground process group, skip forwarding only
+  SIGINT, which the terminal also delivers to the child; always forward SIGHUP
+  and SIGTERM, which may be sent to Quest alone. A SIGINT sent with `kill` to
+  Quest alone is then not forwarded. On Windows,
   Ctrl-C reaches every process on the console and Node's `child.kill()`
   terminates the child forcefully, so `quest gate` waits for the child
   instead of forwarding; `quest worktree run` is Linux-only.
