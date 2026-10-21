@@ -226,25 +226,17 @@ releasing every waiter at once. Windows reports no load
 average and macOS counts reclaimable cache as used memory, so those signals are
 skipped there.
 
-On Linux with unified cgroup v2, writable `cgroup.kill`, and a systemd 254+ user
-manager, each command also takes one of `min(cores, RAM / 4 GiB)` slots in a
-user scope. The slot stays taken until the command's last descendant exits,
-even if the gate crashes, and cancellation kills that exact cgroup. The gate
-checks the client and manager versions and probes writable ownership before
-starting the command. Linux uses load and memory admission alone when those
-prerequisites are unavailable, like macOS and Windows.
-
-A nested invocation runs immediately inside the admitted command. Internal
-compiler or test worker parallelism remains the command's responsibility.
+Admission is the gate's only job: it holds no slot or lock while the command
+runs and does not track the command's descendants. A nested invocation runs
+immediately inside the admitted command. Internal compiler or test worker
+parallelism remains the command's responsibility.
 
 This repository's `just check`, `just test`, `just worker-check`, and
 `just worker-test` run through the gate.
 
 Arguments, working directory, environment and terminal streams pass through to
-the executable, and waiting happens before it starts. Commands that move
-themselves into other cgroups are outside the slot boundary. There is no
-fairness guarantee: a queued command may wait on the first occupied slot while
-another becomes available.
+the executable, and waiting happens before it starts. There is no fairness
+guarantee or timeout: a command waits as long as the host stays busy.
 
 ## Work with your agents
 

@@ -2,30 +2,32 @@
 
 ## Goal
 
-`quest gate <cmd>` admits a bounded number of expensive commands for one user
-on one host, shared across repositories and worktrees. Concurrent agent sessions
-remain useful without multiplying full-machine builds and test stacks.
+`quest gate <cmd>` holds expensive commands for one user on one host until the
+host has CPU and memory room, shared across repositories and worktrees.
+Concurrent agent sessions remain useful without multiplying full-machine builds
+and test stacks.
 
-The gate and its automatic use by `just check` / `just test` have landed. What
-remains is measuring representative build/test contention with and without the
-gate, for example how many concurrent Worker suites hit their 5-second timeouts,
-before claiming a responsiveness improvement.
+Load and memory admission and its automatic use by `just check` / `just test`
+have landed. What remains is measuring representative build/test contention
+with and without the gate, for example how many concurrent Worker suites hit
+their 5-second timeouts, before claiming a responsiveness improvement.
 
 ## Plan
 
-- Decided 2026-10-15: gate expensive command phases, not agent lifetimes. Use a
-  simple concurrency limit derived from the host. Repository
-  entrypoints invoke the gate automatically; ordinary reasoning and I/O do not
-  occupy a CPU slot. No adaptive scheduler or new daemon is needed for this scope.
+- Decided 2026-10-15: gate expensive command phases, not agent lifetimes.
+  Repository entrypoints invoke the gate automatically; ordinary reasoning and
+  I/O are not gated. No adaptive scheduler or new daemon is needed for this scope.
 - Decided 2026-10-15 (user): gate checks and CI-like suites on host load, not
   agents, because load from every session and user is what starves test timers.
   The agent-level load-average rule was removed from the spawn and complete skills.
-- Decided 2026-10-15 (user): admission uses both. Slots cap concurrency where
-  the platform can own descendants exactly; admission also waits while the
-  1-minute load average exceeds the core count, which sees work the slots cannot.
-- Decided 2026-10-15 (user): the load gate runs on every platform, and Linux adds
-  systemd scope slots on top. macOS, Windows, and Linux without a user manager
-  get load and memory admission alone rather than an unsupported error.
+- Decided 2026-10-21 (user): admission is load and memory only, on every
+  platform. This supersedes the 2026-10-15 decisions to add Linux systemd scope
+  slots on top: every review round on the scope handshake, `cgroup.kill` inode
+  pinning, and manager probes found another race, for little admission benefit.
+  Exact descendant ownership and orphan cleanup move to the
+  [worktree process-ownership quest](/quest/m0/worktree.md). The removed
+  backend, its probes, and its opt-in systemd suite are recoverable from commit
+  5684307 in [kixelated/quest#128](https://github.com/kixelated/quest/pull/128).
 - Decided 2026-10-15 (user): Bun's `--no-orphans` stays a research option. Its
   best-effort registration and bounded PID-tree walks do not establish exact
   ownership by themselves.
@@ -38,20 +40,18 @@ before claiming a responsiveness improvement.
 - Decided 2026-10-15 (user): limits come from host specs, with no configuration
   file. The load limit is the host's CPU count, because the load average counts
   every CPU, including ones outside this process's affinity (revised
-  2026-10-21 from the usable core count). Each
-  command is budgeted 4 GiB, a typical build or test stack, so Linux gets
-  `min(usable cores, RAM / 4 GiB)` slots (at least one), with RAM capped by a cgroup
-  memory limit. Admission also waits while available memory is below
-  `min(4 GiB, RAM / 4)`, so a small host still runs one command. Cgroup
-  headroom subtracts inactive file cache from usage, since it is reclaimable. macOS counts
-  reclaimable cache as used memory, so only its load is gated; Windows reports
-  no load average, so only its memory is.
-- Nested gated calls run immediately: the kernel scope identifies them on Linux,
-  and an inherited marker does where admission had no kernel scope.
-- A 10-sample probe measured about 37 ms of admission overhead for a gated
-  `/bin/true`. Fairness is not promised.
+  2026-10-21 from the usable core count). Admission waits while available
+  memory is below `min(4 GiB, RAM / 4)`: 4 GiB is a typical build or test
+  stack, and a small host still runs one command. RAM is capped by a cgroup
+  memory limit, and cgroup headroom subtracts inactive file cache from usage,
+  since it is reclaimable. macOS counts reclaimable cache as used memory, so
+  only its load is gated; Windows reports no load average, so only its memory is.
+- Nested gated calls run immediately, identified by a marker the gate sets in
+  the admitted command's environment. Fairness is not promised.
+- Measure admission overhead alongside contention; the earlier 37 ms figure
+  included the removed systemd probe.
 
 ## Related
 
-- [Recoverable worktrees](/quest/m0/worktree.md) - should reuse the systemd scope backend for exact descendant ownership
-- [Own-PC runner](/quest/m0/kix/runner.md) - reuse local command supervision
+- [Recoverable worktrees](/quest/m0/worktree.md) - owns command descendants, with its own process-ownership backend
+- [Own-PC runner](/quest/m0/kix/runner.md) - can gate expensive job phases on host room

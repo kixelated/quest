@@ -1,68 +1,32 @@
-import {
-	closeSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	renameSync,
-	statSync,
-	writeFileSync,
-	writeSync,
-} from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
 	admit,
 	COMMAND_MEMORY,
 	claimDirectory,
-	DirectGate,
 	fileHost,
-	type GateBackend,
+	gate,
 	type Host,
 	hostLimits,
 	linuxMemory,
-	openOwnership,
+	run as runCommand,
 	SETTLE_MS,
 } from "../src/cli/gate";
 import { gateBoundary } from "../src/cli/main";
 import { run, tempDir } from "./fixture";
 
-const idle: Host = { load: () => 0, memory: () => Infinity, now: () => 0, claim: () => true, sleep: async () => {} };
 const GiB = 2 ** 30;
 
-test("limits derive from the host's cores and memory", () => {
-	// A slot per command's memory, capped at the cores; load at one per core.
-	expect(hostLimits(24, 64 * GiB, 24)).toEqual({ jobs: 16, load: 24, memory: COMMAND_MEMORY });
-	expect(hostLimits(8, 16 * GiB, 8)).toEqual({ jobs: 4, load: 8, memory: COMMAND_MEMORY });
+afterEach(() => vi.unstubAllEnvs());
+
+test("limits derive from the host's CPUs and memory", () => {
 	// The host-wide load average is compared with every host CPU, not the
 	// process's affinity subset, so an idle assigned CPU is not held back.
-	expect(hostLimits(2, 64 * GiB, 32)).toMatchObject({ jobs: 2, load: 32 });
+	expect(hostLimits(24, 64 * GiB)).toEqual({ load: 24, memory: COMMAND_MEMORY });
 	// A small host still runs one command, and reserves a quarter of its RAM.
-	expect(hostLimits(4, 2 * GiB, 4)).toEqual({ jobs: 1, load: 4, memory: GiB / 2 });
-	expect(hostLimits().jobs).toBeGreaterThanOrEqual(1);
-	expect(hostLimits().load).toBeGreaterThanOrEqual(hostLimits().jobs);
-});
-
-test("admission checks slots before waiting and preserves exact exit codes", async () => {
-	const calls: string[] = [];
-	let released = false;
-	const backend: GateBackend = {
-		nested: () => false,
-		tryRun: async (slot, command) => {
-			calls.push(`try ${slot}`);
-			expect(command).toEqual(["compiler", "a $b", "--help"]);
-			return released ? 23 : null;
-		},
-		wait: async (slot) => {
-			calls.push(`wait ${slot}`);
-			released = true;
-		},
-	};
-	const limits = { jobs: 2, load: 1, memory: 1 };
-	const waiting = (reason: string) => calls.push(reason);
-	expect(
-		await admit(["compiler", "a $b", "--help"], limits, backend, idle, new AbortController().signal, waiting),
-	).toBe(23);
-	expect(calls).toEqual(["try 0", "try 1", "slots", "wait 0", "try 0"]);
+	expect(hostLimits(4, 2 * GiB)).toEqual({ load: 4, memory: GiB / 2 });
+	expect(hostLimits().load).toBeGreaterThanOrEqual(1);
 });
 
 test("load and memory pressure wait, then admit one caller per settle window", async () => {
@@ -88,14 +52,8 @@ test("load and memory pressure wait, then admit one caller per settle window", a
 			else memory = GiB;
 		},
 	};
-	const backend: GateBackend = {
-		nested: () => false,
-		tryRun: async () => (events.push("run"), 0),
-		wait: () => Promise.reject(new Error("unreachable")),
-	};
 	const signal = new AbortController().signal;
-	const limits = { jobs: 1, load: 4, memory: GiB };
-	expect(await admit(["x"], limits, backend, host, signal, (reason) => events.push(reason))).toBe(0);
+	await admit({ load: 4, memory: GiB }, host, signal, (reason) => events.push(reason));
 	expect(events).toEqual([
 		"load",
 		`sleep ${SETTLE_MS - 500}`,
@@ -104,7 +62,6 @@ test("load and memory pressure wait, then admit one caller per settle window", a
 		"claim 4",
 		`sleep ${SETTLE_MS}`,
 		"claim 5",
-		"run",
 	]);
 });
 
@@ -178,63 +135,33 @@ test("admission claims stay on this host", () => {
 	expect(claimDirectory({}, "/home/u", "b")).not.toBe(claimDirectory({}, "/home/u", "a"));
 });
 
-test("a scope path reused before handshake acknowledgment cannot acquire cancellation ownership", () => {
-	const path = join(tempDir(), "cgroup.kill");
-	writeFileSync(path, "original");
-	// The original shell reported this identity, then exited; the slot was reused.
-	const original = statSync(path, { bigint: true }).ino;
-	renameSync(path, `${path}.old`);
-	writeFileSync(path, "successor");
-	expect(() => openOwnership(path, original)).toThrow("exited before admission");
-	expect(readFileSync(path, "utf8")).toBe("successor");
-});
-
-test("cancellation ownership stays pinned after its slot path is reused", () => {
-	const path = join(tempDir(), "cgroup.kill");
-	writeFileSync(path, "original");
-	const handle = openOwnership(path, statSync(path, { bigint: true }).ino);
-	try {
-		renameSync(path, `${path}.old`);
-		writeFileSync(path, "successor");
-		writeSync(handle, "1");
-		expect(readFileSync(`${path}.old`, "utf8")).toBe("1riginal");
-		expect(readFileSync(path, "utf8")).toBe("successor");
-	} finally {
-		closeSync(handle);
-	}
-});
-
-test("a waiting cancellation never launches the command", async () => {
+test("cancelling a waiting caller rejects admission", async () => {
 	const controller = new AbortController();
-	let calls = 0;
-	const backend: GateBackend = {
-		nested: () => false,
-		tryRun: async () => {
-			calls++;
-			return null;
-		},
-		wait: async () => controller.abort(new Error("cancelled")),
+	const busy: Host = {
+		load: () => 9,
+		memory: () => Infinity,
+		now: () => 0,
+		claim: () => true,
+		sleep: async () => controller.abort(new Error("cancelled")),
 	};
-	await expect(
-		admit(["compiler"], { jobs: 1, load: 1, memory: 1 }, backend, idle, controller.signal),
-	).rejects.toThrow("cancelled");
-	expect(calls).toBe(1);
+	await expect(admit({ load: 1, memory: 1 }, busy, controller.signal)).rejects.toThrow("cancelled");
 });
 
-test("load-only admission runs the command in place and marks it nested", async () => {
-	const gate = new DirectGate();
+test("an admitted command runs in place and is marked nested", async () => {
 	const script = "process.exit(process.env.QUEST_GATE_ADMITTED === '1' ? 7 : 1)";
-	expect(await gate.tryRun(0, [process.execPath, "-e", script], new AbortController().signal)).toBe(7);
+	expect(await runCommand([process.execPath, "-e", script], new AbortController().signal)).toBe(7);
 });
 
-test("load-only admission cancels a signal aborted before listener registration", async () => {
+test("a nested gate runs at once and keeps the exact exit status", async () => {
+	// A gated recipe that calls another one must not wait for admission twice.
+	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
+	expect(await gate([process.execPath, "-e", "process.exit(23)"])).toBe(23);
+});
+
+test("a command cancelled before listener registration still stops", async () => {
 	const controller = new AbortController();
 	controller.abort();
-	const result = await new DirectGate().tryRun(
-		0,
-		[process.execPath, "-e", "setInterval(() => {}, 1000)"],
-		controller.signal,
-	);
+	const result = await runCommand([process.execPath, "-e", "setInterval(() => {}, 1000)"], controller.signal);
 	expect(result).not.toBe(0);
 });
 

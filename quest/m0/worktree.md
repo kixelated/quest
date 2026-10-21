@@ -31,6 +31,12 @@ Agent count is unrestricted by this command; expensive work uses `quest gate`.
   Reuse the owning tool for managed worktrees and report failed cleanup as a
   retained allocation, not success. Do not steal live locks or remove shared
   or current checkouts underneath their users.
+- Decided 2026-10-21 (user): this quest brings its own process-ownership
+  backend; `quest gate` admits on load and memory only and owns no
+  descendants. The Linux systemd scope backend (scopes, slot handshake,
+  `cgroup.kill` inode pinning, prerequisite probes, opt-in systemd tests) was
+  dropped from the gate and is restorable from commit 5684307 in
+  [kixelated/quest#128](https://github.com/kixelated/quest/pull/128).
 - Preserve branches/recovery refs independently of checkout retention. A
   squash-merged branch may not be an ancestor of main; exact PR-head evidence
   matters when deciding whether a published result is finished.
@@ -40,5 +46,5 @@ Agent count is unrestricted by this command; expensive work uses `quest gate`.
 
 ## Related
 
-- [Expensive command gate](/quest/m0/local-gate.md) - independent CPU admission
+- [Expensive command gate](/quest/m0/local-gate.md) - independent CPU and memory admission
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - native agents and workflow adoption

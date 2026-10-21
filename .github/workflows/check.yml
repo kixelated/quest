@@ -26,19 +26,10 @@ jobs:
           determinate: false
       - name: Install dependencies
         run: nix develop --command just install
-      - name: Enable the systemd user manager so checks run in gate slots
-        shell: bash
-        run: |
-          sudo loginctl enable-linger "$USER"
-          sudo systemctl start "user@$(id -u).service"
-          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
-          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
       - name: Check
         run: nix develop --command just check
       - name: Test
         run: nix develop --command just test
-      - name: Test real Linux gate ownership
-        run: nix develop --command env QUEST_GATE_SYSTEMD_TESTS=1 bunx vitest run test/gate.systemd.test.ts
       - name: Check Nix package
         run: nix flake check
 
