@@ -34,6 +34,11 @@ Recommended shape, open for review:
   permission mode; it never prints a key. It reports the session id, final
   reply, and cost, and exits with a distinct status when a key's credit is
   exhausted, so the skill moves to the next key without parsing output.
+- Open: who resolves `QUEST_API_KEYS`. The skill resolves it once per spawn
+  and keeps the keys in a user-only file until the spawn ends. Resolving per
+  `start` repeats secret-manager prompts, and leaving the file in the skill
+  keeps half the launcher. Recommended: the command owns a spawn-scoped key
+  store, resolved once on first use and removed when the spawn ends.
 - Each dispatching skill's stub body states what invoking it authorizes:
   starting, resuming, and stopping background agents in isolated worktrees,
   and with `api`, billing them to the user's keys. Stub text is part of the
@@ -52,8 +57,8 @@ Recommended shape, open for review:
   rules; the gate admits expensive phases inside each agent, not agent
   lifetimes.
 - Validate with a multi-agent `api` spawn in a repository with no `autoMode`
-  settings: no classifier blocks, and exhausted keys hand off without the
-  coordinator writing a script.
+  settings: no classifier blocks on `start`, `resume`, or stopping a live
+  agent, and exhausted keys hand off without the coordinator writing a script.
 
 ## Related
 
