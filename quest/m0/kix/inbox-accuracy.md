@@ -31,8 +31,8 @@ Decided 2026-10-21 from the follow-ups of
   loses closed history).
 - Extend the seeded dev server (`cloudflare/dev/seed.ts`) with a claimed
   draft, a draft that hands back decisions, and an `UNKNOWN` PR, so
-  `test/seed.test.ts` covers each state.
-- Keep `test/seed.test.ts` within the Worker suite's 5-second test timeout as
-  the seed grows; it was the only test to time out under 8× CPU overload in
-  [kixelated/quest#177](https://github.com/kixelated/quest/pull/177). Slim it
-  rather than raising its timeout.
+  `cloudflare/test/seed.test.ts` covers each state.
+- Keep `cloudflare/test/seed.test.ts` within the Worker suite's 5-second test
+  timeout as the seed grows; it was the only test to time out under 8× CPU
+  overload in [kixelated/quest#177](https://github.com/kixelated/quest/pull/177).
+  Slim it rather than raising its timeout.
