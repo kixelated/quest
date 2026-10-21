@@ -326,8 +326,8 @@ The jobs/funding quests own live eligibility checks and contribution execution.
 ## Project state and activity
 
 An enrolled project's setup page links to `/projects/github/<owner>/<repo>/state`.
-A maintainer explicitly refreshes observations with its same-origin form. The
-service rereads the default branch at an exact commit using the preview's shared
+Webhooks reread observations in the background (see below), and a maintainer
+can refresh them explicitly with its same-origin form. Each read rereads the default branch at an exact commit using the preview's shared
 snapshot reader and validates the Quest tree with the pure core. The authenticated
 board and nested quest pages use the existing `Project` seam. Source links retain
 the exact commit; live project state never replaces GitHub as authority.
@@ -346,6 +346,31 @@ This deliberately avoids GitHub's bounded, delayed activity feed; GitHub does
 [not automatically redeliver failed webhooks](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries).
 There is no scheduled background poll in this stage.
 
+Each webhook that names an issue or PR (a comment on a PR names the PR by its
+number), or that invalidates candidates (below), asks for a background read of its enabled project once its delivery commits.
+The read runs after the response (`waitUntil`) with the App's read-only,
+repository-scoped installation token, and is the same read as a refresh: one
+page of each pass, plus every entity a webhook named since it was last read,
+fetched by number in the same GraphQL query. A new issue or PR therefore shows
+its title and state after one read however far the history pass is from it,
+and a closed one stops showing as open. A lease in `github_project_state` lets
+one read run at a time per project: it answers every request made before it
+started, requests made during it get one more read, and duplicate deliveries
+never reach it, so a burst costs one or two reads rather than one each. A
+per-entity webhook count lets a read clear only the updates it saw. One
+invocation reads at most three rounds, to stay within a Worker's subrequest
+budget; a request left after them waits for the next webhook or a refresh.
+A read overtaken by another read or by a webhook's revision bump reads again.
+Paused and disconnected projects are not read. A failed or rate-limited read is
+recorded and shown next to the refresh fallback, and is not retried: only a
+request made during it gets another round, and otherwise the next webhook or a
+refresh reads again. Checks, statuses and other pushes name no entity and
+change no candidate, so they cost no read.
+
+The inbox also treats a PR whose row still says open as closed once a
+complete, current occupancy pass no longer lists it, so a missed close webhook
+corrects itself on the next read.
+
 A single GraphQL activity query reads up to 50 issues, 50 PRs, 100 open PRs and
 100 branch claims, keeping external request count independent of entity/file counts. Bulk
 D1 writes use `json_each`, avoiding a query per entity or SQLite's parameter
@@ -353,10 +378,10 @@ limit. A revision comparison commits each page and cursor atomically; concurrent
 refreshes or an intervening webhook cannot publish over a newer observation.
 Only a PR opening, closing, reopening or receiving new commits, a `quest/` branch
 being created or deleted, or a push to the default branch invalidates candidates
-and restarts the occupancy pass; new work waits for the next refresh, so a job
+and restarts the occupancy pass; new work waits for the next read, so a job
 binds the PR head and tree the maintainer saw. Checks, statuses, comments,
-reviews and other pushes wait for the history pass, so a busy repository neither
-withholds candidates nor races a refresh. Installation tokens remain read-only,
+reviews and other pushes do not invalidate candidates, so a busy repository
+neither withholds candidates nor races a refresh. Installation tokens remain read-only,
 repository-scoped, and revoked after use.
 
 Durable activity items use the GitHub repository ID, entity kind and full database
@@ -378,7 +403,10 @@ Claimed on the board. Runner/run associations belong to job coordination.
 
 Every cached read and refresh proves current maintainer authority, live repository
 identity/public visibility, installation access, and enrollment for that
-installation. Refresh rechecks those boundaries after provider reads. Paused
+installation. Refresh rechecks those boundaries after provider reads. A
+background read has no user, so it checks the same boundaries except maintainer
+authority; it publishes observations only, and grants or caches no authority.
+Every page and action still rechecks the maintainer acting on it. Paused
 projects remain readable but have no candidates. Disconnect cascades cached
 snapshots and activity; explicitly enrolling a replacement installation clears
 prior observations. No positive authority cache is created. Candidate data is an

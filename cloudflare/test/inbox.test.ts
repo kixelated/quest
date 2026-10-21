@@ -148,8 +148,19 @@ describe("decision inbox", () => {
 		expect(html).toMatch(/Fix<\/a><span class="entry-meta"><span class="tag">New/);
 		// A webhook only points at the new issue; refreshing reads it, and no work starts before.
 		expect(html).toContain("Issue #3");
-		expect(thread(html)).toContain("GitHub reported changes");
+		expect(thread(html)).toContain("Refresh to start new work");
 		expect(thread(html)).not.toContain("Plan this issue");
+	});
+
+	it("drops a pull request the latest occupancy pass no longer found open", async () => {
+		expect(thread(await inbox({ project: "10", item: "pulls/2" }))).toContain("Iterate on this PR");
+		// History has not reread it, so its row still says open.
+		await db
+			.prepare(
+				"UPDATE github_project_state SET scan=json_set(scan,'$.occupancy.pulls',json('[]')) WHERE repository=10",
+			)
+			.run();
+		expect(await inbox({ project: "10", item: "pulls/2" })).toContain("no longer open");
 	});
 
 	it("starts work bound to the revision on screen and shows its progress plainly", async () => {

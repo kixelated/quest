@@ -175,9 +175,11 @@ progress, and their projects. Each item is one job target (`issues/1`,
 `pulls/2`, a quest path), so an issue, its planning job, and that job's
 questions stay one item, and webhook updates and reconnects never add another
 prompt. Agents waiting on an answer come first, then failed jobs, new pull
-requests, new issues, and ready quests. An item offers only actions that
-would work: none on a paused project, and only a refresh while availability
-is pending. Every action is a plain form post to the job routes, which
+requests, new issues, and ready quests. Each webhook rereads its project in the
+background, so a new issue or PR arrives with its title, ready to act on. An
+item offers only actions that would work: none on a paused project, and only a
+refresh while availability is pending or a background read failed, with the
+failure's reason. Every action is a plain form post to the job routes, which
 recheck authority and move on to the next active decision (or the empty
 state) with a short notice such as "Answer recorded"; the item acted on stays
 reachable from its list with its earlier answers. A refused action says why
