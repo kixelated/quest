@@ -3,10 +3,11 @@
 // github.com remote name reach a local bare repository.
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test, vi } from "vitest";
 
 import { claims } from "../src/cli/claims";
 import { type GitHubDependencies, type ObjectValue } from "../src/cli/github";
@@ -19,45 +20,64 @@ const BRANCH = "quest/m0/epic/one";
 const UPSTREAM = "https://github.com/example/project.git";
 const FORK = "https://github.com/me/project.git";
 
+// Each test spawns git a few dozen times, which takes seconds on Windows runners.
+vi.setConfig({ testTimeout: 30_000 });
+
 function git(cwd: string, ...args: string[]): string {
 	return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-/** A bare repository whose default branch holds the baseline tree. */
-function upstream(): string {
-	const bare = tempDir();
-	git(bare, "init", "-q", "--bare", "-b", "main");
-	const seed = Tree.baseline().path;
-	setup(seed);
-	git(seed, "add", ".");
-	git(seed, "commit", "-q", "-m", "seed");
-	git(seed, "push", "-q", bare, "HEAD:refs/heads/main");
-	return bare;
-}
+/** Identity and no signing, so commits work under any user configuration. */
+const IDENTITY = "[user]\n\tname = Test\n\temail = test@example.com\n[commit]\n\tgpgsign = false\n";
 
 /** A new repository on main. */
 function setup(dir: string): void {
 	git(dir, "init", "-q", "-b", "main");
-	identity(dir);
-}
-
-/** Identity and no signing, so commits work under any user configuration. */
-function identity(dir: string): void {
-	git(dir, "config", "user.name", "Test");
-	git(dir, "config", "user.email", "test@example.com");
-	git(dir, "config", "commit.gpgsign", "false");
+	appendFileSync(join(dir, ".git", "config"), IDENTITY);
 }
 
 /**
- * A clone of the upstream bare repository whose origin is `url`, rewritten to
- * the bare repositories in `routes`. Without routes, origin is the bare path.
+ * Built once and copied per test, since spawning git dominates these tests: a
+ * bare repository whose main holds the baseline tree, and a clone of it.
+ */
+const templates = (() => {
+	let built: { bare: string; clone: string } | undefined;
+	const root = mkdtempSync(join(tmpdir(), "quest-start-"));
+	afterAll(() => rmSync(root, { recursive: true, force: true }));
+	return () => {
+		if (built) return built;
+		const bare = join(root, "bare");
+		const clone = join(root, "clone");
+		cpSync(Tree.baseline().path, clone, { recursive: true });
+		setup(clone);
+		git(clone, "add", ".");
+		git(clone, "commit", "-q", "-m", "seed");
+		git(root, "clone", "-q", "--bare", clone, bare);
+		git(clone, "remote", "add", "origin", bare);
+		git(clone, "fetch", "-q", "origin");
+		git(clone, "branch", "-q", "--set-upstream-to", "origin/main");
+		built = { bare, clone };
+		return built;
+	};
+})();
+
+/** A bare repository whose default branch holds the baseline tree. */
+function upstream(): string {
+	const bare = tempDir();
+	cpSync(templates().bare, bare, { recursive: true });
+	return bare;
+}
+
+/**
+ * A clone of the baseline whose origin is `url`, rewritten to the bare
+ * repositories in `routes`. Without routes, origin is a bare path.
  */
 function clone(url: string, routes: Record<string, string> = {}): string {
 	const dir = tempDir();
-	git(dir, "clone", "-q", routes[UPSTREAM] ?? url, ".");
-	identity(dir);
+	cpSync(templates().clone, dir, { recursive: true });
 	git(dir, "remote", "set-url", "origin", url);
-	for (const [from, to] of Object.entries(routes)) git(dir, "config", `url.${to}.insteadOf`, from);
+	const rewrites = Object.entries(routes).map(([from, to]) => `[url "${to}"]\n\tinsteadOf = ${from}\n`);
+	appendFileSync(join(dir, ".git", "config"), rewrites.join(""));
 	return dir;
 }
 
