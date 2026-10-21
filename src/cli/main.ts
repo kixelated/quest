@@ -388,7 +388,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"When no other supervised run remains, the scratch declared at creation is pruned. Put the whole job, " +
 				"such as an agent session or a script that installs, builds, and tests, in one run.\n\n" +
 				"A supervisor that crashes leaves its run recorded; the next worktree command drops it once its scope " +
-				"is empty, and releases the checkout. Needs Linux with a systemd 254+ user manager and unified cgroup " +
+				"is empty, and releases the checkout. Needs Linux 5.14+ with a systemd 254+ user manager and unified cgroup " +
 				"v2, and fails on other hosts. Exits with the command's status; a release that fails is reported, leaves " +
 				"the checkout reserved, and turns success into exit 1.",
 		)

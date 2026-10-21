@@ -15,7 +15,7 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Retained, type Scopes, currentOwner } from "../src/cli/supervise";
+import { Retained, type Scopes, currentOwner, kill, killable } from "../src/cli/supervise";
 import { main } from "../src/cli/main";
 import { Worktrees, diskUsage } from "../src/cli/worktree";
 import { run } from "./fixture";
@@ -410,7 +410,36 @@ describe("supervised runs", { timeout: 20_000 }, () => {
 			},
 		});
 		expect(code).toBe(1);
-		expect(stderr).toContain("needs Linux with a systemd user manager");
+		expect(stderr).toContain("needs Linux 5.14 or later with a systemd user manager");
 		expect(new Worktrees(home).status().records[0].runs).toEqual([]);
+	});
+});
+
+describe("cgroup kill", () => {
+	it("requires cgroup.kill in this process's unified cgroup", () => {
+		const root = mkdtempSync(join(tmpdir(), "quest-cgroup-test-"));
+		roots.push(root);
+		const self = join(root, "self");
+		const cgroups = join(root, "cgroup");
+		mkdirSync(join(cgroups, "user.slice"), { recursive: true });
+		writeFileSync(self, "0::/user.slice\n");
+		// Before Linux 5.14 the cgroup exists without cgroup.kill, so a run could never empty its scope.
+		expect(killable(cgroups, self)).toBe(false);
+		writeFileSync(join(cgroups, "user.slice", "cgroup.kill"), "");
+		expect(killable(cgroups, self)).toBe(true);
+		// A hybrid hierarchy lists v1 controllers, and /sys/fs/cgroup is not its unified mount.
+		writeFileSync(self, "1:name=systemd:/user.slice\n");
+		expect(killable(cgroups, self)).toBe(false);
+	});
+
+	it("ignores a missing cgroup.kill only once the cgroup is gone", () => {
+		const root = mkdtempSync(join(tmpdir(), "quest-cgroup-test-"));
+		roots.push(root);
+		const group = join(root, "run.scope");
+		mkdirSync(group);
+		expect(() => kill(group)).toThrow("ENOENT");
+		expect(existsSync(join(group, "cgroup.kill"))).toBe(false);
+		rmSync(group, { recursive: true });
+		expect(() => kill(group)).not.toThrow();
 	});
 });

@@ -2,7 +2,7 @@
 // named once and never reused, so its cgroup holds every descendant that does not ask another
 // service manager to start it. Other hosts fail explicitly rather than guess from process groups.
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync, watch, writeFileSync } from "node:fs";
+import { closeSync, existsSync, constants as fs, openSync, readFileSync, watch, writeSync } from "node:fs";
 import { constants, hostname } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -62,7 +62,7 @@ export interface Scopes {
 export class Retained extends Error {}
 
 export const UNSUPPORTED =
-	"quest worktree run needs Linux with a systemd user manager (systemd 254 or later) and unified cgroup v2";
+	"quest worktree run needs Linux 5.14 or later with a systemd user manager (systemd 254 or later) and unified cgroup v2";
 
 /**
  * The shell proves it runs in the scope's own v2 cgroup, then waits for the supervisor before it
@@ -116,18 +116,36 @@ function vacated(group: string): Promise<void> {
 	});
 }
 
+/**
+ * Whether this process's unified cgroup offers `cgroup.kill` (Linux 5.14), which stops every
+ * descendant in a scope at once. Without it a run's scope could never be emptied.
+ */
+export function killable(cgroups = "/sys/fs/cgroup", self = "/proc/self/cgroup"): boolean {
+	const unified = readFileSync(self, "utf8")
+		.split("\n")
+		.find((line) => line.startsWith("0::"));
+	return unified !== undefined && existsSync(join(cgroups, unified.slice(3), "cgroup.kill"));
+}
+
 /** SIGKILL every process in the cgroup; one already removed has none. */
-function kill(group: string): void {
+export function kill(group: string): void {
 	try {
-		writeFileSync(join(group, "cgroup.kill"), "1");
+		// Never create the file: a missing one means the cgroup is gone or cannot be killed.
+		const fd = openSync(join(group, "cgroup.kill"), fs.O_WRONLY);
+		try {
+			writeSync(fd, "1");
+		} finally {
+			closeSync(fd);
+		}
 	} catch (error) {
-		if (!["ENOENT", "ENODEV"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+		const code = (error as NodeJS.ErrnoException).code ?? "";
+		if (!["ENOENT", "ENODEV"].includes(code) || existsSync(group)) throw error;
 	}
 }
 
 export const systemdScopes: Scopes = {
 	check() {
-		if (process.platform !== "linux") throw new Error(UNSUPPORTED);
+		if (process.platform !== "linux" || !killable()) throw new Error(UNSUPPORTED);
 	},
 
 	live(unit) {

@@ -428,7 +428,8 @@ job, such as an agent session or a script that installs, builds, and tests, in
 one run, since the next run starts without scratch.
 
 `run` owns processes through a systemd user scope per run, so it needs Linux
-with a systemd 254+ user manager and unified cgroup v2; it fails on other hosts.
+5.14+ with a systemd 254+ user manager and unified cgroup v2; it fails on other
+hosts.
 Work handed to another service manager, such as `systemd-run` or a container
 daemon, escapes the scope. If the supervisor itself is killed, its command keeps
 running and its scratch is kept; the next `quest worktree` command drops the run

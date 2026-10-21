@@ -1,4 +1,4 @@
-// Supervised runs against the host's real systemd user manager. On Linux these need systemd 254+
+// Supervised runs against the host's real systemd user manager. On Linux these need 5.14+, systemd 254+
 // and unified cgroup v2; a host without them fails here rather than skipping.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
