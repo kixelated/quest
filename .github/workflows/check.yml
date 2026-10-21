@@ -29,6 +29,12 @@ jobs:
           determinate: false
       - name: Install dependencies
         run: nix develop --command just install
+      # `quest worktree run` owns processes through a systemd user scope, which the tests exercise.
+      - name: Start a systemd user manager
+        run: |
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
       - name: Check
         run: nix develop --command just check
       - name: Test

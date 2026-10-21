@@ -1,4 +1,5 @@
-// Git checkouts under a shared disk budget. Release prunes declared scratch in place.
+// Git checkouts under a shared disk budget. Release prunes declared scratch in place, by hand or
+// once the last supervised run in the checkout stops.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -10,20 +11,32 @@ import {
 	readdirSync,
 	realpathSync,
 	renameSync,
+	rmdirSync,
 	rmSync,
 	statSync,
 	statfsSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { type Owner, Retained, type Scopes, alive, currentOwner, systemdScopes } from "./supervise";
 
+/** A supervised command, live while its owner runs or its scope holds a process. */
+export interface Run {
+	unit: string;
+	owner: Owner;
+}
 export interface WorktreeRecord {
 	id: string;
 	name: string;
 	repository: string;
 	path: string;
 	reserve: number;
+	/** Ignored paths, declared at creation, that release deletes. */
+	scratch: string[];
+	runs: Run[];
 	phase: "creating" | "active" | "released";
 	failure?: string;
 }
@@ -32,6 +45,9 @@ interface Registry {
 	capacity: number;
 	records: WorktreeRecord[];
 }
+
+/** Another live process holds the registry lock. */
+class Busy extends Error {}
 
 function git(root: string, ...args: string[]): string {
 	return execFileSync("git", ["-C", root, ...args], {
@@ -45,12 +61,15 @@ function save(path: string, value: unknown): void {
 	writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);
 }
+function code(error: unknown): string | undefined {
+	return (error as NodeJS.ErrnoException).code;
+}
 /** The entry itself, without following a final symlink; undefined when it is missing. */
 function entry(path: string): Stats | undefined {
 	try {
 		return lstatSync(path);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		if (code(error) === "ENOENT") return undefined;
 		throw error;
 	}
 }
@@ -59,7 +78,7 @@ function device(path: string): number {
 	try {
 		return statSync(path).dev;
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(path) === path) throw error;
+		if (code(error) !== "ENOENT" || dirname(path) === path) throw error;
 		return device(dirname(path));
 	}
 }
@@ -135,7 +154,7 @@ function lockReason(path: string): string | undefined {
 		const admin = /^gitdir: (.+)$/m.exec(readFileSync(join(path, ".git"), "utf8"))?.[1];
 		return admin && readFileSync(resolve(path, admin.trim(), "locked"), "utf8").replace(/\r?\n$/, "");
 	} catch (error) {
-		if (["ENOENT", "ENOTDIR", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return undefined;
+		if (["ENOENT", "ENOTDIR", "EISDIR"].includes(code(error) ?? "")) return undefined;
 		throw error;
 	}
 }
@@ -155,47 +174,147 @@ export function diskUsage(path: string, seen = new Set<string>()): number {
 	return bytes;
 }
 
+/**
+ * The registry lock is a directory holding one file named for its owner. It is created whole by a
+ * rename, which fails while a non-empty lock exists. A dead owner's lock is reclaimed by unlinking
+ * that exact owner file, so a reclaimer can never remove a lock some later owner took.
+ */
+function acquire(lock: string): string {
+	const token = randomUUID();
+	const staging = `${lock}.${token}`;
+	mkdirSync(staging, { mode: 0o700 });
+	try {
+		writeFileSync(join(staging, `${token}.json`), JSON.stringify(currentOwner()), { mode: 0o600 });
+		for (;;) {
+			try {
+				renameSync(staging, lock);
+				return token;
+			} catch (error) {
+				if (!existsSync(lock)) throw error;
+			}
+			let holders: string[];
+			try {
+				holders = readdirSync(lock);
+			} catch (error) {
+				if (code(error) === "ENOENT") continue;
+				throw error;
+			}
+			const holder = holders[0];
+			if (holder !== undefined) {
+				let owner: Owner;
+				try {
+					owner = JSON.parse(readFileSync(join(lock, holder), "utf8"));
+				} catch (error) {
+					if (code(error) === "ENOENT") continue;
+					throw error;
+				}
+				if (alive(owner))
+					throw new Busy(
+						`worktree registry is locked by process ${owner.pid} on ${owner.host ?? "an unknown host"}: ${lock}`,
+					);
+				try {
+					unlinkSync(join(lock, holder));
+				} catch (error) {
+					if (code(error) !== "ENOENT") throw error;
+				}
+			}
+			// An empty lock is mid-release or reclaimed; a later owner's file makes this fail instead.
+			try {
+				rmdirSync(lock);
+			} catch (error) {
+				if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(code(error) ?? "")) throw error;
+			}
+		}
+	} finally {
+		rmSync(staging, { recursive: true, force: true });
+	}
+}
+function unlock(lock: string, token: string): void {
+	unlinkSync(join(lock, `${token}.json`));
+	try {
+		rmdirSync(lock);
+	} catch (error) {
+		if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(code(error) ?? "")) throw error;
+	}
+}
+
 /** All allocations share one registry across repositories for this user/host. */
 export class Worktrees {
 	readonly home: string;
 	constructor(
 		home = process.env.QUEST_WORKTREE_HOME ??
 			join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "quest", "worktrees"),
+		private readonly scopes: Scopes = systemdScopes,
 	) {
 		mkdirSync(home, { recursive: true, mode: 0o700 });
 		this.home = realpathSync(home);
 	}
+	/** Every operation first reconciles runs whose supervisor and processes are gone. */
 	private locked<T>(action: (registry: Registry) => T): T {
 		const lock = join(this.home, "lock");
+		const token = acquire(lock);
 		try {
-			mkdirSync(lock, { mode: 0o700 });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "EEXIST")
-				throw new Error(
-					`worktree registry is locked: ${lock}; never remove a live lock; after a crash inspect owner.json and reconcile it explicitly`,
-				);
-			throw error;
-		}
-		try {
-			save(join(lock, "owner.json"), { pid: process.pid, started: new Date().toISOString() });
 			const file = join(this.home, "registry.json");
 			const registry: Registry = existsSync(file)
 				? JSON.parse(readFileSync(file, "utf8"))
 				: { version: 1, capacity: 0, records: [] };
 			if (registry.version !== 1) throw new Error("unsupported worktree registry version");
+			for (const record of registry.records) {
+				record.scratch ??= [];
+				record.runs ??= [];
+			}
 			try {
+				this.reconcile(registry);
 				return action(registry);
 			} finally {
 				save(file, registry);
 			}
 		} finally {
-			rmSync(lock, { recursive: true });
+			unlock(lock, token);
+		}
+	}
+	/** Waits out another live holder, whose critical sections are short; a dead one is reclaimed. */
+	private async lockedWait<T>(action: (registry: Registry) => T): Promise<T> {
+		for (;;) {
+			try {
+				return this.locked(action);
+			} catch (error) {
+				if (!(error instanceof Busy)) throw error;
+			}
+			await sleep(100);
 		}
 	}
 	private find(registry: Registry, id: string): WorktreeRecord {
 		const record = registry.records.find((item) => item.id === id || item.name === id);
 		if (!record) throw new Error(`unknown worktree: ${id}`);
 		return record;
+	}
+	/** Unknown counts as running, so scratch is never deleted under a process that may use it. */
+	private running(record: WorktreeRecord, run: Run): boolean {
+		if (alive(run.owner)) return true;
+		try {
+			return this.scopes.live(run.unit);
+		} catch (error) {
+			record.failure = `cannot inspect supervised run ${run.unit}: ${error instanceof Error ? error.message : error}`;
+			return true;
+		}
+	}
+	/** Drops finished runs a crashed supervisor left behind, and releases a checkout none remain in. */
+	private reconcile(registry: Registry): void {
+		for (const record of [...registry.records]) {
+			if (!record.runs.length) continue;
+			record.runs = record.runs.filter((run) => this.running(record, run));
+			if (!record.runs.length) this.settle(registry, record);
+		}
+	}
+	/** Releases a checkout whose last run stopped, keeping it charged and noting why on failure. */
+	private settle(registry: Registry, record: WorktreeRecord): void {
+		try {
+			this.prune(registry, record);
+			delete record.failure;
+		} catch (error) {
+			record.failure = `release failed; the checkout stays reserved: ${error instanceof Error ? error.message : error}`;
+		}
 	}
 	/**
 	 * Bytes on disk, plus the growth active reservations still expect. Released checkouts keep only
@@ -242,7 +361,8 @@ export class Worktrees {
 			return { capacity: registry.capacity, allocated: used + growth, records: registry.records };
 		});
 	}
-	create(root: string, name: string, reserve: number, ref = "HEAD"): WorktreeRecord {
+	/** `scratch` names the ignored paths release deletes, such as dependencies and build output. */
+	create(root: string, name: string, reserve: number, ref = "HEAD", scratch: string[] = []): WorktreeRecord {
 		return this.locked((registry) => {
 			if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name))
 				throw new Error("name must contain only letters, digits, dots, underscores, or hyphens");
@@ -250,12 +370,22 @@ export class Worktrees {
 				throw new Error("reserve must be a positive safe integer in bytes, including expected build growth");
 			if (registry.records.some((item) => item.name === name))
 				throw new Error(`worktree name already exists; use restore or another name: ${name}`);
+			const declared = scratch.map(childPath);
 			const repository = canonical(git(root, "rev-parse", "--show-toplevel").trim());
 			const path = join(repository, ".worktrees", name);
 			mkdirSync(dirname(path), { recursive: true });
 			if (existsSync(path)) throw new Error(`refusing to adopt an existing checkout: ${path}`);
 			this.admit(registry, reserve, dirname(path));
-			const record: WorktreeRecord = { id: randomUUID(), name, repository, path, reserve, phase: "creating" };
+			const record: WorktreeRecord = {
+				id: randomUUID(),
+				name,
+				repository,
+				path,
+				reserve,
+				scratch: declared,
+				runs: [],
+				phase: "creating",
+			};
 			registry.records.push(record);
 			save(join(this.home, "registry.json"), registry); // Reservation survives a crash in git.
 			try {
@@ -296,52 +426,62 @@ export class Worktrees {
 	 * The checkout, its Git state, and untracked source stay in place. A checkout that Git and the
 	 * disk both lack, such as one removed with `git worktree remove`, drops its record instead.
 	 */
-	release(id: string, scratch: string[]): WorktreeRecord {
+	private prune(registry: Registry, record: WorktreeRecord): void {
+		if (!this.owned(record)) {
+			registry.records.splice(registry.records.indexOf(record), 1);
+			return;
+		}
+		if (record.phase === "creating")
+			throw new Error(
+				`creation was interrupted; inspect and remove the partial checkout with git worktree remove, then release again: ${record.path}`,
+			);
+		const root = canonical(record.path);
+		const paths = record.scratch.filter((path) => present(root, path)); // Reruns skip pruned paths.
+		const admin = entry(join(root, ".git"));
+		for (const path of paths) {
+			// Case folding and other platform aliases can still name the checkout's .git entry.
+			const stat = entry(join(root, path));
+			if (admin && stat?.dev === admin.dev && stat.ino === admin.ino)
+				throw new Error(`scratch path is the checkout's .git entry: ${path}`);
+		}
+		if (paths.length) {
+			// icase, because a case-insensitive filesystem resolves `CACHE` to a tracked `cache`.
+			const pathspecs = paths.map((path) => `:(literal,icase)${path}`);
+			const tracked = git(root, "ls-files", "-z", "--", ...pathspecs)
+				.split("\0")
+				.filter(Boolean);
+			if (tracked.length) throw new Error(`scratch includes tracked files: ${tracked.slice(0, 20).join(", ")}`);
+			const matched = ignored(root, paths);
+			const unignored = paths.filter((path) => !matched.has(path));
+			if (unignored.length) throw new Error(`scratch must be ignored by Git: ${unignored.join(", ")}`);
+			// Another checkout, such as one created inside this one, is work rather than scratch.
+			const registered = checkouts(record.repository)
+				.map((checkout) => checkout.path)
+				.filter((path) => path !== root);
+			for (const path of paths) {
+				// A symlink is unlinked rather than followed, whatever it points to.
+				if (entry(join(root, path))?.isSymbolicLink()) continue;
+				const target = canonical(join(root, path));
+				const nested =
+					registered.find((checkout) => checkout === target || checkout.startsWith(target + sep)) ??
+					linkedWorktree(join(root, path));
+				if (nested) throw new Error(`scratch contains a Git worktree: ${path} holds ${nested}`);
+			}
+			// Removal unlinks symlinks rather than following them; force skips paths an overlapping parent removed.
+			for (const path of paths) rmSync(join(root, path), { recursive: true, force: true });
+		}
+		record.phase = "released";
+	}
+	/** Prunes the scratch declared at creation; refuses while a supervised run may still use it. */
+	release(id: string): WorktreeRecord {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
-			if (!this.owned(record)) {
-				registry.records.splice(registry.records.indexOf(record), 1);
-				return record;
-			}
-			if (record.phase === "creating")
+			if (record.runs.length)
 				throw new Error(
-					`creation was interrupted; inspect and remove the partial checkout with git worktree remove, then release again: ${record.path}`,
+					`supervised runs are live in this checkout: ${record.runs.map((run) => run.unit).join(", ")}`,
 				);
-			const root = canonical(record.path);
-			const paths = scratch.map(childPath).filter((path) => present(root, path)); // Reruns skip pruned paths.
-			const admin = entry(join(root, ".git"));
-			for (const path of paths) {
-				// Case folding and other platform aliases can still name the checkout's .git entry.
-				const stat = entry(join(root, path));
-				if (admin && stat?.dev === admin.dev && stat.ino === admin.ino)
-					throw new Error(`scratch path is the checkout's .git entry: ${path}`);
-			}
-			if (paths.length) {
-				// icase, because a case-insensitive filesystem resolves `CACHE` to a tracked `cache`.
-				const pathspecs = paths.map((path) => `:(literal,icase)${path}`);
-				const tracked = git(root, "ls-files", "-z", "--", ...pathspecs)
-					.split("\0")
-					.filter(Boolean);
-				if (tracked.length)
-					throw new Error(`scratch includes tracked files: ${tracked.slice(0, 20).join(", ")}`);
-				const matched = ignored(root, paths);
-				const unignored = paths.filter((path) => !matched.has(path));
-				if (unignored.length) throw new Error(`scratch must be ignored by Git: ${unignored.join(", ")}`);
-				// Another checkout, such as one created inside this one, is work rather than scratch.
-				const registered = checkouts(record.repository)
-					.map((checkout) => checkout.path)
-					.filter((path) => path !== root);
-				for (const path of paths) {
-					const target = canonical(join(root, path));
-					const nested =
-						registered.find((checkout) => checkout === target || checkout.startsWith(target + sep)) ??
-						linkedWorktree(join(root, path));
-					if (nested) throw new Error(`scratch contains a Git worktree: ${path} holds ${nested}`);
-				}
-				// Removal unlinks symlinks rather than following them; force skips paths an overlapping parent removed.
-				for (const path of paths) rmSync(join(root, path), { recursive: true, force: true });
-			}
-			record.phase = "released";
+			this.prune(registry, record);
+			delete record.failure;
 			return record;
 		});
 	}
@@ -350,11 +490,47 @@ export class Worktrees {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
 			if (!this.owned(record)) throw new Error(`checkout is missing; release drops its record: ${record.path}`);
-			if (record.phase === "active") return record;
-			if (record.phase !== "released") throw new Error(`cannot restore a ${record.phase} checkout`);
-			this.admit(registry, Math.max(0, record.reserve - diskUsage(record.path)), dirname(record.path));
-			record.phase = "active";
+			this.activate(registry, record);
 			return record;
 		});
+	}
+	private activate(registry: Registry, record: WorktreeRecord): void {
+		if (record.phase === "active") return;
+		if (record.phase !== "released") throw new Error(`cannot use a ${record.phase} checkout`);
+		this.admit(registry, Math.max(0, record.reserve - diskUsage(record.path)), dirname(record.path));
+		record.phase = "active";
+	}
+	/**
+	 * Runs a command in the checkout, restoring it first when released. Once the command and every
+	 * descendant have stopped, and no other run remains, its declared scratch is pruned. Resolves
+	 * with the command's status; a failed release is recorded and leaves the checkout reserved.
+	 */
+	async run(id: string, command: string[]): Promise<{ code: number; failure?: string }> {
+		this.scopes.check();
+		const run: Run = { unit: `quest-worktree-${randomUUID()}.scope`, owner: currentOwner() };
+		const record = this.locked((registry) => {
+			const record = this.find(registry, id);
+			if (!this.owned(record)) throw new Error(`checkout is missing; release drops its record: ${record.path}`);
+			this.activate(registry, record);
+			record.runs.push(run); // Recorded before the scope exists, so a crash is reconciled.
+			return { id: record.id, path: record.path };
+		});
+		const result = await this.scopes.run(run.unit, record.path, command).then(
+			(code) => ({ code }),
+			(error: unknown) => ({ error }),
+		);
+		// Waits out a busy lock rather than failing: the run's record keeps its scratch until this lands.
+		const failure = await this.lockedWait((registry) => {
+			const current = registry.records.find((item) => item.id === record.id);
+			if (!current) return undefined;
+			// Reconciliation drops a retained run once this process exits and its scope is empty.
+			if ("error" in result && result.error instanceof Retained) current.failure = result.error.message;
+			else current.runs = current.runs.filter((item) => item.unit !== run.unit);
+			// A command that never started, such as on a host without a user manager, keeps its scratch.
+			if (!current.runs.length && "code" in result) this.settle(registry, current);
+			return current.failure;
+		});
+		if ("error" in result) throw result.error;
+		return { code: result.code, failure };
 	}
 }

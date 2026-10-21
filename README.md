@@ -403,9 +403,7 @@ guarantee or timeout: a command waits as long as the host stays busy.
 The experimental `quest worktree` commands share one disk budget across this
 user's repositories and release a checkout's disk by deleting its declared
 scratch in place. They only operate on Git worktrees they create; use the
-owning application for Codex, Claude, or other managed checkouts. Process
-supervision remains unfinished: stop agents and commands in a checkout before
-releasing it.
+owning application for Codex, Claude, or other managed checkouts.
 
 Set a shared capacity and an explicit reservation in bytes, covering the
 checkout and its expected build output. Measure representative jobs before
@@ -415,30 +413,52 @@ writers, and Git objects stored in the shared repository are not charged.
 
 ```sh
 quest worktree capacity 20000000000
-quest worktree create example --reserve 3000000000 --ref HEAD
+quest worktree create example --reserve 3000000000 --scratch node_modules dist
+quest worktree run example -- sh -c 'just install && just test'
 quest worktree status
-quest worktree release example --scratch node_modules dist
-quest worktree restore example
 ```
 
 Creation prints JSON with the ID and the detached, locked checkout path under
-`.worktrees/`. Release deletes only its `--scratch` paths, and refuses one that
-Git does not ignore, that holds tracked files or another Git worktree, or that
-is reached through a symbolic link; links inside scratch are removed, never
-followed. Missing paths
-are skipped, so release can be rerun. The checkout, its Git state, and
-untracked files stay in place, and `status` charges what remains. Restore
-reserves the checkout's disk again; then reinstall or rebuild its scratch, for
-example with `just install`.
+`.worktrees/`, and records the `--scratch` paths. `run` restores a released
+checkout, runs the command there, and once it exits kills any descendants it
+left behind. When no other run remains in the checkout, it releases it: the
+declared scratch is deleted and the checkout keeps only its source. Put a whole
+job, such as an agent session or a script that installs, builds, and tests, in
+one run, since the next run starts without scratch.
+
+`run` owns processes through a systemd user scope per run, so it needs Linux
+with a systemd 254+ user manager and unified cgroup v2; it fails on other hosts.
+Work handed to another service manager, such as `systemd-run` or a container
+daemon, escapes the scope. If the supervisor itself is killed, its command keeps
+running and its scratch is kept; the next `quest worktree` command drops the run
+once its scope is empty and then releases the checkout. `status` lists each
+run's scope, which `systemctl --user stop` ends.
+
+Release deletes only declared scratch, and refuses a path that Git does not
+ignore, that holds tracked files or another Git worktree, or that is reached
+through a symbolic link; links at or inside scratch are removed, never followed.
+Missing paths are skipped, so release can be rerun. The checkout, its Git state,
+and untracked files stay in place, and `status` charges what remains. A failed
+automatic release is recorded on the checkout, which stays reserved. To manage a
+checkout by hand, stop its unsupervised work first:
+
+```sh
+quest worktree release example
+quest worktree restore example
+```
+
+`release` refuses while supervised runs are live. `restore` reserves the
+checkout's disk again; then reinstall or rebuild its scratch, for example with
+`just install`.
 
 Quest never removes a checkout. Once one is finished, remove it with
 `git worktree unlock` and `git worktree remove`, which refuses modified or
 untracked files but deletes ignored ones; `release` then drops its record. A
 failed creation stays charged until `release` drops it. Records live in
 `$QUEST_WORKTREE_HOME`, or `$XDG_STATE_HOME/quest/worktrees` (default
-`~/.local/state/quest/worktrees`). No live lock is stolen: after a crash,
-confirm the registry lock's owner has exited before removing it. This initial
-interface refuses unknown or changed checkout ownership.
+`~/.local/state/quest/worktrees`). The registry lock of a process that exited on
+this host is reclaimed; a live lock, or one held from another host, is never
+stolen. This initial interface refuses unknown or changed checkout ownership.
 
 ## Work with your agents
 

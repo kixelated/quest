@@ -39,9 +39,9 @@ merge.
 
 ## Required
 
-- [Worktree process ownership](/quest/m0/worktree.md) - supervised commands and automatic scratch release
 - [Expensive command gate](/quest/m0/local-gate.md) - resource control before removing agent-count throttles
 
 ## Related
 
+- [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; `quest worktree run` already supervises jobs and releases scratch
 - [Own-PC runner](/quest/m0/kix/runner.md) - reuse lifecycle ownership in the hosted job adapter
