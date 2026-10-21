@@ -1,6 +1,6 @@
 import { type Pull, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
-import { PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
+import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
@@ -15,10 +15,20 @@ export type InboxProps = {
 	active: Item | null;
 	/** The requested item is gone, such as a question another maintainer answered. */
 	missing: boolean;
+	/** What the previous form recorded, from the redirect's query. */
+	done: string | undefined;
 	decisions: Item[];
 	working: Item[];
 	skipped: Item[];
 	runners: Map<string, Runners>;
+};
+
+const recorded: Record<Done, string> = {
+	answer: "Answer recorded.",
+	start: "Job requested.",
+	stop: "Stop requested.",
+	skip: "Skipped until it changes.",
+	merge: "Pull request merged.",
 };
 
 const kinds = { pull: "Pull request", issue: "Issue", quest: "Ready quest", plan: "Plan", devshell: "Bootstrap" };
@@ -257,7 +267,7 @@ function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
 	const state = view?.state;
 	if (!state?.project.available) return "GitHub reported changes. Refresh to start new work from current state.";
-	// A retry continues its failed job's pull request, so that one is no other claim.
+	// A retry continues its failed job's pull request, so that claim does not block it.
 	const retry = item.need === "retry" ? (item.job?.pull ?? null) : null;
 	if (item.kind === "quest" && !startable(state, item.target, retry))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
@@ -479,6 +489,11 @@ export function InboxPage(props: InboxProps) {
 					? `${props.decisions.length} waiting on you${unread ? `, ${unread} new` : ""}.`
 					: "Nothing needs a decision right now."}
 			</p>
+			{props.done && Object.hasOwn(recorded, props.done) && (
+				<p class="note" role="status">
+					{recorded[props.done as Done]}
+				</p>
+			)}
 			{props.missing && (
 				<p class="note" role="status">
 					That decision is no longer open. It may have been answered or changed on GitHub.
