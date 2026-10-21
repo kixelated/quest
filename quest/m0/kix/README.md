@@ -20,7 +20,8 @@ answer planning prompts, publish a draft quest PR, merge through GitHub's
 rules, start a ready quest, follow its summaries, answer an implementation
 question from a push notification, take its runner offline so the job is
 reassigned to the other, and receive its contribution PR notification. Exercise duplicate events,
-interrupted sessions, and an exhausted account with stubbed agents before a
+interrupted sessions, and an exhausted account with stubbed agents, starting
+from the seeded local server's fake GitHub and seed (`cloudflare/dev/`), before a
 live rehearsal on the operator's runner.
 
 ## Plan
@@ -94,7 +95,6 @@ operator-paid-hosting decisions:
 
 ## Required
 
-- [Local harness](/quest/m0/kix/harness.md) - the Worker served locally with seeded data and mocked GitHub for browser checks
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID

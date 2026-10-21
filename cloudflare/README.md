@@ -232,6 +232,38 @@ under `cloudflare/.wrangler/`. There are no remote-only bindings: local
 development and tests need no Cloudflare login. Wrangler reruns the build when
 `src/`, `scripts/`, or `docs/` change.
 
+### Seeded local server
+
+Check UI changes in a browser with representative data, and no OAuth app or
+Cloudflare login:
+
+```sh
+just worker-seeded  # or: just worker-seeded --port 8788
+```
+
+This bundles the Worker as `wrangler deploy --dry-run` does and serves it with
+Miniflare at `http://localhost:8787`, on in-memory D1, R2, and Durable
+Objects, so every run starts from the same seed. It works where `wrangler dev`
+hangs, such as sandboxed agent environments. After applying the checked-in
+migrations, `dev/seed.ts` signs in a maintainer and enrolls and observes their
+projects through the Worker's own routes: ready, claimed, and blocked quests,
+issues (one known only from a webhook, one with a long title), pull requests
+with checks and reviews (one clean to merge), and a paused second project. It then adds runners and
+jobs that are queued, running, failed, or waiting on an agent's questions, a
+tool permission, or an account limit.
+
+`dev/github.ts` fakes GitHub for every outbound request, so nothing leaves
+localhost and no real credential is used. Sign in with GitHub completes as the
+seeded maintainer. From a shell, sign in with a cookie jar:
+
+```sh
+curl -sL -c jar -b jar -H 'Origin: http://localhost:8787' -d provider=github http://localhost:8787/sign-in
+```
+
+Check phone and desktop widths with the browser's device emulation. The Worker
+tests run the same seed (`test/seed.test.ts`), so it follows schema and route
+changes, and later end-to-end tests can start from it.
+
 ## Checks
 
 ```sh

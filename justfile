@@ -58,6 +58,10 @@ worker-check:
 worker-test:
     bun run --cwd cloudflare test
 
+# Serve the Worker on localhost with seeded data and a fake GitHub, for checking UI.
+worker-seeded *args:
+    bun run --cwd cloudflare seeded {{args}}
+
 # Apply auth migrations locally and start the Worker.
 worker-dev:
     bun run --cwd cloudflare migrate

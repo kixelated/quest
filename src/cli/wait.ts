@@ -108,11 +108,6 @@ async function watch(
 	const prUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`;
 	const deadline = options.timeout === undefined ? Infinity : started + options.timeout * 1000;
 	const github = new GitHub(deps, deadline);
-	const list = async (path: string): Promise<{ rows: ObjectValue[]; response: Response }> => {
-		const response = await github.request(path);
-		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
-		return { rows: array(await response.json()), response };
-	};
 
 	let cursor: Cursor;
 	let historical: Activity[] = [];
@@ -132,7 +127,7 @@ async function watch(
 		let commitsPath: string | undefined = `${base}/pulls/${pr.number}/commits?per_page=100`;
 		let listedHead: string | undefined;
 		while (commitsPath) {
-			const { rows, response } = await list(commitsPath);
+			const { rows, response } = await github.list(commitsPath);
 			for (const commit of rows) {
 				listedHead = string(commit.sha);
 				if (!fullSha(listedHead)) throw new Error("invalid GitHub commit SHA");
@@ -156,7 +151,7 @@ async function watch(
 			let path: string | undefined =
 				`/repos/${fullName}/activity?ref=${encodeURIComponent(string(head.ref))}&per_page=100`;
 			while (path) {
-				const { rows, response } = await list(path);
+				const { rows, response } = await github.list(path);
 				activities.push(...rows);
 				if (
 					shaPoint

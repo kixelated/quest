@@ -5,7 +5,8 @@
 export async function osiApproved(identifier: string | undefined, request: typeof fetch = fetch): Promise<boolean> {
 	if (!identifier || identifier === "NOASSERTION" || !/^[a-zA-Z0-9][a-zA-Z0-9.-]*\+?$/.test(identifier)) return false;
 	const response = await request(`https://spdx.org/licenses/${encodeURIComponent(identifier)}.json`, {
-		redirect: "error",
+		// Workers refuse `redirect: "error"`; a redirect is not ok, so it fails below.
+		redirect: "manual",
 		cache: "no-store",
 		headers: { Accept: "application/json" },
 	});
