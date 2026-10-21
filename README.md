@@ -230,7 +230,9 @@ Creation prints JSON with the ID and detached checkout path under `.worktrees/`.
 Release always takes a fresh checkpoint. Tracked working files, the staged
 index, reachable Git history, and initialized submodules' local history are
 preserved. Untracked and ignored files require explicit `--keep` or `--scratch`
-classification before release; source cannot be declared scratch. `--keep`
+classification before release; source cannot be declared scratch. Release
+refuses while the checkout holds any nested repository or worktree other than
+its initialized submodules. `--keep`
 never pushes or publishes its contents. Checkpoints record notes and check
 results without running tests or claiming that validation passed.
 

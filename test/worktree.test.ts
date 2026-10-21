@@ -151,6 +151,29 @@ describe("recoverable worktrees", { timeout: 20_000 }, () => {
 		expect(readlinkSync(join(record.path, "kept-directory", "link"))).toBe("../file");
 		expect(git(record.path, "diff", "HEAD")).toBe("");
 	});
+	it.skipIf(process.platform === "win32")("keeps dangling untracked symlinks", () => {
+		const { repo, worktrees } = fixture();
+		const record = worktrees.create(repo, "work", 10_000_000);
+		symlinkSync("missing", join(record.path, "dangling"));
+		worktrees.release(record.id, { ...notes, keep: ["dangling"] });
+		worktrees.restore(record.id);
+		expect(readlinkSync(join(record.path, "dangling"))).toBe("missing");
+	});
+	it.each(["independent repository", "another repository's worktree", "same repository's worktree"])(
+		"refuses to release a nested %s under scratch",
+		(kind) => {
+			const { root, repo, worktrees } = fixture();
+			const record = worktrees.create(repo, "work", 10_000_000);
+			const nested = join(record.path, "cache", "nested");
+			if (kind === "independent repository") repository(nested);
+			else if (kind === "same repository's worktree") git(repo, "worktree", "add", "--detach", nested);
+			else git(repository(join(root, "other")), "worktree", "add", "--detach", nested);
+			writeFileSync(join(nested, "file"), "uncommitted\n");
+			expect(() => worktrees.release(record.id, { ...notes, scratch: ["cache"] })).toThrow("nested repository");
+			expect(readFileSync(join(nested, "file"), "utf8")).toBe("uncommitted\n");
+			expect(worktrees.status().records[0].phase).toBe("active");
+		},
+	);
 	it("retains unique committed history independently of the released checkout", () => {
 		const { repo, worktrees } = fixture();
 		const record = worktrees.create(repo, "work", 10_000_000);
@@ -290,6 +313,23 @@ describe("recoverable worktrees", { timeout: 20_000 }, () => {
 		expect(git(module, "remote", "get-url", "origin")).toBe(upstream);
 		expect(git(module, "show", ":file")).toBe("staged module");
 		expect(readFileSync(join(module, "file"), "utf8")).toBe("unstaged module\n");
+	});
+	it.each(["file", "directory"])("roundtrips a staged submodule replaced by a %s", (kind) => {
+		const { root, repo, worktrees } = fixture();
+		const upstream = repository(join(root, "upstream"));
+		git(repo, "-c", "protocol.file.allow=always", "submodule", "add", upstream, "module");
+		git(repo, "commit", "-m", "add module");
+		const record = worktrees.create(repo, "work", 20_000_000);
+		git(record.path, "rm", "module");
+		const path = kind === "file" ? "module" : "module/child";
+		if (kind === "directory") mkdirSync(join(record.path, "module"));
+		writeFileSync(join(record.path, path), "replacement\n");
+		git(record.path, "add", path);
+		const status = git(record.path, "status", "--porcelain=v1");
+		worktrees.release(record.id, notes);
+		worktrees.restore(record.id);
+		expect(git(record.path, "status", "--porcelain=v1")).toBe(status);
+		expect(git(record.path, "show", `:${path}`)).toBe("replacement");
 	});
 	it("wires capacity, reservation, and checkpoint notes through the command line", () => {
 		const { repo, home } = fixture();

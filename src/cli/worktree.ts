@@ -113,6 +113,15 @@ function list(root: string, ...args: string[]): string[] {
 		.filter(Boolean);
 }
 
+/** Nested `.git` entries beneath `root`, relative to it; symlinks are never traversed. */
+function repositories(root: string, path = ""): string[] {
+	return readdirSync(join(root, path), { withFileTypes: true }).flatMap((entry) => {
+		const child = path ? `${path}/${entry.name}` : entry.name;
+		if (entry.name === ".git") return path ? [path] : [];
+		return entry.isDirectory() ? repositories(root, child) : [];
+	});
+}
+
 /** Allocated blocks, including ignored build output; symlinks are never traversed. */
 export function diskUsage(path: string): number {
 	if (!existsSync(path)) return 0;
@@ -273,11 +282,7 @@ export class Worktrees {
 		const path = canonical(record.path);
 		if (inside(path, canonical(process.cwd())))
 			throw new Error("leave the checkout before checkpointing or releasing it");
-		const entries = checkouts(record.repository);
-		for (const entry of entries)
-			if (entry.path !== path && inside(path, entry.path))
-				throw new Error(`nested checkout is retained: ${entry.path}`);
-		const entry = entries.find((entry) => entry.path === path);
+		const entry = checkouts(record.repository).find((entry) => entry.path === path);
 		if (!entry && !existsSync(path)) return false;
 		if (entry?.locked !== `quest worktree ${record.id}`)
 			throw new Error(
@@ -285,9 +290,23 @@ export class Worktrees {
 			);
 		return true;
 	}
+	/**
+	 * Refuses removal while the checkout holds a repository its checkpoint did not save, whichever
+	 * repository registered it: forced removal would delete its uncommitted work and history.
+	 */
+	private refuseNested(record: WorktreeRecord): void {
+		if (!existsSync(record.path)) return;
+		const saved = record.checkpoint
+			? json<Snapshot>(join(record.checkpoint, "snapshot.json")).repositories.map((repository) => repository.path)
+			: [];
+		const nested = repositories(record.path).filter((path) => !saved.includes(path));
+		if (nested.length)
+			throw new Error(`nested repository would be removed; move it out of the checkout: ${nested.join(", ")}`);
+	}
 	/** Git removes the owned checkout and its administrative directory, even when the checkout is missing. */
 	private discard(record: WorktreeRecord): void {
 		if (!this.owned(record)) return;
+		this.refuseNested(record);
 		git(record.repository, "worktree", "remove", "--force", "--force", record.path);
 		if (existsSync(record.path)) throw new Error("Git reported cleanup success but checkout is retained");
 	}
@@ -334,6 +353,9 @@ export class Worktrees {
 					.split("\0")
 					.filter(Boolean)
 					.map((entry) => ({ mode: entry.slice(0, 6), path: entry.slice(entry.indexOf("\t") + 1) }));
+				// The index decides which paths are submodules, including staged replacements of HEAD's.
+				// HEAD adds the files the index deleted or replaced.
+				const submodules = entries.filter((entry) => entry.mode === "160000").map((entry) => entry.path);
 				const files = [
 					...new Set(
 						[...entries, ...committed]
@@ -404,14 +426,8 @@ export class Worktrees {
 					const relative = path ? `${path}/${file}` : file;
 					if (!covers(keep, relative) && !covers(scratch, relative)) snapshot.unclassified.push(relative);
 				}
-				for (const entry of [
-					...new Map(
-						[...entries, ...committed]
-							.filter((entry) => entry.mode === "160000")
-							.map((entry) => [entry.path, entry]),
-					).values(),
-				]) {
-					const child = path ? `${path}/${entry.path}` : entry.path;
+				for (const submodule of submodules) {
+					const child = path ? `${path}/${submodule}` : submodule;
 					if (existsSync(join(record.path, child, ".git"))) visit(child);
 					else if (existsSync(join(record.path, child)) && readdirSync(join(record.path, child)).length)
 						throw new Error(`unrecognized submodule contents: ${child}`);
@@ -420,9 +436,18 @@ export class Worktrees {
 			visit("");
 			for (const path of keep) {
 				const source = join(record.path, path);
-				if (!existsSync(source)) throw new Error(`keep path does not exist: ${path}`);
-				if (!inside(record.path, realpathSync(source))) throw new Error(`keep path escapes checkout: ${path}`);
-				if (lstatSync(source).isDirectory() && existsSync(join(source, ".git")))
+				// The entry itself, which may be a dangling symlink; copies keep its link text.
+				let stat: ReturnType<typeof lstatSync>;
+				try {
+					stat = lstatSync(source);
+				} catch (error) {
+					if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
+						throw new Error(`keep path does not exist: ${path}`);
+					throw error;
+				}
+				if (!inside(canonical(record.path), canonical(dirname(source))))
+					throw new Error(`keep path escapes checkout: ${path}`);
+				if (stat.isDirectory() && existsSync(join(source, ".git")))
 					throw new Error(
 						`keep directories cannot contain a repository: ${path}; tracked submodules are preserved automatically`,
 					);
@@ -457,6 +482,7 @@ export class Worktrees {
 					throw new Error(
 						`classify untracked/ignored files with --keep or --scratch before release: ${snapshot.unclassified.slice(0, 20).join(", ")}`,
 					);
+				this.refuseNested(record); // Refuse while still active; discard checks again after a crash.
 				record.phase = "releasing";
 				save(join(this.home, "registry.json"), registry);
 			}
