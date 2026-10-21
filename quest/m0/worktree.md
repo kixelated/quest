@@ -22,11 +22,15 @@ work, stealing a live lock, or deleting scratch a running process still uses.
   checkpoint-and-remove design kept finding data-loss edge cases, while the
   disk cost is scratch (2026-10-15 on this repository: 1.6 MB fresh source,
   376 MB built).
-- Decided (user): reuse the Linux systemd scope ownership backend from
-  [kixelated/quest#128](https://github.com/kixelated/quest/pull/128) rather than
-  adding another one; start once that PR merges. Process groups and PID files
-  cannot prove detached descendants stopped after a supervisor crash, so hosts
-  without a supported backend fail explicitly instead of guessing.
+- Decided 2026-10-21 (user): this quest brings its own process-ownership
+  backend; `quest gate` admits on CPU load and memory only and owns no
+  descendants. The Linux systemd scope backend (scopes, slot handshake,
+  `cgroup.kill` inode pinning, prerequisite probes, opt-in systemd tests) was
+  dropped from the gate and is restorable from commit 5684307 in
+  [kixelated/quest#128](https://github.com/kixelated/quest/pull/128). Process
+  groups and PID files cannot prove detached descendants stopped after a
+  supervisor crash, so hosts without a supported backend fail explicitly
+  instead of guessing.
 - Own foreground child processes and their descendants until they stop; only
   then prune scratch and release the reservation. Record ownership so a crash
   can be reconciled, including a stale registry lock whose owner has exited.
@@ -43,5 +47,5 @@ work, stealing a live lock, or deleting scratch a running process still uses.
 
 ## Related
 
-- [Expensive command gate](/quest/m0/local-gate.md) - its Linux ownership backend is reused here
+- [Expensive command gate](/quest/m0/local-gate.md) - independent CPU and memory admission
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - native agents and workflow adoption

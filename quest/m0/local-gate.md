@@ -29,5 +29,5 @@ remain useful without multiplying full-machine builds and test stacks.
 
 ## Related
 
-- [Worktree process ownership](/quest/m0/worktree.md) - reuses this ownership backend for checkout commands
+- [Worktree process ownership](/quest/m0/worktree.md) - owns checkout command descendants, with its own process-ownership backend
 - [Own-PC runner](/quest/m0/kix/runner.md) - reuse local command supervision
