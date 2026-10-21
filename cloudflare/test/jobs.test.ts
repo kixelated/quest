@@ -11,7 +11,7 @@ import { formAnswer, parseAnswer, parsePrompt } from "../src/jobs/prompt";
 import { resume } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
-import { commit, head, maintainerOf, project } from "./project-fixtures";
+import { commit, delivery, head, maintainerOf, project } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const db = env.DB;
@@ -888,6 +888,40 @@ describe("job routes", () => {
 				["iterate", "pulls/2", head, "contributor/fix", 0, maintainer],
 			]),
 		);
+	});
+
+	it("starts work while history is still paging, but not before a refresh reads a new pull request head", async () => {
+		// A long history needs many refreshes; open PRs and claims are already current.
+		await db
+			.prepare("UPDATE github_project_state SET scan=json_set(scan,'$.history.complete',json('false'))")
+			.run();
+		expect((await post("", { workflow: "start", target: "quest/first.md" })).status).toBe(201);
+		const pushed = {
+			action: "synchronize",
+			installation: { id: 5 },
+			repository: { id: 10 },
+			pull_request: { id: 21, number: 2 },
+		};
+		expect((await delivery("pull_request", pushed)).status).toBe(202);
+		const stale = await post("", { workflow: "iterate", target: "pulls/2" });
+		expect(stale.status).toBe(403);
+		expect(await stale.json()).toMatchObject({ error: "Refresh project activity before starting work" });
+	});
+
+	it("refuses an issue or pull request that closed or moved since it was read", async () => {
+		// Closing or commenting leaves availability known, and history has not reread the target.
+		const changed = "This changed on GitHub since it was read; refresh and review it again";
+		github.issue = "closed";
+		const closed = await post("", { workflow: "plan", target: "issues/1" });
+		expect(closed.status).toBe(403);
+		expect(await closed.json()).toEqual({ error: changed });
+		github.pull = "closed";
+		expect(await (await post("", { workflow: "iterate", target: "pulls/2" })).json()).toEqual({ error: changed });
+		github.pull = "open";
+		github.head = "e".repeat(40);
+		expect(await (await post("", { workflow: "iterate", target: "pulls/2" })).json()).toEqual({ error: changed });
+		// Work that targets no issue or pull request still starts.
+		expect((await post("", { workflow: "start", target: "quest/first.md" })).status).toBe(201);
 	});
 
 	it("offers a devShell bootstrap job instead of starting without a flake", async () => {

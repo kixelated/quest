@@ -62,6 +62,9 @@ export async function maintainerOf() {
 		flake: true,
 		pullFlake: true,
 		role: "maintain",
+		issue: "open",
+		pull: "open",
+		head,
 		methods: ["squash", "merge", "rebase"],
 		refuse: null as string | null,
 		merged: [] as unknown[],
@@ -74,7 +77,10 @@ export async function maintainerOf() {
 		.first<{ userId: string }>())!.userId;
 	await project(10, user);
 	const snapshot = { commit, date: "2026-10-16", documents, completed: [] };
-	const scan = { id: "scan", issues: false, pulls: false, refs: false, claims: [], complete: true };
+	const scan = {
+		history: { id: "scan", issues: false, pulls: false, complete: true },
+		occupancy: { open: false, refs: false, pulls: ["21"], claims: [], complete: true },
+	};
 	await db.batch([
 		db
 			.prepare(
@@ -95,7 +101,7 @@ export async function maintainerOf() {
 				id: 5,
 				app_id: 123,
 				suspended_at: null,
-				permissions: { metadata: "read", contents: "write", pull_requests: "write" },
+				permissions: { metadata: "read", contents: "write", issues: "read", pull_requests: "write" },
 			});
 		if (path.endsWith("/access_tokens")) return Response.json({ token: "installation-token" });
 		if (path === "/installation/token") return new Response(null, { status: 204 });
@@ -132,6 +138,10 @@ export async function maintainerOf() {
 					? { user: { id: Number(who.id) }, permission: "write", role_name: github.role }
 					: { user: { id: Number(permission[1]) }, permission: "read", role_name: "read" },
 			);
+		// The live issue and pull request that a job binds, which observations can lag.
+		if (path === "/repos/upstream/project/issues/1") return Response.json({ state: github.issue });
+		if (path === "/repos/upstream/project/pulls/2")
+			return Response.json({ state: github.pull, head: { sha: github.head } });
 		const ref = url.searchParams.get("ref");
 		if (path === "/repos/upstream/project/contents/flake.nix" && (ref === commit || ref === head))
 			return (ref === commit ? github.flake : github.pullFlake)

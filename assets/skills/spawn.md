@@ -10,7 +10,7 @@ Run `quest unblocked --json` for ready candidates in milestone priority, descend
 The count is distinct transitive dependents; other prerequisites may still remain.
 Use that order when dispatching, and recompute after the quest tree changes.
 An explicit argument takes precedence: filter to the selected quests/epics and honor their requested order.
-Ranking does not establish that work is unclaimed: verify live locks, open changes, and remote branch claims before starting.
+Ranking does not establish that work is unclaimed: verify live locks, open changes (including PRs from forks), and remote branch claims before starting.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Start every quest you would recommend starting, without asking: well planned, with no blockers or conflicts with quests already started.
@@ -30,7 +30,7 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
-When done, each agent opens a PR, a draft if decisions or unfinished work remain.
+When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
 Its report lists every open decision and suggested follow-up with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 

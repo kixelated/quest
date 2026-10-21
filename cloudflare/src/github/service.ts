@@ -476,7 +476,7 @@ export class GitHubService {
 		const state = await this.#state(repo, installation);
 		await this.#gate(installation);
 		if (state === null) throw new GitHubError("Project enrollment changed");
-		if (result && state !== "enabled") result.available = [];
+		if (result && state !== "enabled") result.project.available = [];
 		return result;
 	}
 
@@ -502,17 +502,18 @@ export class GitHubService {
 					.bind(repo.id)
 					.first<{ revision: number; scan: string | null; invalidated: number; epoch: string }>();
 				const previous: Scan | null = row?.scan ? JSON.parse(row.scan) : null;
-				const scan: Scan =
-					previous && !previous.complete && row?.invalidated !== 1
-						? previous
-						: {
-								id: crypto.randomUUID(),
-								issues: null,
-								pulls: null,
-								refs: null,
-								claims: [],
-								complete: false,
-							};
+				// History resumes through any webhook; only occupancy, which is
+				// small, restarts to observe a possibly opened, closed, or claimed quest.
+				const scan: Scan = {
+					history:
+						previous && !previous.history.complete
+							? previous.history
+							: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
+					occupancy:
+						previous && !previous.occupancy.complete && row!.invalidated !== 1
+							? previous.occupancy
+							: { open: null, refs: null, pulls: [], claims: [], complete: false },
+				};
 				const snapshot = await this.#snapshot(token, repo, current);
 				const response = await this.#api<{ data?: { repository: ActivityPage | null }; errors?: unknown[] }>(
 					token,
@@ -523,9 +524,10 @@ export class GitHubService {
 						variables: {
 							owner: repo.owner,
 							name: repo.name,
-							issues: scan.issues || null,
-							pulls: scan.pulls || null,
-							refs: scan.refs || null,
+							issues: scan.history.issues || null,
+							pulls: scan.history.pulls || null,
+							open: scan.occupancy.open || null,
+							refs: scan.occupancy.refs || null,
 						},
 					},
 				);
@@ -557,23 +559,38 @@ export class GitHubService {
 	}
 
 	/**
-	 * What a new job may start from: `resolve` picks it from complete
-	 * observations, then this checks whether its revision has a flake for the
+	 * What a new job may start from: `resolve` picks it from current
+	 * observations, then this checks that its issue or pull request is still
+	 * open at the observed head, and whether its revision has a flake for the
 	 * runner's devShell.
 	 */
-	jobSource<T extends { revision: string }>(
+	jobSource<T extends { target: string; revision: string }>(
 		repo: GitHubRepository,
 		userId: string,
 		resolve: (state: ProjectState) => T,
 	) {
-		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
+		const permissions = { contents: "read", issues: "read", pull_requests: "read" } as const;
+		return this.#authorized(repo, userId, permissions, async (token, current, installation) => {
 			this.#public(current);
 			const enrolled = await this.#state(repo, installation);
 			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
 			const state = await this.#observations(repo, installation);
-			if (!state?.complete) throw new GitHubError("Refresh project activity before starting work");
+			// Pending availability means a webhook or an unfinished pass left open PRs and claims unread.
+			if (!state || state.project.available === null)
+				throw new GitHubError("Refresh project activity before starting work");
 			// Check the revision the job will run, such as a pull request's head.
 			const job = resolve(state);
+			// Only history rereads an issue or PR, so its activity row can still say
+			// open after it closed; read the target itself before binding a job to it.
+			const [, kind, target] = job.target.match(/^(issues|pulls)\/(\d+)$/) ?? [];
+			if (kind) {
+				const live = await this.#api<{ state: string; head?: { sha: string } }>(
+					token,
+					`${repositoryPath(repo)}/${kind}/${number(Number(target))}`,
+				);
+				if (live.state !== "open" || (kind === "pulls" && live.head?.sha !== job.revision))
+					throw new GitHubError("This changed on GitHub since it was read; refresh and review it again");
+			}
 			let flake = true;
 			try {
 				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);

@@ -75,4 +75,3 @@ the base; and `--branch` overriding the current branch.
 ## Related
 
 - [Move and delete quests](/quest/m0/helpers/move.md) - `quest rm` deletes a quest and every link to it
-- [Finished milestone links](/quest/m0/milestone-links.md) - the same "a finishing PR removes what depended on it" rule for milestones

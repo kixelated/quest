@@ -56,7 +56,8 @@ blocked and `Required:`), with the markers and size colours.
 A quest shows its most advanced state: Ready to turn in, then Accepted by, then
 Available or Requires. Accepted by comes from a live runner lock: an active
 job in kix.quest's database, which moves when its runner goes offline; open changes
-carry Ready to turn in. GitHub uses the pushed quest branch to claim work.
+carry Ready to turn in. On GitHub, a draft PR from the quest branch, opened
+right away and from a fork too, claims work.
 None of these states adds a section to the quest file.
 
 Tokens are display only: a run's spend and donated tokens show with an amber
