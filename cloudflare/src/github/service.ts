@@ -48,6 +48,8 @@ export class GitHubError extends Error {
 	constructor(
 		message: string,
 		readonly status?: number,
+		/** GitHub's own words for a refusal, read only where a request asks for them. */
+		readonly reason: string | null = null,
 	) {
 		super(message);
 	}
@@ -118,6 +120,20 @@ function sha(value: string) {
 export function refName(name: string) {
 	return !/[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{|\/\/|(^|\/)\.|\.lock($|\/)|[/.]$|^\/|^@$/.test(name);
 }
+/** The `message` GitHub gives for a refused request, as one bounded line of display text. */
+async function refusal(response: Response) {
+	try {
+		const { message } = (await response.json()) as { message?: unknown };
+		if (typeof message === "string")
+			return (
+				message
+					.replace(/[\x00-\x1f\x7f]+/g, " ")
+					.trim()
+					.slice(0, 300) || null
+			);
+	} catch {}
+	return null;
+}
 function pullNumber(target: string) {
 	const match = target.match(/^pulls\/(\d{1,15})$/);
 	if (!match) throw new GitHubError("Invalid pull request target");
@@ -145,7 +161,8 @@ export class GitHubService {
 		return `${body}.${sign("RSA-SHA256", Buffer.from(body), createPrivateKey(this.#env.GITHUB_APP_PRIVATE_KEY)).toString("base64url")}`;
 	}
 
-	async #api<T>(token: string, path: string, method = "GET", body?: unknown): Promise<T> {
+	/** `explain` keeps GitHub's one-line `message` from a refusal, for a maintainer to read. */
+	async #api<T>(token: string, path: string, method = "GET", body?: unknown, explain = false): Promise<T> {
 		const response = await this.#fetch(`https://api.github.com${path}`, {
 			method,
 			redirect: "error",
@@ -159,7 +176,12 @@ export class GitHubService {
 			body: body === undefined ? undefined : JSON.stringify(body),
 		});
 		// Never include provider response bodies, request headers, or secrets in errors.
-		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`, response.status);
+		if (!response.ok)
+			throw new GitHubError(
+				`GitHub request failed (${response.status})`,
+				response.status,
+				explain ? await refusal(response) : null,
+			);
 		return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 	}
 
@@ -914,10 +936,10 @@ export class GitHubService {
 	/**
 	 * Merge exactly `expectedHead` with the first method the repository
 	 * allows: squash, then a merge commit, then rebase. GitHub enforces branch
-	 * rules, reviews, and checks.
+	 * rules, reviews, and checks; a refusal says why and is never retried.
 	 */
 	mergePullRequest(repo: GitHubRepository, userId: string, pull: number, expectedHead: string) {
-		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, (token, current) => {
+		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, async (token, current) => {
 			const method = current.allow_squash_merge
 				? "squash"
 				: current.allow_merge_commit
@@ -926,10 +948,30 @@ export class GitHubService {
 						? "rebase"
 						: null;
 			if (!method) throw new GitHubError("The repository allows no merge method");
-			return this.#api(token, `${repositoryPath(repo)}/pulls/${number(pull)}/merge`, "PUT", {
-				sha: sha(expectedHead),
-				merge_method: method,
-			});
+			let merged: { sha: string };
+			try {
+				merged = await this.#api<{ sha: string }>(
+					token,
+					`${repositoryPath(repo)}/pulls/${number(pull)}/merge`,
+					"PUT",
+					{ sha: sha(expectedHead), merge_method: method },
+					true,
+				);
+			} catch (error) {
+				if (!(error instanceof GitHubError)) throw error;
+				if (error.status === 409)
+					throw new GitHubError("The pull request's head moved since you looked; review it again", 409);
+				if (error.reason && [403, 405, 422].includes(error.status!))
+					throw new GitHubError(`GitHub refused the merge: ${error.reason}`, error.status);
+				throw error;
+			}
+			// As a webhook would, mark observations stale so the inbox stops offering the merged pull request.
+			await this.#env.DB.prepare(
+				"UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=?",
+			)
+				.bind(repo.id)
+				.run();
+			return { sha: merged.sha };
 		});
 	}
 }
