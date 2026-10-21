@@ -83,6 +83,11 @@ operator-paid-hosting decisions:
   without kix. The two coexist through GitHub: kix sees a local agent's
   quest branches and PRs, which count as claims and get the usual PR
   decision items. There is no plugin or session mirroring.
+- **One owner per quest and PR** (decided 2026-10-20 from a transcript
+  audit, see [quest start](/quest/m0/helpers/start.md)). Claims are draft
+  PRs. A PR is owned while it is a draft without a `## Decisions needed`
+  section or carries one `quest:*` state label, shared with local sessions. There is no repository-wide merge agent and no user-facing
+  parallelism limit; runner slots and account quota cap it.
 - **Independent core.** Keep provider, GitHub, Cloudflare, and UI behavior
   outside the pure quest core. The standalone CLI and versioned quest
   format remain useful without this service.
@@ -98,6 +103,7 @@ operator-paid-hosting decisions:
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Webhook reconcile](/quest/m0/kix/reconcile.md) - new issues and PRs arrive in the inbox ready to act on, without a manual refresh
 - [Inbox merge](/quest/m0/kix/merge.md) - PR items merge the reviewed head through GitHub's rules
+- [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
 - [Co-maintainer inbox](/quest/m0/kix/members.md) - every current maintainer sees enrolled projects in their inbox
 - [Answer flow](/quest/m0/kix/answer-flow.md) - move to the next decision after an answer, with neutral refusals
 - [Retry from the branch](/quest/m0/kix/retry.md) - a retried job continues from the head its failed attempt published
