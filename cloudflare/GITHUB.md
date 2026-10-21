@@ -314,24 +314,32 @@ snapshot reader and validates the Quest tree with the pure core. The authenticat
 board and nested quest pages use the existing `Project` seam. Source links retain
 the exact commit; live project state never replaces GitHub as authority.
 
-Each refresh reconciles one page of native issues, **all** PRs (including human
-contributions and closed/merged PRs), and `quest/` branches. Independent opaque
-cursors persist across requests. Continue reconciliation until all connections
-finish; candidates remain empty while a scan is incomplete or a webhook has
-invalidated it. The next completed scan also detects deleted entities and removed
-claims. Refreshing a completed scan starts again from the authoritative entity
-connections, so missed webhooks and later changes to old entities are recovered.
+Each refresh advances two passes with independent opaque cursors. The history
+pass reads one page of native issues and **all** PRs (including human
+contributions and closed/merged PRs); continue reconciliation until it finishes.
+A completed history pass detects deleted entities, and refreshing after one starts
+again, so missed webhooks and later changes to old entities are recovered. The
+occupancy pass reads open PRs and `quest/` branches, the only activity that
+decides candidates, and starts again on every refresh after it completes. Its
+pages are small, so candidates are normally current after a single refresh no
+matter how long the history is. Candidates remain pending while the occupancy
+pass is incomplete or a webhook has invalidated it.
 This deliberately avoids GitHub's bounded, delayed activity feed; GitHub does
 [not automatically redeliver failed webhooks](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries).
 There is no scheduled background poll in this stage.
 
-A single GraphQL activity query reads up to 50 issues, 50 PRs and 100 branch
-claims, keeping external request count independent of entity/file counts. Bulk
+A single GraphQL activity query reads up to 50 issues, 50 PRs, 100 open PRs and
+100 branch claims, keeping external request count independent of entity/file counts. Bulk
 D1 writes use `json_each`, avoiding a query per entity or SQLite's parameter
 limit. A revision comparison commits each page and cursor atomically; concurrent
 refreshes or an intervening webhook cannot publish over a newer observation.
-A webhook restarts an unfinished scan on the next refresh. Installation tokens
-remain read-only, repository-scoped, and revoked after use.
+Only a PR opening, closing, reopening or receiving new commits, a `quest/` branch
+being created or deleted, or a push to the default branch invalidates candidates
+and restarts the occupancy pass; new work waits for the next refresh, so a job
+binds the PR head and tree the maintainer saw. Checks, statuses, comments,
+reviews and other pushes wait for the history pass, so a busy repository neither
+withholds candidates nor races a refresh. Installation tokens remain read-only,
+repository-scoped, and revoked after use.
 
 Durable activity items use the GitHub repository ID, entity kind and full database
 ID. GitHub's GraphQL `fullDatabaseId` strings and webhook numeric IDs map to the
