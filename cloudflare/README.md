@@ -102,7 +102,10 @@ attempts it is running, and its free job slots. It also sends `checkpoint`,
 whenever jobs or connections change. A status that lists an assigned attempt
 acknowledges it; until then the assignment holds one of the runner's slots and
 the hub resends it, and cancelling a
-job whose assignment was never acknowledged stops it at once.
+job whose assignment was never acknowledged stops it at once. An `assign`
+carries the job and its `instructions`, which the runner gives the agent
+alongside the workflow's skill, or `null`. A planning job's instructions say
+kix writes its pull request's decision record, so the agent does not.
 
 Routing gives a job to the connected runner with a free slot and the owner's
 most preferred usable account. A pin, the job's trust, or a paused session's

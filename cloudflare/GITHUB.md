@@ -130,6 +130,19 @@ project; a paused project's running jobs can still preserve their work on their
 branches. Pull requests use `maintainer_can_modify: false`, because an
 upstream-scoped token cannot grant edits on the fork branch.
 
+A planning pull request's body ends with a decision section the service
+writes from the job's answered `decision` questions, after those of a failed
+job whose pull request a retry continues (`src/jobs/trail.ts`): each round's
+questions, every option with ✅ on each choice, and the
+maintainer's own words. Permission requests and the service's `account` and
+`publication` questions stay out, since they can name runners and accounts.
+Prompts and answers are untrusted, so each appears only as a code span with its
+line breaks and bidirectional controls removed: GitHub renders no Markdown or
+HTML there and links no mention, issue, cross-repository or commit reference,
+URL, or closing keyword. Every delivery renders the section again between
+`<!-- kix:decisions -->` markers, after dropping any the agent wrote. Rounds
+past GitHub's 65,536-character body limit are counted rather than cut.
+
 GitHub keeps pull request status, checks, and reviews. `mergePullRequest`
 merges only an exact head a maintainer explicitly chose, with the first method
 the repository allows: squash, then a merge commit, then rebase. GitHub's

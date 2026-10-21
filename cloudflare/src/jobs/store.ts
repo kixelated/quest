@@ -537,6 +537,27 @@ export async function settle(db: D1Database, job: string, commit: string, landed
 		.run();
 }
 
+/**
+ * The answered agent questions behind the job's pull request, oldest first,
+ * for its decision record: the job's own, and those of any earlier job on its
+ * target that delivered the same pull request, which a retry continues.
+ */
+export async function decisions(db: D1Database, job: string) {
+	const { results } = await db
+		.prepare(
+			`SELECT q.prompt,q.answer FROM jobs c
+ JOIN jobs j ON j.id=c.id OR (j.repository=c.repository AND j.target=c.target AND j.pull=c.pull)
+ JOIN job_questions q ON q.job=j.id
+ WHERE c.id=? AND q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
+		)
+		.bind(job)
+		.all<{ prompt: string; answer: string }>();
+	return results.map((row) => ({
+		prompt: JSON.parse(row.prompt) as unknown,
+		answer: JSON.parse(row.answer) as unknown,
+	}));
+}
+
 /** Remember the pull request a job delivered, so later deliveries update it. */
 export async function delivered(db: D1Database, job: string, pull: number) {
 	await db.prepare("UPDATE jobs SET pull=? WHERE id=?").bind(pull, job).run();

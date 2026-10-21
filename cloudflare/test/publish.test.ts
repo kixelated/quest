@@ -480,6 +480,134 @@ describe("runner publication", () => {
 		expect(refused.status).toBe(202);
 	});
 
+	it("writes a planning pull request's decisions from the recorded answers, replacing the agent's", async () => {
+		const id = await running({ workflow: "plan", target: "issues/1", branch: "plan/issue-1" });
+		let attempt = 1;
+		const resume = async () => {
+			await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+			attempt++;
+		};
+		const round = async (prompt: unknown, reply: unknown) => {
+			const asked = await store.ask(
+				db,
+				machine,
+				id,
+				attempt,
+				{ summary: "Asking", session: "s", prompt },
+				attempt,
+			);
+			await store.answer(db, id, asked.question, user, reply, attempt);
+			await resume();
+		};
+		const ask = (question: string, ...labels: string[]) => ({
+			kind: "decision",
+			questions: [{ question, options: labels.map((label) => ({ label })) }],
+		});
+		await round(
+			{
+				kind: "decision",
+				questions: [
+					{
+						header: "Scope",
+						question: "Which scope?",
+						options: [{ label: "Small", recommended: true }, { label: "Large" }],
+					},
+					{ question: "Notify @octocat?", options: [{ label: "Fixes #1" }], multiple: true },
+				],
+			},
+			{ answers: [{ choices: ["Small"] }, { choices: ["Fixes #1"], text: "cc @kixelated/maintainers" }] },
+		);
+		await round({ ...ask("Run rm -rf?", "Allow"), kind: "permission" }, { answers: [{ choices: ["Allow"] }] });
+		await round(ask("Closes #2?", "Yes", "No"), {
+			answers: [{ choices: [], text: "Neither; see https://evil.example" }],
+		});
+		// The account runs out mid-interview; the maintainer retries it, which records an account question.
+		await store.finish(
+			db,
+			machine,
+			id,
+			attempt,
+			{ outcome: "limited", summary: "Limit", result: undefined },
+			attempt,
+		);
+		const limit = (await job(id)).questions.at(-1)!;
+		expect(limit.kind).toBe("account");
+		await store.answer(db, id, limit.id, user, { runner: machine.id, account: "main" }, attempt);
+		await resume();
+
+		const forged =
+			"Proposes one quest.\n\n<!-- kix:decisions -->\n## Decisions\n- ✅ Large\n<!-- /kix:decisions -->";
+		const first = await publish({
+			job: id,
+			attempt,
+			head: null,
+			message: "docs: plan",
+			changes: [file("quest/one.md", "# [S] One\n")],
+			pull: { title: "Plan", body: forged },
+		});
+		expect(first.status).toBe(200);
+		const { head } = (await first.json()) as { head: string };
+		const opened: string = github.pulls[0].body;
+		expect(opened).toBe(
+			[
+				"Proposes one quest.",
+				"",
+				"<!-- kix:decisions -->",
+				"## Decisions",
+				"",
+				"Recorded by kix from the maintainer's answers.",
+				"",
+				"### Round 1",
+				"",
+				"- ` Scope ` ` Which scope? `",
+				"  - ✅ ` Small `",
+				"  - ⬜ ` Large `",
+				"- ` Notify @octocat? `",
+				"  - ✅ ` Fixes #1 `",
+				"  - ✍️ ` cc @kixelated/maintainers `",
+				"",
+				"### Round 2",
+				"",
+				"- ` Closes #2? `",
+				"  - ⬜ ` Yes `",
+				"  - ⬜ ` No `",
+				"  - ✍️ ` Neither; see https://evil.example `",
+				"<!-- /kix:decisions -->",
+			].join("\n"),
+		);
+		expect(opened).not.toContain(machine.id);
+
+		// A later round re-renders the same section on the next delivery.
+		await round(ask("Size?", "S", "M"), { answers: [{ choices: ["M"] }] });
+		const again = await publish({ job: id, attempt, head, pull: { title: "Plan", body: "Proposes two quests." } });
+		expect(again.status).toBe(200);
+		const updated: string = github.pulls[0].body;
+		expect(github.pulls).toHaveLength(1);
+		expect(updated.startsWith("Proposes two quests.\n\n<!-- kix:decisions -->\n")).toBe(true);
+		expect(updated.split("<!-- kix:decisions -->")).toHaveLength(2);
+		expect(updated).toContain(opened.slice(opened.indexOf("## Decisions"), opened.indexOf("<!-- /kix")));
+		expect(updated).toContain("### Round 3\n\n- ` Size? `\n  - ⬜ ` S `\n  - ✅ ` M `\n<!-- /kix:decisions -->");
+	});
+
+	it("leaves other workflows' pull request bodies as the agent wrote them", async () => {
+		const id = await running();
+		const prompt = { kind: "decision", questions: [{ question: "Q?", options: [{ label: "A" }] }] };
+		const asked = await store.ask(db, machine, id, 1, { summary: "?", session: "s", prompt }, 1);
+		await store.answer(db, id, asked.question, user, { answers: [{ choices: ["A"] }] }, 1);
+		await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+		const body = "Summary <!-- kix:decisions --> left alone";
+		const response = await publish({
+			job: id,
+			attempt: 2,
+			head: null,
+			message: "feat: first",
+			changes: [file("src/first.ts", "export {};\n")],
+			pull: { title: "First", body },
+		});
+		expect(response.status).toBe(200);
+		expect(github.pulls[0].body).toBe(body);
+	});
+
 	it("recovers a branch update whose outcome was lost, without overwriting or duplicating", async () => {
 		const id = await running();
 		github.loseMove = false;
@@ -664,6 +792,32 @@ describe("runner publication", () => {
 		expect(github.refs.get("quest-bot-forks/project:quest/first")).toBe(next.head);
 		expect(next.pull.number).toBe(100);
 		expect(github.pulls).toHaveLength(1);
+	});
+
+	it("keeps a failed planning job's decisions in the pull request its retry continues", async () => {
+		const target = { workflow: "plan" as const, target: "issues/1", branch: "plan/issue-1" };
+		const decide = async (id: string, question: string, choice: string) => {
+			const prompt = { kind: "decision", questions: [{ question, options: [{ label: choice }] }] };
+			const asked = await store.ask(db, machine, id, 1, { summary: "?", session: "s", prompt }, 1);
+			await store.answer(db, id, asked.question, user, { answers: [{ choices: [choice] }] }, 1);
+			await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+		};
+		const failed = await running(target);
+		await decide(failed, "First?", "A");
+		const pull = { title: "Plan", body: "Plan" };
+		const changes = [file("quest/a.md", "# A\n")];
+		const first = await publish({ job: failed, attempt: 2, head: null, message: "m", changes, pull });
+		const { head } = (await first.json()) as { head: string };
+		await store.finish(db, machine, failed, 2, { outcome: "failed", summary: "Failed", result: undefined }, 2);
+
+		const retry = await running(target, 1000);
+		await decide(retry, "Second?", "B");
+		const response = await publish({ job: retry, attempt: 2, head, pull });
+		expect(response.status).toBe(200);
+		expect(github.pulls).toHaveLength(1);
+		const body: string = github.pulls[0].body;
+		expect(body).toContain("### Round 1\n\n- ` First? `\n  - ✅ ` A `");
+		expect(body).toContain("### Round 2\n\n- ` Second? `\n  - ✅ ` B `");
 	});
 
 	it("starts a retried job fresh when its failed job published nothing", async () => {

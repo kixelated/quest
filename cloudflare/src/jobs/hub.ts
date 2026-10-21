@@ -4,6 +4,7 @@ import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
 import { JobError } from "./store";
+import { instructions } from "./trail";
 
 /** The authenticated runner the Worker forwards a connection for. */
 export const RUNNER_HEADER = "X-Quest-Runner";
@@ -120,7 +121,10 @@ export class RunnerHub extends DurableObject<Env> {
 			if (reported !== null) slots.set(runner, reported);
 		}
 		const { assign, cancel, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
-		for (const { runner, job } of assign) connections.get(runner)?.send(JSON.stringify({ type: "assign", job }));
+		for (const { runner, job } of assign) {
+			const message = { type: "assign", job, instructions: instructions(job.workflow) };
+			connections.get(runner)?.send(JSON.stringify(message));
+		}
 		for (const { runner, job, attempt } of cancel)
 			connections.get(runner)?.send(JSON.stringify({ type: "cancel", job, attempt }));
 		if (wake === null) await this.ctx.storage.deleteAlarm();

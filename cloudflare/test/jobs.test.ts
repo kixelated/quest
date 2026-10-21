@@ -585,7 +585,20 @@ describe("runner connections", () => {
 		// Resuming sends no runner event, so the resume itself dispatches.
 		await project(10, "owner");
 		await resume(env, 10);
-		expect(await live.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
+		expect(await live.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 }, instructions: null });
+	});
+
+	it("tells a planning job's agent that kix writes its decision record", async () => {
+		const machine = await runner("owner", "machine");
+		const live = await connect(machine.token);
+		const id = await job(10, "owner", { workflow: "plan", target: "plans/x", branch: "plan/x" }, Date.now());
+		live.send(status(1, "main"));
+		expect(await live.next()).toEqual({ type: "reply", id: 1, attempts: [] });
+		expect(await live.next()).toMatchObject({
+			type: "assign",
+			job: { id, workflow: "plan" },
+			instructions: expect.stringContaining("Do not write the interview's questions, options, or answers"),
+		});
 	});
 
 	it("keeps a job across a replaced connection and reassigns it after a disconnect", async () => {
