@@ -98,11 +98,11 @@ function checkouts(repository: string): { path: string; locked?: string }[] {
 		});
 }
 function childPath(path: string): string {
+	const parts = path.split(/[\\/]/);
 	if (
-		!path ||
 		isAbsolute(path) ||
-		path.split(/[\\/]/).some((part) => part === ".." || part.toLowerCase() === ".git") ||
-		resolve("/", path) === "/"
+		parts.some((part) => part === ".." || part.toLowerCase() === ".git") ||
+		parts.every((part) => part === "" || part === ".") // Names the checkout itself.
 	) {
 		throw new Error(`expected a relative path without .. or .git: ${path}`);
 	}

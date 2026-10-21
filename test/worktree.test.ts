@@ -95,7 +95,7 @@ describe("worktrees", { timeout: 20_000 }, () => {
 	});
 	it("refuses scratch that is tracked, not ignored, or outside the checkout", () => {
 		const { repo, worktrees } = fixture();
-		for (const path of ["../outside", ".git", ".GIT", "/absolute", "."])
+		for (const path of ["../outside", ".git", ".GIT", "/absolute", ".", "./", ""])
 			expect(() => worktrees.create(repo, "invalid", 10_000_000, "HEAD", [path])).toThrow("relative path");
 		let count = 0;
 		const declare = (scratch: string) => {
