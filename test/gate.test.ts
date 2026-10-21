@@ -71,8 +71,8 @@ test("a window admits one claim and cleanup never admits an expired sample again
 	const host = fileHost(directory, () => now);
 	expect(host.claim(5)).toBe(true);
 	expect(host.claim(5)).toBe(false);
-	now = 6 * SETTLE_MS;
-	expect(host.claim(6)).toBe(true);
+	now = 7 * SETTLE_MS;
+	expect(host.claim(7)).toBe(true);
 	expect(existsSync(join(directory, "5"))).toBe(false);
 	// A waiter sampled 5 before descheduling, then resumes after cleanup.
 	expect(host.claim(5)).toBe(false);
@@ -87,11 +87,30 @@ test("a claim that crosses rollover during filesystem work does not admit", () =
 	let calls = 0;
 	const delayed = fileHost(directory, () => {
 		if (++calls === 1) return 5 * SETTLE_MS;
-		expect(successor.claim(6)).toBe(true);
+		// The pending claim may still admit, so the next window must wait for it.
+		expect(successor.claim(6)).toBe(false);
 		return 6 * SETTLE_MS;
 	});
 	expect(delayed.claim(5)).toBe(false);
-	expect(successor.claim(6)).toBe(false);
+	// The expired claim admitted nothing and is gone, so the next window is free.
+	expect(existsSync(join(directory, "5"))).toBe(false);
+	expect(successor.claim(6)).toBe(true);
+});
+
+test("admissions stay a full window apart across a window boundary", () => {
+	const directory = join(tempDir(), "claims");
+	let now = 5 * SETTLE_MS - 1;
+	const host = fileHost(directory, () => now);
+	expect(host.claim(4)).toBe(true);
+	// A waiter at the next boundary, 1 ms later, must not start alongside it.
+	now = 5 * SETTLE_MS;
+	expect(host.claim(5)).toBe(false);
+	// The refused claim is removed: it admitted nothing, so it holds back no one.
+	expect(existsSync(join(directory, "5"))).toBe(false);
+	expect(host.claim(5)).toBe(false);
+	now = 6 * SETTLE_MS;
+	expect(host.claim(6)).toBe(true);
+	expect(existsSync(join(directory, "4"))).toBe(false);
 });
 
 test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s container headroom", (version) => {

@@ -2,7 +2,7 @@
 // for CPU load and free memory before starting the command. The gate owns no
 // descendants and holds nothing while the command runs.
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -29,8 +29,8 @@ export interface Limits {
 export type Waiting = "load" | "memory";
 
 /**
- * At most one admission per window across all callers. The load average lags
- * new work, so waiters that all see it fall must not start together.
+ * Admissions across all callers are at least this far apart. The load average
+ * lags new work, so waiters that all see it fall must not start together.
  */
 export const SETTLE_MS = 5000;
 
@@ -150,15 +150,23 @@ export function fileHost(directory: string, now = Date.now): Host {
 		claim(window) {
 			if (window !== Math.floor(now() / SETTLE_MS)) return false;
 			mkdirSync(directory, { recursive: true });
+			const file = join(directory, String(window));
 			try {
-				closeSync(openSync(join(directory, String(window)), "wx"));
+				closeSync(openSync(file, "wx"));
 			} catch (error) {
 				if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
 				throw error;
 			}
-			// A descheduled caller may have created an old claim after cleanup.
-			// It must not admit work from that expired sample.
-			if (window !== Math.floor(now() / SETTLE_MS)) return false;
+			// The previous window's claim may have admitted a command moments ago,
+			// so admissions stay a full window apart. Only an admitted claim removes
+			// older ones, and none can be admitted while this one exists, so that
+			// claim is still here. A descheduled caller may also have created an old
+			// claim after cleanup; it must not admit work from that expired sample.
+			// A refused claim is removed, so it never holds back the next window.
+			if (existsSync(join(directory, String(window - 1))) || window !== Math.floor(now() / SETTLE_MS)) {
+				rmSync(file, { force: true });
+				return false;
+			}
 			for (const name of readdirSync(directory)) {
 				if (Number(name) < window) rmSync(join(directory, name), { force: true });
 			}
