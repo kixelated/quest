@@ -635,6 +635,15 @@ export async function listJobs(db: D1Database, repository: number) {
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
+/** The pull request of the target's latest job when that job failed: what a retry continues. */
+export async function failedPull(db: D1Database, repository: number, target: string) {
+	const latest = await db
+		.prepare("SELECT state,pull FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1")
+		.bind(repository, target)
+		.first<Pick<Job, "state" | "pull">>();
+	return latest?.state === "failed" ? latest.pull : null;
+}
+
 /** Whether a job on `target` is queued, running, or waiting, and so may still push to it. */
 export async function active(db: D1Database, repository: number, target: string) {
 	return !!(await db

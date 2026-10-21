@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
-import type { ProjectState, Pull } from "../github/state";
+import { type ProjectState, type Pull, startable } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
@@ -167,8 +167,12 @@ jobs.get(base, async (c) => {
 
 type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccount">;
 
-/** Resolve a requested workflow and target against current observations. */
-function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan {
+/**
+ * Resolve a requested workflow and target against current observations.
+ * `retry` is the pull request of the target's failed latest job, which a
+ * retry continues rather than counting it as another claim.
+ */
+function resolve(workflow: unknown, target: unknown, state: ProjectState, retry: number | null): Plan {
 	const commit = state.project.commit;
 	const open = (kind: "issue" | "pull", prefix: string) =>
 		state.activity.find(
@@ -179,7 +183,7 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan 
 				item.data?.state === "OPEN",
 		);
 	if (workflow === "start") {
-		if (typeof target !== "string" || !state.project.available?.includes(target))
+		if (typeof target !== "string" || !startable(state, target, retry))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
 		const branch = target.replace(/(\/README)?\.md$/, "");
 		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");
@@ -233,8 +237,12 @@ jobs.post(base, async (c) => {
 	const pinAccount = body.account === undefined ? null : id(body.account);
 	if ((body.runner !== undefined && !pinRunner) || (body.account !== undefined && !pinAccount))
 		throw new JobError("Invalid runner or account");
+	const retry =
+		body.workflow === "start" && typeof body.target === "string"
+			? await store.failedPull(c.env.DB, repo.id, body.target)
+			: null;
 	const { job, enabled, flake } = await github.jobSource(repo, user, (state) =>
-		resolve(body.workflow, body.target, state),
+		resolve(body.workflow, body.target, state, retry),
 	);
 	// A decision binds the revision the maintainer saw, such as a pull request's head.
 	if (body.revision !== undefined && body.revision !== job.revision)
