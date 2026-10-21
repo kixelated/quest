@@ -209,7 +209,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Delete a quest or epic and drop the links to it")
 		.description(
 			"Delete a quest, or an epic and the quests under it, with git rm, and drop every Required, Related, " +
-				"or Closes entry that links to it, with any heading left empty. The change is staged.\n\n" +
+				"or Closes entry that links to it, with any heading left empty. It also drops every Required link to a " +
+				"finished milestone, one whose README has no Required left, except the root's own listing. The change " +
+				"is staged.\n\n" +
 				"Refuses outside a git work tree. An epic is its directory or README; removing one that holds other " +
 				"quests requires -r. The root epic and milestones are permanent.\n\n" +
 				"Prints D for each deleted quest and M for each edited document. Mentions that are not list entries, " +

@@ -128,6 +128,35 @@ describe("remove", () => {
 			"# [S] A\n\n## Goal\n\nAfter [B](/quest/b.md).\n\n- [B](/quest/b.md) in a goal list\n\n## Related\n\nContext.\n",
 		);
 	});
+	test("drops links to finished milestones until nothing changes, keeping the root's listing", () => {
+		const root =
+			"# Quests\n\n## Goal\n\nG.\n\n## Required\n\n- [M0](/quest/m0/README.md)\n- [M1](/quest/m1/README.md)\n";
+		const sources = [
+			{ path: "quest/README.md", text: root },
+			// m0 finishes once b goes, which finishes m1, which only waited on m0.
+			{ path: "quest/m0/README.md", text: "# M0\n\n## Goal\n\nG.\n\n## Required\n\n- [B](/quest/b.md)\n" },
+			{
+				path: "quest/m1/README.md",
+				text: "# M1\n\n## Goal\n\nG.\n\n## Required\n\n- [M0](/quest/m0/README.md)\n",
+			},
+			{ path: "quest/b.md", text: "# [S] B\n\n## Goal\n\nG.\n" },
+			{
+				path: "quest/m1/a.md",
+				text:
+					"# [S] A\n\n## Goal\n\nG.\n\n## Required\n\n- [M1](/quest/m1/README.md)\n- [M2](/quest/m2/README.md)\n\n" +
+					"## Related\n\n- [M0](/quest/m0/README.md)\n",
+			},
+			// m2 was already finished, so the link to it was already stale.
+			{ path: "quest/m2/README.md", text: "# M2\n\n## Goal\n\nG.\n" },
+		];
+		const texts = remove(sources, gone);
+		expect([...texts.keys()].sort()).toEqual(["quest/m0/README.md", "quest/m1/README.md", "quest/m1/a.md"]);
+		expect(texts.get("quest/m0/README.md")).toBe("# M0\n\n## Goal\n\nG.\n");
+		expect(texts.get("quest/m1/README.md")).toBe("# M1\n\n## Goal\n\nG.\n");
+		expect(texts.get("quest/m1/a.md")).toBe(
+			"# [S] A\n\n## Goal\n\nG.\n\n## Related\n\n- [M0](/quest/m0/README.md)\n",
+		);
+	});
 });
 
 describe("quest mv", () => {
@@ -226,7 +255,7 @@ describe("quest rm", () => {
 		tree.accepts();
 	});
 
-	test("deletes a milestone's last child while the root still lists the milestone", async () => {
+	test("drops links to the milestone it finishes while the root still lists it", async () => {
 		const tree = Tree.baseline()
 			.write("quest/README.md", `${ROOT_README}- [M1](/quest/m1/README.md)\n`)
 			.write("quest/m1/README.md", "# M1\n\n## Goal\n\nNext.\n\n## Required\n\n- [Later](/quest/m1/later.md)\n")
@@ -238,9 +267,10 @@ describe("quest rm", () => {
 		const out = await quest(tree, "rm", "-r", "quest/m0/epic");
 		expect(out.code).toBe(0);
 		expect(out.stdout).toBe(
-			"D quest/m0/epic/README.md\nD quest/m0/epic/one.md\nD quest/m0/epic/two.md\nM quest/m0/README.md\n",
+			"D quest/m0/epic/README.md\nD quest/m0/epic/one.md\nD quest/m0/epic/two.md\nM quest/m0/README.md\nM quest/m1/later.md\n",
 		);
 		expect(tree.read("quest/m0/README.md")).toBe("# M0\n\n## Goal\n\nA milestone.\n");
+		expect(tree.read("quest/m1/later.md")).toBe("# [S] Later\n\n## Goal\n\nAfter m0.\n");
 		expect(tree.read("quest/README.md")).toContain("- [M0](/quest/m0/README.md)\n");
 		tree.accepts();
 	});

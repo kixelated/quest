@@ -161,6 +161,8 @@ quest rm -r quest/m1/drain
 `mv` rewrites every root-absolute link to the moved path, and to everything
 under a moved epic. `rm` drops each `Required`, `Related`, or `Closes` entry
 that links to what it deleted, and the heading if that was the last entry.
+It also drops every `Required` link to a finished milestone, including one it
+just finished, but keeps the root's listing of the milestone.
 Both stage the change, print one line per file (`R from -> to`, `D path`, or
 `M path`), and report on stderr any other mention of the path, such as prose
 or files outside `quest/`, without editing it. They run `quest check` on the

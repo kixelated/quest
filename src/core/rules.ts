@@ -11,7 +11,19 @@
 // entry for a completed quest survived a rebase that produced no conflict at
 // all.
 
-import { type Doc, entries, has, isEpic, children, owner, permanent, resolve, rooted, withoutFragment } from "./doc";
+import {
+	type Doc,
+	type Entry,
+	entries,
+	has,
+	isEpic,
+	children,
+	owner,
+	permanent,
+	resolve,
+	rooted,
+	withoutFragment,
+} from "./doc";
 import { comparePaths, join } from "./path";
 
 /**
@@ -231,14 +243,10 @@ function index(found: Finding[], known: Set<string>, docs: Doc[]) {
  * membership, not a blocker, so it is exempt.
  */
 function milestones(found: Finding[], docs: Doc[]) {
-	const byPath = new Map(docs.map((d) => [d.path, d]));
+	const finished = finishedMilestone(docs);
 	for (const doc of docs) {
-		if (doc.path === ROOT) continue;
 		for (const entry of entries(doc, "Required")) {
-			const target = entry.target === null ? null : rooted(entry.target);
-			if (target === null || target === ROOT || !permanent(target)) continue;
-			const milestone = byPath.get(target);
-			if (milestone === undefined || has(milestone, "Required")) continue;
+			if (!finished(doc, entry)) continue;
 			found.push({
 				path: doc.path,
 				line: entry.line,
@@ -246,6 +254,21 @@ function milestones(found: Finding[], docs: Doc[]) {
 			});
 		}
 	}
+}
+
+/**
+ * Whether `entry`, in `doc`, is a `Required` link to a milestone of `docs`
+ * that is finished. Shared with `quest rm`, which drops these links.
+ */
+export function finishedMilestone(docs: Doc[]): (doc: Doc, entry: Entry) => boolean {
+	const byPath = new Map(docs.map((d) => [d.path, d]));
+	return (doc, entry) => {
+		if (doc.path === ROOT || entry.section !== "Required" || entry.target === null) return false;
+		const target = rooted(entry.target);
+		if (target === null || target === ROOT || !permanent(target)) return false;
+		const milestone = byPath.get(target);
+		return milestone !== undefined && !has(milestone, "Required");
+	};
 }
 
 /**

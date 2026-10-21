@@ -5,8 +5,8 @@
 // dependency graph. Anything else that mentions a path is prose, which the
 // caller reports rather than rewriting.
 
-import { type Doc, parse, rooted, withoutFragment } from "./doc";
-import { LIST_SECTIONS } from "./rules";
+import { type Doc, type Entry, parse, rooted, withoutFragment } from "./doc";
+import { LIST_SECTIONS, finishedMilestone } from "./rules";
 
 /** One quest document as loaded: its repository-relative path and source text. */
 export interface Source {
@@ -69,29 +69,43 @@ export function move(sources: Source[], from: string, to: string): Moved {
 
 /**
  * Drop every list entry, in a list section, that opens with a link to a
- * deleted document, and a section heading left with no entries. Returns the
- * new text of every surviving document that changed.
+ * deleted document, and a section heading left with no entries. Then drop
+ * every `Required` link to a finished milestone, whether this removal emptied
+ * it or the link was already stale, repeating until nothing changes so the
+ * result passes `quest check`. Returns the new text of every surviving
+ * document that changed.
  */
 export function remove(sources: Source[], deleted: (path: string) => boolean): Map<string, string> {
-	const texts = new Map<string, string>();
-	for (const source of sources) {
-		if (deleted(source.path)) continue;
-		const text = drop(source.text, parse(source.path, source.text), deleted);
-		if (text !== null) texts.set(source.path, text);
+	const texts = new Map(sources.filter((s) => !deleted(s.path)).map((s) => [s.path, s.text]));
+	const changed = new Set<string>();
+	const linksDeleted = (entry: Entry) => {
+		if (entry.section === null || !LIST_SECTIONS.includes(entry.section) || entry.target === null) return false;
+		const target = rooted(entry.target);
+		return target !== null && deleted(target);
+	};
+	for (let progress = true; progress;) {
+		progress = false;
+		const docs = [...texts].map(([path, text]) => parse(path, text));
+		const finished = finishedMilestone(docs);
+		for (const doc of docs) {
+			const text = drop(texts.get(doc.path)!, doc, (entry) => linksDeleted(entry) || finished(doc, entry));
+			if (text === null) continue;
+			texts.set(doc.path, text);
+			changed.add(doc.path);
+			progress = true;
+		}
 	}
-	return texts;
+	return new Map([...changed].map((path) => [path, texts.get(path)!]));
 }
 
-/** `doc` without its list entries whose link `deleted` accepts, or `null` if it has none. */
-function drop(text: string, doc: Doc, deleted: (path: string) => boolean): string | null {
+/** `doc` without the list entries `dropping` accepts, or `null` if it has none. */
+function drop(text: string, doc: Doc, dropping: (entry: Entry) => boolean): string | null {
 	const lines = text.split("\n");
 	// A trailing newline leaves an empty last element, which is not a line.
 	const count = text.endsWith("\n") ? lines.length - 1 : lines.length;
 	const dropped = new Set<number>();
 	for (const entry of doc.entries) {
-		if (entry.section === null || !LIST_SECTIONS.includes(entry.section) || entry.target === null) continue;
-		const target = rooted(entry.target);
-		if (target === null || !deleted(target)) continue;
+		if (!dropping(entry)) continue;
 		for (let line = entry.line; line <= entry.end; line++) dropped.add(line - 1);
 	}
 	if (dropped.size === 0) return null;
