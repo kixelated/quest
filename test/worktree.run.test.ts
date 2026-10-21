@@ -1,0 +1,127 @@
+// Supervised runs against the host's real systemd user manager. On Linux these need 5.14+, systemd 254+
+// and unified cgroup v2; a host without them fails here rather than skipping.
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import { Worktrees } from "../src/cli/worktree";
+import { tempDir } from "./fixture";
+
+const root = resolve(import.meta.dirname, "..");
+
+function fixture() {
+	const dir = tempDir();
+	const repo = join(dir, "repo");
+	mkdirSync(repo);
+	const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { stdio: "ignore" });
+	git("init", "-b", "main");
+	git("config", "user.name", "Fixture");
+	git("config", "user.email", "fixture@localhost");
+	writeFileSync(join(repo, ".gitignore"), "cache/\n.worktrees/\n");
+	git("add", ".");
+	git("commit", "-m", "initial");
+	const home = join(dir, "state");
+	const worktrees = new Worktrees(home);
+	worktrees.configure(100_000_000);
+	const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
+	mkdirSync(join(record.path, "cache"));
+	return { dir, home, worktrees, record };
+}
+
+/** The CLI supervising `script` in the checkout, with its streams piped here. */
+function supervise(home: string, script: string, ...args: string[]) {
+	const child = spawn(
+		"bun",
+		[
+			`--config=${join(root, "bunfig.toml")}`,
+			join(root, "src/cli/bin.ts"),
+			"worktree",
+			"run",
+			"work",
+			"--",
+			"/bin/sh",
+			"-c",
+			script,
+			"sh",
+			...args,
+		],
+		{ env: { ...process.env, QUEST_WORKTREE_HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
+	);
+	let stdout = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8");
+	child.stderr.setEncoding("utf8");
+	const ready = new Promise<void>((resolve, reject) => {
+		child.stdout.on("data", (data: string) => {
+			stdout += data;
+			if (stdout.includes("ready\n")) resolve();
+		});
+		child.once("exit", () => reject(new Error(`exited before ready: ${stdout} ${stderr}`)));
+	});
+	ready.catch(() => {}); // Awaited only by cases that wait for readiness.
+	child.stderr.on("data", (data: string) => (stderr += data));
+	const exited = once(child, "exit").then(([code, signal]) => ({ code, signal, stdout, stderr }));
+	return { child, ready, exited };
+}
+
+/** Gone, or a zombie its new parent has not reaped yet: either way it runs no code. */
+function stopped(pid: number): boolean {
+	try {
+		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+		return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z");
+	} catch {
+		return true;
+	}
+}
+
+describe.runIf(process.platform === "linux")("supervised runs under systemd", { timeout: 30_000 }, () => {
+	it("forwards arguments and status, stops orphaned descendants, then releases", async () => {
+		const { dir, home, worktrees, record } = fixture();
+		const pidFile = join(dir, "orphan");
+		const run = supervise(
+			home,
+			`sleep 1000 & echo $! > ${JSON.stringify(pidFile)}; printf '%s|' "$@"; pwd; echo ready; exit 7`,
+			"a $b",
+			"--flag",
+		);
+		const result = await run.exited;
+		expect(result.code, result.stderr).toBe(7);
+		expect(result.stdout).toBe(`a $b|--flag|${record.path}\nready\n`);
+		expect(stopped(Number(readFileSync(pidFile, "utf8")))).toBe(true);
+		expect(existsSync(join(record.path, "cache"))).toBe(false);
+		expect(worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+	});
+
+	it("forwards cancellation, stops live descendants, then releases", async () => {
+		const { dir, home, worktrees, record } = fixture();
+		const pidFile = join(dir, "descendant");
+		const run = supervise(home, `sleep 1000 & echo $! > ${JSON.stringify(pidFile)}; echo ready; wait`);
+		await run.ready;
+		expect(worktrees.status().records[0].runs).toHaveLength(1);
+		run.child.kill("SIGTERM");
+		const result = await run.exited;
+		expect(result.code, result.stderr).toBe(143);
+		expect(stopped(Number(readFileSync(pidFile, "utf8")))).toBe(true);
+		expect(existsSync(join(record.path, "cache"))).toBe(false);
+		expect(worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+	});
+
+	it("keeps a crashed supervisor's scratch until its scope is empty", async () => {
+		const { home, worktrees, record } = fixture();
+		const run = supervise(home, "echo ready; exec sleep 1000");
+		await run.ready;
+		run.child.kill("SIGKILL");
+		await run.exited;
+		// The command outlives its supervisor, so reconciliation keeps the run and its scratch.
+		const [orphan] = worktrees.status().records[0].runs;
+		expect(orphan).toBeDefined();
+		expect(() => worktrees.release(record.id)).toThrow("supervised runs are live");
+		expect(existsSync(join(record.path, "cache"))).toBe(true);
+		// Stopping a scope waits until it is empty.
+		const stop = spawnSync("systemctl", ["--user", "stop", orphan.unit], { encoding: "utf8" });
+		expect(stop.status, stop.stderr).toBe(0);
+		expect(worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+		expect(existsSync(join(record.path, "cache"))).toBe(false);
+	});
+});

@@ -372,14 +372,52 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description("Create an exclusively owned detached Git worktree under .worktrees/")
 		.requiredOption("--reserve <bytes>", "Checkout and expected build growth in bytes", positiveInteger("bytes"))
 		.option("--ref <ref>", "Initial Git revision", "HEAD")
-		.action((name: string, options: { reserve: number; ref: string }) =>
-			record(state().create(root(), name, options.reserve, options.ref)),
+		.option(
+			"--scratch <path...>",
+			"Ignored paths release deletes, such as dependencies and build output; they must hold no tracked files",
+			[],
+		)
+		.action((name: string, options: { reserve: number; ref: string; scratch: string[] }) =>
+			record(state().create(root(), name, options.reserve, options.ref, options.scratch)),
 		);
 	worktree
+		.command("run")
+		.summary("Run a command in a checkout, then release it once every process stops")
+		.description(
+			"Run a command in the checkout, restoring it first when released. The command and its descendants " +
+				"run in a new systemd user scope; once the command exits, descendants still in the scope are killed. " +
+				"When no other supervised run remains, the scratch declared at creation is pruned. Put the whole job, " +
+				"such as an agent session or a script that installs, builds, and tests, in one run.\n\n" +
+				"A supervisor that crashes leaves its run recorded; the next worktree command drops it once its scope " +
+				"is empty, and releases the checkout. Needs Linux 5.14+ with a systemd 254+ user manager and unified cgroup " +
+				"v2, and fails on other hosts. Exits with the command's status; a release that fails is reported, leaves " +
+				"the checkout reserved, and turns success into exit 1.",
+		)
+		.argument("<id>", "Checkout ID or name")
+		.argument("<command>", "Executable to run; put -- before it when any argument starts with -")
+		.argument("[args...]", "Arguments forwarded verbatim")
+		.action((id: string, command: string, args: string[]) => {
+			pending = state()
+				.run(id, [command, ...args])
+				.then(
+					({ code, failure }) => {
+						if (!failure) return code;
+						warn(failure);
+						return code || 1;
+					},
+					(error: unknown) => {
+						warn(error instanceof Error ? error.message : String(error));
+						return 1;
+					},
+				);
+		});
+	worktree
 		.command("release <id>")
-		.description("Delete declared scratch and keep the checkout; drop the record of a removed checkout")
-		.option("--scratch <path...>", "Ignored paths without tracked files, such as dependencies and build output", [])
-		.action((id: string, options: { scratch: string[] }) => record(state().release(id, options.scratch)));
+		.description(
+			"Delete the scratch declared at creation and keep the checkout; refuses while supervised runs are live, " +
+				"and drops the record of a removed checkout",
+		)
+		.action((id: string) => record(state().release(id)));
 	worktree
 		.command("restore <id>")
 		.description("Reserve a released checkout's disk again before rebuilding its scratch")

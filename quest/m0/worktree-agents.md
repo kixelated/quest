@@ -37,10 +37,7 @@ merge.
   [Claude removal hooks](https://code.claude.com/docs/en/hooks#worktreeremove),
   [Codex worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees).
 
-## Required
-
-- [Worktree process ownership](/quest/m0/worktree.md) - supervised commands and automatic scratch release
-
 ## Related
 
+- [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; `quest worktree run` already supervises jobs and releases scratch
 - [Own-PC runner](/quest/m0/kix/runner.md) - reuse lifecycle ownership in the hosted job adapter

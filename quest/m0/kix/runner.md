@@ -87,6 +87,6 @@ replacing the hosted Agent SDK runtime:
   preference-order control. Decided 2026-10-18 as a follow-up of the
   decision inbox (#144), folded here rather than its own quest.
 
-## Required
+## Related
 
-- [Worktree process ownership](/quest/m0/worktree.md) - reuse checkout supervision, scratch release, and disk admission
+- [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; reuse `quest worktree run` for supervision, scratch release, and disk admission
