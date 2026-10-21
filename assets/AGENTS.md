@@ -107,12 +107,15 @@ starting. These states stay out of the quest file.
 
 On GitHub, a quest is claimed by its branch on the upstream repository or by any
 open PR whose head branch has that name, including PRs from forks
-(`gh pr list --head <quest-branch>`).
-Check both before starting; in a fork's clone, `origin` is usually the fork.
+(`gh pr list --repo <upstream> --head <quest-branch>`).
+Check both before starting, against the upstream repository; in a fork's clone,
+`origin` is usually the fork.
 To claim a quest, make an empty commit on its branch.
 With push access, push it upstream.
 Without, push it to your fork and open a draft PR from it right away; that PR
 becomes the quest's PR.
+Fork pushes never collide, so recheck after opening: the earliest open PR holds
+the claim, and a later one closes and stops.
 If a branch looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.
