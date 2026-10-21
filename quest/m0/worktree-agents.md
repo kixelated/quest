@@ -38,7 +38,7 @@ checkout without waiting for the parent chat to end or the PR to merge.
 
 ## Required
 
-- [Recoverable worktrees](/quest/m0/worktree.md) - checkpoint, release, and restore
+- [Worktree process ownership](/quest/m0/worktree.md) - supervised commands and automatic checkpoint and release
 - [Expensive command gate](/quest/m0/local-gate.md) - resource control before removing agent-count throttles
 
 ## Related

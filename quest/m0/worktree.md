@@ -1,65 +1,44 @@
-# [L] Checkpoint and release worktrees with quest worktree
+# [M] Own worktree processes and release checkouts automatically
 
 ## Goal
 
-`quest worktree` owns a recoverable checkout lifecycle: admit disk use, create
-or reuse a checkout, run work, checkpoint, release, and restore on resume.
-Waiting for a decision or PR review does not require retaining a large checkout.
-Agent count is unrestricted by this command; expensive work uses `quest gate`.
+`quest worktree` supervises the commands that run in a checkout it created,
+then checkpoints and releases that checkout automatically once they stop.
+A crash or cancellation is reconciled without losing work, stealing a live
+lock, or removing a checkout whose processes may still be running.
 
 ## Plan
 
-- Decided 2026-10-15: disk capacity is the admission constraint. Account for
-  concurrent allocations and expected build growth, with configurable limits
-  informed by measured footprints. A free-space check alone cannot reserve
-  space against simultaneous creators or subsequent builds.
-- Checkpoint meaningful edits before a blocking handoff and at completion,
-  then release the idle checkout. An asynchronous question with independent
-  work still running is not a release boundary. Checkpoints are recoverable
-  WIP, not claims of passing tests, and do not run the validation suite.
-- Preserve source, unique commits, and resume metadata independently of the
-  checkout before removing it. Preserve local-only submodule history outside
-  its disposable gitdir. Keep valuable untracked or ignored files explicitly;
-  never publish secrets or treat every ignored file as disposable.
-- Record unresolved work and which checks passed or were not run with each
-  checkpoint. Recovery metadata lives outside the disposable checkout.
-- Delete owned disposable scratch at handoff or exit. If scratch must live in
-  a checkout, ignore its declared paths and teach cleanup those same paths.
-  Unstaged source changes are work to preserve, not scratch to delete.
-- Own foreground child processes until they stop; only then release capacity
-  and remove their checkout. Record ownership so crashes can be reconciled.
-  Reuse the owning tool for managed worktrees and report failed cleanup as a
-  retained allocation, not success. Do not steal live locks or remove shared
-  or current checkouts underneath their users.
-- Preserve branches/recovery refs independently of checkout retention. A
-  squash-merged branch may not be an ancestor of main; exact PR-head evidence
-  matters when deciding whether a published result is finished.
-- Verify checkpoint/restore across dirty files, unique commits, submodules,
-  cancellation, interrupted cleanup, and simultaneous disk admission. Measure
-  retained disk after complete and suspended jobs; update existing docs inline.
-
-Draft implementation status:
-
-- Draft implementation: explicit disk capacity/reservation, generic Git-owned
-  create/checkpoint/release/restore, private recovery metadata, full bundles,
-  tracked/index preservation, explicit keep/scratch classification, initialized
-  submodule history, retained failed allocations, and filesystem fixtures.
-  Interrupted create, restore, and release recover through `restore`/`release`
-  without checkpointing partial checkouts.
-- Measured 2026-10-15 on this repository: a fresh checkout is 1.6 MB, 376 MB
-  after `just install` and `just build` (node_modules), and a released
-  checkpoint retains 4.4 MB (2.2 MB history bundle). Restore takes ~0.6 s.
-- Remaining before this quest is complete: exact foreground descendant ownership
-  through cancellation/crashes and automatic reconciliation (including a stale
-  registry lock), automatic release at lifecycle boundaries, and cancellation
-  fixtures. Native agent lifecycle adoption remains in the related integration
-  quest. Whether that remainder splits into a quest that reuses the
-  [quest gate](/quest/m0/local-gate.md) ownership backend awaits a decision.
-- Process groups and PID files cannot prove detached descendants are stopped
-  after a supervisor crash. Keep this PR draft until a supported ownership
-  backend can enforce that boundary; unsupported platforms must fail explicitly.
+- Landed in [kixelated/quest#127](https://github.com/kixelated/quest/pull/127):
+  manual disk capacity/reservation, create, checkpoint, release, and restore of
+  Git-owned checkouts, with private recovery data, interrupted-transition
+  recovery through `restore`/`release`, and filesystem fixtures. The README
+  section "Recoverable local checkouts" documents it as experimental and
+  tells users to stop all work before checkpointing or releasing.
+- Decided (user): reuse the Linux systemd scope ownership backend from
+  [kixelated/quest#128](https://github.com/kixelated/quest/pull/128) rather than
+  adding another one; start once that PR merges. Process groups and PID files
+  cannot prove detached descendants stopped after a supervisor crash, so hosts
+  without a supported backend fail explicitly instead of guessing.
+- Own foreground child processes and their descendants until they stop; only
+  then release capacity and remove the checkout. Record ownership so a crash
+  can be reconciled, including a stale registry lock whose owner has exited.
+  Report failed cleanup as a retained allocation, not success.
+- Release automatically at lifecycle boundaries: checkpoint meaningful edits
+  before a blocking handoff and at completion, then release the idle checkout.
+  An asynchronous question with independent work still running is not a release
+  boundary. Delete declared scratch at handoff or exit; unstaged source changes
+  are work to preserve, not scratch.
+- Keep branches and recovery data independent of checkout retention. A
+  squash-merged branch may not be an ancestor of main; only exact PR-head
+  evidence shows a published result is finished.
+- Add cancellation and crash fixtures: interrupt a supervised command with live
+  descendants, kill the supervisor, and reconcile. Measure retained disk after
+  complete and suspended jobs (2026-10-15 baseline on this repository: 1.6 MB
+  fresh, 376 MB built, 4.4 MB released checkpoint, ~0.6 s restore).
+- Native agent lifecycle adoption stays in the agent integration quest.
 
 ## Related
 
-- [Expensive command gate](/quest/m0/local-gate.md) - independent CPU admission
+- [Expensive command gate](/quest/m0/local-gate.md) - its Linux ownership backend is reused here
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - native agents and workflow adoption
