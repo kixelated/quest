@@ -132,7 +132,10 @@ GitHub keeps pull request status, checks, and reviews. `mergePullRequest`
 merges only an exact head a maintainer explicitly chose, with the first method
 the repository allows: squash, then a merge commit, then rebase. GitHub's
 branch rules and refusals stand, and an agent's recommendation is never
-approval.
+approval. The decision inbox offers it on a pull request item only when
+GitHub reports the PR's merge state as `CLEAN` or `HAS_HOOKS` and no job holds
+the PR. The form binds the head on screen. A moved head asks for another look,
+GitHub's refusal is shown in its own words, and neither is retried.
 
 Fork pull requests do not make privileged CI safe. Workflows that run a pull
 request's code with secrets or write tokens, such as `pull_request_target` or
