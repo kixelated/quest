@@ -2,7 +2,15 @@ import { createHash, createPrivateKey, sign } from "node:crypto";
 import { check, isQuest, parse, ready } from "quest/core";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
-import { activityQuery, type ActivityPage, type ProjectState, type Scan, reconcile, readState } from "./state";
+import {
+	activityQuery,
+	type ActivityPage,
+	type ProjectState,
+	type Scan,
+	reconcile,
+	readState,
+	staleEntities,
+} from "./state";
 
 export interface GitHubRepository {
 	owner: string;
@@ -11,6 +19,17 @@ export interface GitHubRepository {
 }
 type Permission = "metadata" | "contents" | "issues" | "pull_requests" | "checks" | "statuses";
 type Permissions = Partial<Record<Permission, "read" | "write">>;
+/** What reading a project's observations needs. */
+const observing: Permissions = {
+	contents: "read",
+	issues: "read",
+	pull_requests: "read",
+	checks: "read",
+	statuses: "read",
+};
+// Longer than a Worker keeps background work after its response, so a read
+// that died with its Worker frees the project for the next webhook.
+const observeLease = 60_000;
 interface Installation {
 	id: number;
 	app_id: number;
@@ -52,6 +71,13 @@ export class GitHubError extends Error {
 		readonly reason: string | null = null,
 	) {
 		super(message);
+	}
+}
+
+/** Another read published, or a webhook invalidated, while this one read, so it must read again. */
+export class ProjectChanged extends GitHubError {
+	constructor() {
+		super("Project changed during refresh; refresh again");
 	}
 }
 /** A publication the bot cannot make, which needs a maintainer's decision rather than a retry. */
@@ -521,80 +547,150 @@ export class GitHubService {
 
 	/** Observations only. Neither a refresh nor an arriving entity launches work. */
 	projectState(repo: GitHubRepository, userId: string, refresh = false): Promise<ProjectState | null> {
-		return this.#authorized(
-			repo,
-			userId,
-			refresh
-				? { contents: "read", issues: "read", pull_requests: "read", checks: "read", statuses: "read" }
-				: {},
-			async (token, current, installation) => {
-				this.#public(current);
-				if ((await this.#state(repo, installation)) === null)
-					throw new GitHubError("Project is not enrolled for this installation");
-				if (!refresh) return this.#observations(repo, installation);
-				await this.#env.DB.prepare("INSERT OR IGNORE INTO github_project_state(repository,epoch) VALUES(?,?)")
-					.bind(repo.id, crypto.randomUUID())
-					.run();
-				const row = await this.#env.DB.prepare(
-					"SELECT revision,scan,invalidated,epoch FROM github_project_state WHERE repository=?",
-				)
-					.bind(repo.id)
-					.first<{ revision: number; scan: string | null; invalidated: number; epoch: string }>();
-				const previous: Scan | null = row?.scan ? JSON.parse(row.scan) : null;
-				// History resumes through any webhook; only occupancy, which is
-				// small, restarts to observe a possibly opened, closed, or claimed quest.
-				const scan: Scan = {
-					history:
-						previous && !previous.history.complete
-							? previous.history
-							: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
-					occupancy:
-						previous && !previous.occupancy.complete && row!.invalidated !== 1
-							? previous.occupancy
-							: { open: null, refs: null, pulls: [], claims: [], complete: false },
-				};
-				const snapshot = await this.#snapshot(token, repo, current);
-				const response = await this.#api<{ data?: { repository: ActivityPage | null }; errors?: unknown[] }>(
-					token,
-					"/graphql",
-					"POST",
-					{
-						query: activityQuery(scan),
-						variables: {
-							owner: repo.owner,
-							name: repo.name,
-							issues: scan.history.issues || null,
-							pulls: scan.history.pulls || null,
-							open: scan.occupancy.open || null,
-							refs: scan.occupancy.refs || null,
-						},
-					},
-				);
-				if (response.errors?.length || !response.data?.repository)
-					throw new GitHubError("Project activity unavailable");
-				// A rename, transfer, visibility change, revocation, or lost
-				// maintainer role during the scan must not publish fresh observations.
-				const latest = await this.#api<Repository>(token, repositoryPath(repo));
-				this.#repository(repo, latest);
-				this.#public(latest);
-				if (latest.default_branch !== current.default_branch)
-					throw new GitHubError("Default branch changed; refresh again");
-				await this.#maintainer(token, repo, userId);
-				await this.#gate(installation);
-				if ((await this.#state(repo, installation)) === null)
-					throw new GitHubError("Project enrollment changed");
-				await reconcile(
-					this.#env.DB,
-					repo,
-					snapshot,
-					scan,
-					response.data.repository,
-					row!.revision,
-					row!.epoch,
-				);
-				return this.#observations(repo, installation);
+		return this.#authorized(repo, userId, refresh ? observing : {}, async (token, current, installation) => {
+			this.#public(current);
+			if ((await this.#state(repo, installation)) === null)
+				throw new GitHubError("Project is not enrolled for this installation");
+			// A lost maintainer role during the read must not publish fresh observations.
+			if (refresh)
+				await this.#read(token, repo, current, installation, () => this.#maintainer(token, repo, userId));
+			return this.#observations(repo, installation);
+		});
+	}
+
+	/**
+	 * Read one page of a project's observations from GitHub and publish them,
+	 * unless `recheck` fails or the repository, installation, or enrollment
+	 * changed during the read.
+	 */
+	async #read(
+		token: string,
+		repo: GitHubRepository,
+		current: Repository,
+		installation: number,
+		recheck: () => Promise<void>,
+	) {
+		await this.#env.DB.prepare("INSERT OR IGNORE INTO github_project_state(repository,epoch) VALUES(?,?)")
+			.bind(repo.id, crypto.randomUUID())
+			.run();
+		const row = await this.#env.DB.prepare(
+			"SELECT revision,scan,invalidated,epoch FROM github_project_state WHERE repository=?",
+		)
+			.bind(repo.id)
+			.first<{ revision: number; scan: string | null; invalidated: number; epoch: string }>();
+		const previous: Scan | null = row?.scan ? JSON.parse(row.scan) : null;
+		// History resumes through any webhook; only occupancy, which is
+		// small, restarts to observe a possibly opened, closed, or claimed quest.
+		const scan: Scan = {
+			history:
+				previous && !previous.history.complete
+					? previous.history
+					: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
+			occupancy:
+				previous && !previous.occupancy.complete && row!.invalidated !== 1
+					? previous.occupancy
+					: { open: null, refs: null, pulls: [], claims: [], complete: false },
+		};
+		// What webhooks named is read by number, so it is current after one read
+		// however far the history pass is from it.
+		const stale = await staleEntities(this.#env.DB, repo.id);
+		const snapshot = await this.#snapshot(token, repo, current);
+		const response = await this.#api<{
+			data?: { repository: ActivityPage | null };
+			errors?: { path?: unknown[] }[];
+		}>(token, "/graphql", "POST", {
+			query: activityQuery(scan, stale),
+			variables: {
+				owner: repo.owner,
+				name: repo.name,
+				issues: scan.history.issues || null,
+				pulls: scan.history.pulls || null,
+				open: scan.occupancy.open || null,
+				refs: scan.occupancy.refs || null,
 			},
+		});
+		// An entity read by number may be gone, such as a deleted issue (GitHub
+		// reports NOT_FOUND at its alias). Any other error is a partial result.
+		// Accepting any error at the alias keeps one unreadable entity from
+		// blocking every later read.
+		const partial = response.errors?.some(
+			(error) =>
+				error.path?.length !== 2 || error.path[0] !== "repository" || !/^s\d+$/.test(String(error.path[1])),
 		);
+		if (partial || !response.data?.repository) throw new GitHubError("Project activity unavailable");
+		// A rename, transfer, visibility change, or revocation during the read
+		// must not publish fresh observations.
+		const latest = await this.#api<Repository>(token, repositoryPath(repo));
+		this.#repository(repo, latest);
+		this.#public(latest);
+		if (latest.default_branch !== current.default_branch)
+			throw new GitHubError("Default branch changed; refresh again");
+		await recheck();
+		await this.#gate(installation);
+		if ((await this.#state(repo, installation)) === null) throw new GitHubError("Project enrollment changed");
+		await reconcile(this.#env.DB, repo, snapshot, scan, response.data.repository, stale, row!.revision, row!.epoch);
+	}
+
+	/**
+	 * Reread an enabled project after a webhook asked for it, with the App's
+	 * own token. One read runs at a time: it answers every request made before
+	 * it started, and requests made during it get one more read, so a burst of
+	 * deliveries costs one or two reads rather than one each. This publishes
+	 * observations only. It checks no maintainer, so it neither grants nor
+	 * caches authority; every page and action still rechecks whoever acts. A
+	 * read that another read or a webhook overtook reads again. A failure is
+	 * recorded for the inbox and not retried: only a request made during the
+	 * failed read gets another round. Each invocation reads at most three
+	 * rounds to stay within one Worker invocation's subrequest budget; a
+	 * request left after them waits for the next webhook or a refresh.
+	 */
+	async observe(id: number) {
+		const db = this.#env.DB;
+		for (let round = 0; round < 3; round++) {
+			const now = Date.now();
+			const lease = now + observeLease;
+			const claimed = await db
+				.prepare(
+					`UPDATE github_project_state SET requested=0,lease=? WHERE repository=? AND requested=1 AND (lease IS NULL OR lease<?)
+ AND EXISTS(SELECT 1 FROM github_projects WHERE id=? AND state='enabled')`,
+				)
+				.bind(lease, id, now, id)
+				.run();
+			if (claimed.meta.changes !== 1) return;
+			let failure: string | null = null;
+			let overtaken = false;
+			try {
+				const repo = await db
+					.prepare("SELECT id,owner,name FROM github_projects WHERE id=?")
+					.bind(id)
+					.first<GitHubRepository>();
+				if (repo)
+					await this.#withRepository(repo, observing, async (token, current, installation) => {
+						this.#public(current);
+						if ((await this.#state(repo, installation)) !== "enabled")
+							throw new GitHubError("Project enrollment changed");
+						await this.#read(token, repo, current, installation, async () => {});
+					});
+			} catch (error) {
+				// A manual refresh that started before the webhook, or a webhook's
+				// revision bump, can publish first and leave this read's entities stale.
+				if (error instanceof ProjectChanged) overtaken = true;
+				else {
+					// Provider errors carry no response bodies or secrets; anything else is a bug.
+					failure = error instanceof GitHubError ? error.message : "Unexpected error";
+					if (!(error instanceof GitHubError))
+						console.error({ event: "github_observe_failed", name: (error as Error)?.name });
+				}
+			}
+			// An overtaken read, or more named entities than one read covers, asks for another round.
+			const more = overtaken || (!failure && (await staleEntities(db, id)).length > 0);
+			await db
+				.prepare(
+					"UPDATE github_project_state SET lease=NULL,failure=COALESCE(?,failure),requested=MAX(requested,?) WHERE repository=? AND lease=?",
+				)
+				.bind(failure, more ? 1 : 0, id, lease)
+				.run();
+		}
 	}
 
 	/**

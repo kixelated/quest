@@ -101,7 +101,17 @@ function graphql(repo: Repo, query: string) {
 			})),
 		);
 	}
-	return { data: { repository: result } };
+	// Entities a webhook named, read by number as GitHub does: an issue number
+	// that is a pull request, or a missing one, is NOT_FOUND at its alias.
+	const errors: unknown[] = [];
+	for (const [, alias, field, number] of query.matchAll(/(s\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
+		const pull = repo.pulls.find((p) => p.number === Number(number));
+		const issue = repo.issues.find((i) => i.number === Number(number));
+		const found = field === "pullRequest" ? pull && pullNode(repo, pull) : issue && entity(repo, issue);
+		result[alias!] = found ?? null;
+		if (!found) errors.push({ type: "NOT_FOUND", path: ["repository", alias] });
+	}
+	return { data: { repository: result }, ...(errors.length ? { errors } : {}) };
 }
 
 function tree(repo: Repo) {
