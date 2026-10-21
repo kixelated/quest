@@ -137,9 +137,15 @@ function drop(text: string, doc: Doc, dropping: (entry: Entry) => boolean): stri
 	return out.join("\n");
 }
 
-/** A repository-relative path as a root-absolute Markdown destination's path. */
+/**
+ * A repository-relative path as a root-absolute Markdown destination's path.
+ * Parentheses are encoded too, since an unmatched one ends an inline link.
+ */
 function encode(path: string): string {
-	return path.split("/").map(encodeURIComponent).join("/");
+	return path
+		.split("/")
+		.map((name) => encodeURIComponent(name).replace(/\(/g, "%28").replace(/\)/g, "%29"))
+		.join("/");
 }
 
 /** `text` with each replacement, keyed by offset, applied. */

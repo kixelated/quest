@@ -93,6 +93,7 @@ export function removeQuest(root: string, arg: string, recursive: boolean): Repo
 	const inside = epic === null ? [] : docs.filter((doc) => relocate(doc.path, epic, epic) !== null);
 	const whole = epic !== null && (directory || inside.length > 1);
 	const doomed = whole ? inside : docs.filter((doc) => doc.path === target);
+	if (doomed.length === 0) throw new Error(`${arg} holds no quest documents`);
 	if (whole && doomed.length > 1 && !recursive) {
 		throw new Error(`${arg} is an epic holding ${doomed.length} quest documents; pass -r to remove them all`);
 	}

@@ -56,15 +56,15 @@ function staged(tree: Tree): string[] {
 }
 
 describe("move", () => {
-	test("rewrites inline and reference links, keeping fragments and encoding names", () => {
+	test("rewrites inline and reference links, keeping fragments and encoding names and parentheses", () => {
 		const text =
 			"# [S] A\n\n## Goal\n\nSee [b](/quest/b.md#plan) and [ref][b].\n\n" +
 			"## Related\n\n- [/quest/b.md](/quest/b.md)\n\n[b]: /quest/b.md\n";
-		const moved = move([{ path: "quest/a.md", text }], "quest/b.md", "quest/m1/new name.md");
+		const moved = move([{ path: "quest/a.md", text }], "quest/b.md", "quest/m1/new (name.md");
 		expect(moved.missed).toEqual([]);
 		expect(moved.texts.get("quest/a.md")).toBe(
-			"# [S] A\n\n## Goal\n\nSee [b](/quest/m1/new%20name.md#plan) and [ref][b].\n\n" +
-				"## Related\n\n- [/quest/b.md](/quest/m1/new%20name.md)\n\n[b]: /quest/m1/new%20name.md\n",
+			"# [S] A\n\n## Goal\n\nSee [b](/quest/m1/new%20%28name.md#plan) and [ref][b].\n\n" +
+				"## Related\n\n- [/quest/b.md](/quest/m1/new%20%28name.md)\n\n[b]: /quest/m1/new%20%28name.md\n",
 		);
 	});
 
@@ -329,6 +329,14 @@ describe("quest rm", () => {
 		for (const path of ["quest/m0", "quest/m0/README.md", "quest/README.md"]) {
 			expect((await quest(tree, "rm", "-r", path)).stderr).toContain("is permanent");
 		}
+	});
+
+	test("refuses a directory that holds no quest documents", async () => {
+		const tree = committed(Tree.baseline().write("quest/m0/research/AGENTS.md", "Notes.\n"));
+		const out = await quest(tree, "rm", "-r", "quest/m0/research");
+		expect(out).toEqual({ code: 1, stdout: "", stderr: "quest: quest/m0/research holds no quest documents\n" });
+		expect(existsSync(join(tree.path, "quest/m0/research/AGENTS.md"))).toBe(true);
+		expect(staged(tree)).toEqual([]);
 	});
 
 	test("reports a prose link it does not edit, and the check that fails on it", async () => {
