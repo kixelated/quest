@@ -1,49 +1,48 @@
-# [M] Own worktree processes and release checkouts automatically
+# [M] Remove finished quest worktree checkouts
 
 ## Goal
 
-`quest worktree` supervises the commands that run in a checkout it created,
-then releases that checkout automatically once they stop by pruning its
-declared scratch in place. A crash or cancellation is reconciled without losing
-work, stealing a live lock, or deleting scratch a running process still uses.
+`quest worktree remove` deletes a finished checkout that `quest worktree` created
+and drops its record, without losing work: it refuses while supervised runs are
+live and refuses a checkout that still holds anything not already preserved.
+`quest worktree stop` ends a crashed supervisor's leftover processes.
 
 ## Plan
 
 - Landed in [kixelated/quest#127](https://github.com/kixelated/quest/pull/127):
-  manual disk capacity and reservations, `create`, `release` (delete declared
-  scratch in place), and `restore` (reserve again; the caller rebuilds the
-  scratch) of Git-owned checkouts. The README section "Prunable local
-  checkouts" documents it as experimental and tells users to stop all work
-  before releasing.
-- Decided (user, 2026-10-21): prune in place. Release deletes only declared
-  scratch that Git ignores, that holds no tracked files or other Git worktree,
-  and that is not reached through a symlink; it never removes the checkout or
-  its Git state.
-  Checkout-independent recovery is out of scope: four review rounds of the
-  checkpoint-and-remove design kept finding data-loss edge cases, while the
-  disk cost is scratch (2026-10-15 on this repository: 1.6 MB fresh source,
-  376 MB built).
-- Decided 2026-10-21 (user): this quest brings its own process-ownership
-  backend; `quest gate` admits on CPU load and memory only and owns no
-  descendants. The Linux systemd scope backend (scopes, slot handshake,
-  `cgroup.kill` inode pinning, prerequisite probes, opt-in systemd tests) was
-  dropped from the gate and is restorable from commit 5684307 in
-  [kixelated/quest#128](https://github.com/kixelated/quest/pull/128). Process
-  groups and PID files cannot prove detached descendants stopped after a
-  supervisor crash, so hosts without a supported backend fail explicitly
-  instead of guessing.
-- Own foreground child processes and their descendants until they stop; only
-  then prune scratch and release the reservation. Record ownership so a crash
-  can be reconciled, including a stale registry lock whose owner has exited.
-  Report failed cleanup as a retained allocation, not success.
-- Release automatically at lifecycle boundaries: before a blocking handoff and
-  at completion, once meaningful edits are committed. An asynchronous question
-  with independent work still running is not a release boundary. Automatic
-  release needs the scratch declarations without a caller; recording them at
-  `create` is the expected route.
-- Add cancellation and crash fixtures: interrupt a supervised command with live
-  descendants, kill the supervisor, and reconcile. Measure retained disk after
-  complete and suspended jobs.
+  disk capacity and reservations, `create`, `release` (delete declared scratch
+  in place), and `restore`. Landed with this quest's first slice: scratch
+  declared at `create`, and `run`, which supervises a command in a systemd user
+  scope per run, kills leftover descendants once the command exits, and prunes
+  scratch when the checkout's last run stops. Crashed supervisors are
+  reconciled by the next `quest worktree` command once their scope is empty,
+  and a dead process's registry lock is reclaimed.
+- Decided (user, 2026-10-21): prune in place. Release never removes the
+  checkout or its Git state. Checkout-independent recovery is out of scope:
+  four review rounds of the checkpoint-and-remove design kept finding
+  data-loss edge cases.
+- Decided 2026-10-21 (user): process ownership is a systemd user scope, on
+  Linux only; other hosts fail explicitly. Process groups and PID files cannot
+  prove detached descendants stopped after a supervisor crash.
+- Remaining (maintainer, 2026-10-21, from
+  [kixelated/quest#127](https://github.com/kixelated/quest/pull/127)):
+  `quest worktree remove` for finished checkouts. Never force: refuse modified,
+  untracked, or undeclared ignored files, and commits no branch or remote ref
+  reaches. Treat a squash-merged branch as finished only with exact PR-head
+  evidence from the forge, behind an interface that keeps the core
+  forge-independent.
+- Remaining (from this quest's first slice): `quest worktree stop <id>` ends a
+  crashed supervisor's leftover processes through its recorded scopes, without
+  calling `systemctl --user stop` directly. A stale inspection-failure reason
+  on a checkout is cleared by the next successful inspection, rather than
+  lingering until the next successful release.
+- Out of scope: terminal Ctrl-C reaches the command twice (once from the
+  terminal, once forwarded by the supervisor). It is shared with `quest gate`
+  and planned separately in
+  [kixelated/quest#180](https://github.com/kixelated/quest/pull/180).
+- Measured 2026-10-21 on this repository: a fresh checkout is 2.9 MB, 394 MB
+  after installing dependencies and building, and 2.9 MB once `run` released
+  it. A suspended job keeps the same released footprint until it is restored.
 - Native agent lifecycle adoption stays in the agent integration quest.
 
 ## Related
