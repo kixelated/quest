@@ -20,6 +20,14 @@ and a bounded test PR verify the integration before contributors are invited.
   upstream commit pushed after the fork was made, GitHub's signature on the
   App's API commits, and an iteration pushing an upstream pull request head
   under branch rules. Disable Actions on the service forks.
+- Install the PWA and receive a push notification on real Android, iOS, and
+  desktop devices (from
+  [kixelated/quest#165](https://github.com/kixelated/quest/pull/165), whose
+  tests use fakes).
+- Read a deleted issue by number against a real installation, which the
+  background reconcile from
+  [kixelated/quest#170](https://github.com/kixelated/quest/pull/170) only
+  tests against the fake.
 - Rehearse on the operator's own runner and an explicitly selected
   operator account.
 - Record nonsecret setup/run instructions and deployment identifiers.
