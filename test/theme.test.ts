@@ -42,39 +42,17 @@ describe("detect", () => {
 	});
 });
 
-describe("ready", () => {
-	test("lists ready quests with a yellow marker and size colours", () => {
-		const bang = sgr("33", "!");
-		expect(sizes().runOn(COLOUR, "ready")).toEqual({
-			code: 0,
-			stdout:
-				"5 quests ready\n" +
-				`${bang} ${sgr("90", "[XS]")} Tiny   quest/m0/epic/xs.md\n` +
-				`${bang} ${sgr("32", "[S]")} Small   quest/m0/epic/s.md\n` +
-				`${bang} ${sgr("34", "[M]")} Medium  quest/m0/epic/m.md\n` +
-				`${bang} ${sgr("35", "[L]")} Large   quest/m0/epic/l.md\n` +
-				`${bang} ${sgr("33", "[XL]")} Huge   quest/m0/epic/xl.md\n`,
-			stderr: "",
-		});
-	});
-
-	test("NO_COLOR keeps the layout and drops the escape codes", () => {
-		expect(sizes().runOn(NO_COLOUR, "ready").stdout).toBe(
-			"5 quests ready\n" +
-				"! [XS] Tiny   quest/m0/epic/xs.md\n" +
-				"! [S] Small   quest/m0/epic/s.md\n" +
-				"! [M] Medium  quest/m0/epic/m.md\n" +
-				"! [L] Large   quest/m0/epic/l.md\n" +
-				"! [XL] Huge   quest/m0/epic/xl.md\n",
+describe("unblocked <path>", () => {
+	test.each([
+		["xs", "90", "[XS]"],
+		["s", "32", "[S]"],
+		["m", "34", "[M]"],
+		["l", "35", "[L]"],
+		["xl", "33", "[XL]"],
+	])("size %s takes its colour", (name, code, label) => {
+		expect(sizes().runOn(COLOUR, "unblocked", `quest/m0/epic/${name}.md`).stdout).toMatch(
+			new RegExp(`^${sgr("33", "!").replace(/\[/g, "\\[")} ${sgr(code, label).replace(/\[/g, "\\[")} `),
 		);
-	});
-
-	test("says so when nothing is ready", () => {
-		const tree = Tree.baseline().append(
-			"quest/m0/epic/one.md",
-			"\n## Required\n\n- [Two](/quest/m0/epic/two.md)\n",
-		);
-		expect(tree.runOn(NO_COLOUR, "ready").stdout).toBe("No quests ready.\n");
 	});
 
 	test("a title cannot send escape sequences to the terminal", () => {
@@ -82,21 +60,13 @@ describe("ready", () => {
 			"quest/m0/epic/one.md",
 			"# [S] One \x1b]0;pwned\x07 \x1b[2J\n\n## Goal\n\nA quest.\n",
 		);
-		expect(tree.runOn(NO_COLOUR, "ready").stdout).toBe(
-			"1 quest ready\n! [S] One \uFFFD]0;pwned\uFFFD \uFFFD[2J  quest/m0/epic/one.md\n",
+		expect(tree.runOn(NO_COLOUR, "unblocked", "quest/m0/epic/one.md").stdout).toBe(
+			"! [S] One �]0;pwned� �[2J  quest/m0/epic/one.md\n  Ready\n",
 		);
 	});
 
-	test("one quest reads in the singular", () => {
-		expect(Tree.baseline().runOn(NO_COLOUR, "ready").stdout).toBe(
-			"1 quest ready\n! [S] One  quest/m0/epic/one.md\n",
-		);
-	});
-});
-
-describe("ready <path>", () => {
 	test("a ready quest", () => {
-		expect(Tree.baseline().runOn(COLOUR, "ready", "quest/m0/epic/one.md")).toEqual({
+		expect(Tree.baseline().runOn(COLOUR, "unblocked", "quest/m0/epic/one.md")).toEqual({
 			code: 0,
 			stdout: `${sgr("33", "!")} ${sgr("32", "[S]")} One  quest/m0/epic/one.md\n  Ready\n`,
 			stderr: "",
@@ -104,7 +74,7 @@ describe("ready <path>", () => {
 	});
 
 	test("a blocked quest shows a grey marker and what it requires", () => {
-		const out = Tree.baseline().runOn(COLOUR, "ready", "/quest/m0/epic/two.md");
+		const out = Tree.baseline().runOn(COLOUR, "unblocked", "/quest/m0/epic/two.md");
 		expect(out.code).toBe(0);
 		expect(out.stdout).toBe(
 			`${sgr("90", "!")} ${sgr("32", "[S]")} Two    quest/m0/epic/two.md\n` +
@@ -117,7 +87,7 @@ describe("ready <path>", () => {
 	});
 
 	test("a required epic expands into the quests it still holds", () => {
-		const out = Tree.baseline().runOn(NO_COLOUR, "ready", "quest/m0/README.md");
+		const out = Tree.baseline().runOn(NO_COLOUR, "unblocked", "quest/m0/README.md");
 		expect(out.stdout).toBe(
 			"! M0           quest/m0/README.md\n" +
 				"  Required:\n" +
@@ -132,14 +102,14 @@ describe("ready <path>", () => {
 			"quest/m0/epic/one.md",
 			"\n## Claim\n\n- Jane Doe (github:jdoe) on jdoe/quest since 2026-10-02\n",
 		);
-		expect(tree.runOn(NO_COLOUR, "ready", "quest/m0/epic/one.md").stdout).toBe(
+		expect(tree.runOn(NO_COLOUR, "unblocked", "quest/m0/epic/one.md").stdout).toBe(
 			"! [S] One  quest/m0/epic/one.md\n  Ready\n",
 		);
 	});
 
 	test("an entry that is not a quest prints as written", () => {
 		const tree = Tree.baseline().append("quest/m0/epic/one.md", "\n## Required\n\n- the design review\n");
-		expect(tree.runOn(NO_COLOUR, "ready", "quest/m0/epic/one.md").stdout).toBe(
+		expect(tree.runOn(NO_COLOUR, "unblocked", "quest/m0/epic/one.md").stdout).toBe(
 			"! [S] One  quest/m0/epic/one.md\n  Required:\n    the design review\n",
 		);
 	});

@@ -17,7 +17,7 @@ trap 'rm -rf "$work"' EXIT
 # The shared lifecycle is also run directly by native Windows CI.
 bun "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle-check.mjs" "$binary"
 
-# A reader that closes stdout early, like `quest ready | head -1`, ends the
+# A reader that closes stdout early, like `quest unblocked | head -1`, ends the
 # command quietly. The writer waits on a FIFO until the reader has closed, so
 # every write fails with EPIPE rather than racing into the pipe buffer.
 mkfifo "$work/reader-closed"

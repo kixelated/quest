@@ -1,8 +1,17 @@
 // GitHub-specific PR activity waiting stays outside the repository-independent core.
-import { execFileSync } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
+import {
+	type GitHubDependencies,
+	type ObjectValue,
+	GitHub,
+	array,
+	githubRepository,
+	link,
+	object,
+	remoteUrl,
+	seconds,
+	string,
+} from "./github";
 
-const API = "https://api.github.com";
 const POLL = 5 * 60_000;
 const SHA = /^[a-f\d]{7,40}$/i;
 /** The timeline records a force push a few seconds after repository activity (1-2s observed). */
@@ -34,13 +43,7 @@ export interface WaitOptions {
 	timeout?: number;
 }
 
-export interface WaitDependencies {
-	fetch: typeof fetch;
-	now(): number;
-	sleep(milliseconds: number): Promise<unknown>;
-	token: string;
-	warn(message: string): void;
-}
+export type WaitDependencies = GitHubDependencies;
 
 export class WaitInputError extends Error {}
 
@@ -51,7 +54,6 @@ export class WaitTimeout extends Error {
 	}
 }
 
-type ObjectValue = Record<string, unknown>;
 interface Activity {
 	point: string;
 	time: number;
@@ -82,36 +84,13 @@ interface Cursor {
 /** Accept a GitHub PR URL, or a number in the origin repository. */
 export function pullRequest(value: string, root: string): PullRequest {
 	if (/^[1-9]\d*$/.test(value)) {
-		const origin = execFileSync("git", ["-C", root, "remote", "get-url", "origin"], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		const match =
-			/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?$/.exec(
-				origin,
-			);
-		if (!match) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
-		return { owner: match[1], repo: match[2], number: Number(value) };
+		const repository = githubRepository(remoteUrl(root, "origin"));
+		if (!repository) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
+		return { ...repository, number: Number(value) };
 	}
 	const match = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value);
 	if (!match) throw new WaitInputError("expected a GitHub pull request URL or a PR number in origin");
 	return { owner: match[1], repo: match[2], number: Number(match[3]) };
-}
-
-export function waitDependencies(): WaitDependencies {
-	let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
-	if (!token) {
-		try {
-			token = execFileSync("gh", ["auth", "token", "--hostname", "github.com"], {
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "pipe"],
-			}).trim();
-		} catch {
-			throw new Error("set GH_TOKEN or GITHUB_TOKEN, or sign in with gh auth login");
-		}
-	}
-	if (!token) throw new Error("GitHub authentication returned an empty token");
-	return { fetch, now: Date.now, sleep, token, warn: (message) => process.stderr.write(`quest: ${message}\n`) };
 }
 
 /** Wait until activity, returning plain output lines. Network and time are injected. */
@@ -157,60 +136,20 @@ async function watch(
 		if (deps.now() >= deadline) throw new WaitTimeout();
 	};
 	let pollInterval = POLL;
-	const request = async (path: string, etag?: string, payload?: unknown): Promise<Response> => {
-		// Follow only same-origin pagination links; never send a token to another host.
-		const url = new URL(path, API);
-		if (url.origin !== API || url.username || url.password) throw new Error("invalid GitHub pagination URL");
-		let attempts = 0;
-		for (;;) {
-			const remaining = deadline - deps.now();
-			if (remaining <= 0) throw new WaitTimeout();
-			let response: Response;
-			try {
-				response = await deps.fetch(url, {
-					...(payload === undefined ? {} : { method: "POST", body: JSON.stringify(payload) }),
-					headers: {
-						Accept: "application/vnd.github+json",
-						Authorization: `Bearer ${deps.token}`,
-						"X-GitHub-Api-Version": "2022-11-28",
-						"User-Agent": "quest",
-						...(etag ? { "If-None-Match": etag } : {}),
-					},
-					...(Number.isFinite(remaining) ? { signal: AbortSignal.timeout(Math.ceil(remaining)) } : {}),
-				});
-			} catch (error) {
-				if (deps.now() >= deadline) throw new WaitTimeout();
-				throw error;
-			}
-			pollInterval = Math.max(pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
-			if (response.status === 200 || response.status === 304) return response;
-			const body = await response.text();
-			const limited =
-				response.status === 429 ||
-				(response.status === 403 &&
-					(response.headers.has("retry-after") ||
-						response.headers.get("x-ratelimit-remaining") === "0" ||
-						/rate limit/i.test(body)));
-			if (!limited || attempts >= 6)
-				throw new Error(
-					`GitHub HTTP ${response.status} for ${url.pathname}; ${limited ? "rate limit persisted" : "check repository access and token permissions"}`,
-				);
-			const retry = seconds(response.headers.get("retry-after"));
-			const reset =
-				response.headers.get("x-ratelimit-remaining") === "0"
-					? seconds(response.headers.get("x-ratelimit-reset"))
-					: undefined;
-			const delay = retry ?? (reset === undefined ? 60_000 * 2 ** attempts : Math.max(1000, reset - deps.now()));
-			attempts++;
-			deps.warn(`GitHub rate limited this request; waiting ${Math.ceil(delay / 1000)} seconds`);
-			await pause(delay);
-		}
-	};
-	const list = async (path: string): Promise<{ rows: ObjectValue[]; response: Response }> => {
-		const response = await request(path);
-		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
-		return { rows: array(await response.json()), response };
-	};
+	// Any failure past the deadline, the client's included, becomes a WaitTimeout in waitForActivity.
+	const github = new GitHub(
+		{
+			...deps,
+			fetch: async (url, init) => {
+				const response = await deps.fetch(url, init);
+				pollInterval = Math.max(pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
+				return response;
+			},
+		},
+		deadline,
+	);
+	const request = (path: string, etag?: string, body?: unknown) => github.request(path, { etag, body });
+	const list = (path: string) => github.list(path);
 
 	let cursor: Cursor;
 	let historical: Activity[] = [];
@@ -512,41 +451,11 @@ function actor(value: unknown): string {
 			: "-";
 }
 
-function object(value: unknown): ObjectValue {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		throw new Error("invalid GitHub response: expected an object");
-	return value as ObjectValue;
-}
-
-function array(value: unknown): ObjectValue[] {
-	if (!Array.isArray(value)) throw new Error("invalid GitHub response: expected an array");
-	return value.map(object);
-}
-
-function string(value: unknown): string {
-	if (typeof value !== "string" || !value) throw new Error("invalid GitHub response: expected a nonempty string");
-	return value;
-}
-
 function timestamp(value: string): number {
 	const result = Date.parse(value);
 	if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(result))
 		throw new Error(`invalid timestamp: ${value}; use an ISO 8601 timestamp, a pushed SHA, or a returned cursor`);
 	return result;
-}
-
-function seconds(value: string | null): number | undefined {
-	if (value === null || !/^\d+(?:\.\d+)?$/.test(value)) return undefined;
-	const result = Number(value) * 1000;
-	return Number.isFinite(result) ? result : undefined;
-}
-
-function link(response: Response, relation: string): string | undefined {
-	return response.headers
-		.get("link")
-		?.split(",")
-		.map((entry) => /<([^>]+)>;\s*rel="([^"]+)"/.exec(entry.trim()))
-		.find((match) => match?.[2] === relation)?.[1];
 }
 
 function fullSha(value: unknown): boolean {
