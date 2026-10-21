@@ -52,15 +52,20 @@ export async function openPullRequests(
 }
 
 /**
- * The repositories whose open PRs can claim a quest: `repository`, and the
- * one it was forked from, since a fork's clone names the fork `origin` while
- * its quest PRs open upstream.
+ * The repository `repository` was forked from, or `null` if it is not a fork.
+ * A fork's clone names the fork `origin`, while its quests are claimed upstream.
  */
-export async function pullRequestRepositories(github: GitHub, repository: Repository): Promise<Repository[]> {
+export async function forkParent(github: GitHub, repository: Repository): Promise<Repository | null> {
 	const parent = object(await (await github.request(path(repository))).json()).parent;
-	if (parent === undefined || parent === null) return [repository];
+	if (parent === undefined || parent === null) return null;
 	const [owner, repo] = string(object(parent).full_name).split("/");
-	return [repository, { owner, repo }];
+	return { owner, repo };
+}
+
+/** The `quest/*` branches in a GitHub `repository`, for one that is not a local remote. */
+export async function githubBranches(github: GitHub, repository: Repository): Promise<string[]> {
+	const rows = await github.all(`${path(repository)}/git/matching-refs/heads/quest/`);
+	return rows.map((row) => string(row.ref).replace(/^refs\/heads\//, ""));
 }
 
 function path(repository: Repository): string {
@@ -69,8 +74,9 @@ function path(repository: Repository): string {
 
 /**
  * Which of `branches` someone holds: pushed to `remote`, or the head of an
- * open PR there or in the repository `remote` was forked from. Without the
- * remote it warns and checks nothing; off GitHub it checks branches only.
+ * open PR there. When `remote` is a GitHub fork, its parent's branches and
+ * open PRs count too. Without the remote it warns and checks nothing; off
+ * GitHub it checks branches only.
  */
 export async function claims(
 	root: string,
@@ -93,7 +99,11 @@ export async function claims(
 		deps.warn(`${remote} is not on GitHub, so only its branches were checked for claims`);
 	} else {
 		const github = new GitHub(deps.github());
-		for (const each of await pullRequestRepositories(github, repository)) {
+		const parent = await forkParent(github, repository);
+		if (parent !== null) {
+			for (const branch of await githubBranches(github, parent)) if (wanted.has(branch)) held.set(branch, null);
+		}
+		for (const each of parent === null ? [repository] : [repository, parent]) {
 			for (const pr of await openPullRequests(github, each)) {
 				if (wanted.has(pr.branch)) held.set(pr.branch, pr.url);
 			}

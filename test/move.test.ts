@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { move, remove } from "../src/core";
-import { openPullRequests, pullRequestRepositories } from "../src/cli/claims";
+import { forkParent, githubBranches, openPullRequests } from "../src/cli/claims";
 import { GitHub, type GitHubDependencies } from "../src/cli/github";
 import { main } from "../src/cli/main";
 import { ROOT_README, Tree, tempDir } from "./fixture";
@@ -368,23 +368,24 @@ test("open pull requests come from every page, by head branch", async () => {
 	]);
 });
 
-test("claims are checked in the repository a fork came from, too", async () => {
-	const repos: Record<string, unknown> = {
+test("a fork's parent repository and its quest branches come from GitHub", async () => {
+	const responses: Record<string, unknown> = {
 		"/repos/me/project": { fork: true, parent: { full_name: "example/project" } },
 		"/repos/example/project": { fork: false },
+		"/repos/example/project/git/matching-refs/heads/quest/": [
+			{ ref: "refs/heads/quest/m0/a" },
+			{ ref: "refs/heads/quest/m0/epic/b" },
+		],
 	};
 	const github = new GitHub({
 		token: "test-token",
 		now: () => 0,
 		sleep: async () => undefined,
 		warn: () => undefined,
-		fetch: async (url) => new Response(JSON.stringify(repos[url.pathname])),
+		fetch: async (url) => new Response(JSON.stringify(responses[url.pathname])),
 	});
-	expect(await pullRequestRepositories(github, { owner: "me", repo: "project" })).toEqual([
-		{ owner: "me", repo: "project" },
-		{ owner: "example", repo: "project" },
-	]);
-	expect(await pullRequestRepositories(github, { owner: "example", repo: "project" })).toEqual([
-		{ owner: "example", repo: "project" },
-	]);
+	const parent = { owner: "example", repo: "project" };
+	expect(await forkParent(github, { owner: "me", repo: "project" })).toEqual(parent);
+	expect(await forkParent(github, parent)).toBeNull();
+	expect(await githubBranches(github, parent)).toEqual(["quest/m0/a", "quest/m0/epic/b"]);
 });
