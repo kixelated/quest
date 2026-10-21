@@ -287,14 +287,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Wait for pull request activity on GitHub")
 		.description(
 			"Wait for a review, comment, review-thread reply, reaction to the PR or a review, push, merge, close, " +
-				"merge-queue removal, or disabled auto-merge. Polls every 5 minutes; rate limits delay requests. No timeout by default.\n\n" +
+				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes; rate limits delay requests. No timeout by default.\n\n" +
 				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
+				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
+				"each once per head, with the check's name as the actor and its details URL. " +
+				"Results count as quest status counts them, so neutral and skipped results pass. " +
+				"checks:passed waits until no check is pending, no GitHub Actions run is unfinished, and every check and workflow the base branch names is present, then names the last check to finish. " +
+				"Optional checks never wake the wait, unless the base branch requires none, which requires them all. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
 				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Replies and reactions by that account are ignored. " +
 				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
-				"Check runs and edits are not activity.",
+				"Edits are not activity.",
 		)
 		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
 		.option("--since <point>", "ISO timestamp, pushed-tip SHA, or resume cursor (default: current head push time)")

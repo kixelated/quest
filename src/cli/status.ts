@@ -178,20 +178,9 @@ function summarize(
 		pending: [],
 	} as Status["checks"];
 	for (const context of contexts) {
-		const run = context.__typename === "CheckRun";
-		const check: Check = {
-			name: string(run ? context.name : context.context),
-			required: context.isRequired === true,
-			result:
-				run && context.status !== "COMPLETED"
-					? lower(context.status)
-					: lower(run ? context.conclusion : context.state),
-			url: optional(run ? context.detailsUrl : context.targetUrl),
-		};
-		if (run ? context.status !== "COMPLETED" : ["pending", "expected"].includes(check.result))
-			checks.pending.push(check);
-		else if (run ? PASSING.includes(check.result) : check.result === "success") checks.passed++;
-		else checks.failing.push(check);
+		const { check, outcome } = classifyCheck(context);
+		if (outcome === "passed") checks.passed++;
+		else checks[outcome].push(check);
 	}
 
 	const reactions: Reaction[] = [];
@@ -264,6 +253,29 @@ function summarize(
 		reviews: [...latest.values()],
 		reactions,
 		threads,
+	};
+}
+
+/**
+ * A check run or commit status from a `statusCheckRollup` context, and whether it passed, failed, or
+ * is still pending. `quest wait` shares this, so both commands agree on what passes.
+ */
+export function classifyCheck(context: ObjectValue): { check: Check; outcome: "passed" | "failing" | "pending" } {
+	const run = context.__typename === "CheckRun";
+	const check: Check = {
+		name: string(run ? context.name : context.context),
+		required: context.isRequired === true,
+		result:
+			run && context.status !== "COMPLETED"
+				? lower(context.status)
+				: lower(run ? context.conclusion : context.state),
+		url: optional(run ? context.detailsUrl : context.targetUrl),
+	};
+	if (run ? context.status !== "COMPLETED" : ["pending", "expected"].includes(check.result))
+		return { check, outcome: "pending" };
+	return {
+		check,
+		outcome: (run ? PASSING.includes(check.result) : check.result === "success") ? "passed" : "failing",
 	};
 }
 
