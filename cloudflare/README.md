@@ -208,8 +208,10 @@ reveals a number and nothing else.
 A device turns notifications on only from a click, which asks the browser for
 permission and stores its push subscription (`push_subscriptions`) for that
 user and session. Subscriptions must name a known push service. Signing out
-deletes the session's subscriptions, and a push service reporting one gone
-(404 or 410) deletes it. The switch shows a device as notified only while the
+deletes the session's subscriptions, and the sign-out form first drops the
+browser's own, which discards pushes still queued for it (a sign-out without
+JavaScript leaves those to arrive within the 24-hour TTL). A push service
+reporting one gone (404 or 410) deletes it. The switch shows a device as notified only while the
 server stores its subscription for the signed-in user, so whoever signs in
 next on that browser turns notifications on with their own click. A rotated
 subscription replaces the old one only for the user who enabled it, and the

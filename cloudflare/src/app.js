@@ -38,6 +38,26 @@ async function current(publicKey) {
 	return null;
 }
 
+// Signing out stops this device's notifications at once. The server forgets the
+// session's subscriptions, and dropping the browser's own also discards any push
+// the push service still holds for it. A sign-out without JavaScript leaves those
+// to arrive within their TTL.
+for (const form of document.querySelectorAll('form[action="/sign-out"]')) {
+	if (!supported) break;
+	form.addEventListener(
+		"submit",
+		(event) => {
+			event.preventDefault();
+			registration
+				.then((found) => found.pushManager.getSubscription())
+				.then((subscription) => subscription?.unsubscribe())
+				.catch(() => {})
+				.finally(() => form.submit());
+		},
+		{ once: true },
+	);
+}
+
 // Whether the server notifies this browser's subscription for whoever is
 // signed in. It forgets one when a session signs out, and never hands one to
 // another user, so the browser's own subscription is not enough to show "on".

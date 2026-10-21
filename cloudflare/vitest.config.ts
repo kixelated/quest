@@ -1,7 +1,7 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { existsSync } from "node:fs";
 import { defineConfig } from "vitest/config";
-import { privateKey } from "./test/github-key";
+import { privateKey } from "./test/github-key.ts";
 
 // Miniflare keeps D1 as SQLite under the OS temp dir and fsyncs every write, so
 // other processes' disk I/O stalls each statement and the route tests time out.
