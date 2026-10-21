@@ -70,10 +70,10 @@ async function reads(who = user) {
 function thread(html: string) {
 	return html.match(/<article class="ql-panel decision"[\s\S]*?<\/article>/)?.[0] ?? "";
 }
-function submit(path: string, fields: [string, string][]) {
+function submit(path: string, fields: [string, string][], headers: Record<string, string> = {}) {
 	return app.request(
 		`${origin}${path}`,
-		{ method: "POST", headers: { Cookie: cookie, Origin: origin }, body: new URLSearchParams(fields) },
+		{ method: "POST", headers: { Cookie: cookie, Origin: origin, ...headers }, body: new URLSearchParams(fields) },
 		testEnv,
 	);
 }
@@ -166,7 +166,7 @@ describe("decision inbox", () => {
 			["revision", head],
 		]);
 		expect(started.status).toBe(303);
-		expect(started.headers.get("Location")).toBe("/inbox?project=10&item=pulls%2F2");
+		expect(started.headers.get("Location")).toBe("/inbox?done=start");
 		const html = await inbox({ project: "10", item: "pulls/2" });
 		expect(html.match(/<h2>In progress<\/h2>[\s\S]*?<\/ol>/)![0]).toContain("Fix");
 		expect(thread(html)).toContain("none of your runners are online");
@@ -174,6 +174,7 @@ describe("decision inbox", () => {
 		const [job] = await store.listJobs(db, 10);
 		const stopped = await submit(`${jobs}/${job!.id}/cancel`, []);
 		expect(stopped.status).toBe(303);
+		expect(stopped.headers.get("Location")).toBe("/inbox?done=stop");
 		expect((await store.readJob(db, job!.id))!.state).toBe("cancelled");
 		// A stopped job sets its item aside until the pull request changes.
 		expect(await inbox()).toMatch(/Skipped and finished \(1\)[\s\S]*Fix/);
@@ -189,11 +190,18 @@ describe("decision inbox", () => {
 		expect(moved.status).toBe(403);
 		expect(await moved.text()).toContain("head moved since you looked; review it again");
 		github.refuse = "At least 1 approving review is required by reviewers with write access.";
-		const refused = await submit(merge, [["head", head]]);
+		const refused = await submit(merge, [["head", head]], {
+			Referer: `${origin}/inbox?project=10&item=pulls%2F2`,
+		});
 		expect(refused.status).toBe(403);
-		expect(await refused.text()).toContain(
+		// Any refused action reads neutrally, says why, and leads back to its item.
+		const explained = await refused.text();
+		expect(explained).toContain("<h1>Couldn&#39;t do that</h1>");
+		expect(explained).not.toContain("Not recorded");
+		expect(explained).toContain(
 			"GitHub refused the merge: At least 1 approving review is required by reviewers with write access.",
 		);
+		expect(explained).toContain('<a href="/inbox?project=10&amp;item=pulls%2F2">Return to the item</a>');
 		// Each click is one request bound to its head; a refusal is never retried.
 		expect(github.merged).toHaveLength(2);
 		github.refuse = null;
@@ -203,7 +211,7 @@ describe("decision inbox", () => {
 			["version", "0"],
 		]);
 		expect(merged.status).toBe(303);
-		expect(merged.headers.get("Location")).toBe("/inbox");
+		expect(merged.headers.get("Location")).toBe("/inbox?done=merge");
 		expect(github.merged.at(-1)).toEqual({ sha: head, merge_method: "squash" });
 		// The merged item is finished, and no new work starts before GitHub is read again.
 		const html = await inbox();
@@ -299,6 +307,12 @@ describe("decision inbox", () => {
 		).toBe(409);
 		const answered = await submit(`${jobs}/${id}/answer`, answer);
 		expect(answered.status).toBe(303);
+		// The inbox moves on to the next decision and notes the answer there.
+		expect(answered.headers.get("Location")).toBe("/inbox?done=answer");
+		const next = await inbox({ done: "answer" });
+		expect(next).toContain('<p class="note" role="status">Answer recorded.</p>');
+		expect(thread(next)).toContain("Fix");
+		expect(next.match(/<h2>In progress<\/h2>[\s\S]*?<\/ol>/)![0]).toContain("First");
 		const job = (await store.readJob(db, id))!;
 		expect(job.state).toBe("queued");
 		expect(job.questions[0]!.answer).toEqual({
@@ -483,6 +497,7 @@ describe("decision inbox", () => {
 			["version", "0"],
 		]);
 		expect(skipped.status).toBe(303);
+		expect(skipped.headers.get("Location")).toBe("/inbox?done=skip");
 		let html = await inbox();
 		expect(html.match(/<h2>Up next<\/h2>[\s\S]*?<\/ol>/)![0]).not.toContain("Idea");
 		expect(html).toMatch(/Skipped and finished \(1\)[\s\S]*Idea/);
@@ -542,9 +557,13 @@ describe("decision inbox", () => {
 			["version", "0"],
 		]);
 		github.limited = true;
-		let html = await inbox();
+		let html = await inbox({ done: "answer" });
 		expect(html).toContain("Unavailable: GitHub request failed (429)");
 		expect(html).not.toContain("Idea");
+		// With no decision left, the notice shows on the empty state.
+		expect(html).toContain("Answer recorded.");
+		expect(html).toContain("Nothing needs a decision right now.");
+		expect(await inbox({ done: "constructor" })).not.toContain('<p class="note" role="status">');
 		expect((await visit()).status).toBe(403);
 		expect(await members()).toEqual([user]);
 		expect(await reads()).toBe(1);
