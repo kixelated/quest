@@ -1,0 +1,81 @@
+# [M] Claim a quest with a draft PR through quest start
+
+## Goal
+
+`quest start <quest>` claims a ready quest by pushing its empty claim commit
+and immediately opening a draft PR labeled `quest:start`, so every claim is
+visible on GitHub. `quest unblocked --unclaimed` lists ready quests nobody
+holds, and `quest unblocked <path>` takes over printing what blocks one quest
+from `quest ready`. Agents stop running `git ls-remote origin
+'refs/heads/quest/...'` and `gh pr list --head/--search` by hand before
+starting or spawning (105 of 396 sessions), and two sessions never implement
+the same quest.
+
+## Plan
+
+Decided 2026-10-20 (user) from an audit of Claude Code and Codex transcripts
+(566 and 465 sessions, Sep 22-Oct 21). This replaces the planned
+`quest claim` quest. Every collision in that audit was two sessions owning
+one PR or branch ("Another session force-pushed over my agent", "reverting
+each other"); none came from two quests touching the same files.
+
+- Decided (user): one owner per quest or PR, recorded on GitHub. A kix
+  lease service with release on disconnect was weighed and dropped as more
+  machinery than the problem needs; GitHub timestamps already say who came
+  first and who went quiet.
+- Decided (user): the draft PR is the claim. `quest start` pushes an empty
+  claim commit with the explicit refspec
+  `refs/heads/<branch>:refs/heads/<branch>`, never forcing, then opens a
+  draft PR from it and adds `quest:start`. A rejected push means someone else
+  holds the branch. Give each claim commit a random nonce, so two claimers on
+  the same base, identity, and second never build the same commit and both
+  see success. Distinct exit codes separate "taken" from a failure.
+- Contributors without push access open the draft PR from their fork. A
+  collision is any open PR whose head branch is the quest's branch, from any
+  repository; the earliest `createdAt` wins and later claimers stop.
+- Open: a fork contributor's token usually cannot label a base-repository
+  PR, so a fork claim may lack `quest:start` and look idle to maintainers
+  and kix. Options: a credentialed actor (the kix GitHub App or an upstream
+  workflow) labels fork claim PRs on a quest branch, which keeps the label
+  the only ownership signal (recommended), or an unlabeled fork draft on a
+  quest branch counts as `quest:start`. Settle this with the user before
+  implementing.
+- `quest:start` comes off when the starting session hands back, with the PR
+  left as a draft (decisions remain) or ready. A PR with no `quest:*` label is
+  idle and waits on the maintainer. The
+  [PR state commands](/quest/m0/helpers/pr-states.md) add the other labels.
+  This quest adds the shared label helper: take a label only when no
+  `quest:*` label is on the PR, back off if another appears in the timeline
+  first, and print a hold token (the event that added it) that later swaps
+  and releases must present.
+- `quest start --release <quest>` closes the draft PR and deletes the claim
+  branch only while its tip is still the empty claim commit, using a lease on
+  that SHA; otherwise it refuses and says why.
+- A label that looks stale (no pushes or comments since it was added) is
+  offered to the user for takeover, as stale claims already are. No fixed
+  timeout.
+- Decided (user): CI runs on ready PRs only, so placeholder drafts cost
+  nothing. GitHub supports this with `ready_for_review` in the
+  `pull_request` types and a `github.event.pull_request.draft == false` job
+  condition. Recommend that pattern in the guide and `SETUP.md`, and adopt it
+  in this repository's `.github/workflows/check.yml`. Agents rely on local
+  checks while in draft. Switching moq-dev/moq and moq-dev/moq.pro is
+  follow-up work in those repositories.
+- Decided (user): free the `ready` name for the PR state by moving
+  `quest ready [path]` into `quest unblocked [path]`, which prints what
+  blocks one quest. This breaks the v0.1.0 `quest ready`; update every use in
+  the guide, skills, README, `SETUP.md`, and the kix Worker in the same PR.
+- `quest unblocked --unclaimed` uses one `ls-remote` for `refs/heads/quest/*`
+  and one query for open PRs, and prints skipped claims on stderr with their
+  age and PR, so stale claims can be offered for takeover.
+- The branch check is plain git. Only the PR steps are GitHub-specific; with
+  a non-GitHub origin, open no PR and warn. Default the remote to origin,
+  with `--remote` to override. kix.quest jobs claim the same way through its
+  bot, so they count as claims here too.
+- Update the guide's Execution section ("When a quest is complete, create a
+  draft PR" becomes "open it when claiming"), and the `start` and `spawn`
+  skill prose to use these commands. The user asked for those edits through
+  this plan.
+- Test claiming free and taken quests, a race between two claimers, a fork
+  PR that claims first, releasing a claim, refusing to release a branch with
+  work on it, a racing label, and the filtered ranking.

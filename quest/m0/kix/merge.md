@@ -21,6 +21,10 @@ offer only "Review on GitHub":
 - Bind the form to the head SHA the maintainer saw. A moved head, failing
   checks, missing reviews, or branch rules refuse the merge and say why; never
   retry or bypass them.
+- Decided 2026-10-20 (user): once [merge jobs](/quest/m0/kix/merge-job.md)
+  land, an open PR that is not clean also offers merge, and the pick starts a
+  merge job that covers its own fixes. That quest widens the button; this one
+  ships the clean-only path.
 - An agent recommendation is never approval: the merge happens only on the
   maintainer's click.
 - Test a moved head, a refused merge, a squash-only repository, and a
