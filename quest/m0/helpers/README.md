@@ -53,5 +53,4 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Related
 
-- [Expensive command gate](/quest/m0/local-gate.md) - CPU admission for the checks these helpers wrap
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the agent-level load-average rules
