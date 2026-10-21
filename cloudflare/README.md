@@ -203,10 +203,11 @@ reveals a number and nothing else.
 A device turns notifications on only from a click, which asks the browser for
 permission and stores its push subscription (`push_subscriptions`) for that
 user and session. Subscriptions must name a known push service. Signing out
-deletes the session's subscriptions and the browser's own, so the next person
-to sign in there opts in for themselves. A push service reporting one gone
-(404 or 410) deletes it. The switch stores the browser's subscription again
-when it loads, so it never shows a device as notified that the server forgot.
+deletes the session's subscriptions, and a push service reporting one gone
+(404 or 410) deletes it. The switch shows a device as notified only while the
+server stores its subscription for the signed-in user, so whoever signs in
+next on that browser turns notifications on with their own click. Each push
+rechecks that its recipient still maintains the project, as the inbox does.
 
 Only decisions push (`src/push/notify.ts`): an agent's question, a
 publication decision, an account limit, a failed job, a new or reopened issue,

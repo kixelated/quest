@@ -14,7 +14,9 @@ async function post(path, body) {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	});
-	if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Request failed.");
+	const result = await response.json().catch(() => null);
+	if (!response.ok) throw new Error(result?.error || "Request failed.");
+	return result;
 }
 
 function key(base64url) {
@@ -22,33 +24,15 @@ function key(base64url) {
 	return Uint8Array.from(text, (c) => c.charCodeAt(0));
 }
 
-// Signing out stops this device's notifications: the server forgets the
-// session's subscriptions, and the browser drops its own, so whoever signs in
-// next turns them on for themselves.
-for (const form of document.querySelectorAll('form[action="/sign-out"]')) {
-	if (!supported) break;
-	form.addEventListener(
-		"submit",
-		(event) => {
-			event.preventDefault();
-			registration
-				.then((found) => found.pushManager.getSubscription())
-				.then((subscription) => subscription?.unsubscribe())
-				.catch(() => {})
-				.finally(() => form.submit());
-		},
-		{ once: true },
-	);
-}
-
-// The server can forget a subscription the browser still has, such as one a
-// signed-out session enabled. Store it again for this session, so a switch
-// that shows notifications on means this device is notified.
+// Whether the server notifies this browser's subscription for whoever is
+// signed in. It forgets one when a session signs out, and never hands one to
+// another user, so the browser's own subscription is not enough to show "on".
 const controls = document.querySelectorAll("[data-push]");
-const synced = (async () => {
+let stored = false;
+const checked = (async () => {
 	if (!supported || !controls.length || Notification.permission !== "granted") return;
 	const subscription = await (await registration).pushManager.getSubscription();
-	if (subscription) await post("/push/subscribe", subscription.toJSON());
+	if (subscription) stored = (await post("/push/check", { endpoint: subscription.endpoint })).stored === true;
 })();
 
 for (const control of controls) {
@@ -58,7 +42,7 @@ for (const control of controls) {
 
 	async function show(message) {
 		const subscription = supported && (await (await registration).pushManager.getSubscription());
-		const on = !!subscription && Notification.permission === "granted";
+		const on = stored && !!subscription && Notification.permission === "granted";
 		const blocked = supported && Notification.permission === "denied";
 		// The inbox's compact control steps aside once there is nothing to switch on.
 		control.hidden = (on || blocked) && "compact" in control.dataset && !message;
@@ -94,6 +78,7 @@ for (const control of controls) {
 				await registration
 			).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(control.dataset.push) });
 			await post("/push/subscribe", subscription.toJSON());
+			stored = true;
 			return "Notifications are on for this device.";
 		}),
 	);
@@ -102,12 +87,13 @@ for (const control of controls) {
 			const subscription = await (await registration).pushManager.getSubscription();
 			if (subscription) {
 				await post("/push/unsubscribe", { endpoint: subscription.endpoint });
+				stored = false;
 				await subscription.unsubscribe();
 			}
 			return "Notifications are off for this device.";
 		}),
 	);
-	synced
+	checked
 		.then(
 			() => show(),
 			(error) => show(error.message || "Something went wrong."),

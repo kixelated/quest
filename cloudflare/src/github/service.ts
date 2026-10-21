@@ -360,6 +360,16 @@ export class GitHubService {
 		).results;
 	}
 
+	/** Whether a user currently maintains a project, as its inbox items require. */
+	async maintains(repo: GitHubRepository, userId: string) {
+		try {
+			return await this.#authorized(repo, userId, {}, async () => true);
+		} catch (error) {
+			if (error instanceof GitHubError) return false;
+			throw error;
+		}
+	}
+
 	/** Let any current maintainer reach stop controls without a valid preview. */
 	async enrolledProject(owner: string, repository: string, userId: string): Promise<Enrollment | null> {
 		return this.#withInstallation({ owner, name: repository }, {}, async (token, installation) => {

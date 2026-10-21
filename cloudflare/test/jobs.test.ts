@@ -469,6 +469,8 @@ describe("runner connections", () => {
 	});
 
 	it("notifies the project's maintainer when a job asks a question or fails, once each", async () => {
+		const maintainer = await maintainerOf();
+		await db.prepare("UPDATE github_projects SET enrolledBy=? WHERE id=10").bind(maintainer.user).run();
 		const pair = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
 			"deriveBits",
 		])) as CryptoKeyPair;
@@ -477,12 +479,14 @@ describe("runner connections", () => {
 		);
 		await db
 			.prepare(
-				"INSERT INTO push_subscriptions(endpoint,user,session,p256dh,auth,createdAt) VALUES('https://fcm.googleapis.com/fcm/send/owner','owner','s',?,'AAAAAAAAAAAAAAAAAAAAAA',0)",
+				"INSERT INTO push_subscriptions(endpoint,user,session,p256dh,auth,createdAt) VALUES('https://fcm.googleapis.com/fcm/send/owner',?,'s',?,'AAAAAAAAAAAAAAAAAAAAAA',0)",
 			)
-			.bind(p256dh)
+			.bind(maintainer.user, p256dh)
 			.run();
 		const sent: string[] = [];
+		// Push services answer here; GitHub answers the recipient's authority check.
 		vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+			if (!String(input).startsWith("https://fcm.googleapis.com/")) return maintainer.mock(input);
 			sent.push(String(input));
 			return new Response(null, { status: 201 });
 		});

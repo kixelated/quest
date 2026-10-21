@@ -5,7 +5,7 @@ import * as store from "../src/jobs/store";
 import * as push from "../src/push/notify";
 import { base64url, encrypt, unbase64url, vapid } from "../src/push/webpush";
 import { privateKey } from "./github-key";
-import { origin } from "./login-fixtures";
+import { identity, oauth, origin } from "./login-fixtures";
 import { commit, delivery, maintainerOf } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
@@ -121,6 +121,7 @@ describe("decision notifications", () => {
 	let cookie = "";
 	let sent: Sent[] = [];
 	let status = 201;
+	let github: Awaited<ReturnType<typeof maintainerOf>>["github"];
 
 	beforeEach(async () => {
 		await db.batch([
@@ -130,7 +131,7 @@ describe("decision notifications", () => {
 			db.prepare("DELETE FROM github_projects"),
 		]);
 		const maintainer = await maintainerOf();
-		({ user, cookie } = maintainer);
+		({ user, cookie, github } = maintainer);
 		sent = [];
 		status = 201;
 		// Push services answer here; everything else goes to the mocked GitHub.
@@ -195,6 +196,39 @@ describe("decision notifications", () => {
 		);
 		expect(out.status).toBe(303);
 		expect(await subscriptions()).toEqual([]);
+	});
+
+	it("shows a device as notified only while its subscription is stored for the signed-in user", async () => {
+		const device = await subscribe();
+		const check = async (headers?: Record<string, string>) =>
+			(await post("/push/check", { endpoint: device.endpoint }, headers)).json();
+		// A session that expired leaves its device notifying; a check moves it to the
+		// current session, so signing out here forgets it.
+		await db.prepare("UPDATE push_subscriptions SET session='expired'").run();
+		expect(await check()).toEqual({ stored: true });
+		// Another person signing in on this browser does not take the device over.
+		const other = (await oauth(identity("github"))).session!;
+		expect(await check({ Cookie: other, Origin: origin })).toEqual({ stored: false });
+		expect(await subscriptions()).toEqual([{ endpoint: device.endpoint, user }]);
+		await app.request(
+			`${origin}/sign-out`,
+			{ method: "POST", headers: { Cookie: cookie, Origin: origin } },
+			testEnv,
+		);
+		expect(await subscriptions()).toEqual([]);
+	});
+
+	it("does not push to someone who no longer maintains the project", async () => {
+		await subscribe();
+		github.role = "write";
+		await delivery("issues", {
+			action: "opened",
+			installation: { id: 5 },
+			repository: { id: 10 },
+			issue: { id: 13, number: 3, title: "Crash on start" },
+		});
+		expect(sent).toHaveLength(0);
+		expect(await subscriptions()).toHaveLength(1);
 	});
 
 	it("pushes a new issue once, opening its decision, and never other updates", async () => {

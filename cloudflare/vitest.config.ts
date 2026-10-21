@@ -1,6 +1,7 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { existsSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+import { privateKey } from "./test/github-key";
 
 // Miniflare keeps D1 as SQLite under the OS temp dir and fsyncs every write, so
 // other processes' disk I/O stalls each statement and the route tests time out.
@@ -23,7 +24,8 @@ export default defineConfig({
 					GOOGLE_CLIENT_SECRET: "test-google-client-secret",
 					GITHUB_APP_ID: "123",
 					GITHUB_WEBHOOK_SECRET: "test-webhook-secret",
-					GITHUB_APP_PRIVATE_KEY: "test-key-injected-by-service-tests",
+					// Background work, such as a push's authority check, signs with the test App key.
+					GITHUB_APP_PRIVATE_KEY: privateKey,
 					GITHUB_FORK_OWNER: "quest-bot-forks",
 					// A test-only key pair from scripts/vapid.ts.
 					VAPID_PUBLIC_KEY:

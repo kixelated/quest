@@ -7,7 +7,7 @@
 
 import { Hono } from "hono";
 import { createAuth } from "../auth";
-import type { Enrollment } from "../github/service";
+import { type Enrollment, GitHubService } from "../github/service";
 import { title, unread } from "../inbox/model";
 import { inboxURL } from "../jobs/routes";
 import { type KeyPair, type Subscription, base64url, send } from "./webpush";
@@ -37,9 +37,8 @@ export function keys(env: Env): KeyPair | null {
 export type Device = Subscription & { user: string };
 
 /**
- * The devices of everyone whose inbox shows this project: today the
- * maintainer who enrolled it. A push reveals only the project and the item's
- * title; the inbox rechecks authority before showing anything more.
+ * The devices of everyone whose inbox lists this project: today the
+ * maintainer who enrolled it. Delivery rechecks that they still maintain it.
  */
 export async function devices(env: Env, project: number): Promise<Device[]> {
 	if (!keys(env)) return [];
@@ -54,19 +53,30 @@ export async function devices(env: Env, project: number): Promise<Device[]> {
 // Undelivered decisions stay in the inbox, so a day-old push adds nothing.
 const TTL = 24 * 60 * 60;
 
-/** Push one decision to these devices, and forget any the push service reports gone. */
-export async function deliver(env: Env, decision: Decision, targets: Device[]) {
+/**
+ * Push one decision to the devices of those who still maintain its project,
+ * as the inbox requires before showing its items, and forget any device the
+ * push service reports gone.
+ */
+export async function deliver(env: Env, decision: Decision, found: Device[]) {
 	const pair = keys(env);
-	if (!pair || !targets.length) return;
+	if (!pair || !found.length) return;
 	const { project, target } = decision;
+	const github = new GitHubService(env);
+	const users = [...new Set(found.map((d) => d.user))];
+	const current = await Promise.all(users.map((user) => github.maintains(project, user)));
+	const maintainers = users.filter((_, i) => current[i]);
+	const targets = found.filter((device) => maintainers.includes(device.user));
+	if (!targets.length) return;
 	const name = decision.title ?? (await title(env.DB, project, target));
 	const tag = `${project.id}/${target}`;
 	const topic = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tag)))).slice(
 		0,
 		32,
 	);
-	const users = [...new Set(targets.map((d) => d.user))];
-	const badges = new Map(await Promise.all(users.map(async (user) => [user, await unread(env, user)] as const)));
+	const badges = new Map(
+		await Promise.all(maintainers.map(async (user) => [user, await unread(env, user)] as const)),
+	);
 	const results = await Promise.allSettled(
 		targets.map((device) =>
 			send(
@@ -172,6 +182,20 @@ subscriptions.post("/push/subscribe", async (c) => {
 		);
 	await c.env.DB.batch(statements);
 	return c.body(null, 204);
+});
+// Whether the server still notifies the browser's subscription for this user.
+// It moves a match to this session, so signing out here forgets it, but never
+// takes over another user's device or one that a sign-out forgot: turning
+// notifications on again takes a click.
+subscriptions.post("/push/check", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Sign in required" }, 401);
+	const body = await c.req.json().catch(() => null);
+	if (typeof body?.endpoint !== "string") return c.json({ error: "Endpoint required" }, 400);
+	const result = await c.env.DB.prepare("UPDATE push_subscriptions SET session=? WHERE endpoint=? AND user=?")
+		.bind(session.session.id, body.endpoint, session.user.id)
+		.run();
+	return c.json({ stored: result.meta.changes > 0 });
 });
 subscriptions.post("/push/unsubscribe", async (c) => {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
