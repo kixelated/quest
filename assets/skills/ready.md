@@ -10,7 +10,7 @@ If its body lists open decisions or unfinished work, offer `/quest-iterate` firs
 Flip a draft to "Ready for Review", then wait with `quest wait`, as `quest skill merge` describes, until an automated reviewer reviews or reacts.
 Skip the wait only if the repository has no automated reviewer.
 
-Summarize the reviews and CI, then interactively prompt the user with your recommendation:
+Summarize the reviews and CI from `quest status <pr>`, then interactively prompt the user with your recommendation:
 - `/quest-merge`: If the reviews found no significant issues.
 - `/quest-iterate`: If they raised significant issues or decisions.
 - skip: If the PR should not be merged yet.

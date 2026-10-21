@@ -1,6 +1,6 @@
-import type { Pull } from "../github/state";
+import { type Pull, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
-import { PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
+import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker, Notifications } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
@@ -15,12 +15,22 @@ export type InboxProps = {
 	active: Item | null;
 	/** The requested item is gone, such as a question another maintainer answered. */
 	missing: boolean;
+	/** What the previous form recorded, from the redirect's query. */
+	done: string | undefined;
 	decisions: Item[];
 	working: Item[];
 	skipped: Item[];
 	runners: Map<string, Runners>;
 	/** The VAPID public key, or null where notifications are not configured. */
 	notifications: string | null;
+};
+
+const recorded: Record<Done, string> = {
+	answer: "Answer recorded.",
+	start: "Job requested.",
+	stop: "Stop requested.",
+	skip: "Skipped until it changes.",
+	merge: "Pull request merged.",
 };
 
 const kinds = { pull: "Pull request", issue: "Issue", quest: "Ready quest", plan: "Plan", devshell: "Bootstrap" };
@@ -257,9 +267,11 @@ function AccountForm(props: { item: Item; runners: Runners }) {
 /** Why new work cannot start from here yet, and how to fix it; `null` when it can. */
 function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
-	const available = view?.state?.project.available;
-	if (!available) return "GitHub reported changes. Refresh to start new work from current state.";
-	if (item.kind === "quest" && !available.includes(item.target))
+	const state = view?.state;
+	if (!state?.project.available) return "GitHub reported changes. Refresh to start new work from current state.";
+	// A retry continues its failed job's pull request, so that claim does not block it.
+	const retry = item.need === "retry" ? (item.job?.pull ?? null) : null;
+	if (item.kind === "quest" && !startable(state, item.target, retry))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
 		return "Refresh to read this from GitHub.";
@@ -479,6 +491,11 @@ export function InboxPage(props: InboxProps) {
 					? `${props.decisions.length} waiting on you${unread ? `, ${unread} new` : ""}.`
 					: "Nothing needs a decision right now."}
 			</p>
+			{props.done && Object.hasOwn(recorded, props.done) && (
+				<p class="note" role="status">
+					{recorded[props.done as Done]}
+				</p>
+			)}
 			<Notifications publicKey={props.notifications} compact />
 			{props.missing && (
 				<p class="note" role="status">

@@ -147,7 +147,8 @@ function pullNumber(target: string) {
 export class GitHubService {
 	#env: GitHubEnvironment;
 	#fetch: typeof fetch;
-	constructor(env: GitHubEnvironment, request: typeof fetch = fetch) {
+	// Workers' fetch throws "Illegal invocation" when called as this.#fetch(), so wrap it.
+	constructor(env: GitHubEnvironment, request: typeof fetch = (input, init) => fetch(input, init)) {
 		this.#env = env;
 		this.#fetch = request;
 	}
@@ -165,7 +166,8 @@ export class GitHubService {
 	async #api<T>(token: string, path: string, method = "GET", body?: unknown, explain = false): Promise<T> {
 		const response = await this.#fetch(`https://api.github.com${path}`, {
 			method,
-			redirect: "error",
+			// Workers refuse `redirect: "error"`; a redirect is not ok, so it fails below.
+			redirect: "manual",
 			headers: {
 				...(token ? { Authorization: `Bearer ${token}` } : {}),
 				Accept: "application/vnd.github+json",
