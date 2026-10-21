@@ -63,15 +63,10 @@ Decided 2026-10-20 (user, planned from moq-dev/moq):
   of their own. Rejected: refusing and reporting for `/quest-iterate`.
 - Repositories may also run the guard in CI on pull requests; document the
   invocation in `README.md`, but don't ship a workflow.
-- [Move and delete quests](/quest/m0/helpers/move.md) gives `quest rm`, which
-  the fix-up step uses once it lands; until then the agent deletes and
-  unlinks by hand.
+- The fix-up step deletes the quest with `quest rm`, which drops the links to
+  it.
 
 Tests: a quest-branch diff that deletes the quest, one that edits it, and one
 that leaves it untouched (the finding); an epic branch checked against its
 README; a non-quest branch; a branch naming a quest that does not exist at
 the base; and `--branch` overriding the current branch.
-
-## Related
-
-- [Move and delete quests](/quest/m0/helpers/move.md) - `quest rm` deletes a quest and every link to it
