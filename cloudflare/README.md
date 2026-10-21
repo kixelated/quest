@@ -175,8 +175,11 @@ background, so a new issue or PR arrives with its title, ready to act on. An
 item offers only actions that would work: none on a paused project, and only a
 refresh while availability is pending or a background read failed, with the
 failure's reason. Every action is a plain form post to the job routes, which
-recheck authority and return to the inbox; prompts render as escaped text and
-never preselect the recommendation. A `publication` decision lists the refused
+recheck authority and move on to the next active decision (or the empty
+state) with a short notice such as "Answer recorded"; the item acted on stays
+reachable from its list with its earlier answers. A refused action says why
+and links back to its item. Prompts render as escaped text and never
+preselect the recommendation. A `publication` decision lists the refused
 paths or why the branch is blocked, and takes the maintainer's reply as text.
 The inbox reads each target's latest job however old it is: every one that
 awaits a decision, and any other whose issue, pull request, or quest is still
