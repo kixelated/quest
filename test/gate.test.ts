@@ -13,7 +13,7 @@ import {
 	run as runCommand,
 	SETTLE_MS,
 } from "../src/cli/gate";
-import { gateBoundary } from "../src/cli/main";
+import { gateBoundary, main } from "../src/cli/main";
 import { run, tempDir } from "./fixture";
 
 const GiB = 2 ** 30;
@@ -126,6 +126,25 @@ test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s con
 	expect(linuxMemory(proc, cgroups).available).toBe(0);
 });
 
+test("Linux memory reads the container cgroup mounted as the root", () => {
+	const proc = tempDir();
+	const cgroups = tempDir();
+	mkdirSync(join(proc, "self"));
+	writeFileSync(join(proc, "meminfo"), `MemTotal: ${(64 * GiB) / 1024} kB\nMemAvailable: ${(24 * GiB) / 1024} kB\n`);
+	writeFileSync(join(cgroups, "memory.max"), String(8 * GiB));
+	writeFileSync(join(cgroups, "memory.current"), String(2 * GiB));
+	const limited = { total: 8 * GiB, available: 6 * GiB };
+	// With a cgroup namespace, the container's own cgroup is `/`.
+	writeFileSync(join(proc, "self/cgroup"), "0::/\n");
+	expect(linuxMemory(proc, cgroups)).toEqual(limited);
+	// Without one, the host path is absent below the bind-mounted container cgroup.
+	writeFileSync(join(proc, "self/cgroup"), "0::/system.slice/docker-abc.scope\n");
+	expect(linuxMemory(proc, cgroups)).toEqual(limited);
+	// A cgroup outside the namespace is not mounted, so nothing visible bounds it.
+	writeFileSync(join(proc, "self/cgroup"), "0::/../sibling\n");
+	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+});
+
 test("admission claims stay on this host", () => {
 	expect(claimDirectory({ XDG_RUNTIME_DIR: "/run/user/1000" }, "/home/u", "a")).toBe(
 		join("/run/user/1000", "quest", "gate"),
@@ -177,6 +196,17 @@ test("the gated command keeps its own flags, even ones Quest also parses", () =>
 	expect(gateBoundary(["--root", "r", "gate", "ls"])).toEqual(["--root", "r", "gate", "--", "ls"]);
 	expect(gateBoundary(["gate", "--help"])).toEqual(["gate", "--help"]);
 	expect(gateBoundary(["check"])).toEqual(["check"]);
+	// Quest's own global options may also follow the subcommand.
+	expect(gateBoundary(["gate", "--root", "r", "ls"])).toEqual(["gate", "--root", "r", "--", "ls"]);
+	expect(gateBoundary(["gate", "--root=r", "ls"])).toEqual(["gate", "--root=r", "--", "ls"]);
+	expect(gateBoundary(["gate", "--version"])).toEqual(["gate", "--version"]);
+});
+
+test("global options after gate keep working", async () => {
+	expect(run("gate", "--version").stdout).toMatch(/^quest /);
+	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
+	const out = { stdout: () => {}, stderr: () => {} };
+	expect(await main(["gate", "--root", ".", process.execPath, "-e", "process.exit(5)"], out)).toBe(5);
 });
 
 test("gate has command help and requires an executable", () => {

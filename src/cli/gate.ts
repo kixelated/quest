@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /** The machine-wide inputs to load admission, replaceable in tests. */
@@ -86,7 +86,7 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 		if (controllers === undefined || path === undefined) throw new Error("gate cannot read Linux memory cgroups");
 		const unified = controllers === "";
 		if (!unified && !controllers?.split(",").includes("memory")) continue;
-		const root = unified ? cgroups : join(cgroups, "memory");
+		const root = resolve(cgroups, unified ? "" : "memory");
 		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
 		// Usage includes inactive file cache, which the kernel reclaims without
 		// swapping; subtract it, as container runtimes do for their working set.
@@ -94,8 +94,14 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 		const limits = unified
 			? ["memory.max", "memory.high"]
 			: ["memory.limit_in_bytes", "memory.soft_limit_in_bytes"];
-		// Child cgroups inherit their parents' limits and shared memory usage.
-		for (let group = join(root, path); ; group = dirname(group)) {
+		// Child cgroups inherit their parents' limits and shared memory usage. The
+		// walk ends at the mount point, which a container without a cgroup
+		// namespace bind-mounts from its own cgroup: its membership path may not
+		// exist below the mount, but the container's limit still applies there.
+		const start = resolve(root, `.${path}`);
+		// A cgroup namespace shows a cgroup outside it as `/..`, which is not mounted.
+		if (/^\.\.(\/|$)/.test(relative(root, start))) continue;
+		for (let group = start; ; group = dirname(group)) {
 			for (const file of limits) {
 				try {
 					const limit = Number(readFileSync(join(group, file), "utf8").trim());
@@ -111,7 +117,7 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 				}
 			}
-			if (group === root || group === dirname(group)) break;
+			if (group === root) break;
 		}
 	}
 	return { total, available };

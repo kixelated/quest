@@ -307,14 +307,22 @@ function positiveSeconds(value: string): number {
 	return seconds;
 }
 
-/** Stop option parsing before a gated executable, keeping its own flags intact. */
+/**
+ * Stop option parsing before a gated executable, keeping its own flags intact.
+ * Quest's global options still apply on either side of `gate`.
+ */
 export function gateBoundary(argv: string[]): string[] {
-	let index = 0;
-	while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
-		index += argv[index] === "--root" ? 2 : 1;
-	}
-	if (argv[index] !== "gate" || !argv[index + 1] || ["--", "-h", "--help"].includes(argv[index + 1])) return argv;
-	return [...argv.slice(0, index + 1), "--", ...argv.slice(index + 1)];
+	const skipRoot = (index: number) => {
+		while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
+			index += argv[index] === "--root" ? 2 : 1;
+		}
+		return index;
+	};
+	const index = skipRoot(0);
+	if (argv[index] !== "gate") return argv;
+	const command = skipRoot(index + 1);
+	if (!argv[command] || ["--", "-h", "--help", "-V", "--version"].includes(argv[command])) return argv;
+	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }
 
 /** A result limit must be a positive, safe integer. */
