@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
-import { pullRequest, waitForActivity, WaitTimeout, type WaitDependencies } from "../src/cli/wait";
+import { type GitHubDependencies, pullRequest } from "../src/cli/github";
+import { waitForActivity, WaitTimeout } from "../src/cli/wait";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -10,6 +11,8 @@ const POINT = "2026-10-07T12:00:00Z";
 const pr = { owner: "example", repo: "project", number: 1 };
 const base = "/repos/example/project";
 const timeline = `${base}/issues/1/timeline?per_page=100`;
+/** The GitHub Actions app, which reports workflow check runs. */
+const ACTIONS = 15368;
 
 function response(body: unknown, headers?: Record<string, string>, status = 200): Response {
 	return new Response(status === 304 ? null : JSON.stringify(body), { status, headers });
@@ -76,6 +79,8 @@ interface CheckFixture {
 	result?: string;
 	time?: string;
 	status?: boolean;
+	/** The GitHub App reporting a check run; GitHub Actions by default. */
+	app?: number;
 }
 
 /** The head's checks; `null` means the head has no checks at all. */
@@ -103,6 +108,7 @@ function checks(
 					completedAt: entry.result ? (entry.time ?? POINT) : null,
 					detailsUrl: `https://github.com/example/project/actions/runs/1/job/${entry.name.length}`,
 					isRequired: entry.required ?? false,
+					checkSuite: { app: { databaseId: entry.app ?? ACTIONS } },
 				};
 	return response({
 		data: {
@@ -130,7 +136,8 @@ function checks(
 
 /**
  * Review comments, reactions, and checks come from their own queues, empty once drained.
- * The base branch requires `protected` through branch protection and `ruled` through rulesets.
+ * The base branch requires `protected` through branch protection and `ruled` through rulesets,
+ * reported by GitHub Actions. `rules` adds further rules on a second page.
  */
 function setup(
 	responses: Response[],
@@ -141,6 +148,7 @@ function setup(
 		checks?: Response[];
 		protected?: string[];
 		ruled?: string[];
+		rules?: unknown[];
 	} = {},
 ) {
 	let now = Date.parse("2026-10-07T12:10:00Z");
@@ -150,7 +158,7 @@ function setup(
 	const ruleCalls: { path: string; headers: Headers }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
-	const deps: WaitDependencies = {
+	const deps: GitHubDependencies = {
 		token: "test-token",
 		now: () => now,
 		sleep: async (ms) => {
@@ -186,13 +194,18 @@ function setup(
 			}
 			if (parsed.pathname === `${base}/rules/branches/main`) {
 				ruleCalls.push(call);
-				const checks = (side.ruled ?? []).map((context) => ({ context, integration_id: 15368 }));
-				return response([
-					{ type: "deletion" },
-					...(checks.length
-						? [{ type: "required_status_checks", parameters: { required_status_checks: checks } }]
-						: []),
-				]);
+				if (parsed.searchParams.get("page") === "2") return response(side.rules);
+				const checks = (side.ruled ?? []).map((context) => ({ context, integration_id: ACTIONS }));
+				const next = `<https://api.github.com${base}/rules/branches/main?per_page=100&page=2>; rel="next"`;
+				return response(
+					[
+						{ type: "deletion" },
+						...(checks.length
+							? [{ type: "required_status_checks", parameters: { required_status_checks: checks } }]
+							: []),
+					],
+					side.rules ? { link: next } : undefined,
+				);
 			}
 			calls.push(call);
 			if (parsed.pathname.endsWith("/commits")) return response(baseline.map((sha) => ({ sha })));
@@ -765,7 +778,7 @@ test("an optional failure never wakes the wait, and every required check passing
 	// The base branch's requirements are read once per wait.
 	expect(fixture.ruleCalls.map((call) => call.path)).toEqual([
 		`${base}/branches/main`,
-		`${base}/rules/branches/main`,
+		`${base}/rules/branches/main?per_page=100`,
 	]);
 });
 
@@ -794,6 +807,67 @@ test("optional checks never stand in for required checks that have not started",
 	expect(fixture.sleeps).toEqual([300_000, 300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
+});
+
+test("required rules on a later page, and app-bound checks, hold back checks:passed", async () => {
+	const fixture = setup(
+		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
+		[A],
+		{
+			checks: [
+				checks([
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					// Another app's check of the same name does not start the required one.
+					{ name: "deploy", result: "SUCCESS", time: LATER, app: 7 },
+				]),
+				checks([
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "deploy", result: "SUCCESS", time: LATER, app: 7 },
+					{ name: "deploy", required: true, app: 42 },
+				]),
+				checks([
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "deploy", result: "SUCCESS", time: LATER, app: 7 },
+					{ name: "deploy", required: true, result: "SUCCESS", time: LATEST, app: 42 },
+				]),
+			],
+			ruled: ["check"],
+			rules: [
+				{
+					type: "required_status_checks",
+					parameters: { required_status_checks: [{ context: "deploy", integration_id: 42 }] },
+				},
+			],
+		},
+	);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed deploy /);
+	expect(fixture.ruleCalls.map((call) => call.path)).toEqual([
+		`${base}/branches/main`,
+		`${base}/rules/branches/main?per_page=100`,
+		`${base}/rules/branches/main?per_page=100&page=2`,
+	]);
+});
+
+test("a required workflow keeps optional checks optional before its checks start", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "lint", result: "FAILURE", time: LATER }]),
+			checks([
+				{ name: "lint", result: "FAILURE", time: LATER },
+				{ name: "build", required: true, result: "FAILURE", time: LATEST },
+			]),
+		],
+		rules: [
+			{ type: "workflows", parameters: { workflows: [{ path: ".github/workflows/ci.yml", repository_id: 1 }] } },
+		],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed build /);
 });
 
 test("a repository with no required checks requires every check, commit statuses included", async () => {
