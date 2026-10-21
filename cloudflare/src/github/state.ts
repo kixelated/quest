@@ -3,13 +3,12 @@ import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository } from "./service";
 import { positiveId } from "./webhook";
 
+type Cursor = string | null | false;
 export type Scan = {
-	id: string;
-	issues: string | null | false;
-	pulls: string | null | false;
-	refs: string | null | false;
-	claims: string[];
-	complete: boolean;
+	/** Pages every issue and PR, so edits to old entities and deletions are found. */
+	history: { id: string; issues: Cursor; pulls: Cursor; complete: boolean };
+	/** Pages only what availability depends on: open PRs and quest branches. */
+	occupancy: { open: Cursor; refs: Cursor; pulls: string[]; claims: string[]; complete: boolean };
 };
 type Connection<T> = { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 type Entity = {
@@ -36,6 +35,7 @@ export type Pull = Entity & {
 export type ActivityPage = {
 	issues?: Connection<Entity>;
 	pullRequests?: Connection<Pull>;
+	open?: Connection<Pull>;
 	refs?: Connection<{ name: string; prefix: string }>;
 };
 export type Activity = {
@@ -51,31 +51,37 @@ export type ProjectState = {
 	project: Project;
 	activity: Activity[];
 	claims: string[];
-	available: string[];
 	complete: boolean;
 	observedAt: number;
 	revision: number;
 };
 
 const entityFields = "databaseId:fullDatabaseId number title state updatedAt author { login } comments { totalCount }";
+const pullFields = `${entityFields} headRefName headRefOid isDraft reviewDecision reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
-export function activityQuery(scan: Scan) {
+export function activityQuery({ history, occupancy }: Scan) {
 	const fields: string[] = [];
 	const variables = ["$owner: String!", "$name: String!"];
-	if (scan.issues !== false) {
+	if (history.issues !== false) {
 		variables.push("$issues: String");
 		fields.push(
 			`issues(first:50,after:$issues,orderBy:{field:CREATED_AT,direction:ASC}) { nodes { ${entityFields} } pageInfo { hasNextPage endCursor } }`,
 		);
 	}
-	if (scan.pulls !== false) {
+	if (history.pulls !== false) {
 		variables.push("$pulls: String");
 		fields.push(
-			`pullRequests(first:50,after:$pulls,orderBy:{field:CREATED_AT,direction:ASC}) { nodes { ${entityFields} headRefName headRefOid isDraft reviewDecision reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } } } pageInfo { hasNextPage endCursor } }`,
+			`pullRequests(first:50,after:$pulls,orderBy:{field:CREATED_AT,direction:ASC}) { nodes { ${pullFields} } pageInfo { hasNextPage endCursor } }`,
 		);
 	}
-	if (scan.refs !== false) {
+	if (occupancy.open !== false) {
+		variables.push("$open: String");
+		fields.push(
+			`open:pullRequests(states:OPEN,first:100,after:$open,orderBy:{field:CREATED_AT,direction:ASC}) { nodes { ${pullFields} } pageInfo { hasNextPage endCursor } }`,
+		);
+	}
+	if (occupancy.refs !== false) {
 		variables.push("$refs: String");
 		fields.push(
 			'refs(refPrefix:"refs/heads/quest/",first:100,after:$refs) { nodes { name prefix } pageInfo { hasNextPage endCursor } }',
@@ -84,7 +90,7 @@ export function activityQuery(scan: Scan) {
 	return `query(${variables.join(",")}) { repository(owner:$owner,name:$name) { ${fields.join("\n")} } }`;
 }
 
-function next<T>(connection: Connection<T> | undefined, cursor: Scan["issues"]) {
+function next<T>(connection: Connection<T> | undefined, cursor: Cursor) {
 	if (cursor === false) return false;
 	if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo)
 		throw new GitHubError("Incomplete project activity");
@@ -111,29 +117,39 @@ export async function reconcile(
 	epoch: string,
 ) {
 	const now = Date.now();
+	const { history, occupancy } = scan;
 	const updated: Scan = {
-		id: scan.id,
-		issues: next(page.issues, scan.issues),
-		pulls: next(page.pullRequests, scan.pulls),
-		refs: next(page.refs, scan.refs),
-		claims: [...scan.claims],
-		complete: false,
+		history: {
+			id: history.id,
+			issues: next(page.issues, history.issues),
+			pulls: next(page.pullRequests, history.pulls),
+			complete: false,
+		},
+		occupancy: {
+			open: next(page.open, occupancy.open),
+			refs: next(page.refs, occupancy.refs),
+			pulls: [...occupancy.pulls],
+			claims: [...occupancy.claims],
+			complete: false,
+		},
 	};
-	if (scan.refs !== false)
+	if (occupancy.refs !== false)
 		for (const ref of page.refs!.nodes) {
 			if (typeof ref.name !== "string" || ref.prefix !== "refs/heads/quest/")
 				throw new GitHubError("Invalid branch observation");
 			// Ref.name is relative to the requested prefix.
-			updated.claims.push(`quest/${ref.name}`);
+			updated.occupancy.claims.push(`quest/${ref.name}`);
 		}
-	updated.claims = [...new Set(updated.claims)];
-	updated.complete = updated.issues === false && updated.pulls === false && updated.refs === false;
-	const entities: { kind: string; item: Entity }[] = [];
-	for (const [kind, connection] of [
-		["issue", page.issues],
-		["pull", page.pullRequests],
+	updated.history.complete = updated.history.issues === false && updated.history.pulls === false;
+	updated.occupancy.complete = updated.occupancy.open === false && updated.occupancy.refs === false;
+	// Keyed by identity: an open PR can arrive from both PR connections at once.
+	const entities = new Map<string, { kind: string; item: Entity }>();
+	for (const [kind, connection, cursor, open] of [
+		["issue", page.issues, history.issues, false],
+		["pull", page.pullRequests, history.pulls, false],
+		["pull", page.open, occupancy.open, true],
 	] as const) {
-		if (scan[kind === "issue" ? "issues" : "pulls"] === false) continue;
+		if (cursor === false) continue;
 		for (const item of connection!.nodes) {
 			if (
 				typeof item.databaseId !== "string" ||
@@ -151,9 +167,12 @@ export async function reconcile(
 				)
 					throw new GitHubError("Pull request head changed; refresh again");
 			}
-			entities.push({ kind, item });
+			entities.set(`${kind}/${item.databaseId}`, { kind, item });
+			if (open) updated.occupancy.pulls.push(item.databaseId);
 		}
 	}
+	updated.occupancy.claims = [...new Set(updated.occupancy.claims)];
+	updated.occupancy.pulls = [...new Set(updated.occupancy.pulls)];
 	// json_each keeps the transaction to three statements and a few bindings,
 	// within D1's free query budget and SQLite's bound-parameter limit.
 	const statements = [
@@ -164,12 +183,12 @@ export async function reconcile(
  FROM json_each(?) WHERE EXISTS(SELECT 1 FROM github_project_state WHERE repository=? AND revision=? AND epoch=?)
  ON CONFLICT(repository,kind,id) DO UPDATE SET number=excluded.number,changedAt=CASE WHEN github_project_activity.data IS NOT excluded.data THEN excluded.changedAt ELSE github_project_activity.changedAt END,data=excluded.data,seenIn=excluded.seenIn,missing=0`,
 			)
-			.bind(repo.id, now, now, scan.id, JSON.stringify(entities), repo.id, revision, epoch),
+			.bind(repo.id, now, now, history.id, JSON.stringify([...entities.values()]), repo.id, revision, epoch),
 		db
 			.prepare(
 				"UPDATE github_project_activity SET missing=1 WHERE repository=? AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND EXISTS(SELECT 1 FROM github_project_state WHERE repository=? AND revision=? AND epoch=?)",
 			)
-			.bind(repo.id, scan.id, updated.complete ? 1 : 0, repo.id, revision, epoch),
+			.bind(repo.id, history.id, updated.history.complete ? 1 : 0, repo.id, revision, epoch),
 		db
 			.prepare(
 				"UPDATE github_project_state SET snapshot=?,scan=?,observedAt=?,invalidated=?,revision=revision+1 WHERE repository=? AND revision=? AND epoch=?",
@@ -202,8 +221,11 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 	const rows = records[1]!.results as (Omit<Activity, "data"> & { data: string | null })[];
 	const activity: Activity[] = rows.map((item) => ({ ...item, data: item.data ? JSON.parse(item.data) : null }));
 	const paths = new Set(snapshot.documents.map((d) => d.path));
+	// A PR's activity row can still say OPEN until history rereads it, so only
+	// PRs in the latest occupancy pass count as open.
+	const open = new Set(scan.occupancy.pulls);
 	const changes = activity
-		.filter((item) => item.kind === "pull" && !item.missing && item.data?.state === "OPEN")
+		.filter((item) => item.kind === "pull" && open.has(item.id) && !item.missing && item.data?.state === "OPEN")
 		.flatMap((item) => {
 			const pull = item.data as Pull;
 			const quest = associatedQuest(pull.headRefName, paths);
@@ -217,12 +239,16 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 					]
 				: [];
 		});
-	const claims = scan.claims.map((ref) => associatedQuest(ref, paths)).filter((q): q is string => q !== null);
-	const complete = scan.complete && row.invalidated === 0;
+	const claims = scan.occupancy.claims
+		.map((ref) => associatedQuest(ref, paths))
+		.filter((q): q is string => q !== null);
 	const occupied = new Set([...claims, ...changes.map((c) => c.quest)]);
-	const available = complete
-		? ready(snapshot.documents.map((d) => parse(d.path, d.content))).filter((path) => !occupied.has(path))
-		: [];
+	// Unknown until every open PR and quest branch is read since the last
+	// webhook that could have opened, closed, or claimed a quest.
+	const available =
+		scan.occupancy.complete && row.invalidated === 0
+			? ready(snapshot.documents.map((d) => parse(d.path, d.content))).filter((path) => !occupied.has(path))
+			: null;
 	const project: Project = {
 		...snapshot,
 		name: `github/${repo.owner}/${repo.name}`,
@@ -234,14 +260,13 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 		issues: activity
 			.filter((item) => item.kind === "issue" && !item.missing && item.data?.state === "OPEN")
 			.map((item) => ({ path: `issues/${item.number}`, title: item.data!.title })),
-		available: complete ? available : null,
+		available,
 	};
 	return {
 		project,
 		activity,
 		claims,
-		available,
-		complete,
+		complete: scan.history.complete,
 		observedAt: row.observedAt,
 		revision: row.revision,
 	};

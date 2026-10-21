@@ -35,6 +35,16 @@ const lifecycle = new Map([
 	["unsuspend", false],
 	["new_permissions_accepted", false],
 ]);
+// Only opening, closing, or claiming a quest, or a new quest tree, can change
+// availability, and a new PR head changes what iterating on it starts from.
+// Checks, comments, and other pushes wait for the history scan, so a busy
+// repository cannot keep restarting a refresh or withholding candidates.
+function invalidates(event: string, payload: any) {
+	if (event === "pull_request") return ["opened", "reopened", "closed", "synchronize"].includes(payload.action);
+	if (event !== "push" || typeof payload.ref !== "string") return false;
+	if (payload.ref.startsWith("refs/heads/quest/")) return payload.created === true || payload.deleted === true;
+	return payload.ref === `refs/heads/${payload.repository.default_branch}`;
+}
 // Far beyond GitHub's redelivery window. Older IDs could be accepted again,
 // which is harmless because observations never authorize or launch work.
 export const deliveryRetention = 30 * 24 * 60 * 60 * 1000;
@@ -140,11 +150,12 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 				),
 			);
 		}
-		statements.push(
-			c.env.DB.prepare(
-				`UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=? AND ${pending} AND ${enrolled}`,
-			).bind(repository, delivery, digest, event, repository, installation),
-		);
+		if (invalidates(event, payload))
+			statements.push(
+				c.env.DB.prepare(
+					`UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=? AND ${pending} AND ${enrolled}`,
+				).bind(repository, delivery, digest, event, repository, installation),
+			);
 	}
 
 	statements.push(

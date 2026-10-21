@@ -255,8 +255,9 @@ function AccountForm(props: { item: Item; runners: Runners }) {
 /** Why new work cannot start from here yet, and how to fix it; `null` when it can. */
 function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
-	if (!view?.state?.complete) return "GitHub reported changes. Refresh to start new work from current state.";
-	if (item.kind === "quest" && !view.state.available.includes(item.target))
+	const available = view?.state?.project.available;
+	if (!available) return "GitHub reported changes. Refresh to start new work from current state.";
+	if (item.kind === "quest" && !available.includes(item.target))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
 		return "Refresh to read this from GitHub.";
@@ -420,7 +421,7 @@ function Project(props: { view: ProjectView }) {
 				) : (
 					<>
 						<span>{project.state === "enabled" ? "Contributions enabled" : "Contributions paused"}</span>
-						{!state?.complete && <span>Refresh needed</span>}
+						{!state?.project.available && <span>Refresh needed</span>}
 						<a href={`${base}/board`}>Quest board</a>
 						<a href={`${base}/state`}>Activity</a>
 					</>
@@ -429,7 +430,7 @@ function Project(props: { view: ProjectView }) {
 			{!error && (
 				<span class="entry-meta project-actions">
 					<Refresh project={project} />
-					{project.state === "enabled" && state?.complete && (
+					{project.state === "enabled" && state?.project.available && (
 						<form method="post" action={`${base}/jobs`}>
 							<input type="hidden" name="workflow" value="plan" />
 							<input type="hidden" name="revision" value={state.project.commit} />

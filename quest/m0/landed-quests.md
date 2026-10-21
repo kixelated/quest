@@ -70,7 +70,3 @@ Tests: a quest-branch diff that deletes the quest, one that edits it, and one
 that leaves it untouched (the finding); an epic branch checked against its
 README; a non-quest branch; a branch naming a quest that does not exist at
 the base; and `--branch` overriding the current branch.
-
-## Related
-
-- [Finished milestone links](/quest/m0/milestone-links.md) - the same "a finishing PR removes what depended on it" rule for milestones
