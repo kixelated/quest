@@ -4,8 +4,8 @@
 
 Agents stop hand-writing `gh`, `jq`, and `sed` loops for routine quest
 workflow steps, because `quest` commands cover them and the skills point at
-those commands: CI results while waiting, a one-shot PR status, claims, moving
-and deleting quests, serialized check-then-merge, and unattended triage.
+those commands: CI results while waiting, a one-shot PR status, claiming
+quests and PRs, moving and deleting quests, and unattended triage.
 
 Only generic helpers belong here. Non-goals: the kix.quest UI, a daemon, and
 deciding whose review or which result counts; the agent still decides.
@@ -29,6 +29,14 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - Decided (user): no separate documentation page. Each child updates
   `--help`, README examples, and the skill prose it replaces; the user asked
   for those skill edits through this plan.
+- Decided 2026-10-20 (user), from a wider audit of Claude Code and Codex
+  sessions: claims and PR ownership live on GitHub as a draft PR per claimed
+  quest and one `quest:*` state label per owned PR, replacing the planned
+  `quest claim`. The named gate lock is dropped: it replaced moq.pro's mkdir
+  merge mutex, which
+  [moq-dev/moq.pro#2510](https://github.com/moq-dev/moq.pro/pull/2510)
+  replaced with a label queue, and PR ownership covers the remaining
+  collisions.
 - Decided (user): this epic ranks after the worktree and gate quests and
   before the Kix decision UI. Children rank by sessions affected.
 
@@ -37,11 +45,11 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [PR status](/quest/m0/helpers/status.md) - one call for head, checks, merge state, reviews by head, and unresolved threads
 - [Move and delete quests](/quest/m0/helpers/move.md) - `quest mv` and `quest rm` keep every root-absolute link valid
 - [CI checks in wait](/quest/m0/helpers/wait-checks.md) - `quest wait` wakes on required check results for the head
-- [Claim quests](/quest/m0/helpers/claim.md) - `quest claim`, `--release`, and `quest unblocked --unclaimed`
-- [Named gate lock](/quest/m0/helpers/gate-lock.md) - `quest gate --lock <name>` serializes check-then-merge
+- [quest start](/quest/m0/helpers/start.md) - claim a quest with a labeled draft PR, `quest unblocked --unclaimed`, and CI on ready PRs only
+- [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
 - [Unattended triage](/quest/m0/helpers/afk.md) - an `afk` argument that only asks about merges and deletes
 
 ## Related
 
-- [Expensive command gate](/quest/m0/local-gate.md) - the gate the lock builds on
+- [Expensive command gate](/quest/m0/local-gate.md) - CPU admission for the checks these helpers wrap
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the agent-level load-average rules
