@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/auth";
-import app from "../src/index";
+import { app } from "../src/index";
 import { authenticator, cookie, enrolled, identity, oauth, options, origin, verify } from "./login-fixtures";
 
 afterEach(() => vi.restoreAllMocks());
@@ -42,7 +42,7 @@ describe("sign-in choices", () => {
 		const html = await (await SELF.fetch(`${origin}/docs`)).text();
 		expect(html).toContain('href="/sign-in?next=%2Fdocs"');
 		const unsafe = await (await SELF.fetch(`${origin}/sign-in?next=//evil.example`)).text();
-		expect(unsafe).toContain('data-next="/"');
+		expect(unsafe).toContain('data-next="/inbox"');
 	});
 	it("omits Google until both of its credentials are configured", async () => {
 		const unconfigured = { ...env, GOOGLE_CLIENT_SECRET: undefined };
@@ -73,7 +73,7 @@ describe("Google sign-in", () => {
 	it("creates its own account, without GitHub authority", async () => {
 		const who = identity("google");
 		const { response, session } = await oauth(who);
-		expect(response.headers.get("location")).toBe("/");
+		expect(response.headers.get("location")).toBe("/inbox");
 		expect(await linked(session!)).toEqual([`google:${who.id}`]);
 		const page = await (await SELF.fetch(`${origin}/account`, { headers: { Cookie: session! } })).text();
 		expect(page).toContain("Link GitHub to act on repositories");

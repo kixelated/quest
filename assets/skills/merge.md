@@ -9,6 +9,10 @@ If a draft, stop and offer `/quest-ready` instead.
 
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
+Automated reviewers often find something new on every push, so keep fixing their findings without asking, but checkpoint the design.
+Every fourth review round since the PR's last design change (one that reshapes the approach; fixing a finding is not one), stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
+Report that judgment and what remains unresolved, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
+Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.
 Interactively prompt the user with your recommendation and any alternatives.
@@ -30,6 +34,9 @@ Run each wait so its exit wakes you, such as a background task that notifies on
 exit, and end your turn until then. Never poll its output or rerun it under a
 foreground time limit; each wake rereads your whole context. The hour bound
 keeps that reread cached; a wake after the prompt cache expires rewrites it all.
+A headless process ends when its turn ends, killing its background commands:
+run each wait in the foreground instead, bounded by the shell's own time limit,
+and re-run it with `--since` until it returns activity.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.

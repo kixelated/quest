@@ -1205,3 +1205,141 @@ a.entry-title:hover {
 .project-select button {
 	justify-self: start;
 }
+
+/* The decision inbox: one active decision thread, phone first. */
+.inbox {
+	max-width: 46rem;
+}
+.inbox > section {
+	margin-block: 1.75rem;
+}
+.decision {
+	display: grid;
+	gap: 0.75rem;
+	margin-block: 1rem 1.5rem;
+}
+.decision h2 {
+	margin: 0;
+	font-size: 1.5rem;
+	overflow-wrap: anywhere;
+}
+.decision h3 {
+	margin: 0 0 0.25rem;
+	font-size: 1rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+}
+.decision p {
+	margin: 0;
+}
+/* Agent text keeps its line breaks but stays escaped text. */
+.decision .summary p,
+.history p {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+/* Entry meta sits in a log row's second column; in the thread it spans the one column. */
+.decision-meta {
+	grid-column: auto;
+	color: var(--ql-muted);
+}
+.decision-form {
+	display: grid;
+	gap: 1rem;
+}
+.decision-form button {
+	justify-self: start;
+}
+.ask {
+	display: grid;
+	gap: 0.5rem;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+.ask legend {
+	padding: 0;
+	margin-bottom: 0.5rem;
+	font-weight: 600;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+/* Each choice is a full-width tap target. */
+.choice {
+	display: grid;
+	grid-template-columns: 1.25rem 1fr;
+	gap: 0.6rem;
+	align-items: start;
+	padding: 0.7rem 0.8rem;
+	background: var(--ql-bg);
+	border: 1px solid var(--ql-rule);
+	border-radius: 4px;
+	cursor: pointer;
+}
+.choice:has(input:checked) {
+	border-color: var(--ql-accent);
+}
+.choice input {
+	margin: 0.2rem 0 0;
+	accent-color: var(--ql-accent);
+}
+.choice > span {
+	display: grid;
+	gap: 0.2rem;
+	overflow-wrap: anywhere;
+}
+.choice-why {
+	color: var(--ql-muted);
+	font-size: 0.92rem;
+	white-space: pre-wrap;
+}
+.tag {
+	justify-self: start;
+	padding: 0.05rem 0.4rem;
+	font: 600 0.75rem/1.4 var(--ql-font-display);
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--ql-bg);
+	background: var(--ql-accent);
+	border-radius: 2px;
+}
+.ask .free {
+	font-size: 0.92rem;
+	color: var(--ql-muted);
+}
+.ask textarea {
+	min-width: 0;
+	padding: 0.6rem;
+	color: var(--ql-text);
+	background: var(--ql-bg);
+	border: 1px solid var(--ql-rule);
+	border-radius: 4px;
+	font: inherit;
+	resize: vertical;
+}
+.decision-actions,
+.project-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+}
+.decision-actions form,
+.project-actions form {
+	margin: 0;
+}
+.decision-actions > p {
+	flex-basis: 100%;
+}
+.history summary,
+.skipped summary {
+	cursor: pointer;
+}
+.history ol {
+	display: grid;
+	gap: 0.5rem;
+	padding-left: 1.25rem;
+}
+.entry-title[aria-current] {
+	color: var(--ql-accent);
+}

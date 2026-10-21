@@ -29,10 +29,58 @@ interface Repository {
 	visibility: string;
 	default_branch: string;
 	license?: { spdx_id: string; name: string } | null;
+	allow_squash_merge?: boolean;
+	allow_merge_commit?: boolean;
+	allow_rebase_merge?: boolean;
 }
-export class GitHubError extends Error {}
+interface PullHead {
+	number: number;
+	node_id: string;
+	html_url: string;
+	state: string;
+	draft: boolean;
+	title: string;
+	body: string | null;
+	created_at: string;
+	head: { ref: string; sha: string; repo: { id: number; name: string; owner: { login: string } } | null };
+}
+export class GitHubError extends Error {
+	constructor(
+		message: string,
+		readonly status?: number,
+	) {
+		super(message);
+	}
+}
+/** A publication the bot cannot make, which needs a maintainer's decision rather than a retry. */
+export class PublicationBlocked extends GitHubError {}
+
+/** One file a publication sets or, with null content, deletes. */
+/** One path's new content, or null to delete it, with its Git mode: a file, an executable, or a symlink. */
+export type Change = { path: string; content: Uint8Array | null; mode: "100644" | "100755" | "120000" };
+/** What a job may publish: its workflow, its target, and its one branch. */
+export type Contribution = {
+	workflow: "plan" | "start" | "iterate" | "bootstrap";
+	target: string;
+	branch: string;
+	pull: number | null;
+	/** When the job was created, in milliseconds; older pull requests on its branch are not its own. */
+	createdAt: number;
+};
+/** The one branch a job may write, on the repository the service resolved for it. */
+export interface Branch {
+	repository: GitHubRepository;
+	/** The branch's commit, or null when it does not exist yet. */
+	head(): Promise<string | null>;
+	/** Create a commit of `changes` on `parent` without moving the branch. */
+	commit(parent: string, changes: Change[], message: string): Promise<string>;
+	/** Move the branch from `from` (null creates it) to `to`; false when it moved first. */
+	move(from: string | null, to: string): Promise<boolean>;
+}
 export type ContributionState = "enabled" | "paused";
 export type Enrollment = GitHubRepository & { state: ContributionState };
+/** A running job attempt whose project was disconnected, which its runner must stop. */
+export type Stopped = { actor: string; runner: string; job: string; attempt: number };
 export type ProjectPreview = {
 	repository: GitHubRepository;
 	branch: string;
@@ -66,10 +114,14 @@ function sha(value: string) {
 	if (!/^[a-f0-9]{40}$/.test(value)) throw new GitHubError("An exact commit SHA is required");
 	return value;
 }
-function branch(value: string) {
-	if (!/^quest\/[a-zA-Z0-9_/-]+$/.test(value) || value.includes("//") || value.endsWith("/"))
-		throw new GitHubError("A quest contribution branch is required");
-	return value;
+/** Whether Git accepts `name` as a branch, per `git check-ref-format`. */
+export function refName(name: string) {
+	return !/[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{|\/\/|(^|\/)\.|\.lock($|\/)|[/.]$|^\/|^@$/.test(name);
+}
+function pullNumber(target: string) {
+	const match = target.match(/^pulls\/(\d{1,15})$/);
+	if (!match) throw new GitHubError("Invalid pull request target");
+	return number(Number(match[1]));
 }
 
 /** Server-only integration. Call with an authenticated local session's user ID
@@ -107,7 +159,7 @@ export class GitHubService {
 			body: body === undefined ? undefined : JSON.stringify(body),
 		});
 		// Never include provider response bodies, request headers, or secrets in errors.
-		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`);
+		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`, response.status);
 		return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 	}
 
@@ -484,12 +536,44 @@ export class GitHubService {
 		);
 	}
 
+	/**
+	 * What a new job may start from: `resolve` picks it from current
+	 * observations, then this checks whether its revision has a flake for the
+	 * runner's devShell.
+	 */
+	jobSource<T extends { revision: string }>(
+		repo: GitHubRepository,
+		userId: string,
+		resolve: (state: ProjectState) => T,
+	) {
+		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
+			this.#public(current);
+			const enrolled = await this.#state(repo, installation);
+			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
+			const state = await this.#observations(repo, installation);
+			// Pending availability means a webhook or an unfinished pass left open PRs and claims unread.
+			if (!state || state.project.available === null)
+				throw new GitHubError("Refresh project activity before starting work");
+			// Check the revision the job will run, such as a pull request's head.
+			const job = resolve(state);
+			let flake = true;
+			try {
+				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
+			} catch (error) {
+				if (!(error instanceof GitHubError) || error.status !== 404) throw error;
+				flake = false;
+			}
+			return { job, enabled: enrolled === "enabled", flake };
+		});
+	}
+
 	previewProject(repo: GitHubRepository, userId: string) {
 		return this.#authorized(repo, userId, { contents: "read" }, (token, current, installation) =>
 			this.#preview(token, repo, current, installation),
 		);
 	}
 
+	/** Change a project's contribution state, returning the running job attempts a disconnect removed. */
 	setContributions(repo: GitHubRepository, userId: string, state: ContributionState | "disconnected") {
 		if (!["enabled", "paused", "disconnected"].includes(state)) throw new GitHubError("Invalid contribution state");
 		return this.#authorized(
@@ -517,8 +601,20 @@ export class GitHubService {
 				// Recheck the local revocation gate after potentially long content reads.
 				await this.#gate(installation);
 				if (state === "disconnected") {
-					await this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id).run();
-				} else if (state === "paused") {
+					// Jobs go with the project, so read the running attempts in the same transaction,
+					// and queue the deletion of any output objects, which R2 cannot do in it.
+					const [running] = await this.#env.DB.batch<Stopped>([
+						this.#env.DB.prepare(
+							"SELECT actor,runner,id AS job,attempt FROM jobs WHERE repository=? AND state='running'",
+						).bind(repo.id),
+						this.#env.DB.prepare(
+							"INSERT OR IGNORE INTO output_cleanup(job,at) SELECT DISTINCT a.job,? FROM job_output_attempts a JOIN jobs j ON j.id=a.job WHERE j.repository=?",
+						).bind(Date.now(), repo.id),
+						this.#env.DB.prepare("DELETE FROM github_projects WHERE id=?").bind(repo.id),
+					]);
+					return running!.results;
+				}
+				if (state === "paused") {
 					await this.#env.DB.prepare("UPDATE github_projects SET state='paused',updatedAt=? WHERE id=?")
 						.bind(Date.now(), repo.id)
 						.run();
@@ -536,6 +632,7 @@ export class GitHubService {
 						).bind(repo.id, repo.owner, repo.name, installation, userId, Date.now()),
 					]);
 				}
+				return [];
 			},
 			state !== "enabled",
 		);
@@ -584,69 +681,259 @@ export class GitHubService {
 		);
 	}
 
-	async createPullRequest(
+	/**
+	 * Hand `action` the one branch a job may write: its branch on the service
+	 * fork, or an iterated pull request's head when the bot can update it.
+	 * Rechecks the requester's current authority and the project's enrollment.
+	 */
+	contribute<T>(
 		upstream: GitHubRepository,
 		userId: string,
-		fork: GitHubRepository,
-		input: { branch: string; base: string; title: string; body: string },
+		job: Contribution,
+		action: (branch: Branch) => Promise<T>,
 	) {
-		this.#forkNamespace(fork);
-		if (!input.title.trim() || !input.base) throw new GitHubError("Approved pull request required");
-		return this.#authorized(upstream, userId, { pull_requests: "write" }, async (token) => {
-			await this.#withRepository(fork, {}, async (_token, current) => {
-				if (!current.fork || current.parent?.id !== upstream.id)
-					throw new GitHubError("Contribution repository must fork this upstream");
+		const iterate = job.workflow === "iterate";
+		return this.#authorized(
+			upstream,
+			userId,
+			iterate ? { pull_requests: "read" } : {},
+			async (token, current, installation) => {
+				this.#public(current);
+				if ((await this.#state(upstream, installation)) === null)
+					throw new GitHubError("Project is not enrolled for this installation");
+				if (!iterate)
+					return this.#fork(upstream, upstream.name, { contents: "write" }, (forkToken, fork) =>
+						action(this.#branch(forkToken, fork, job.branch)),
+					);
+				const pull = await this.#api<PullHead>(
+					token,
+					`${repositoryPath(upstream)}/pulls/${pullNumber(job.target)}`,
+				);
+				if (pull.state !== "open" || pull.head.ref !== job.branch)
+					throw new GitHubError("The pull request was closed or its head branch changed");
+				const head = pull.head.repo;
+				if (head?.id === upstream.id)
+					return this.#withRepository(upstream, { contents: "write" }, async (writeToken, latest) =>
+						action(this.#branch(writeToken, latest, job.branch)),
+					);
+				if (head && this.#forkOwner(head.owner.login))
+					return this.#fork(upstream, head.name, { contents: "write" }, (forkToken, fork) => {
+						if (fork.id !== head.id) throw new GitHubError("Repository identity or availability changed");
+						return action(this.#branch(forkToken, fork, job.branch));
+					});
+				throw new PublicationBlocked(
+					"The pull request's head is in a contributor's fork, which the bot cannot update. Ask its author to apply the changes, or close it and start new work.",
+				);
+			},
+		);
+	}
+
+	#forkOwner(owner: string) {
+		return !!this.#env.GITHUB_FORK_OWNER && owner.toLowerCase() === this.#env.GITHUB_FORK_OWNER.toLowerCase();
+	}
+
+	/** The operator-provisioned fork of `upstream` in the service namespace, verified by parent ID. */
+	async #fork<T>(
+		upstream: GitHubRepository,
+		repository: string,
+		permissions: Permissions,
+		action: (token: string, fork: Repository) => Promise<T>,
+	) {
+		const owner = this.#env.GITHUB_FORK_OWNER;
+		if (!owner || !name(owner)) throw new GitHubError("Configured service fork namespace required");
+		const missing = new GitHubError(`Provision the service fork ${owner}/${repository} of this upstream first`);
+		// Only a missing installation or repository means the fork is unprovisioned.
+		let found = false;
+		try {
+			return await this.#withInstallation({ owner, name: repository }, permissions, async (token) => {
+				const fork = await this.#api<Repository>(token, `/repos/${owner}/${repository}`);
+				if (
+					!fork.fork ||
+					fork.parent?.id !== upstream.id ||
+					!this.#forkOwner(fork.owner.login) ||
+					fork.archived ||
+					fork.disabled
+				)
+					throw missing;
+				found = true;
+				return action(token, fork);
 			});
-			return this.#api(token, `${repositoryPath(upstream)}/pulls`, "POST", {
-				head: `${fork.owner}:${branch(input.branch)}`,
-				head_repo: fork.name,
-				base: input.base,
-				title: input.title,
-				body: input.body,
-				draft: true,
-				// The upstream-scoped token has no write access to the fork's head
-				// branch, so it cannot grant maintainers edits there. Installation
-				// tokens cannot span both owners; the fork token only pushes.
-				maintainer_can_modify: false,
-			});
+		} catch (error) {
+			throw !found && error instanceof GitHubError && error.status === 404 ? missing : error;
+		}
+	}
+
+	#branch(token: string, repo: Repository, branch: string): Branch {
+		if (!refName(branch) || branch === repo.default_branch)
+			throw new PublicationBlocked("Jobs never write a repository's default branch");
+		const path = `/repos/${repo.owner.login}/${repo.name}`;
+		const ref = branch.split("/").map(encodeURIComponent).join("/");
+		const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+		return {
+			repository: { owner: repo.owner.login, name: repo.name, id: repo.id },
+			head: async () => {
+				try {
+					const found = await this.#api<{ object: { sha: string; type: string } }>(
+						token,
+						`${path}/git/ref/heads/${ref}`,
+					);
+					if (found.object.type !== "commit") throw new GitHubError("Branch must point at a commit");
+					return sha(found.object.sha);
+				} catch (error) {
+					if (error instanceof GitHubError && error.status === 404) return null;
+					throw error;
+				}
+			},
+			commit: async (parent, changes, message) => {
+				const base = await this.#api<{ tree: { sha: string } }>(token, `${path}/git/commits/${sha(parent)}`);
+				const tree = [];
+				for (const change of changes) {
+					const mode = change.mode;
+					if (change.content === null) {
+						tree.push({ path: change.path, mode, type: "blob", sha: null });
+						continue;
+					}
+					// Text goes inline in the tree request; other bytes need their own blob.
+					let content: string | null = null;
+					try {
+						content = text.decode(change.content);
+					} catch {}
+					if (content !== null && !content.includes("\0")) {
+						tree.push({ path: change.path, mode, type: "blob", content });
+						continue;
+					}
+					const blob = await this.#api<{ sha: string }>(token, `${path}/git/blobs`, "POST", {
+						content: Buffer.from(change.content).toString("base64"),
+						encoding: "base64",
+					});
+					tree.push({ path: change.path, mode, type: "blob", sha: sha(blob.sha) });
+				}
+				const created = await this.#api<{ sha: string }>(token, `${path}/git/trees`, "POST", {
+					base_tree: sha(base.tree.sha),
+					tree,
+				});
+				// No author or committer: GitHub attributes and signs the commit as the App.
+				const commit = await this.#api<{ sha: string }>(token, `${path}/git/commits`, "POST", {
+					message,
+					tree: sha(created.sha),
+					parents: [parent],
+				});
+				return sha(commit.sha);
+			},
+			move: async (from, to) => {
+				try {
+					if (from === null)
+						await this.#api(token, `${path}/git/refs`, "POST", {
+							ref: `refs/heads/${branch}`,
+							sha: sha(to),
+						});
+					// Fast-forward only, so an update built on a stale head cannot overwrite newer work.
+					else
+						await this.#api(token, `${path}/git/refs/heads/${ref}`, "PATCH", {
+							sha: sha(to),
+							force: false,
+						});
+					return true;
+				} catch (error) {
+					if (error instanceof GitHubError && (error.status === 409 || error.status === 422)) return false;
+					throw error;
+				}
+			},
+		};
+	}
+
+	/**
+	 * Open the job's pull request from its service fork branch, or update the
+	 * one it already opened. A closed pull request is not replaced.
+	 */
+	deliver(
+		upstream: GitHubRepository,
+		userId: string,
+		job: Contribution,
+		input: { title: string; body: string; draft: boolean },
+	) {
+		if (job.workflow === "iterate")
+			throw new GitHubError("An iteration updates its pull request's head and opens no pull request");
+		return this.#authorized(upstream, userId, { pull_requests: "write" }, async (token, current, installation) => {
+			this.#public(current);
+			if ((await this.#state(upstream, installation)) !== "enabled")
+				throw new GitHubError("Contributions are paused");
+			const fork = await this.#fork(upstream, upstream.name, {}, async (_token, fork) => fork);
+			const pulls = `${repositoryPath(upstream)}/pulls`;
+			const label = `${fork.owner.login}:${job.branch}`;
+			// An unrecorded earlier delivery may have opened one, which the maintainer may since have closed.
+			// GitHub reports whole seconds, so compare against the second the job was created in.
+			const since = Math.floor(job.createdAt / 1000) * 1000;
+			const opened = async () =>
+				(
+					await this.#api<PullHead[]>(
+						token,
+						`${pulls}?state=all&per_page=100&head=${encodeURIComponent(label)}`,
+					)
+				).find((pull) => Date.parse(pull.created_at) >= since) ?? null;
+			let pull = job.pull ? await this.#api<PullHead>(token, `${pulls}/${number(job.pull)}`) : await opened();
+			if (pull && (pull.head.repo?.id !== fork.id || pull.head.ref !== job.branch))
+				throw new GitHubError("The job's pull request no longer comes from its branch");
+			if (pull && pull.state !== "open")
+				throw new GitHubError("The job's pull request was closed; reopen it on GitHub to deliver again");
+			if (!pull) {
+				try {
+					pull = await this.#api<PullHead>(token, pulls, "POST", {
+						head: label,
+						// GitHub requires the head repository for cross-organization pull requests.
+						head_repo: fork.name,
+						base: current.default_branch,
+						title: input.title,
+						body: input.body,
+						draft: input.draft,
+						// Installation tokens cannot span both owners, so the upstream
+						// token cannot grant maintainers edits on the fork branch.
+						maintainer_can_modify: false,
+					});
+				} catch (error) {
+					// A concurrent delivery may have opened it first.
+					if (!(error instanceof GitHubError) || error.status !== 422) throw error;
+					pull = await opened();
+					if (pull?.state !== "open") throw error;
+				}
+			}
+			if (pull.title !== input.title || pull.body !== input.body)
+				pull = await this.#api<PullHead>(token, `${pulls}/${number(pull.number)}`, "PATCH", {
+					title: input.title,
+					body: input.body,
+				});
+			// Finished work leaves draft; a maintainer's own choice to mark it ready is never reverted.
+			if (pull.draft && !input.draft) {
+				const result = await this.#api<{ errors?: unknown[] }>(token, "/graphql", "POST", {
+					query: "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }",
+					variables: { id: pull.node_id },
+				});
+				if (result.errors?.length) throw new GitHubError("Could not mark the pull request ready for review");
+				pull = { ...pull, draft: false };
+			}
+			return { number: number(pull.number), url: pull.html_url, draft: pull.draft };
 		});
 	}
 
-	#forkNamespace(fork: GitHubRepository) {
-		if (!this.#env.GITHUB_FORK_OWNER || fork.owner.toLowerCase() !== this.#env.GITHUB_FORK_OWNER.toLowerCase())
-			throw new GitHubError("Configured service fork namespace required");
-	}
-
-	publishQuest(
-		upstream: GitHubRepository,
-		userId: string,
-		fork: GitHubRepository,
-		input: { branch: string; path: string; content: string; message: string; previousBlob?: string },
-	) {
-		this.#forkNamespace(fork);
-		if (!/^quest\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.md$/.test(input.path) || !input.message.trim())
-			throw new GitHubError("Approved quest file required");
-		return this.#authorized(upstream, userId, {}, async () =>
-			this.#withRepository(fork, { contents: "write" }, async (token, current) => {
-				if (!current.fork || current.parent?.id !== upstream.id)
-					throw new GitHubError("Contribution repository must fork this upstream");
-				return this.#api(token, `${repositoryPath(fork)}/contents/${input.path}`, "PUT", {
-					branch: branch(input.branch),
-					path: input.path,
-					content: Buffer.from(input.content).toString("base64"),
-					message: input.message,
-					...(input.previousBlob ? { sha: sha(input.previousBlob) } : {}),
-				});
-			}),
-		);
-	}
-
+	/**
+	 * Merge exactly `expectedHead` with the first method the repository
+	 * allows: squash, then a merge commit, then rebase. GitHub enforces branch
+	 * rules, reviews, and checks.
+	 */
 	mergePullRequest(repo: GitHubRepository, userId: string, pull: number, expectedHead: string) {
-		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, (token) =>
-			this.#api(token, `${repositoryPath(repo)}/pulls/${number(pull)}/merge`, "PUT", {
+		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, (token, current) => {
+			const method = current.allow_squash_merge
+				? "squash"
+				: current.allow_merge_commit
+					? "merge"
+					: current.allow_rebase_merge
+						? "rebase"
+						: null;
+			if (!method) throw new GitHubError("The repository allows no merge method");
+			return this.#api(token, `${repositoryPath(repo)}/pulls/${number(pull)}/merge`, "PUT", {
 				sha: sha(expectedHead),
-				merge_method: "merge",
-			}),
-		);
+				merge_method: method,
+			});
+		});
 	}
 }

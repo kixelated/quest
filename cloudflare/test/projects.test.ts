@@ -1,13 +1,13 @@
 import { env } from "cloudflare:workers";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 import { readBoard } from "../src/board/model";
 import type { ActivityPage } from "../src/github/state";
 import { GitHubService } from "../src/github/service";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
-import { delivery } from "./webhook";
+import { delivery } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const repo = { owner: "upstream", name: "project", id: 10 };
@@ -809,7 +809,7 @@ describe("enrolled project observations", () => {
 			["status", {}],
 			["issues", { action: "opened", issue: { id: 102, number: 5 } }],
 			["issue_comment", { action: "created", issue: { id: 100, number: 1 } }],
-			["pull_request", { action: "synchronize", pull_request: { id: 201, number: 2 } }],
+			["pull_request", { action: "edited", pull_request: { id: 201, number: 2 } }],
 			["pull_request_review", { action: "submitted", pull_request: { id: 201, number: 2 } }],
 			["push", { ref: "refs/heads/human-branch" }],
 			["push", { ref: "refs/heads/quest/first", created: false, deleted: false }],
@@ -832,6 +832,7 @@ describe("enrolled project observations", () => {
 	it.each([
 		["pull_request", { action: "opened", pull_request: { id: 202, number: 4 } }],
 		["pull_request", { action: "reopened", pull_request: { id: 202, number: 4 } }],
+		["pull_request", { action: "synchronize", pull_request: { id: 202, number: 4 } }],
 		["push", { ref: "refs/heads/quest/first", created: true }],
 		["push", { ref: "refs/heads/trunk" }],
 	] as const)("withholds candidates after %s %j until a refresh rereads occupancy", async (name, payload) => {

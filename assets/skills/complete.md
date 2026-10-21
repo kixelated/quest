@@ -18,6 +18,7 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 
 Include a brief summary of each PR.
 Act on a PR only after the user picks its action in this session, including PRs found on a later refresh.
+A pick covers the PR until it lands or needs the user: when its push draws new review findings, send the agent back without asking, and apply the merge skill's design checkpoint across those rounds.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
 

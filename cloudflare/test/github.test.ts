@@ -2,10 +2,10 @@ import { env } from "cloudflare:workers";
 import { createPublicKey, verify } from "node:crypto";
 import { privateKey } from "./github-key";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 import { GitHubService, type GitHubRepository } from "../src/github/service";
 import { deliveryRetention } from "../src/github/webhook";
-import { delivery } from "./webhook";
+import { delivery } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const repo: GitHubRepository = { owner: "upstream", name: "project", id: 10 };
@@ -191,6 +191,7 @@ function github(
 		missing?: boolean;
 		permissions?: Record<string, string>;
 		parent?: number;
+		merges?: ("squash" | "merge" | "rebase")[];
 		cleanupFails?: boolean;
 		failMutation?: boolean;
 	} = {},
@@ -239,6 +240,9 @@ function github(
 				disabled: false,
 				fork: isFork,
 				parent: { id: options.parent ?? 10 },
+				allow_squash_merge: (options.merges ?? ["squash", "merge", "rebase"]).includes("squash"),
+				allow_merge_commit: (options.merges ?? ["squash", "merge", "rebase"]).includes("merge"),
+				allow_rebase_merge: (options.merges ?? ["squash", "merge", "rebase"]).includes("rebase"),
 			});
 		}
 		if (method !== "GET")
@@ -309,61 +313,27 @@ describe("trusted App operations", () => {
 		await expect(service.comment(repo, "app-test", 1, "Approved")).rejects.toThrow("issues permission");
 		expect(requests.length).toBe(1);
 	});
-	it("uses separate fork and upstream scopes and verifies the parent", async () => {
-		const input = { branch: "quest/m0/one", base: "main", title: "Approved", body: "Approved" };
-		const { service, requests } = github();
-		await service.createPullRequest(repo, "app-test", fork, input);
-		expect(requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.body)).toEqual([
-			{ repository_ids: [10], permissions: { metadata: "read", pull_requests: "write" } },
-			{ repository_ids: [20], permissions: { metadata: "read" } },
-		]);
-		expect(requests.find((r) => r.path.endsWith("/pulls"))?.body).toMatchObject({
-			head: "quest-bot-forks:quest/m0/one",
-			head_repo: "project",
-			draft: true,
-			maintainer_can_modify: false,
-		});
-		expect(requests.find((r) => r.path.endsWith("/pulls"))?.authorization).toBe("Bearer upstream-token");
-		await expect(github({ parent: 999 }).service.createPullRequest(repo, "app-test", fork, input)).rejects.toThrow(
-			"fork this upstream",
-		);
-		await expect(
-			github().service.createPullRequest(repo, "app-test", { ...fork, owner: "attacker" }, input),
-		).rejects.toThrow("namespace");
-	});
-	it("restricts approved publication to quests in service fork branches", async () => {
-		const { service, requests } = github();
-		await service.publishQuest(repo, "app-test", fork, {
-			branch: "quest/m0/one",
-			path: "quest/m0/one.md",
-			content: "# [S] One",
-			message: "Approved",
-		});
-		expect(requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.body)).toEqual([
-			{ repository_ids: [10], permissions: { metadata: "read" } },
-			{ repository_ids: [20], permissions: { metadata: "read", contents: "write" } },
-		]);
-		expect(() =>
-			service.publishQuest(repo, "app-test", fork, {
-				branch: "main",
-				path: ".github/workflows/run.yml",
-				content: "",
-				message: "Approved",
-			}),
-		).toThrow("quest file");
-	});
-	it("pins explicit merges to the approved commit SHA", async () => {
-		const { service, requests } = github();
+	it.each([
+		[["squash", "merge", "rebase"], "squash"],
+		[["merge", "rebase"], "merge"],
+		[["rebase"], "rebase"],
+	] as const)("pins explicit merges to the approved commit SHA with %j allowed", async (merges, method) => {
+		const { service, requests } = github({ merges: [...merges] });
 		await service.mergePullRequest(repo, "app-test", 1, "a".repeat(40));
 		expect(requests.find((r) => r.path.endsWith("/merge"))?.body).toEqual({
 			sha: "a".repeat(40),
-			merge_method: "merge",
+			merge_method: method,
 		});
 		expect(requests.find((r) => r.path.endsWith("/access_tokens"))?.body.permissions).toEqual({
 			metadata: "read",
 			contents: "write",
 			pull_requests: "write",
 		});
+	});
+	it("refuses to merge when the repository allows no merge method", async () => {
+		const { service, requests } = github({ merges: [] });
+		await expect(service.mergePullRequest(repo, "app-test", 1, "a".repeat(40))).rejects.toThrow("no merge method");
+		expect(requests.some((r) => r.path.endsWith("/merge"))).toBe(false);
 	});
 	it("reads provider data with read-only permissions", async () => {
 		const { service, requests } = github();

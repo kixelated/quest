@@ -33,13 +33,12 @@ Decided 2026-10-15 in the decisions-not-implementations interview:
   encryption and VAPID signing work in the Workers runtime with WebCrypto
   before choosing a library. Keep payloads minimal (project and decision
   title), since the full context loads in the app.
+- Show an unread decision count in the nav and, where the Badging API is
+  supported, on the installed app icon. Decided 2026-10-18 as a follow-up of
+  the decision inbox (#144), folded here rather than its own quest.
 - Make the installed app phone-first: the inbox, prompts, and activity cards
   fit a narrow viewport and work with touch and keyboard.
 - Sources:
   [Web Push on iOS](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/),
   [Push API](https://developer.mozilla.org/en-US/docs/Web/API/Push_API),
   and [RFC 8291](https://www.rfc-editor.org/rfc/rfc8291).
-
-## Required
-
-- [Decision inbox](/quest/m0/kix/prompts.md) - the decision items that notifications open
