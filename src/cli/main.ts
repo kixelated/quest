@@ -7,6 +7,7 @@ import { Command, CommanderError, InvalidArgumentError, Option } from "commander
 
 import { description, version } from "../../package.json";
 import { blockers, check, formatFinding, label, lookup, ready, renderBlocker, unblocked } from "../core";
+import { landed } from "./landed";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
@@ -54,9 +55,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("check")
-		.description("Report every structural mistake in the tree; exit non-zero if any")
-		.action(() => {
+		.summary("Report every structural mistake in the tree; exit non-zero if any")
+		.description(
+			"Report every structural mistake in the tree; exit non-zero if any.\n\n" +
+				"With --base, also check that a PR from a quest's branch leaves that quest accurate. When the branch " +
+				"is quest/<path>, naming quest/<path>.md or an epic's quest/<path>/README.md at the merge base with " +
+				"<ref>, the working tree must delete or edit that file; a PR that finishes the quest deletes it, and " +
+				"one that leaves work rewrites it to what remains. Any other branch adds no finding. Fetch <ref> " +
+				"first: a stale base can predate the quest and skip it.",
+		)
+		.option("--base <ref>", "Also check the quest branch's diff from its merge base with this ref")
+		.option("--branch <name>", "The PR's head branch, when it differs from the current branch (needs --base)")
+		.action((options: { base?: string; branch?: string }) => {
+			if (options.branch !== undefined && options.base === undefined) {
+				throw new UsageError("--branch requires --base");
+			}
 			const findings = check(load(root()), (path) => exists(root(), path));
+			if (options.base !== undefined) findings.push(...landed(root(), options.base, options.branch));
 			if (findings.length === 0) {
 				const count = collect(root()).length;
 				print(theme ? theme.checked(count) : `quest: ${count} documents ok`);

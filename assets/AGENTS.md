@@ -125,6 +125,11 @@ For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 Push claims and updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
 
+A quest's PR leaves its quest accurate when it merges.
+The PR that finishes a quest deletes its file and every link to it.
+A PR that leaves work rewrites the quest to what remains, rather than noting it only in the PR body.
+`quest check --base <ref>` flags a quest branch whose diff does neither.
+
 When a quest is complete with no open decisions, mark its PR ready for review.
 Otherwise keep it a draft and list its open decisions, or what remains unfinished, in the body.
 A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.

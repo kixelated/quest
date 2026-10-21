@@ -35,7 +35,6 @@ ownership-manifest design:
 
 ## Required
 
-- [Accurate landed quests](/quest/m0/landed-quests.md) - a quest-branch PR deletes or rewrites its quest, and `quest check --base` refuses one that does neither
 - [Expensive command gate](/quest/m0/local-gate.md) - shared CPU admission across worktrees and repositories
 - [Recoverable worktrees](/quest/m0/worktree.md) - disk admission, checkpoints, release, and restore
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
