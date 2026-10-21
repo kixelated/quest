@@ -1,3 +1,4 @@
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
@@ -207,9 +208,10 @@ async function running(extra: Partial<store.NewJob> = {}, now = 0) {
 async function fail(id: string) {
 	await store.finish(db, machine, id, 1, { outcome: "failed", summary: "Failed", result: undefined }, 0);
 }
-function publish(body: Record<string, unknown>, token = machine.token) {
+async function publish(body: Record<string, unknown>, token = machine.token) {
 	const text = JSON.stringify(body);
-	return app.request(
+	const ctx = createExecutionContext();
+	const response = await app.request(
 		`${origin}/api/runner/publish`,
 		{
 			method: "POST",
@@ -221,7 +223,10 @@ function publish(body: Record<string, unknown>, token = machine.token) {
 			body: text,
 		},
 		testEnv,
+		ctx,
 	);
+	await waitOnExecutionContext(ctx);
+	return response;
 }
 const file = (path: string, content: string, executable?: boolean) => ({
 	path,

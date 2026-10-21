@@ -12,6 +12,8 @@ full prompt in the app.
 - Decided 2026-10-15: the native app follows the m0 PWA. It adds what Web
   Push cannot do on every platform: notification quick replies and native
   delivery.
+- Extend the PWA's push events and coalescing (`cloudflare/src/push/`)
+  rather than defining a second set.
 - Reuse the service's decision API, authorization, and stale/duplicate-answer
   checks. A quick reply is a normal answer bound to the decision's revision,
   not a second path with weaker checks.
@@ -21,7 +23,3 @@ full prompt in the app.
   example React Native/Expo). Research the current options when this starts
   and choose with the user. Split any app-store account setup that waits on a
   human into its own quest.
-
-## Required
-
-- [Mobile web app](/quest/m0/kix/mobile.md) - the push events and phone-first UI this extends

@@ -22,7 +22,7 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 	]);
 	const data = world();
 	vi.spyOn(globalThis, "fetch").mockImplementation(fakeGitHub(data));
-	// Webhooks read in the background, so each request finishes its `waitUntil` work.
+	// Webhooks read and notify in the background, so each request finishes its `waitUntil` work.
 	const request = async (path: string, init?: RequestInit) => {
 		const ctx = createExecutionContext();
 		const response = await app.request(`${origin}${path}`, init, testEnv, ctx);

@@ -22,6 +22,8 @@ export type Page = {
 	// The current path, where signing in returns.
 	path: string;
 	user: User | null;
+	/** The signed-in maintainer's new decisions, for the nav and the installed app's badge. */
+	unread: number;
 	crumbs?: Crumb[];
 };
 
@@ -40,20 +42,27 @@ export function Layout(props: Page & { children: Child }) {
 				<meta property="og:image" content={`${props.origin}/theme/og.png`} />
 				<meta name="twitter:card" content="summary_large_image" />
 				<link rel="icon" href="/theme/logo.svg" type="image/svg+xml" />
+				<link rel="manifest" href="/manifest.webmanifest" />
+				<link rel="apple-touch-icon" href="/theme/icon-192.png" />
 				<link rel="preconnect" href="https://fonts.googleapis.com" />
 				<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 				<link rel="stylesheet" href={fonts} />
 				<link rel="stylesheet" href="/theme/theme.css" />
 				<link rel="stylesheet" href="/site.css" />
 			</head>
-			<body>
+			<body data-unread={props.user ? String(props.unread) : undefined}>
 				<header class="site-header">
 					<nav class="wrap nav" aria-label="Site">
 						<a class="brand" href="/">
 							<img src="/theme/logo.svg" alt="" width="32" height="32" />
 							Quest
 						</a>
-						{props.user && <a href="/inbox">Decisions</a>}
+						{props.user && (
+							<a href="/inbox" aria-label={props.unread ? `Decisions, ${props.unread} new` : undefined}>
+								Decisions
+								{props.unread > 0 && <span class="count">{props.unread}</span>}
+							</a>
+						)}
 						<a href="/repos/quest">Quests</a>
 						<a href="/projects">Projects</a>
 						<a href="/docs">Docs</a>
@@ -84,6 +93,7 @@ export function Layout(props: Page & { children: Child }) {
 					</p>
 				</footer>
 				<script>{raw(copyScript)}</script>
+				{props.user && <script src="/app.js" defer></script>}
 			</body>
 		</html>
 	);
@@ -124,6 +134,26 @@ export function Paste(props: { id: string; text: string }) {
 			<code id={props.id}>{props.text}</code>
 			<button class="button" type="button" data-copy={props.id} hidden>
 				Copy
+			</button>
+		</div>
+	);
+}
+
+/**
+ * Turning decision notifications on or off for this device. /app.js reveals
+ * the control that fits the browser, and asks for permission only when the
+ * enable button is clicked. `compact` hides it once this device is on.
+ */
+export function Notifications(props: { publicKey: string | null; compact?: boolean }) {
+	if (!props.publicKey) return null;
+	return (
+		<div class="notify" data-push={props.publicKey} data-compact={props.compact ? "" : undefined} hidden>
+			<p class="muted" role="status" aria-live="polite" data-push-status></p>
+			<button class="button primary" type="button" data-push-enable hidden>
+				Notify me on this device
+			</button>
+			<button class="button quiet" type="button" data-push-disable hidden>
+				Turn off on this device
 			</button>
 		</div>
 	);
