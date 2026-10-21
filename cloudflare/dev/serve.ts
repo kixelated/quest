@@ -80,6 +80,9 @@ const mf = new Miniflare(
 					GITHUB_FORK_OWNER: "quest-dev-forks",
 					GOOGLE_CLIENT_ID: "",
 					GOOGLE_CLIENT_SECRET: "",
+					// Notifications stay off: a push would leave localhost for a real push service.
+					VAPID_PUBLIC_KEY: "",
+					VAPID_PRIVATE_KEY: "",
 				},
 				// Every outbound request goes to the fake; nothing reaches the network.
 				outboundService: async (request) => {

@@ -165,6 +165,18 @@ square. It carries its own fill, so it reads on light and dark pages, and it
 stays legible at 16 px for favicons. Use it as is: do not recolour it, add
 text inside it, or pair it with game art.
 
+[`theme/icon.svg`](theme/icon.svg) is the installed app's icon: the same `!`
+on a full-bleed amber square, since home screens round or mask icons
+themselves, with the `!` inside the maskable safe zone. `icon-192.png` and
+`icon-512.png` are its exports:
+
+```sh
+for size in 192 512; do
+  google-chrome --headless=new --hide-scrollbars --window-size=$size,$size \
+    --screenshot=design/theme/icon-$size.png "file://$PWD/design/theme/icon.svg"
+done
+```
+
 ## Social image
 
 [`theme/og.svg`](theme/og.svg) is the source and
