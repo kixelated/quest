@@ -16,7 +16,7 @@ its epics and quests with their statuses, filtered by status with
 `?show=available` and the like. Each quest has a page at its path without
 `.md`, such as `/repos/quest/quest/m0/kix/prompts`: its Markdown rendered
 with raw HTML escaped, its status, and what to do next. Readiness comes from
-`quest/core`, so the board agrees with `quest ready`. Progress counts finished
+`quest/core`, so the board agrees with `quest unblocked`. Progress counts finished
 quests, which merges delete, from Git history (`scripts/history.ts`), weighted
 by size. A deletion counts only when its commit changed something outside
 `quest/`, since deleting only plans abandons a quest.

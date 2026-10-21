@@ -96,8 +96,14 @@ export class GitHub {
 		if (this.deps.now() >= this.deadline) throw new GitHubDeadline();
 	}
 
-	/** A 200 or 304 response; anything else fails after rate-limit retries. */
-	async request(path: string, etag?: string, payload?: unknown): Promise<Response> {
+	/**
+	 * A 2xx or 304 response; anything else fails after rate-limit retries, with
+	 * GitHub's reason when it gives one. `body` makes it a POST unless `method` says otherwise.
+	 */
+	async request(
+		path: string,
+		options: { etag?: string; body?: unknown; method?: "POST" | "PATCH" } = {},
+	): Promise<Response> {
 		// Follow only same-origin pagination links; never send a token to another host.
 		const url = new URL(path, API);
 		if (url.origin !== API || url.username || url.password) throw new Error("invalid GitHub pagination URL");
@@ -108,13 +114,15 @@ export class GitHub {
 			let response: Response;
 			try {
 				response = await this.deps.fetch(url, {
-					...(payload === undefined ? {} : { method: "POST", body: JSON.stringify(payload) }),
+					...(options.body === undefined
+						? {}
+						: { method: options.method ?? "POST", body: JSON.stringify(options.body) }),
 					headers: {
 						Accept: "application/vnd.github+json",
 						Authorization: `Bearer ${this.deps.token}`,
 						"X-GitHub-Api-Version": "2022-11-28",
 						"User-Agent": "quest",
-						...(etag ? { "If-None-Match": etag } : {}),
+						...(options.etag ? { "If-None-Match": options.etag } : {}),
 					},
 					...(Number.isFinite(remaining) ? { signal: AbortSignal.timeout(Math.ceil(remaining)) } : {}),
 				});
@@ -123,7 +131,7 @@ export class GitHub {
 				throw error;
 			}
 			this.pollInterval = Math.max(this.pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
-			if (response.status === 200 || response.status === 304) return response;
+			if (response.ok || response.status === 304) return response;
 			const body = await response.text();
 			const limited =
 				response.status === 429 ||
@@ -133,7 +141,7 @@ export class GitHub {
 						/rate limit/i.test(body)));
 			if (!limited || attempts >= 6)
 				throw new Error(
-					`GitHub HTTP ${response.status} for ${url.pathname}; ${limited ? "rate limit persisted" : "check repository access and token permissions"}`,
+					`GitHub HTTP ${response.status} for ${url.pathname}; ${limited ? "rate limit persisted" : (explanation(body) ?? "check repository access and token permissions")}`,
 				);
 			const retry = seconds(response.headers.get("retry-after"));
 			const reset =
@@ -168,7 +176,7 @@ export class GitHub {
 
 	/** Run a GraphQL query and return its data, failing on any reported error. */
 	async graphql(query: string, variables: ObjectValue): Promise<ObjectValue> {
-		const response = await this.request("/graphql", undefined, { query, variables });
+		const response = await this.request("/graphql", { body: { query, variables } });
 		const body = object(await response.json());
 		if (body.errors !== undefined)
 			throw new Error(
@@ -213,6 +221,18 @@ export function link(response: Response, relation: string): string | undefined {
 		?.split(",")
 		.map((entry) => /<([^>]+)>;\s*rel="([^"]+)"/.exec(entry.trim()))
 		.find((match) => match?.[2] === relation)?.[1];
+}
+
+/** GitHub's reason in an error body, such as why it refused to create a pull request. */
+function explanation(body: string): string | undefined {
+	try {
+		const parsed = object(JSON.parse(body));
+		const errors = Array.isArray(parsed.errors) ? (parsed.errors as unknown[]) : [];
+		const parts = [parsed.message, ...errors.map((error) => (error as ObjectValue | null)?.message)];
+		return parts.filter((part): part is string => typeof part === "string" && part !== "").join(": ") || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function seconds(value: string | null): number | undefined {

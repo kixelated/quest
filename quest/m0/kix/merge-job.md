@@ -12,7 +12,7 @@ PR.
 ## Plan
 
 Decided 2026-10-20 (user) from the transcript audit recorded in
-[quest start](/quest/m0/helpers/start.md). Locally, a long-lived
+[quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md). Locally, a long-lived
 `/quest-complete` session per repository (median about 31 PR merges in moq)
 sends sub-agents to fix PRs, and the user's pick covers a PR until it lands
 or needs them.

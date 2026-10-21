@@ -225,7 +225,7 @@ async function watch(
 		return async (): Promise<ObjectValue[]> => {
 			const rows: ObjectValue[] = [];
 			for (;;) {
-				const response = await github.request(path, etag);
+				const response = await github.request(path, { etag });
 				if (response.status === 304) {
 					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
 					return rows;

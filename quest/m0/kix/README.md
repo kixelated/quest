@@ -85,7 +85,7 @@ operator-paid-hosting decisions:
   quest branches and PRs, which count as claims and get the usual PR
   decision items. There is no plugin or session mirroring.
 - **One owner per quest and PR** (decided 2026-10-20 from a transcript
-  audit, see [quest start](/quest/m0/helpers/start.md)). Claims are draft
+  audit, see [quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md)). Claims are draft
   PRs. A PR is owned while it is a draft without a `## Decisions needed`
   section or carries one `quest:*` state label, shared with local sessions. There is no repository-wide merge agent and no user-facing
   parallelism limit; runner slots and account quota cap it.
