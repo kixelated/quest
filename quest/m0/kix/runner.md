@@ -88,4 +88,4 @@ replacing the hosted Agent SDK runtime:
 
 ## Required
 
-- [Worktree process ownership](/quest/m0/worktree.md) - reuse checkout supervision, checkpoints, and disk admission
+- [Worktree process ownership](/quest/m0/worktree.md) - reuse checkout supervision, scratch release, and disk admission

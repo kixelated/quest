@@ -172,7 +172,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	const worktree = program
 		.command("worktree")
-		.description("Reserve disk and checkpoint, release, or restore private Git checkouts");
+		.description("Reserve disk for Git checkouts and release it by pruning their scratch in place");
 	const state = () => new Worktrees();
 	const record = (value: unknown) => print(JSON.stringify(value));
 	worktree
@@ -183,39 +183,24 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 	worktree
 		.command("status")
-		.description("Print reservations, retained recovery bytes, and checkouts as JSON")
+		.description("Print the capacity, allocated bytes, and checkouts as JSON")
 		.action(() => record(state().status()));
 	worktree
 		.command("create <name>")
 		.description("Create an exclusively owned detached Git worktree under .worktrees/")
-		.requiredOption(
-			"--reserve <bytes>",
-			"Checkout, expected build growth, and checkpoint bytes",
-			positiveInteger("bytes"),
-		)
+		.requiredOption("--reserve <bytes>", "Checkout and expected build growth in bytes", positiveInteger("bytes"))
 		.option("--ref <ref>", "Initial Git revision", "HEAD")
 		.action((name: string, options: { reserve: number; ref: string }) =>
 			record(state().create(root(), name, options.reserve, options.ref)),
 		);
-	for (const operation of ["checkpoint", "release"] as const) {
-		worktree
-			.command(`${operation} <id>`)
-			.description(
-				operation === "checkpoint"
-					? "Preserve source, index, history, and resume notes outside the checkout"
-					: "Take a fresh checkpoint, then remove an exclusively owned idle checkout",
-			)
-			.requiredOption("--notes <text>", "Unresolved work, or an explicit completion statement")
-			.option("--check <result...>", "Checks passed, failed, or not run", [])
-			.option("--keep <path...>", "Explicit valuable untracked or ignored paths to preserve locally", [])
-			.option("--scratch <path...>", "Explicit disposable untracked or ignored paths", [])
-			.action((id: string, options: { notes: string; check: string[]; keep: string[]; scratch: string[] }) =>
-				record(state()[operation](id, { ...options, checks: options.check })),
-			);
-	}
+	worktree
+		.command("release <id>")
+		.description("Delete declared scratch and keep the checkout; drop the record of a removed checkout")
+		.option("--scratch <path...>", "Ignored paths without tracked files, such as dependencies and build output", [])
+		.action((id: string, options: { scratch: string[] }) => record(state().release(id, options.scratch)));
 	worktree
 		.command("restore <id>")
-		.description("Restore the preserved checkout and source; leave the main worktree detached")
+		.description("Reserve a released checkout's disk again before rebuilding its scratch")
 		.action((id: string) => record(state().restore(id)));
 
 	program

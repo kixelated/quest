@@ -1,8 +1,8 @@
-// Recoverable Git checkouts. Recovery data is private, local, and never pushed.
+// Git checkouts under a shared disk budget. Release prunes declared scratch in place.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-	cpSync,
+	type Stats,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -15,7 +15,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface WorktreeRecord {
 	id: string;
@@ -23,35 +23,13 @@ export interface WorktreeRecord {
 	repository: string;
 	path: string;
 	reserve: number;
-	phase: "creating" | "active" | "releasing" | "released" | "restoring";
-	checkpoint?: string;
+	phase: "creating" | "active" | "released";
 	failure?: string;
 }
 interface Registry {
 	version: 1;
 	capacity: number;
 	records: WorktreeRecord[];
-}
-interface RepositorySnapshot {
-	path: string;
-	head: string;
-	branch: string | null;
-}
-interface Snapshot {
-	version: 1;
-	created: string;
-	notes: string;
-	checks: string[];
-	keep: string[];
-	scratch: string[];
-	repositories: RepositorySnapshot[];
-	unclassified: string[];
-}
-export interface CheckpointOptions {
-	notes: string;
-	checks: string[];
-	keep: string[];
-	scratch: string[];
 }
 
 function git(root: string, ...args: string[]): string {
@@ -61,18 +39,19 @@ function git(root: string, ...args: string[]): string {
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 }
-function json<T>(path: string): T {
-	return JSON.parse(readFileSync(path, "utf8")) as T;
-}
 function save(path: string, value: unknown): void {
 	const temporary = `${path}.${randomUUID()}.tmp`;
 	writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);
 }
-/** Copy file trees without changing symbolic-link text. */
-function copy(source: string, destination: string): void {
-	mkdirSync(dirname(destination), { recursive: true });
-	cpSync(source, destination, { recursive: true, dereference: false, verbatimSymlinks: true });
+/** The entry itself, without following a final symlink; undefined when it is missing. */
+function entry(path: string): Stats | undefined {
+	try {
+		return lstatSync(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
 }
 /** One spelling per path: Git prints `C:/...`, Node `C:\...`, and Windows may use 8.3 names. */
 function canonical(path: string): string {
@@ -89,10 +68,6 @@ function checkouts(repository: string): { path: string; locked?: string }[] {
 			return path ? [{ path: canonical(path), locked }] : [];
 		});
 }
-function inside(root: string, path: string): boolean {
-	const value = relative(root, path);
-	return value === "" || (!isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`));
-}
 function childPath(path: string): string {
 	if (
 		!path ||
@@ -104,30 +79,38 @@ function childPath(path: string): string {
 	}
 	return path.replaceAll("\\", "/").replace(/\/$/, "");
 }
-function covers(paths: string[], path: string): boolean {
-	return paths.some((p) => path === p || path.startsWith(`${p}/`));
+/** Whether a scratch path exists; refuses one reached through a symlink, which could leave the checkout. */
+function present(root: string, path: string): boolean {
+	const parts = path.split("/");
+	for (let i = 1; i <= parts.length; i++) {
+		const stat = entry(join(root, ...parts.slice(0, i)));
+		if (!stat) return false;
+		if (i < parts.length && !stat.isDirectory())
+			throw new Error(`scratch path is reached through a symlink or file: ${path}`);
+	}
+	return true;
 }
-function list(root: string, ...args: string[]): string[] {
-	return git(root, "ls-files", "-z", ...args)
-		.split("\0")
-		.filter(Boolean);
-}
-
-/** Nested `.git` entries beneath `root`, relative to it; symlinks are never traversed. */
-function repositories(root: string, path = ""): string[] {
-	return readdirSync(join(root, path), { withFileTypes: true }).flatMap((entry) => {
-		const child = path ? `${path}/${entry.name}` : entry.name;
-		if (entry.name === ".git") return path ? [path] : [];
-		return entry.isDirectory() ? repositories(root, child) : [];
-	});
+/** The paths Git ignores; check-ignore exits 1 when it matches none. */
+function ignored(root: string, paths: string[]): Set<string> {
+	try {
+		const output = execFileSync("git", ["-C", root, "check-ignore", "-z", "--stdin"], {
+			encoding: "utf8",
+			input: `${paths.join("\0")}\0`,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		return new Set(output.split("\0"));
+	} catch (error) {
+		if ((error as { status?: number }).status === 1) return new Set();
+		throw error;
+	}
 }
 
 /** Allocated blocks, including ignored build output; symlinks are never traversed. */
 export function diskUsage(path: string): number {
-	if (!existsSync(path)) return 0;
-	const stat = lstatSync(path);
+	const stat = entry(path);
+	if (!stat) return 0;
 	let bytes = Math.max(stat.blocks * 512, stat.size);
-	if (stat.isDirectory()) for (const entry of readdirSync(path)) bytes += diskUsage(join(path, entry));
+	if (stat.isDirectory()) for (const child of readdirSync(path)) bytes += diskUsage(join(path, child));
 	return bytes;
 }
 
@@ -155,9 +138,9 @@ export class Worktrees {
 		try {
 			save(join(lock, "owner.json"), { pid: process.pid, started: new Date().toISOString() });
 			const file = join(this.home, "registry.json");
-			const registry = existsSync(file)
-				? json<Registry>(file)
-				: { version: 1 as const, capacity: 0, records: [] };
+			const registry: Registry = existsSync(file)
+				? JSON.parse(readFileSync(file, "utf8"))
+				: { version: 1, capacity: 0, records: [] };
 			if (registry.version !== 1) throw new Error("unsupported worktree registry version");
 			try {
 				return action(registry);
@@ -173,83 +156,52 @@ export class Worktrees {
 		if (!record) throw new Error(`unknown worktree: ${id}`);
 		return record;
 	}
-	private retained(): number {
-		const directory = join(this.home, "checkpoints");
-		// Shared registry/container metadata is outside per-checkout reservations.
-		return existsSync(directory)
-			? readdirSync(directory).reduce((total, entry) => total + diskUsage(join(directory, entry)), 0)
-			: 0;
+	/** Bytes on disk, plus the growth active reservations still expect. Released checkouts keep only what remains. */
+	private usage(registry: Registry): { used: number; growth: number } {
+		let used = 0;
+		let growth = 0;
+		for (const record of registry.records) {
+			const bytes = diskUsage(record.path);
+			used += bytes;
+			if (record.phase !== "released") growth += Math.max(0, record.reserve - bytes);
+		}
+		return { used, growth };
 	}
-	private measure(registry: Registry): number {
-		const retained = this.retained();
-		return (
-			retained +
-			registry.records.reduce((total, record) => {
-				if (record.phase === "released") return total;
-				const checkout = diskUsage(record.path);
-				const recovery = diskUsage(join(this.home, "checkpoints", record.id));
-				return total + checkout + Math.max(0, record.reserve - checkout - recovery);
-			}, 0)
-		);
-	}
-	private admit(registry: Registry, reserve: number, root: string): void {
-		if (lstatSync(this.home).dev !== lstatSync(root).dev)
+	private admit(registry: Registry, reserve: number, parent: string): void {
+		const { used, growth } = this.usage(registry);
+		if (used + growth + reserve > registry.capacity)
 			throw new Error(
-				"worktree state and checkout must share a filesystem for disk admission; set QUEST_WORKTREE_HOME on the checkout filesystem",
+				`disk capacity exceeded: ${used + growth} allocated + ${reserve} requested > ${registry.capacity}`,
 			);
-		const used = this.measure(registry);
-		if (used + reserve > registry.capacity)
-			throw new Error(
-				`disk capacity exceeded: ${used} reserved/retained + ${reserve} requested > ${registry.capacity}`,
-			);
-		const fs = statfsSync(root);
-		const future = registry.records.reduce(
-			(total, record) =>
-				total +
-				(record.phase === "released"
-					? 0
-					: Math.max(
-							0,
-							record.reserve -
-								diskUsage(record.path) -
-								diskUsage(join(this.home, "checkpoints", record.id)),
-						)),
-			0,
-		);
-		if (Number(fs.bavail) * Number(fs.bsize) < future + reserve)
+		const fs = statfsSync(parent);
+		if (Number(fs.bavail) * Number(fs.bsize) < growth + reserve)
 			throw new Error("insufficient free space after accounting for concurrent build reservations");
 	}
-	/** Capacity persists; reducing it below retained allocations is rejected. */
+	/** Capacity persists; reducing it below existing allocations is rejected. */
 	configure(capacity: number): void {
 		this.locked((registry) => {
 			if (!Number.isSafeInteger(capacity) || capacity <= 0)
 				throw new Error("capacity must be a positive safe integer in bytes");
-			if (this.measure(registry) > capacity)
-				throw new Error("capacity is below existing reserved/retained allocations");
+			const { used, growth } = this.usage(registry);
+			if (used + growth > capacity) throw new Error("capacity is below existing allocations");
 			registry.capacity = capacity;
 		});
 	}
-	status(): { capacity: number; allocated: number; retained: number; records: WorktreeRecord[] } {
-		return this.locked((registry) => ({
-			capacity: registry.capacity,
-			allocated: this.measure(registry),
-			retained: this.retained(),
-			records: registry.records,
-		}));
+	status(): { capacity: number; allocated: number; records: WorktreeRecord[] } {
+		return this.locked((registry) => {
+			const { used, growth } = this.usage(registry);
+			return { capacity: registry.capacity, allocated: used + growth, records: registry.records };
+		});
 	}
 	create(root: string, name: string, reserve: number, ref = "HEAD"): WorktreeRecord {
 		return this.locked((registry) => {
 			if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name))
 				throw new Error("name must contain only letters, digits, dots, underscores, or hyphens");
 			if (!Number.isSafeInteger(reserve) || reserve <= 0)
-				throw new Error(
-					"reserve must be a positive safe integer in bytes, including expected build and checkpoint growth",
-				);
+				throw new Error("reserve must be a positive safe integer in bytes, including expected build growth");
 			if (registry.records.some((item) => item.name === name))
 				throw new Error(`worktree name already exists; use restore or another name: ${name}`);
 			const repository = canonical(git(root, "rev-parse", "--show-toplevel").trim());
-			if (inside(repository, this.home))
-				throw new Error("recovery state must live outside the disposable checkout");
 			const path = join(repository, ".worktrees", name);
 			mkdirSync(dirname(path), { recursive: true });
 			if (existsSync(path)) throw new Error(`refusing to adopt an existing checkout: ${path}`);
@@ -280,8 +232,6 @@ export class Worktrees {
 	/** Refuses unless this record exclusively owns the checkout; false once Git and the disk both lack it. */
 	private owned(record: WorktreeRecord): boolean {
 		const path = canonical(record.path);
-		if (inside(path, canonical(process.cwd())))
-			throw new Error("leave the checkout before checkpointing or releasing it");
 		const entry = checkouts(record.repository).find((entry) => entry.path === path);
 		if (!entry && !existsSync(path)) return false;
 		if (entry?.locked !== `quest worktree ${record.id}`)
@@ -291,306 +241,49 @@ export class Worktrees {
 		return true;
 	}
 	/**
-	 * Refuses removal while the checkout holds a repository its checkpoint did not save, whichever
-	 * repository registered it: forced removal would delete its uncommitted work and history.
+	 * Deletes only the declared scratch, which Git must ignore and which holds no tracked files.
+	 * The checkout, its Git state, and untracked source stay in place. A checkout that Git and the
+	 * disk both lack, such as one removed with `git worktree remove`, drops its record instead.
 	 */
-	private refuseNested(record: WorktreeRecord): void {
-		if (!existsSync(record.path)) return;
-		const saved = record.checkpoint
-			? json<Snapshot>(join(record.checkpoint, "snapshot.json")).repositories.map((repository) => repository.path)
-			: [];
-		const nested = repositories(record.path).filter((path) => !saved.includes(path));
-		if (nested.length)
-			throw new Error(`nested repository would be removed; move it out of the checkout: ${nested.join(", ")}`);
-	}
-	/** Git removes the owned checkout and its administrative directory, even when the checkout is missing. */
-	private discard(record: WorktreeRecord): void {
-		if (!this.owned(record)) return;
-		this.refuseNested(record);
-		git(record.repository, "worktree", "remove", "--force", "--force", record.path);
-		if (existsSync(record.path)) throw new Error("Git reported cleanup success but checkout is retained");
-	}
-	checkpoint(id: string, options: CheckpointOptions): WorktreeRecord {
-		return this.locked((registry) => this.checkpointLocked(this.find(registry, id), options));
-	}
-	private checkpointLocked(record: WorktreeRecord, options: CheckpointOptions): WorktreeRecord {
-		if (record.phase !== "active") throw new Error(`cannot checkpoint a ${record.phase} checkout`);
-		if (!this.owned(record)) throw new Error(`active checkout is missing: ${record.path}`);
-		if (!options.notes.trim())
-			throw new Error("checkpoint notes must describe unresolved work, or state that it is complete");
-		const keep = options.keep.map(childPath);
-		const scratch = options.scratch.map(childPath);
-		if (keep.some((k) => scratch.some((s) => covers([k], s) || covers([s], k))))
-			throw new Error("keep and scratch paths overlap");
-		const directory = join(this.home, "checkpoints", record.id, randomUUID());
-		mkdirSync(directory, { recursive: true, mode: 0o700 });
-		const snapshot: Snapshot = {
-			version: 1,
-			created: new Date().toISOString(),
-			notes: options.notes,
-			checks: options.checks,
-			keep,
-			scratch,
-			repositories: [],
-			unclassified: [],
-		};
-		try {
-			const visit = (path: string) => {
-				const root = join(record.path, path);
-				const number = snapshot.repositories.length;
-				const target = join(directory, String(number));
-				mkdirSync(join(target, "files"), { recursive: true });
-				// Each Git process costs ~100 ms on Windows, so every query here is batched.
-				const entries = list(root, "--stage").map((entry) => {
-					const tab = entry.indexOf("\t");
-					return { mode: entry.slice(0, 6), stage: entry[tab - 1], path: entry.slice(tab + 1) };
-				});
-				if (entries.some((entry) => !entry.path || entry.path.includes("\0")))
-					throw new Error("invalid tracked path");
-				if (entries.some((entry) => entry.stage !== "0"))
-					throw new Error("resolve the unmerged index before checkpointing");
-				const committed = git(root, "ls-tree", "-r", "-z", "HEAD")
-					.split("\0")
-					.filter(Boolean)
-					.map((entry) => ({ mode: entry.slice(0, 6), path: entry.slice(entry.indexOf("\t") + 1) }));
-				// The index decides which paths are submodules, including staged replacements of HEAD's.
-				// HEAD adds the files the index deleted or replaced.
-				const submodules = entries.filter((entry) => entry.mode === "160000").map((entry) => entry.path);
-				const files = [
-					...new Set(
-						[...entries, ...committed]
-							.filter((entry) => entry.mode !== "160000")
-							.map((entry) => entry.path),
-					),
-				];
-				for (const file of files)
-					if (covers(scratch, path ? `${path}/${file}` : file))
-						throw new Error(`scratch includes tracked source: ${file}`);
-				for (const file of files) {
-					const source = join(root, file);
-					try {
-						// HEAD may name a file replaced by a directory in the index.
-						if (lstatSync(source).isDirectory()) continue;
-					} catch (error) {
-						// A missing descendant can be underneath a replacement file.
-						if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) continue;
-						throw error;
-					}
-					copy(source, join(target, "files", file));
-				}
-				const [head, index, config, symbolic] = git(
-					root,
-					"rev-parse",
-					"HEAD",
-					"--path-format=absolute",
-					"--git-path",
-					"index",
-					"--git-path",
-					"config",
-					"--symbolic-full-name",
-					"HEAD",
-				)
-					.trim()
-					.split("\n");
-				const branch = symbolic === "HEAD" ? null : symbolic; // Detached HEAD is supported.
-				const savedIndex = join(target, "index");
-				copy(index, savedIndex);
-				// Materialize a private full index while its split-index backing file still exists.
-				// The live index and its flags stay intact.
-				execFileSync("git", ["-C", root, "update-index", "--no-split-index"], {
-					env: { ...process.env, GIT_INDEX_FILE: savedIndex },
-					stdio: "pipe",
-				});
-				if (path) cpSync(config, join(target, "config"));
-				// A recovery commit makes staged blobs reachable without changing HEAD/index.
-				const tree = git(root, "write-tree").trim();
-				const commit = git(
-					root,
-					"-c",
-					"user.name=Quest recovery",
-					"-c",
-					"user.email=recovery@localhost",
-					"commit-tree",
-					tree,
-					"-p",
-					head,
-					"-m",
-					`Local worktree recovery ${record.id}`,
-				).trim();
-				git(root, "update-ref", `refs/quest/worktrees/${record.id}/${number}`, commit);
-				// A full bundle has no prerequisites, so `bundle verify` would only repeat its creation.
-				git(root, "bundle", "create", join(target, "history.bundle"), "--all", "--reflog", "HEAD");
-				snapshot.repositories.push({ path, head, branch });
-				// Without exclude patterns, --others lists untracked and ignored files alike.
-				for (const file of list(root, "--others")) {
-					const relative = path ? `${path}/${file}` : file;
-					if (!covers(keep, relative) && !covers(scratch, relative)) snapshot.unclassified.push(relative);
-				}
-				for (const submodule of submodules) {
-					const child = path ? `${path}/${submodule}` : submodule;
-					if (existsSync(join(record.path, child, ".git"))) visit(child);
-					else if (existsSync(join(record.path, child)) && readdirSync(join(record.path, child)).length)
-						throw new Error(`unrecognized submodule contents: ${child}`);
-				}
-			};
-			visit("");
-			for (const path of keep) {
-				const source = join(record.path, path);
-				// The entry itself, which may be a dangling symlink; copies keep its link text.
-				let stat: ReturnType<typeof lstatSync>;
-				try {
-					stat = lstatSync(source);
-				} catch (error) {
-					if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
-						throw new Error(`keep path does not exist: ${path}`);
-					throw error;
-				}
-				if (!inside(canonical(record.path), canonical(dirname(source))))
-					throw new Error(`keep path escapes checkout: ${path}`);
-				if (stat.isDirectory() && existsSync(join(source, ".git")))
-					throw new Error(
-						`keep directories cannot contain a repository: ${path}; tracked submodules are preserved automatically`,
-					);
-				copy(source, join(directory, "kept", path));
-			}
-			save(join(directory, "snapshot.json"), snapshot);
-			const previous = record.checkpoint;
-			record.checkpoint = directory;
-			record.failure = undefined;
-			// Publish the new recovery pointer before collecting the old checkpoint.
-			// A crash can retain extra data, but can never invalidate the saved pointer.
-			const registry = json<Registry>(join(this.home, "registry.json"));
-			const current = this.find(registry, record.id);
-			Object.assign(current, record);
-			save(join(this.home, "registry.json"), registry);
-			if (previous) rmSync(previous, { recursive: true });
-			return record;
-		} catch (error) {
-			if (record.checkpoint !== directory) rmSync(directory, { recursive: true });
-			throw error;
-		}
-	}
-	/** Checkpoint and deletion occur under the same lock; stale snapshots cannot lose edits. */
-	release(id: string, options: CheckpointOptions): WorktreeRecord {
+	release(id: string, scratch: string[]): WorktreeRecord {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
-			if (record.phase === "released") return record;
-			if (record.phase === "active") {
-				this.checkpointLocked(record, options);
-				const snapshot = json<Snapshot>(join(record.checkpoint!, "snapshot.json"));
-				if (snapshot.unclassified.length)
-					throw new Error(
-						`classify untracked/ignored files with --keep or --scratch before release: ${snapshot.unclassified.slice(0, 20).join(", ")}`,
-					);
-				this.refuseNested(record); // Refuse while still active; discard checks again after a crash.
-				record.phase = "releasing";
-				save(join(this.home, "registry.json"), registry);
+			if (!this.owned(record)) {
+				registry.records.splice(registry.records.indexOf(record), 1);
+				return record;
 			}
-			// An interrupted create, restore, or release never handed out new work, so the last
-			// checkpoint stays authoritative; checkpointing a partial checkout could corrupt it.
-			try {
-				this.discard(record);
-			} catch (error) {
-				record.failure = String(error);
-				throw new Error(`cleanup failed; allocation retained: ${record.path}: ${String(error)}`);
+			if (record.phase === "creating")
+				throw new Error(
+					`creation was interrupted; inspect and remove the partial checkout with git worktree remove, then release again: ${record.path}`,
+				);
+			const root = canonical(record.path);
+			const paths = scratch.map(childPath).filter((path) => present(root, path)); // Reruns skip pruned paths.
+			if (paths.length) {
+				const tracked = git(root, "--literal-pathspecs", "ls-files", "-z", "--", ...paths)
+					.split("\0")
+					.filter(Boolean);
+				if (tracked.length)
+					throw new Error(`scratch includes tracked files: ${tracked.slice(0, 20).join(", ")}`);
+				const matched = ignored(root, paths);
+				const unignored = paths.filter((path) => !matched.has(path));
+				if (unignored.length) throw new Error(`scratch must be ignored by Git: ${unignored.join(", ")}`);
+				// Removal unlinks symlinks rather than following them.
+				for (const path of paths) rmSync(join(root, path), { recursive: true });
 			}
 			record.phase = "released";
-			record.failure = undefined;
-			// An abandoned creation has nothing to restore; free its name and reservation.
-			if (!record.checkpoint) registry.records.splice(registry.records.indexOf(record), 1);
 			return record;
 		});
 	}
+	/** Reserves the released checkout's disk again; the caller then reinstalls or rebuilds its scratch. */
 	restore(id: string): WorktreeRecord {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
-			if (record.phase === "active") {
-				if (!this.owned(record)) throw new Error(`active checkout is missing: ${record.path}`);
-				return record;
-			}
-			if (record.phase === "restoring") {
-				// Retry an interrupted restore from the untouched checkpoint.
-				this.discard(record);
-				record.phase = "released";
-			}
-			if (record.phase !== "released" || !record.checkpoint)
-				throw new Error(`cannot restore a ${record.phase} allocation; release finishes or abandons it`);
-			if (existsSync(record.path))
-				throw new Error("restore destination exists; refusing to adopt or overwrite it");
-			// Its retained recovery already counts toward the shared capacity and free-space usage.
-			const retained = diskUsage(join(this.home, "checkpoints", record.id));
-			this.admit(registry, Math.max(0, record.reserve - retained), dirname(record.path));
-			const snapshot = json<Snapshot>(join(record.checkpoint, "snapshot.json"));
-			if (snapshot.version !== 1) throw new Error("unsupported checkpoint version");
-			record.phase = "restoring";
-			save(join(this.home, "registry.json"), registry);
-			try {
-				for (let i = 0; i < snapshot.repositories.length; i++) {
-					const saved = snapshot.repositories[i];
-					const root = join(record.path, saved.path);
-					const source = join(record.checkpoint, String(i));
-					if (i === 0) {
-						git(
-							record.repository,
-							"fetch",
-							"--no-write-fetch-head",
-							join(source, "history.bundle"),
-							`refs/quest/worktrees/${record.id}/0:refs/quest/worktrees/${record.id}/0`,
-						);
-						git(
-							record.repository,
-							"worktree",
-							"add",
-							"--no-checkout",
-							"--detach",
-							"--lock",
-							"--reason",
-							`quest worktree ${record.id}`,
-							root,
-							saved.head,
-						);
-					} else {
-						mkdirSync(root, { recursive: true });
-						git(root, "init");
-						cpSync(join(source, "config"), join(root, ".git", "config"));
-						// Embedded restored gitdirs have a different relative worktree path.
-						try {
-							execFileSync(
-								"git",
-								["config", "--file", join(root, ".git", "config"), "--unset-all", "core.worktree"],
-								{ cwd: this.home, stdio: "pipe" },
-							);
-						} catch (error) {
-							if ((error as { status?: number }).status !== 5) throw error;
-						}
-						// Detach before fetching branches, including git init's initial branch.
-						writeFileSync(join(root, ".git", "HEAD"), `${saved.head}\n`);
-						git(root, "fetch", "--no-write-fetch-head", join(source, "history.bundle"), "+refs/*:refs/*");
-						// Submodule gitdirs are private copies, so their branches return as saved.
-						writeFileSync(
-							join(root, ".git", "HEAD"),
-							`${saved.branch ? `ref: ${saved.branch}` : saved.head}\n`,
-						);
-					}
-					// The checkout starts empty, so the saved tree itself describes present files.
-					copy(join(source, "files"), root);
-					cpSync(
-						join(source, "index"),
-						i === 0
-							? git(root, "rev-parse", "--path-format=absolute", "--git-path", "index").trim()
-							: join(root, ".git", "index"),
-					);
-				}
-				if (existsSync(join(record.checkpoint, "kept"))) copy(join(record.checkpoint, "kept"), record.path);
-				record.phase = "active";
-				record.failure = undefined;
-				return record;
-			} catch (error) {
-				record.failure = String(error);
-				throw new Error(
-					`restore incomplete; allocation and recovery retained: ${record.path}: ${String(error)}`,
-				);
-			}
+			if (!this.owned(record)) throw new Error(`checkout is missing; release drops its record: ${record.path}`);
+			if (record.phase === "active") return record;
+			if (record.phase !== "released") throw new Error(`cannot restore a ${record.phase} checkout`);
+			this.admit(registry, Math.max(0, record.reserve - diskUsage(record.path)), dirname(record.path));
+			record.phase = "active";
+			return record;
 		});
 	}
 }

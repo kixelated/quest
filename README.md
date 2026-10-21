@@ -201,54 +201,46 @@ a cursor, or the given `--since` (else the head SHA) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
 
-## Recoverable local checkouts
+## Prunable local checkouts
 
-The experimental `quest worktree` commands reserve disk across this user's
-repositories and preserve private recovery data outside disposable checkouts.
-They only operate on Git worktrees they create; use the owning application for
-Codex, Claude, or other managed checkouts. Foreground process supervision and
-crash reconciliation remain unfinished. Do not use these commands to supervise
-active agents or commands, and stop all work before taking a checkpoint or
-releasing its checkout.
+The experimental `quest worktree` commands share one disk budget across this
+user's repositories and release a checkout's disk by deleting its declared
+scratch in place. They only operate on Git worktrees they create; use the
+owning application for Codex, Claude, or other managed checkouts. Process
+supervision remains unfinished: stop agents and commands in a checkout before
+releasing it.
 
-Set a shared capacity and an explicit reservation in bytes, including the
-checkout, expected build growth, and recovery history. Measure representative
-jobs before choosing the budget; `status` reports allocated and retained bytes.
-Reservations serialize creators and account for concurrent expected growth.
-They do not enforce filesystem quotas against arbitrary external writers.
+Set a shared capacity and an explicit reservation in bytes, covering the
+checkout and its expected build output. Measure representative jobs before
+choosing the budget. Reservations serialize creators and account for concurrent
+expected growth. They do not enforce filesystem quotas against arbitrary
+writers, and Git objects stored in the shared repository are not charged.
 
 ```sh
 quest worktree capacity 20000000000
 quest worktree create example --reserve 3000000000 --ref HEAD
 quest worktree status
-quest worktree checkpoint example --notes "Implementing the parser" --check "unit tests not run"
-quest worktree release example --notes "Awaiting review" --check "just check passed" --keep .env --scratch node_modules dist
+quest worktree release example --scratch node_modules dist
 quest worktree restore example
 ```
 
-Creation prints JSON with the ID and detached checkout path under `.worktrees/`.
-Release always takes a fresh checkpoint. Tracked working files, the staged
-index, reachable Git history, and initialized submodules' local history are
-preserved. Untracked and ignored files require explicit `--keep` or `--scratch`
-classification before release; source cannot be declared scratch. Release
-refuses while the checkout holds any nested repository or worktree other than
-its initialized submodules. `--keep`
-never pushes or publishes its contents. Checkpoints record notes and check
-results without running tests or claiming that validation passed.
+Creation prints JSON with the ID and the detached, locked checkout path under
+`.worktrees/`. Release deletes only its `--scratch` paths, and refuses one that
+Git does not ignore, that holds tracked files, or that is reached through a
+symbolic link; links inside scratch are removed, never followed. Missing paths
+are skipped, so release can be rerun. The checkout, its Git state, and
+untracked files stay in place, and `status` charges what remains. Restore
+reserves the checkout's disk again; then reinstall or rebuild its scratch, for
+example with `just install`.
 
-Recovery lives in `$QUEST_WORKTREE_HOME`, or
-`$XDG_STATE_HOME/quest/worktrees` (default `~/.local/state/quest/worktrees`). It
-must be outside the disposable checkout and on the same filesystem for disk
-admission. Checkpoint bytes remain charged after checkout removal. There is no
-automatic recovery-data deletion or branch deletion, including after a squash
-merge. Restore leaves the main checkout detached, preserving existing branches.
-A failed creation, restoration, or removal remains charged and visible in
-`status`. Run `restore` again to retry an interrupted restoration from its
-checkpoint, or `release` to finish an interrupted removal or abandon an
-interrupted creation or restoration; neither checkpoints the partial checkout.
-No live lock is stolen: after a crash, confirm the registry lock's owner has
-exited before removing it. This initial interface intentionally refuses unknown
-or changed checkout ownership.
+Quest never removes a checkout. Once one is finished, remove it with
+`git worktree unlock` and `git worktree remove`, which refuses modified or
+untracked files but deletes ignored ones; `release` then drops its record. A
+failed creation stays charged until `release` drops it. Records live in
+`$QUEST_WORKTREE_HOME`, or `$XDG_STATE_HOME/quest/worktrees` (default
+`~/.local/state/quest/worktrees`). No live lock is stolen: after a crash,
+confirm the registry lock's owner has exited before removing it. This initial
+interface refuses unknown or changed checkout ownership.
 
 ## Work with your agents
 
