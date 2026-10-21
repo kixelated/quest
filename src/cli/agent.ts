@@ -357,6 +357,30 @@ interface Running {
 
 const recordPath = (dir: string, worktree: string) => join(dir, "agents", `${digest(worktree)}.json`);
 
+/**
+ * Claim `worktree` for this process by creating its record exclusively, so two
+ * concurrent launches cannot both run there. A record left by a `quest agent`
+ * that died is replaced.
+ */
+function claim(record: string, worktree: string): void {
+	for (;;) {
+		try {
+			writeFileSync(record, `${JSON.stringify({ pid: process.pid, worktree } satisfies Running)}\n`, {
+				flag: "wx",
+				mode: 0o600,
+			});
+			return;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		const previous = load<Running>(record);
+		if (previous && alive(previous.pid)) {
+			throw new Error(`an agent is already running in ${worktree}; stop it with \`quest agent stop\``);
+		}
+		rmSync(record, { force: true });
+	}
+}
+
 export interface AgentDependencies {
 	env: NodeJS.ProcessEnv;
 	/** The state directory, normally `agentDirectory()`. */
@@ -402,16 +426,13 @@ export async function runAgent(
 	const redact = (value: string) =>
 		keys.reduce((result, k, index) => result.replaceAll(k, `<key ${index + 1}>`), value);
 
-	const record = recordPath(dir, worktree);
-	const previous = load<Running>(record);
-	if (previous && alive(previous.pid)) {
-		throw new Error(`an agent is already running in ${worktree}; stop it with \`quest agent stop\``);
-	}
 	const harness = HARNESS[launch.harness];
 	const id = session ?? randomUUID();
 	const argv = session === undefined ? harness.start(launch, id) : harness.resume(launch, id);
 	// Claude Code takes the id this command assigns; Codex announces its own.
 	const known = launch.harness === "claude" ? id : session;
+	const record = recordPath(dir, worktree);
+	claim(record, worktree);
 
 	let announced: string | undefined;
 	const announce = (value: string | undefined) => {
@@ -440,12 +461,15 @@ export async function runAgent(
 					stdio: ["pipe", "pipe", "pipe"],
 				});
 				child = agent;
-				// One write with the agent's pid, so `stop` never finds a record it cannot signal.
+				// `stop` waits for the agent's pid before it marks the record, so this write loses nothing.
 				save(record, { pid: process.pid, child: agent.pid, worktree } satisfies Running);
 				announce(known);
 				let out = "";
 				let err = "";
 				let line = "";
+				// Stderr is forwarded by whole lines: a key never spans a newline, so
+				// one split across chunks is still redacted.
+				let partial = "";
 				agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
 					out += chunk;
 					const lines = (line + chunk).split("\n");
@@ -454,7 +478,13 @@ export async function runAgent(
 				});
 				agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
 					err += chunk;
-					deps.stderr(redact(chunk));
+					const buffered = partial + chunk;
+					const end = buffered.lastIndexOf("\n") + 1;
+					partial = buffered.slice(end);
+					if (end > 0) deps.stderr(redact(buffered.slice(0, end)));
+				});
+				agent.stderr.once("end", () => {
+					if (partial !== "") deps.stderr(redact(partial));
 				});
 				agent.stdin.on("error", () => {}); // An agent that exits early closes its stdin.
 				agent.stdin.end(prompt);
@@ -509,18 +539,24 @@ export async function stopAgent(worktree: string, deps: AgentDependencies): Prom
 }
 
 async function stopRecord(record: string, deps: AgentDependencies): Promise<void> {
-	const running = load<Running>(record);
+	let running = load<Running>(record);
+	// A launch records its agent's pid just after claiming the worktree.
+	while (running !== undefined && running.child === undefined && alive(running.pid)) {
+		await sleep(100);
+		running = load<Running>(record);
+	}
 	if (running === undefined || !alive(running.pid)) {
 		rmSync(record, { force: true });
 		deps.stdout(`no agent running${running ? ` in ${running.worktree}` : ""}\n`);
 		return;
 	}
 	save(record, { ...running, stopping: true });
+	const { pid, child, worktree } = running;
 	// Signal the agent CLI, never the reporting process, which then prints the
 	// stopped outcome and removes the record.
 	const signal = (name: NodeJS.Signals) => {
 		try {
-			if (running.child !== undefined) process.kill(running.child, name);
+			if (child !== undefined) process.kill(child, name);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
 		}
@@ -529,7 +565,7 @@ async function stopRecord(record: string, deps: AgentDependencies): Promise<void
 	const deadline = Date.now() + STOP_GRACE_MS;
 	let killed = false;
 	let session = running.session;
-	for (let current = running; alive(running.pid);) {
+	for (let current = running; alive(pid);) {
 		session = current.session ?? session;
 		if (!killed && Date.now() > deadline) {
 			signal("SIGKILL");
@@ -541,7 +577,7 @@ async function stopRecord(record: string, deps: AgentDependencies): Promise<void
 		current = next;
 	}
 	rmSync(record, { force: true });
-	deps.stdout(`stopped ${running.worktree}${session ? ` session ${session}` : ""}\n`);
+	deps.stdout(`stopped ${worktree}${session ? ` session ${session}` : ""}\n`);
 }
 
 /** End the spawn for the repository holding `root`: stop every agent, then delete the resolved keys. */

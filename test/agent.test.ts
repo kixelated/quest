@@ -9,6 +9,9 @@ import { tempDir } from "./fixture";
 
 afterEach(() => vi.unstubAllEnvs());
 
+/** The fake agent CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
+const fakes = test.skipIf(process.platform === "win32");
+
 /**
  * Fake agent CLIs and secret manager. Each logs its argv, stdin, and the
  * variables it was given, then behaves as FAKE_MODE says.
@@ -28,7 +31,14 @@ if (process.env.FAKE_MODE === "exhausted") {
 	result({ is_error: true, result: "Credit balance is too low" });
 	process.exit(1);
 }
-if (process.env.FAKE_MODE === "sleep") {
+if (process.env.FAKE_MODE === "leak") {
+	// The key arrives on stderr in two separate writes.
+	process.stderr.write("using " + key.slice(0, 4));
+	setTimeout(() => {
+		process.stderr.write(key.slice(4) + "\\nunterminated " + key);
+		result({ is_error: false, result: "leaked" });
+	}, 100);
+} else if (process.env.FAKE_MODE === "sleep") {
 	process.on("SIGTERM", () => {
 		fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ terminated: true }) + "\\n");
 		process.exit(143);
@@ -173,7 +183,7 @@ test("the agent environment holds only its own key", () => {
 	});
 });
 
-test("start runs claude with every launch setting, one resolved key, and no key in its output", async () => {
+fakes("start runs claude with every launch setting, one resolved key, and no key in its output", async () => {
 	const s = setup();
 	const result = await quest("agent", "start", ...launch("claude", "2"), s.worktree, "/quest-start quest/m0/a.md");
 	expect(result.code).toBe(0);
@@ -205,7 +215,7 @@ test("start runs claude with every launch setting, one resolved key, and no key 
 	expect(readFileSync(s.opLog, "utf8")).toBe("{{ op://vault/item/second }}\n--\n");
 });
 
-test("keys resolve once per spawn into a user-only store, and stop --all deletes them", async () => {
+fakes("keys resolve once per spawn into a user-only store, and stop --all deletes them", async () => {
 	const s = setup();
 	expect((await quest("agent", "start", ...launch("claude", "1"), s.worktree, "one")).code).toBe(0);
 	expect((await quest("agent", "start", ...launch("claude", "2"), s.worktree, "two")).code).toBe(0);
@@ -229,7 +239,7 @@ test("keys resolve once per spawn into a user-only store, and stop --all deletes
 	expect(existsSync(dir)).toBe(false);
 });
 
-test("a resolver that died leaves no lock that blocks the next launch", async () => {
+fakes("a resolver that died leaves no lock that blocks the next launch", async () => {
 	const s = setup();
 	const lock = join(spawnDirectory(join(s.runtime, "quest", "agent"), s.worktree), "resolving");
 	mkdirSync(lock, { recursive: true });
@@ -239,7 +249,7 @@ test("a resolver that died leaves no lock that blocks the next launch", async ()
 	expect(existsSync(lock)).toBe(false);
 });
 
-test("a key with no credit exits 3 so the spawn resumes on the next key", async () => {
+fakes("a key with no credit exits 3 so the spawn resumes on the next key", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_MODE", "exhausted");
 	const started = await quest("agent", "start", ...launch("claude", "1"), s.worktree, "go");
@@ -258,7 +268,7 @@ test("a key with no credit exits 3 so the spawn resumes on the next key", async 
 	expect((call.env as Record<string, string>).ANTHROPIC_API_KEY).toBe("resolved-second");
 });
 
-test("codex runs with its key variable and reports its thread and last message", async () => {
+fakes("codex runs with its key variable and reports its thread and last message", async () => {
 	const s = setup();
 	const started = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
 	expect(started).toEqual({ code: 0, stdout: "session thread-1\noutcome finished\n\nfinal reply\n", stderr: "" });
@@ -291,7 +301,7 @@ test("codex runs with its key variable and reports its thread and last message",
 	});
 });
 
-test("stop ends a live agent, which reports it as stopped", async () => {
+fakes("stop ends a live agent, which reports it as stopped", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_MODE", "sleep");
 	const running = quest("agent", "start", ...launch("claude", "1"), s.worktree, "go");
@@ -316,6 +326,28 @@ test("stop ends a live agent, which reports it as stopped", async () => {
 	expect(readdirSync(records)).toEqual([]);
 
 	expect((await quest("agent", "stop", s.worktree)).stdout).toBe("no agent running\n");
+});
+
+fakes("stderr is redacted even when a key spans two writes", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "leak");
+	const result = await quest("agent", "start", ...launch("claude", "2"), s.worktree, "go");
+	expect(result.code).toBe(0);
+	expect(result.stderr).toBe("using <key 2>\nunterminated <key 2>");
+});
+
+fakes("concurrent launches in one worktree run only one agent", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "sleep");
+	const first = quest("agent", "start", ...launch("claude", "1"), s.worktree, "one");
+	const second = quest("agent", "start", ...launch("claude", "2"), s.worktree, "two");
+	await vi.waitFor(() => expect(s.calls()).toHaveLength(1));
+	expect((await quest("agent", "stop", s.worktree)).code).toBe(0);
+	const results = await Promise.all([first, second]);
+	expect(results.map((result) => result.code)).toEqual([1, 1]);
+	expect(results.filter((result) => result.stderr.includes("an agent is already running"))).toHaveLength(1);
+	expect(results.filter((result) => result.stdout.endsWith("outcome stopped\n"))).toHaveLength(1);
+	expect(s.calls().filter((call) => "argv" in call)).toHaveLength(1);
 });
 
 test("missing keys, positions past the list, and unknown references are usage errors", async () => {
