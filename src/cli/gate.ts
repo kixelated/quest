@@ -196,14 +196,23 @@ export async function admit(limits: Limits, host: Host, signal: AbortSignal, wai
 /** Marks an admitted command, so nested gated calls inside it run at once. */
 const ADMITTED = "QUEST_GATE_ADMITTED";
 
-/** Run a command in place, with inherited streams and its exact exit status. */
+/**
+ * Run a command in place, with inherited streams and its exact exit status.
+ * Aborting with a signal name forwards that signal, so the command's own
+ * handling of it runs; any other reason sends SIGTERM.
+ */
 export function run(command: string[], signal: AbortSignal): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(command[0], command.slice(1), {
 			env: { ...process.env, [ADMITTED]: "1" },
 			stdio: "inherit",
 		});
-		const cancel = () => child.kill("SIGTERM");
+		const cancel = () =>
+			child.kill(
+				typeof signal.reason === "string" && signal.reason in constants.signals
+					? (signal.reason as NodeJS.Signals)
+					: "SIGTERM",
+			);
 		signal.addEventListener("abort", cancel, { once: true });
 		if (signal.aborted) cancel();
 		child.once("error", (error) => {
@@ -228,7 +237,7 @@ export async function gate(command: string[]): Promise<number> {
 	let interrupted = 0;
 	const interrupt = (name: "SIGINT" | "SIGTERM" | "SIGHUP") => {
 		interrupted = 128 + constants.signals[name];
-		controller.abort();
+		controller.abort(name);
 	};
 	const handlers = {
 		SIGINT: () => interrupt("SIGINT"),

@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { constants } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import {
@@ -201,6 +202,14 @@ test("a command cancelled before listener registration still stops", async () =>
 	controller.abort();
 	const result = await runCommand([process.execPath, "-e", "setInterval(() => {}, 1000)"], controller.signal);
 	expect(result).not.toBe(0);
+});
+
+// Windows has no POSIX signals to forward; kill() always terminates there.
+test.skipIf(process.platform === "win32")("cancellation forwards the received signal to the command", async () => {
+	const controller = new AbortController();
+	controller.abort("SIGINT");
+	const result = await runCommand([process.execPath, "-e", "setInterval(() => {}, 1000)"], controller.signal);
+	expect(result).toBe(128 + constants.signals.SIGINT);
 });
 
 test("the gated command keeps its own flags, even ones Quest also parses", () => {
