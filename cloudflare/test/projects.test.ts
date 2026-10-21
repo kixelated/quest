@@ -508,6 +508,8 @@ describe("project setup routes", () => {
 		expect(await env.DB.prepare("SELECT name FROM github_projects WHERE id=10").first()).toEqual({
 			name: options.repositoryName,
 		});
+		// Passing the maintainer check joins the project's inbox even when its preview fails.
+		expect(await github().service.projects(account!.userId)).toEqual([expect.objectContaining({ id: 10 })]);
 		for (const next of ["paused", "disconnected"]) {
 			const stopped = await app.request(
 				route,
@@ -521,6 +523,8 @@ describe("project setup routes", () => {
 			expect(stopped.status).toBe(303);
 		}
 		expect(await state()).toBeNull();
+		// Disconnecting removes every maintainer's membership with the project.
+		expect(await env.DB.prepare("SELECT count(*) AS n FROM github_project_members").first()).toEqual({ n: 0 });
 	});
 
 	it("keeps stop controls after transfer without inheriting opt-in for the new installation", async () => {

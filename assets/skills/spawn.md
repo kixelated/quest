@@ -6,11 +6,12 @@ Before you begin, run `quest guide` and read its output completely.
 
 Your goal is to execute many quests in parallel.
 The scope consists of all ready quests that are not claimed.
-Run `quest unblocked --json` for ready candidates in milestone priority, descending downstream impact, then tree order.
+Run `quest unblocked --unclaimed --json` for unclaimed ready candidates in milestone priority, descending downstream impact, then tree order.
 The count is distinct transitive dependents; other prerequisites may still remain.
 Use that order when dispatching, and recompute after the quest tree changes.
 An explicit argument takes precedence: filter to the selected quests/epics and honor their requested order.
-Ranking does not establish that work is unclaimed: verify live locks, open changes (including PRs from forks), and remote branch claims before starting.
+It lists each skipped claim on stderr with how long ago it was last active; offer the user any that look stale, as the guide describes.
+Each agent claims its quest with `quest start`, which refuses one claimed since; a refusal is a skip, not a failure.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Start every quest you would recommend starting, without asking: well planned, with no blockers or conflicts with quests already started.

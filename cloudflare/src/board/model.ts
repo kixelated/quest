@@ -1,6 +1,6 @@
 // The board's reading of a project: milestones, epics, and quests, each with its
 // status and progress. Readiness comes from the shared core, so the board
-// always agrees with `quest ready`.
+// always agrees with `quest unblocked`.
 
 import { type Doc, ROOT, blockers, children, comparePaths, entries, isEpic, parse, permanent, ready } from "quest/core";
 import type { Size } from "../layout";

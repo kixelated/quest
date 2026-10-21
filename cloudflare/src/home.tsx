@@ -134,7 +134,7 @@ export function Home(props: { setup: string; board: Board }) {
 							Available
 						</p>
 						<p>
-							<code>quest ready</code> lists the quests with nothing standing in their way.
+							<code>quest unblocked</code> lists the quests with nothing standing in their way.
 						</p>
 					</li>
 					<li>

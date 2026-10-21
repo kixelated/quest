@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { move, remove } from "../src/core";
-import { forkParent, githubBranches, openPullRequests } from "../src/cli/claims";
+import { openPullRequests } from "../src/cli/claims";
 import { GitHub, type GitHubDependencies } from "../src/cli/github";
 import { main } from "../src/cli/main";
 import { ROOT_README, Tree, tempDir } from "./fixture";
@@ -365,47 +365,48 @@ test("open pull requests come from every page, by head branch", async () => {
 			const url = new URL(String(input));
 			requested.push(url.pathname + url.search);
 			const page = url.searchParams.get("page");
-			const head = (ref: string, n: number) => ({
-				head: { ref },
+			// The first PR is from a fork and handed back; the second's fork was deleted.
+			const pull = (ref: string, n: number, body: string | null) => ({
+				number: n,
+				head: { ref, repo: n === 1 ? { full_name: "someone/project" } : null },
+				draft: n === 1,
+				body,
+				created_at: "2026-10-21T12:00:00Z",
+				updated_at: "2026-10-21T13:00:00Z",
 				html_url: `https://github.com/example/project/pull/${n}`,
 			});
 			return page === null
-				? new Response(JSON.stringify([head("quest/m0/a", 1)]), {
+				? new Response(JSON.stringify([pull("quest/m0/a", 1, "Notes.\n\n## Decisions needed\n")]), {
 						headers: {
 							link: '<https://api.github.com/repos/example/project/pulls?state=open&page=2>; rel="next"',
 						},
 					})
-				: new Response(JSON.stringify([head("feature", 2)]));
+				: new Response(JSON.stringify([pull("feature", 2, null)]));
 		},
 	};
+	const times = { created: Date.parse("2026-10-21T12:00:00Z"), updated: Date.parse("2026-10-21T13:00:00Z") };
 	expect(await openPullRequests(new GitHub(deps), { owner: "example", repo: "project" })).toEqual([
-		{ branch: "quest/m0/a", url: "https://github.com/example/project/pull/1" },
-		{ branch: "feature", url: "https://github.com/example/project/pull/2" },
+		{
+			number: 1,
+			url: "https://github.com/example/project/pull/1",
+			branch: "quest/m0/a",
+			head: "someone/project",
+			draft: true,
+			...times,
+			handedBack: true,
+		},
+		{
+			number: 2,
+			url: "https://github.com/example/project/pull/2",
+			branch: "feature",
+			head: null,
+			draft: false,
+			...times,
+			handedBack: false,
+		},
 	]);
 	expect(requested).toEqual([
 		"/repos/example/project/pulls?state=open&per_page=100",
 		"/repos/example/project/pulls?state=open&page=2",
 	]);
-});
-
-test("a fork's parent repository and its quest branches come from GitHub", async () => {
-	const responses: Record<string, unknown> = {
-		"/repos/me/project": { fork: true, parent: { full_name: "example/project" } },
-		"/repos/example/project": { fork: false },
-		"/repos/example/project/git/matching-refs/heads/quest/": [
-			{ ref: "refs/heads/quest/m0/a" },
-			{ ref: "refs/heads/quest/m0/epic/b" },
-		],
-	};
-	const github = new GitHub({
-		token: "test-token",
-		now: () => 0,
-		sleep: async () => undefined,
-		warn: () => undefined,
-		fetch: async (url) => new Response(JSON.stringify(responses[new URL(String(url)).pathname])),
-	});
-	const parent = { owner: "example", repo: "project" };
-	expect(await forkParent(github, { owner: "me", repo: "project" })).toEqual(parent);
-	expect(await forkParent(github, parent)).toBeNull();
-	expect(await githubBranches(github, parent)).toEqual(["quest/m0/a", "quest/m0/epic/b"]);
 });

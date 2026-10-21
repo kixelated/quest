@@ -11,7 +11,7 @@ way in shows `quest:merge` on GitHub.
 ## Plan
 
 Decided 2026-10-20 (user) from the transcript audit recorded in
-[quest start](/quest/m0/helpers/start.md). Overlapping merge sessions in one
+[quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md). Overlapping merge sessions in one
 repository drew "another agent was merging, I told them to stop, can you take
 over anything needed?", and the same-machine guard flagged sessions in other
 repositories ("those are in another repo?").
@@ -23,7 +23,7 @@ repositories ("those are in another repo?").
 - Decided (user): a label per state, with no owner comment:
   `quest:iterate`, `quest:ready`, and `quest:merge`. At most one is on a
   PR. Planning PRs get none. A draft that its starter still holds, one with no
-  `## Decisions needed` section (see [quest start](/quest/m0/helpers/start.md)),
+  `## Decisions needed` section (the guide's Execution section),
   counts as owned too, so every command refuses it until the starter hands
   back; taking it over from a stale starter is the user's choice. Decided
   2026-10-21 (user), replacing a `quest:start` label.
@@ -69,7 +69,3 @@ repositories ("those are in another repo?").
   with a stale token, a refused swap, landing on a moved head, a PR
   leaving the queue, and a repository whose root instructions override
   landing.
-
-## Required
-
-- [quest start](/quest/m0/helpers/start.md) - the hand-back marker and the freed `ready` name
