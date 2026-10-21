@@ -31,5 +31,4 @@ how the service works.
 ## Required
 
 - [Web execution](/quest/m0/kix/execution.md) - the complete user flow being documented
-- [Mobile web app](/quest/m0/kix/mobile.md) - install and notification steps
 - [Operator setup](/quest/m0/kix/operator-setup.md) - verified deployment and App setup

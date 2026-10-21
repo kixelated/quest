@@ -389,7 +389,7 @@ export async function ask(
 			.bind(input.summary, input.session, now, job, attempt, runner.id, id),
 	]);
 	if (question!.meta.changes === 1)
-		return { question: id, cancel: !!(update!.results[0] as { cancel: number }).cancel };
+		return { question: id, cancel: !!(update!.results[0] as { cancel: number }).cancel, asked: true };
 	// An identical retry after the first request landed; anything else is refused.
 	const existing = await db
 		.prepare(
@@ -407,13 +407,14 @@ export async function ask(
 		)
 		.first<{ id: string; cancel: number }>();
 	if (!existing) throw new JobError("Attempt is no longer current");
-	return { question: existing.id, cancel: !!existing.cancel };
+	return { question: existing.id, cancel: !!existing.cancel, asked: false };
 }
 
 /**
  * Finish the current attempt. An account limit pauses the job with a
  * decision instead of moving it to another account. A requested cancel wins
- * over whatever the runner reports, keeping its partial result.
+ * over whatever the runner reports, keeping its partial result. Returns the
+ * job's new state, or null for a retry of a report that already landed.
  */
 export async function finish(
 	db: D1Database,
@@ -447,7 +448,7 @@ export async function finish(
 	statements.push(
 		db
 			.prepare(
-				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE ? END,summary=?,result=?,lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running'",
+				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE ? END,summary=?,result=?,lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' RETURNING state",
 			)
 			.bind(
 				input.outcome === "limited" ? "waiting" : input.outcome,
@@ -460,7 +461,8 @@ export async function finish(
 			),
 	);
 	const results = await db.batch(statements);
-	if (results.at(-1)!.meta.changes === 1) return;
+	const finished = results.at(-1)!.results[0] as { state: JobState } | undefined;
+	if (finished) return finished.state;
 	// An identical retry after the first report landed is accepted; anything else is refused.
 	const landed = await db
 		.prepare(
@@ -469,6 +471,7 @@ export async function finish(
 		.bind(job, attempt, body, stored, attempt, runner.id)
 		.first();
 	if (!landed) throw new JobError("Attempt is no longer current");
+	return null;
 }
 
 /** How long an unrecorded branch update blocks another publication of the same job. */

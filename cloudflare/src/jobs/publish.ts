@@ -103,12 +103,13 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	return { job, attempt, head: body.head as string | null, session, message, changes, pull };
 }
 
-type Decision = { decision: string; cancel: boolean };
+/** A pause on a decision; `asked` is false for a retry of one already asked. */
+type Decision = { decision: string; cancel: boolean; asked: boolean };
 type Published = { head: string | null; pull?: { number: number; url: string; draft: boolean } };
 
 /** Pause the attempt on a decision the maintainer must make before this can publish. */
 async function decide(db: D1Database, runner: Runner, input: Publication, prompt: unknown): Promise<Decision> {
-	const { question, cancel } = await store.ask(
+	const { question, cancel, asked } = await store.ask(
 		db,
 		runner,
 		input.job,
@@ -121,7 +122,7 @@ async function decide(db: D1Database, runner: Runner, input: Publication, prompt
 		},
 		Date.now(),
 	);
-	return { decision: question, cancel };
+	return { decision: question, cancel, asked };
 }
 
 /**

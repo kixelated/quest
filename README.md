@@ -53,7 +53,8 @@ own quest, and it becomes ready once its children have merged. The top folders
 (`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
-on it, so the quests that required it can become ready. Milestones are never
+on it, so the quests that required it can become ready. A PR that leaves work
+rewrites the plan to what remains. Milestones are never
 deleted, so a PR that finishes one (its README has no `Required` left) removes
 the links to that milestone too; `quest check` flags any it misses. The
 finished plan stays in Git history, beside the code that completed it.
@@ -180,6 +181,35 @@ Draft claims are placeholders, so CI can skip them. This repository runs its
 checks only on PRs ready for review: the `pull_request` trigger lists
 `ready_for_review`, and each job has the condition
 `github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
+
+## Check a quest's PR
+
+A PR from a quest's branch must leave that quest accurate. `quest check --base
+<ref>` runs the usual check, then compares the working tree with its merge base
+with `<ref>`. When the branch is a quest's path without `.md` (an epic's is
+`quest/<path>/README`) and that quest exists at the merge base, the diff must
+delete or edit it. Any other branch passes. The branch defaults to the current one;
+`--branch <name>` names the PR's head branch instead:
+
+```sh
+git fetch origin main
+quest check --base origin/main --branch quest/m0/export
+```
+
+Fetch the base first, since a stale one can predate the quest. The
+`quest-merge` skill runs this before enabling auto-merge. A repository with
+`quest` installed in CI can also run it on pull requests, where the checkout is
+detached, so pass the head branch:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    fetch-depth: 0
+- run: quest check --base "origin/$GITHUB_BASE_REF" --branch "$GITHUB_HEAD_REF"
+```
+
+The check is a floor, not a review: any edit to the quest passes, so reviewers
+still judge whether a rewrite matches what remains.
 
 ## Move and delete quests
 
@@ -316,6 +346,48 @@ same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `threads`. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
+
+## Prunable local checkouts
+
+The experimental `quest worktree` commands share one disk budget across this
+user's repositories and release a checkout's disk by deleting its declared
+scratch in place. They only operate on Git worktrees they create; use the
+owning application for Codex, Claude, or other managed checkouts. Process
+supervision remains unfinished: stop agents and commands in a checkout before
+releasing it.
+
+Set a shared capacity and an explicit reservation in bytes, covering the
+checkout and its expected build output. Measure representative jobs before
+choosing the budget. Reservations serialize creators and account for concurrent
+expected growth. They do not enforce filesystem quotas against arbitrary
+writers, and Git objects stored in the shared repository are not charged.
+
+```sh
+quest worktree capacity 20000000000
+quest worktree create example --reserve 3000000000 --ref HEAD
+quest worktree status
+quest worktree release example --scratch node_modules dist
+quest worktree restore example
+```
+
+Creation prints JSON with the ID and the detached, locked checkout path under
+`.worktrees/`. Release deletes only its `--scratch` paths, and refuses one that
+Git does not ignore, that holds tracked files or another Git worktree, or that
+is reached through a symbolic link; links inside scratch are removed, never
+followed. Missing paths
+are skipped, so release can be rerun. The checkout, its Git state, and
+untracked files stay in place, and `status` charges what remains. Restore
+reserves the checkout's disk again; then reinstall or rebuild its scratch, for
+example with `just install`.
+
+Quest never removes a checkout. Once one is finished, remove it with
+`git worktree unlock` and `git worktree remove`, which refuses modified or
+untracked files but deletes ignored ones; `release` then drops its record. A
+failed creation stays charged until `release` drops it. Records live in
+`$QUEST_WORKTREE_HOME`, or `$XDG_STATE_HOME/quest/worktrees` (default
+`~/.local/state/quest/worktrees`). No live lock is stolen: after a crash,
+confirm the registry lock's owner has exited before removing it. This initial
+interface refuses unknown or changed checkout ownership.
 
 ## Work with your agents
 

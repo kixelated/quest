@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { arrived } from "../push/notify";
 import { GitHubService } from "./service";
 
 export function positiveId(value: unknown): value is number {
@@ -205,7 +206,18 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 	}
 	// Observations never approve or launch work. The background read reconciles
 	// current GitHub state rather than treating delayed webhook bodies as facts.
-	if (reads !== null && committed[reads]!.meta.changes > 0)
-		c.executionCtx.waitUntil(new GitHubService(c.env).observe(repository));
+	// A new decision item still notifies, once, from the first delivery, after
+	// the read so a title the webhook lacks can come from GitHub.
+	const read = reads !== null && committed[reads]!.meta.changes > 0;
+	if (read || observed.has(event))
+		c.executionCtx.waitUntil(
+			(async () => {
+				try {
+					if (read) await new GitHubService(c.env).observe(repository);
+				} finally {
+					if (observed.has(event)) await arrived(c.env, repository, installation, event, payload);
+				}
+			})(),
+		);
 	return c.json({ status: "accepted" }, 202);
 });

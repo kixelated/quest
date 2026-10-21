@@ -2,8 +2,9 @@
 
 A deployable foundation for Quest on Cloudflare, and the site at
 `https://kix.quest`: the quest log for your repo and your agents, on the web.
-Hono serves HTML directly, so there is no client bundle; only passkeys need a
-small script (`src/passkey.js`). Every page renders
+Hono serves HTML directly, so there is no client bundle; only passkeys
+(`src/passkey.js`) and the installed app (`src/app.js` and `src/sw.js`) need
+small scripts. Every page renders
 inside the shared layout in `src/layout.tsx`, which follows
 [the quest log theme](../design/theme.md): the home page (`src/home.tsx`), the
 docs under `/docs` (`src/docs.tsx`), the quest board under `/repos`
@@ -28,9 +29,11 @@ other docs become `/docs/<name>` and other repository paths point at GitHub. It
 also snapshots this repository's `quest/` tree and finished quests into
 `build/board.json`, which supplies the public board. Enrolled repositories use authenticated
 GitHub snapshots through the same board model. A shallow clone has no
-history, so its board shows no finished work. It also copies `design/theme/` and `src/site.css` into `build/public/`, which the
-Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
-`/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
+history, so its board shows no finished work. It also copies `design/theme/`,
+`src/site.css`, the scripts, and the web app manifest into `build/public/`,
+which the Worker serves as static assets (`/theme/theme.css`,
+`/theme/logo.svg`, `/theme/og.png`, `/site.css`, `/sw.js`, and the like).
+`build/` is ignored by Git.
 
 Better Auth uses D1 for accounts and sessions;
 adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
@@ -205,6 +208,49 @@ the item showed (a question, a GitHub change, a quest's text). A newer version
 is unread again, and skipping an item lasts until it changes. A finished or
 stopped job sets its item aside the same way.
 
+### Installed app and notifications
+
+kix.quest installs as a progressive web app (`src/manifest.webmanifest`,
+starting at `/inbox`) on Android, desktop browsers, and iOS/iPadOS 16.4+ once
+added to the Home Screen. Signed-in pages load `src/app.js`, which registers
+the service worker `src/sw.js`, sets the installed app's icon badge to the
+unread decision count where the Badging API exists, and drives the
+notification switch on `/inbox` and `/account`. The nav shows the same count.
+It reads stored observations without rechecking GitHub on every page, so it
+reveals a number and nothing else.
+
+A device turns notifications on only from a click, which asks the browser for
+permission and stores its push subscription (`push_subscriptions`) for that
+user and session. Subscriptions must name a known push service. Signing out
+deletes the session's subscriptions, and the sign-out form first drops the
+browser's own, which discards pushes still queued for it (a sign-out without
+JavaScript leaves those to arrive within the 24-hour TTL). A push service
+reporting one gone (404 or 410) deletes it. The switch shows a device as notified only while the
+server stores its subscription for the signed-in user, so whoever signs in
+next on that browser turns notifications on with their own click. A rotated
+subscription replaces the old one only for the user who enabled it, and the
+switch drops a browser subscription made for an earlier VAPID key pair. Each push
+rechecks that its recipient still maintains the project, as the inbox does.
+
+Only decisions push (`src/push/notify.ts`): an agent's question, a
+publication decision, an account limit, a failed job, a new or reopened issue,
+and a pull request opened ready for review or marked ready. Drafts,
+progress, presence, and finished work never push, and neither does anything on
+a paused project. Each push goes once, from the first delivery or the attempt
+that changed, to the devices of the project's members, whose inbox shows it. It
+carries the project, the item's title, and the unread count; one
+notification tag and push `Topic` per item replace an earlier one instead of
+stacking. Tapping it opens the item in the inbox. Notifications have no answer
+buttons: iOS Web Push does not support them, and every answer goes through the
+inbox's stale- and duplicate-answer checks.
+
+`src/push/webpush.ts` implements RFC 8291 message encryption and RFC 8292 VAPID
+signing with WebCrypto, so there is no push library; tests check it against
+RFC 8291's worked example. Notifications are on only when both
+`VAPID_PUBLIC_KEY` (in `wrangler.jsonc`) and the `VAPID_PRIVATE_KEY` secret are
+set. `bun scripts/vapid.ts` prints a new pair; replacing it stops every
+existing subscription until each device turns notifications on again.
+
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
 and readiness the CLI runs.
@@ -264,7 +310,8 @@ jobs that are queued, running, failed, or waiting on an agent's questions, a
 tool permission, or an account limit.
 
 `dev/github.ts` fakes GitHub for every outbound request, so nothing leaves
-localhost and no real credential is used. Sign in with GitHub completes as the
+localhost and no real credential is used. Notifications are off, since a push
+would reach a real push service. Sign in with GitHub completes as the
 seeded maintainer. From a shell, sign in with a cookie jar:
 
 ```sh
@@ -301,7 +348,9 @@ limits and their decisions, lost branch updates and deliveries, iterated heads,
 and token scopes. Output tests use local R2 for chunk ordering, retries, the
 caps, expiry, and cleanup after a disconnect. Inbox tests answer prompts
 through the forms, reject stale revisions and repeated answers, coalesce
-duplicate webhooks, and hide a project whose maintainer lost authority. No
+duplicate webhooks, and hide a project whose maintainer lost authority. Push
+tests encrypt RFC 8291's example, verify VAPID signatures, decrypt what a
+subscribed device receives, and check that only decisions push, once each. No
 OAuth credentials or Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
@@ -350,7 +399,10 @@ a production Google OAuth web client with redirect URI
 `https://kix.quest/api/auth/callback/google`, set its public client ID as
 `GOOGLE_CLIENT_ID` in `wrangler.jsonc`, and set the secret with
 `bun run wrangler secret put GOOGLE_CLIENT_SECRET`; without both, Google is
-not offered. The secret is optional, so it is not listed under `secrets.required`. Deploys fail until every
+not offered. The secret is optional, so it is not listed under `secrets.required`.
+Notifications are optional the same way: run `bun scripts/vapid.ts`, set its
+public key as `VAPID_PUBLIC_KEY` in `wrangler.jsonc`, and set the private key
+with `bun run wrangler secret put VAPID_PRIVATE_KEY`. Deploys fail until every
 required secret is set, so register the GitHub App first ([GITHUB.md](GITHUB.md)
 steps 1 and 2), then set secrets interactively:
 

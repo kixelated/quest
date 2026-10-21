@@ -40,6 +40,11 @@ run each wait in the foreground instead, bounded by the shell's own time limit,
 and re-run it with `--since` until it returns activity.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
+Before enabling auto-merge, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
+Run a `quest` the PR cannot modify, such as an installed release or a build from the base, from a directory outside the head checkout: the head's files, including runtime config such as `bunfig.toml`, are untrusted.
+A stale local base can predate the quest and skip the check.
+On a finding, fix the branch: delete the finished quest with `quest rm`, or rewrite it to the remainder the PR body names.
+Then push, re-check, and continue; ask the user only when what remains is unclear.
 Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
 If your caller said it watches the merge queue, report once auto-merge is enabled.
 Otherwise wait until the PR merges. If it leaves the queue unmerged or auto-merge

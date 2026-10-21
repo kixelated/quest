@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
 import { type Provider, providerNames } from "./auth";
+import { Notifications } from "./layout";
 
 // Sign-in choices and the signed-in account's methods. OAuth uses plain forms;
 // only the WebAuthn ceremonies need /passkey.js, which reveals its buttons
@@ -84,6 +85,9 @@ export function AccountPage(props: {
 	linked: Provider[];
 	providers: Provider[];
 	passkeys: Passkey[];
+	/** The VAPID public key, or null where notifications are not configured. */
+	notifications: string | null;
+	devices: number;
 	error?: string;
 }) {
 	const unlinked = props.providers.filter((provider) => !props.linked.includes(provider));
@@ -144,6 +148,24 @@ export function AccountPage(props: {
 					Keep another passkey or a linked provider to recover access; there is no administrator recovery.
 				</p>
 			</Panel>
+			{props.notifications && (
+				<Panel title="Notifications">
+					<p>
+						Get a notification when something needs your decision: an agent's question, an account limit, a
+						stopped job, a new issue, or a pull request ready for review. Tapping it opens the decision.
+					</p>
+					<p class="muted">
+						{props.devices === 1
+							? "1 device is notified."
+							: `${props.devices || "No"} devices are notified.`}{" "}
+						Signing out turns notifications off for that device.
+					</p>
+					<Notifications publicKey={props.notifications} />
+					<noscript>
+						<p class="muted">Notifications need JavaScript.</p>
+					</noscript>
+				</Panel>
+			)}
 		</section>
 	);
 }

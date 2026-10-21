@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import * as push from "../push/notify";
 import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
@@ -151,14 +152,28 @@ export class RunnerHub extends DurableObject<Env> {
 					message.session,
 					now,
 				);
-			case "question":
-				return store.ask(db, runner, message.job, message.attempt, message, now);
+			case "question": {
+				const { question, cancel, asked } = await store.ask(
+					db,
+					runner,
+					message.job,
+					message.attempt,
+					message,
+					now,
+				);
+				if (asked && !cancel) this.ctx.waitUntil(push.job(this.env, message.job, "question"));
+				return { question, cancel };
+			}
 			case "output":
 				// Past the attempt's cap the reply says `truncated`, and the job carries on.
 				return output.append(this.env, runner, message, now);
-			case "result":
-				await store.finish(db, runner, message.job, message.attempt, message, now);
+			case "result": {
+				const state = await store.finish(db, runner, message.job, message.attempt, message, now);
+				// A limit waits on an account choice; a failure waits on a retry.
+				if (state === "waiting" || state === "failed")
+					this.ctx.waitUntil(push.job(this.env, message.job, state === "waiting" ? "account" : "failed"));
 				return {};
+			}
 		}
 	}
 }

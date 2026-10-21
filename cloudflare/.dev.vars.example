@@ -14,3 +14,9 @@ GITHUB_APP_ID=replace-with-app-id
 GITHUB_APP_PRIVATE_KEY=replace-with-quoted-PEM-private-key
 GITHUB_WEBHOOK_SECRET=replace-with-random-webhook-secret
 GITHUB_FORK_OWNER=replace-with-service-controlled-fork-owner
+
+# Optional decision notifications: `bun scripts/vapid.ts` prints a key pair.
+# Set VAPID_PUBLIC_KEY here, and list VAPID_PRIVATE_KEY under
+# `secrets.required` in wrangler.jsonc while trying it, as with Google.
+# VAPID_PUBLIC_KEY=replace-with-vapid-public-key
+# VAPID_PRIVATE_KEY=replace-with-vapid-private-key
