@@ -99,11 +99,16 @@ export async function deliver(env: Env, decision: Decision, targets: Device[]) {
 		);
 }
 
-/** Notify everyone with a device about a decision on a project. */
+/**
+ * Notify everyone with a device about a decision on a project. A paused
+ * project offers no work, so a job that stops after it pauses does not notify.
+ */
 export async function notify(env: Env, decision: Omit<Decision, "project"> & { project: number }) {
 	const targets = await devices(env, decision.project);
 	if (!targets.length) return;
-	const project = await env.DB.prepare("SELECT id,owner,name,state FROM github_projects WHERE id=?")
+	const project = await env.DB.prepare(
+		"SELECT id,owner,name,state FROM github_projects WHERE id=? AND state='enabled'",
+	)
 		.bind(decision.project)
 		.first<Enrollment>();
 	if (project) await deliver(env, { ...decision, project }, targets);

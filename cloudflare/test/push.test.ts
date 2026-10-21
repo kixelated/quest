@@ -221,9 +221,9 @@ describe("decision notifications", () => {
 			body: "New issue: Crash on start",
 			tag: "10/issues/3",
 			url: "/inbox?project=10&item=issues%2F3",
-			// The open issue and pull request, and the new issue. Ready quests wait for a
-			// refresh after a webhook marks the observations stale.
-			badge: 3,
+			// The open issue and pull request, the ready quest, and the new issue. A new
+			// issue cannot change which quests are ready, so they stay available.
+			badge: 4,
 		});
 	});
 
@@ -290,6 +290,11 @@ describe("decision notifications", () => {
 			body: "Agent question: [S] First",
 			url: "/inbox?project=10&item=quest%2Ffirst.md",
 		});
+		// A project paused while its job runs stops notifying.
+		await db.prepare("UPDATE github_projects SET state='paused' WHERE id=10").run();
+		await push.job(env, id, "question");
+		expect(sent).toHaveLength(1);
+		await db.prepare("UPDATE github_projects SET state='enabled' WHERE id=10").run();
 		status = 410;
 		await push.job(env, id, "question");
 		expect(await subscriptions()).toEqual([]);

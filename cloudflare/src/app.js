@@ -22,7 +22,36 @@ function key(base64url) {
 	return Uint8Array.from(text, (c) => c.charCodeAt(0));
 }
 
-for (const control of document.querySelectorAll("[data-push]")) {
+// Signing out stops this device's notifications: the server forgets the
+// session's subscriptions, and the browser drops its own, so whoever signs in
+// next turns them on for themselves.
+for (const form of document.querySelectorAll('form[action="/sign-out"]')) {
+	if (!supported) break;
+	form.addEventListener(
+		"submit",
+		(event) => {
+			event.preventDefault();
+			registration
+				.then((found) => found.pushManager.getSubscription())
+				.then((subscription) => subscription?.unsubscribe())
+				.catch(() => {})
+				.finally(() => form.submit());
+		},
+		{ once: true },
+	);
+}
+
+// The server can forget a subscription the browser still has, such as one a
+// signed-out session enabled. Store it again for this session, so a switch
+// that shows notifications on means this device is notified.
+const controls = document.querySelectorAll("[data-push]");
+const synced = (async () => {
+	if (!supported || !controls.length || Notification.permission !== "granted") return;
+	const subscription = await (await registration).pushManager.getSubscription();
+	if (subscription) await post("/push/subscribe", subscription.toJSON());
+})();
+
+for (const control of controls) {
 	const status = control.querySelector("[data-push-status]");
 	const enable = control.querySelector("[data-push-enable]");
 	const disable = control.querySelector("[data-push-disable]");
@@ -78,5 +107,10 @@ for (const control of document.querySelectorAll("[data-push]")) {
 			return "Notifications are off for this device.";
 		}),
 	);
-	show().catch(() => {});
+	synced
+		.then(
+			() => show(),
+			(error) => show(error.message || "Something went wrong."),
+		)
+		.catch(() => {});
 }
