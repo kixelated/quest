@@ -145,7 +145,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
 				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
 				"each once per head, with the check's name as the actor and its details URL. " +
-				"Neutral and skipped results pass; optional checks never wake the wait, unless the base branch requires none, which requires them all. " +
+				"Neutral and skipped results pass, and a required check not yet started holds back checks:passed. " +
+				"Optional checks never wake the wait, unless the base branch requires none, which requires them all. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
 				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Replies and reactions by that account are ignored. " +

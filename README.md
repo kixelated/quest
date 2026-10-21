@@ -184,12 +184,12 @@ prints `checks:failed`, and every required check passing prints
 the actor field and its details URL. Neutral and skipped results pass.
 Requiredness comes from the base branch's protection and rulesets, readable
 with read access; optional checks never wake the wait, unless the base branch
-requires none, in which case every check is required. A result counts when it
-was reached at or after the starting point, so a wait started after CI finished
-still reports it; a push starts over for the new head, and the cursor records
-what was reported, so resuming never replays it. GitHub lists only checks that
-have started, so a required check created late, such as a job that waits on
-others, can start after `checks:passed` prints.
+requires none, in which case every check is required. A required check that
+has not started yet, such as a job that waits on others, holds back
+`checks:passed`. A result counts when it was reached at or after the starting
+point, so a wait started after CI finished still reports it; a push starts over
+for the new head, and the cursor records what was reported, so resuming never
+replays it.
 
 Review-thread replies and reactions never reach the PR timeline, so they are
 read separately. A reply prints as `replied`; a thread's first comment is part
@@ -206,7 +206,8 @@ visible after a newer reaction is still reported.
 Each poll makes one conditional timeline request and one conditional
 review-comment request every five minutes once it has read the existing pages,
 following a new page when the current one fills, plus one GraphQL query each
-for reactions and checks. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
+for reactions and checks. It reads the base branch's required checks once per
+call. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:

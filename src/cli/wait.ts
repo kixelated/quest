@@ -25,6 +25,7 @@ fragment reaction on Reaction { id content createdAt user { login } }`;
 const CHECKS = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
 	repository(owner: $owner, name: $repo) {
 		pullRequest(number: $number) {
+			baseRefName
 			headRefOid
 			commits(last: 1) { nodes { commit { oid statusCheckRollup {
 				contexts(first: 100, after: $after) {
@@ -409,12 +410,13 @@ async function watch(
 		return { viewer, events };
 	};
 	/** GraphQL says which checks the base branch requires, through branch protection or rulesets. */
-	const checks = async (): Promise<{ head: string; checks: Check[] } | undefined> => {
+	const checks = async (): Promise<{ head: string; base: string; checks: Check[] } | undefined> => {
 		const result: Check[] = [];
 		let head: string | undefined;
 		let after: string | null = null;
+		let pull: ObjectValue;
 		do {
-			const pull = object(object((await graphql(CHECKS, after)).repository).pullRequest);
+			pull = object(object((await graphql(CHECKS, after)).repository).pullRequest);
 			const commit = object(array(object(pull.commits).nodes)[0]?.commit);
 			// A push racing these pages is read whole on the next poll.
 			if (commit.oid !== pull.headRefOid || (head !== undefined && commit.oid !== head)) return undefined;
@@ -426,7 +428,29 @@ async function watch(
 			const page = object(contexts.pageInfo);
 			after = page.hasNextPage === true ? string(page.endCursor) : null;
 		} while (after !== null);
-		return { head: head!, checks: result };
+		return { head: head!, base: string(pull.baseRefName), checks: result };
+	};
+	/**
+	 * The check names the base branch requires, read once per wait. Only a requirement says whether a
+	 * missing check has yet to start, or whether the repository requires none.
+	 */
+	const requirements = new Map<string, Set<string>>();
+	const required = async (branch: string): Promise<Set<string>> => {
+		const known = requirements.get(branch);
+		if (known) return known;
+		const path = `${base}/branches/${encodeURIComponent(branch)}`;
+		const protection = object(object(await (await request(path)).json()).protection ?? {});
+		const legacy = object(protection.required_status_checks ?? { checks: [] });
+		const rules = array(await (await request(`${base}/rules/branches/${encodeURIComponent(branch)}`)).json());
+		const names = new Set([
+			...(legacy.enforcement_level === "off" ? [] : array(legacy.checks).map((row) => string(row.context))),
+			...rules
+				.filter((rule) => rule.type === "required_status_checks")
+				.flatMap((rule) => array(object(rule.parameters).required_status_checks))
+				.map((row) => string(row.context)),
+		]);
+		requirements.set(branch, names);
+		return names;
 	};
 
 	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=100`);
@@ -482,7 +506,9 @@ async function watch(
 		found.reactions.push(...events.filter((event) => event.actor !== viewer && fresh("reactions", event)));
 		// Check results are state rather than a log, so each poll reads them afresh.
 		const head = await checks();
-		const reached = head ? checkActivities(head.head, head.checks, cursor.checks, prUrl) : [];
+		const reached = head
+			? checkActivities(head.head, head.checks, await required(head.base), cursor.checks, prUrl)
+			: [];
 
 		if (reached.length || SOURCES.some((source) => found[source].length)) {
 			const marks = Object.fromEntries(
@@ -560,10 +586,18 @@ function check(row: ObjectValue): Check {
 
 /**
  * The head's first required failure, and every required check passing, each reported once per head
- * when reached at or after the starting point. A repository that requires no checks requires them all.
+ * when reached at or after the starting point. A base branch that requires no checks requires them all.
  */
-function checkActivities(head: string, all: Check[], state: Cursor["checks"], prUrl: string): Activity[] {
-	const required = all.some((entry) => entry.required) ? all.filter((entry) => entry.required) : all;
+function checkActivities(
+	head: string,
+	all: Check[],
+	names: Set<string>,
+	state: Cursor["checks"],
+	prUrl: string,
+): Activity[] {
+	const required = names.size ? all.filter((entry) => entry.required) : all;
+	// GitHub lists a check only once it starts, so a required one created late is still to come.
+	const started = [...names].every((name) => all.some((entry) => entry.name === name));
 	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
 		const id = `${head}:${outcome}`;
 		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
@@ -582,7 +616,7 @@ function checkActivities(head: string, all: Check[], state: Cursor["checks"], pr
 	settled.sort((a, b) => a.result.time - b.result.time);
 	const failed = settled.find((entry) => entry.result.outcome === "failed" && entry.result.time >= state.since);
 	const passed =
-		settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
+		started && settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
 			? settled.at(-1)
 			: undefined;
 	return [...reached("failed", failed), ...reached("passed", passed)];
