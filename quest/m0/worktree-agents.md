@@ -40,7 +40,6 @@ merge.
 ## Required
 
 - [Worktree process ownership](/quest/m0/worktree.md) - supervised commands and automatic scratch release
-- [Expensive command gate](/quest/m0/local-gate.md) - resource control before removing agent-count throttles
 
 ## Related
 
