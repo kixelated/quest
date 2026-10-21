@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	readdirSync,
 	realpathSync,
+	rmSync,
 	statSync,
 	symlinkSync,
 	writeFileSync,
@@ -14,7 +15,7 @@ import {
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { agentEnvironment, spawnDirectory } from "../src/cli/agent";
+import { agentEnvironment, redactedLines, spawnDirectory } from "../src/cli/agent";
 import { type Output, main } from "../src/cli/main";
 import { tempDir } from "./fixture";
 
@@ -73,6 +74,12 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CL
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
 const event = (value) => console.log(JSON.stringify(value));
 const resume = argv[1] === "resume";
+if (process.env.FAKE_MODE === "late-thread") {
+	// Announce the thread only after a while, then keep running.
+	setTimeout(() => event({ type: "thread.started", thread_id: "thread-late" }), 500);
+	setInterval(() => {}, 1000);
+	return;
+}
 event({ type: "thread.started", thread_id: resume ? argv[argv.length - 2] : "thread-1" });
 event({ type: "turn.started" });
 if (process.env.FAKE_MODE === "exhausted") {
@@ -413,6 +420,49 @@ fakes("a prompt starting with a dash is the prompt, not an option", async () => 
 	const result = await quest("agent", "start", ...launch("claude", "1"), s.worktree, "- A: yes");
 	expect(result.code).toBe(0);
 	expect(s.calls()[0].stdin).toBe("- A: yes");
+});
+
+fakes("a launch refuses while stop --all is ending the spawn", async () => {
+	const s = setup();
+	const dir = spawnDirectory(join(s.runtime, "quest", "agent"), s.worktree);
+	// A live `stop --all` marks the spawn before listing its records.
+	writeFileSync(join(dir, "ending"), String(process.pid));
+	const refused = await quest("agent", "start", ...launch("claude", "1"), s.worktree, "go");
+	expect(refused.code).toBe(1);
+	expect(refused.stderr).toContain("the spawn is ending");
+	expect(s.calls()).toEqual([]);
+	expect(readdirSync(join(dir, "agents"))).toEqual([]);
+
+	// A mark left by a `stop --all` that died does not block the next spawn.
+	writeFileSync(join(dir, "ending"), String(spawnSync(process.execPath, ["-e", ""]).pid));
+	expect((await quest("agent", "start", ...launch("claude", "1"), s.worktree, "go")).code).toBe(0);
+});
+
+fakes("an agent whose record is lost is killed rather than left running untracked", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "late-thread");
+	const running = quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+	await vi.waitFor(() => expect(s.calls()).toHaveLength(1));
+	// The state disappears before the agent announces its thread.
+	rmSync(spawnDirectory(join(s.runtime, "quest", "agent"), s.worktree), { recursive: true, force: true });
+	const result = await running;
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("ENOENT");
+});
+
+test("a long line without a newline is forwarded early, still redacted", () => {
+	const written: string[] = [];
+	const lines = redactedLines(
+		(value) => value.replaceAll("SECRETKEY", "<key 1>"),
+		8,
+		(text) => written.push(text),
+	);
+	lines.data(`${"a".repeat(70_000)}SECRE`);
+	lines.data(`TKEY${"b".repeat(10)}`);
+	// Most of the line is out before it ends, so the buffer stays bounded.
+	expect(written.join("").length).toBeGreaterThan(60_000);
+	lines.end();
+	expect(written.join("")).toBe(`${"a".repeat(70_000)}<key 1>${"b".repeat(10)}`);
 });
 
 fakes("every command refuses a state directory that is a symlink", async () => {

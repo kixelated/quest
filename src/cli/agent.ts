@@ -430,12 +430,22 @@ function live(record: string): Running | undefined {
 function claim(dir: string, worktree: string): string {
 	const record = join(dir, "agents", `${digest(worktree)}.${randomUUID()}.json`);
 	save(record, { pid: process.pid, worktree } satisfies Running);
+	// `stop --all` marks the spawn as ending before it lists the records, so a
+	// launch it does not list sees the mark here and never starts.
+	const ending = load<number>(endingPath(dir));
+	if (ending !== undefined && alive(ending)) {
+		rmSync(record, { force: true });
+		throw new Error("the spawn is ending; `quest agent stop --all` is running");
+	}
 	if (records(dir, worktree).some((other) => other !== record && live(other) !== undefined)) {
 		rmSync(record, { force: true });
 		throw new Error(`an agent is already running in ${worktree}; stop it with \`quest agent stop\``);
 	}
 	return record;
 }
+
+/** Holds the pid of a running `stop --all`. */
+const endingPath = (dir: string) => join(dir, "ending");
 
 export interface AgentDependencies {
 	env: NodeJS.ProcessEnv;
@@ -456,6 +466,33 @@ export const processDependencies = (out: Pick<AgentDependencies, "stdout" | "std
 /** How much of an agent's output is kept for diagnostics; the rest is read as it streams. */
 const TAIL = 64 * 1024;
 const tail = (value: string) => (value.length > TAIL ? value.slice(-TAIL) : value);
+
+/**
+ * Forward a stream redacted, by whole lines: a key never spans a newline, so
+ * one split across chunks is still redacted. A line longer than `TAIL` is
+ * forwarded early, keeping only `overlap` characters to finish a split key.
+ */
+export function redactedLines(redact: (value: string) => string, overlap: number, write: (text: string) => void) {
+	let partial = "";
+	return {
+		data(chunk: string) {
+			const buffered = partial + chunk;
+			const end = buffered.lastIndexOf("\n") + 1;
+			if (end > 0) write(redact(buffered.slice(0, end)));
+			partial = buffered.slice(end);
+			if (partial.length > TAIL) {
+				// Whole keys are redacted first, so only a key's unfinished start can remain raw.
+				const redacted = redact(partial);
+				const cut = redacted.length - overlap;
+				write(redacted.slice(0, cut));
+				partial = redacted.slice(cut);
+			}
+		},
+		end() {
+			if (partial !== "") write(redact(partial));
+		},
+	};
+}
 
 /**
  * Run one agent turn in the foreground: a new session with `prompt`, or
@@ -494,16 +531,27 @@ export async function runAgent(
 	const record = claim(dir, worktree);
 	const state: Running = { pid: process.pid, worktree };
 
+	let child: ChildProcess | undefined;
+	// An agent whose record cannot be saved, for example because `stop --all`
+	// deleted the state, could not be stopped, so it is killed.
+	let lost: unknown;
+	const update = () => {
+		try {
+			save(record, state);
+		} catch (error) {
+			lost ??= error;
+			child?.kill("SIGKILL");
+		}
+	};
 	const announce = (value: string | undefined) => {
 		if (value === undefined || value === state.session) return;
 		state.session = value;
-		save(record, state);
+		update();
 		deps.stdout(`session ${value}\n`);
 	};
 
 	const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 	let interrupted = 0;
-	let child: ChildProcess | undefined;
 	const forward = (name: (typeof signals)[number]) => {
 		interrupted ||= 128 + constants.signals[name];
 		child?.kill(name);
@@ -520,15 +568,13 @@ export async function runAgent(
 				});
 				child = agent;
 				state.child = agent.pid;
-				save(record, state);
+				update();
 				announce(known);
 				// The kept tails are redacted before they are cut, so a cut never splits a key.
 				let out = "";
 				let err = "";
 				let line = "";
-				// Stderr is forwarded by whole lines: a key never spans a newline, so
-				// one split across chunks is still redacted.
-				let partial = "";
+				const forwarded = redactedLines(redact, Math.max(...keys.map((k) => k.length)) - 1, deps.stderr);
 				agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
 					out = tail(redact(out + chunk));
 					const lines = (line + chunk).split("\n");
@@ -538,14 +584,9 @@ export async function runAgent(
 				agent.stdout.once("end", () => announce(reader.line(line)));
 				agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
 					err = tail(redact(err + chunk));
-					const buffered = partial + chunk;
-					const end = buffered.lastIndexOf("\n") + 1;
-					partial = buffered.slice(end);
-					if (end > 0) deps.stderr(redact(buffered.slice(0, end)));
+					forwarded.data(chunk);
 				});
-				agent.stderr.once("end", () => {
-					if (partial !== "") deps.stderr(redact(partial));
-				});
+				agent.stderr.once("end", () => forwarded.end());
 				agent.stdin.on("error", () => {}); // An agent that exits early closes its stdin.
 				agent.stdin.end(prompt);
 				agent.once("error", (error: NodeJS.ErrnoException) =>
@@ -560,6 +601,7 @@ export async function runAgent(
 				);
 			},
 		);
+		if (lost !== undefined) throw lost;
 		const result = reader.result(stderr);
 		announce(result.session);
 		// A finished turn is never exhausted, even if its reply mentions credit.
@@ -643,6 +685,7 @@ async function stopRecord(record: string, deps: AgentDependencies): Promise<bool
 /** End the spawn for the repository holding `root`: stop every agent, then delete the resolved keys. */
 export async function stopAll(root: string, deps: AgentDependencies): Promise<void> {
 	const dir = spawnDirectory(deps.base, root);
+	save(endingPath(dir), process.pid);
 	for (const record of records(dir)) await stopRecord(record, deps);
 	rmSync(dir, { recursive: true, force: true });
 	deps.stdout("deleted the resolved keys\n");
