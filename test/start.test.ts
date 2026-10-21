@@ -211,7 +211,25 @@ describe("start on GitHub", () => {
 		expect(github.pulls).toMatchObject([
 			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "example/project" } }, draft: true },
 		]);
-		expect(github.pulls[0].body).toContain(ONE);
+		expect(github.pulls[0].body).toBe(`Claims [${ONE}](https://github.com/example/project/blob/main/${ONE}).`);
+	});
+
+	test("links the quest by its repository path when the tree is below the top level", async () => {
+		const bare = tempDir();
+		git(bare, "init", "-q", "--bare", "-b", "main");
+		const work = tempDir();
+		setup(work);
+		mkdirSync(join(work, "sub"));
+		cpSync(join(Tree.baseline().path, "quest"), join(work, "sub", "quest"), { recursive: true });
+		git(work, "add", ".");
+		git(work, "commit", "-q", "-m", "seed");
+		git(work, "remote", "add", "origin", UPSTREAM);
+		git(work, "config", `url.${bare}.insteadOf`, UPSTREAM);
+		git(work, "push", "-q", "origin", "HEAD:refs/heads/main");
+		const github = new FakeGitHub();
+
+		await startQuest(join(work, "sub"), ONE, "[S] One", "origin", deps(github));
+		expect(github.pulls[0].body).toBe(`Claims [${ONE}](https://github.com/example/project/blob/main/sub/${ONE}).`);
 	});
 
 	test("fast-forwards the quest branch a worktree already has checked out", async () => {

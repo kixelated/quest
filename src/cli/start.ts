@@ -113,6 +113,8 @@ async function openDraft(
 	const github = up.github!;
 	const { owner, repo } = github.repository;
 	const fork = github.head.owner !== owner || github.head.repo !== repo;
+	// The quest's path in the repository, which differs from `path` when the tree sits below the top level.
+	const file = encodeURI(gitOutput(root, ["rev-parse", "--show-prefix"]) + path);
 	let created: OpenPull;
 	try {
 		const response = await github.client.request(`${repositoryPath(github.repository)}/pulls`, {
@@ -121,7 +123,7 @@ async function openDraft(
 				head: fork ? `${github.head.owner}:${branch}` : branch,
 				base: github.defaultBranch,
 				draft: true,
-				body: `Claims [${path}](https://github.com/${owner}/${repo}/blob/${github.defaultBranch}/${path}).`,
+				body: `Claims [${path}](https://github.com/${owner}/${repo}/blob/${github.defaultBranch}/${file}).`,
 			},
 		});
 		const row = object(await response.json());
