@@ -67,7 +67,9 @@ base64 content, or `null` content to delete. A symlink's content is its target.
 Submodule changes cannot be published. An optional `pull: { title, body, draft }`
 opens or updates the job's pull request, and `session` names the agent session
 to resume if the publication needs a decision. Checkpoints publish work in
-progress the same way, so a reassigned job continues from its branch. The reply
+progress the same way, so a reassigned job continues from its branch, as does
+a retry of a failed job: it starts from the head and pull request the failed
+job recorded, and a branch moved since still becomes a decision. The reply
 is `{ head, pull? }`, or `202 { decision, cancel }` when the job paused.
 
 Submitted files are data. The publisher never checks them out or runs their

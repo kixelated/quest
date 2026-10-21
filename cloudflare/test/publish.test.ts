@@ -185,7 +185,7 @@ let github: ReturnType<typeof fakeGitHub>;
 let machine: store.Runner & { token: string };
 
 /** Create and claim a job on the test runner, returning its ID. */
-async function running(extra: Partial<store.NewJob> = {}) {
+async function running(extra: Partial<store.NewJob> = {}, now = 0) {
 	const { id } = await store.createJob(
 		db,
 		{
@@ -198,10 +198,14 @@ async function running(extra: Partial<store.NewJob> = {}) {
 			trusted: true,
 			...extra,
 		},
-		0,
+		now,
 	);
-	await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+	await store.dispatch(db, user, new Map([[machine.id, 1]]), now);
 	return id;
+}
+/** Fail a job's current attempt, as its runner would. */
+async function fail(id: string) {
+	await store.finish(db, machine, id, 1, { outcome: "failed", summary: "Failed", result: undefined }, 0);
 }
 function publish(body: Record<string, unknown>, token = machine.token) {
 	const text = JSON.stringify(body);
@@ -752,6 +756,69 @@ describe("runner publication", () => {
 			prompt: { blocked: "The branch quest/first changed outside this job." },
 		});
 		expect(github.pulls).toEqual([]);
+	});
+
+	it("continues a retried job from the branch and pull request its failed job published", async () => {
+		const failed = await running();
+		const { head } = (await (
+			await publish({
+				job: failed,
+				attempt: 1,
+				head: null,
+				message: "one",
+				changes: [file("a", "1")],
+				pull: { title: "T", body: "B" },
+			})
+		).json()) as { head: string };
+		await fail(failed);
+		const id = await running({}, 1000);
+		expect(await job(id)).toMatchObject({ state: "running", head, pull: 100 });
+		const response = await publish({
+			job: id,
+			attempt: 1,
+			head,
+			message: "two",
+			changes: [file("a", "2")],
+			pull: { title: "T", body: "B2" },
+		});
+		expect(response.status).toBe(200);
+		const next = (await response.json()) as { head: string; pull: { number: number } };
+		expect(github.commits.get(next.head)!.parents).toEqual([head]);
+		expect(github.refs.get("quest-bot-forks/project:quest/first")).toBe(next.head);
+		expect(next.pull.number).toBe(100);
+		expect(github.pulls).toHaveLength(1);
+	});
+
+	it("starts a retried job fresh when its failed job published nothing", async () => {
+		await fail(await running());
+		const id = await running({}, 1000);
+		expect(await job(id)).toMatchObject({ head: null, pull: null });
+		const response = await publish({ job: id, attempt: 1, head: null, message: "m", changes: [file("a", "1")] });
+		expect(response.status).toBe(200);
+	});
+
+	it("pauses a retried job when its branch moved outside kix after the failure", async () => {
+		const failed = await running();
+		const { head } = (await (
+			await publish({ job: failed, attempt: 1, head: null, message: "one", changes: [file("a", "1")] })
+		).json()) as { head: string };
+		await fail(failed);
+		github.refs.set("quest-bot-forks/project:quest/first", prHead);
+		const id = await running({}, 1000);
+		const response = await publish({
+			job: id,
+			attempt: 1,
+			head,
+			session: "s",
+			message: "two",
+			changes: [file("a", "2")],
+		});
+		expect(response.status).toBe(202);
+		expect((await job(id)).questions[0]).toMatchObject({
+			kind: "publication",
+			prompt: { blocked: "The branch quest/first changed outside this job." },
+		});
+		expect(github.refs.get("quest-bot-forks/project:quest/first")).toBe(prHead);
 	});
 
 	it("keeps publishing a paused project's branch but opens no pull request", async () => {

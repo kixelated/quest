@@ -28,7 +28,13 @@ export type Snapshot = {
 };
 
 /** An open change that names a quest: its branch on a contributor's fork. */
-export type Change = { quest: string; author: string; href: string };
+export type Change = {
+	quest: string;
+	author: string;
+	href: string;
+	/** The pull request's number, when the change is one observed on GitHub. */
+	number?: number;
+};
 
 /** An issue filed from a fork, quarantined under `issues/` until a maintainer promotes it. */
 export type Issue = { path: string; title: string };

@@ -1,0 +1,264 @@
+import { expect, test } from "vitest";
+
+import type { GitHubDependencies } from "../src/cli/github";
+import { main } from "../src/cli/main";
+import { pullRequestStatus, statusLines } from "../src/cli/status";
+
+const A = "a".repeat(40);
+const B = "b".repeat(40);
+const pr = { owner: "example", repo: "project", number: 1 };
+const URL_ = "https://github.com/example/project/pull/1";
+
+type Node = Record<string, unknown>;
+const page = (nodes: Node[], next?: string) => ({
+	pageInfo: { hasNextPage: next !== undefined, endCursor: next ?? null },
+	nodes,
+});
+
+/** A recorded GraphQL response; omitted connections stand for ones the query skipped. */
+function pull(
+	fields: {
+		head?: string;
+		checks?: ReturnType<typeof page> | null;
+		reviews?: ReturnType<typeof page>;
+		threads?: ReturnType<typeof page>;
+		reactions?: Node[];
+	} & Node = {},
+) {
+	const { head = A, checks, reviews, threads, reactions = [], ...rest } = fields;
+	return {
+		data: {
+			repository: {
+				pullRequest: {
+					url: URL_,
+					state: "OPEN",
+					isDraft: false,
+					headRefOid: head,
+					mergeable: "MERGEABLE",
+					mergeStateStatus: "BLOCKED",
+					reviewDecision: "REVIEW_REQUIRED",
+					autoMergeRequest: null,
+					mergeQueueEntry: null,
+					reactions: { nodes: reactions },
+					commits: {
+						nodes: [
+							{
+								commit: {
+									oid: head,
+									statusCheckRollup:
+										checks === null
+											? null
+											: { state: "FAILURE", ...(checks ? { contexts: checks } : {}) },
+								},
+							},
+						],
+					},
+					...(reviews ? { reviews } : {}),
+					...(threads ? { reviewThreads: threads } : {}),
+					...rest,
+				},
+			},
+		},
+	};
+}
+
+function run(name: string, status: string, conclusion: string | null, isRequired: boolean) {
+	return {
+		__typename: "CheckRun",
+		name,
+		status,
+		conclusion,
+		detailsUrl: `https://github.com/example/project/actions/runs/1/job/${name}`,
+		isRequired,
+	};
+}
+
+function review(login: string, state: string, commit: string | null, id: number, reactions: Node[] = []) {
+	return {
+		author: { login },
+		state,
+		submittedAt: `2026-10-07T12:0${id}:00Z`,
+		url: `${URL_}#pullrequestreview-${id}`,
+		commit: commit === null ? null : { oid: commit },
+		reactions: { nodes: reactions },
+	};
+}
+
+function thread(id: string, isResolved: boolean, line: number | null = 3, author = "reviewer") {
+	return {
+		id,
+		isResolved,
+		isOutdated: line === null,
+		path: "src/a.ts",
+		line,
+		originalLine: 2,
+		comments: { nodes: [{ author: { login: author }, url: `${URL_}#discussion_r${id}` }] },
+	};
+}
+
+function setup(bodies: unknown[]) {
+	const queries: Record<string, unknown>[] = [];
+	const deps: GitHubDependencies = {
+		token: "test-token",
+		now: () => 0,
+		sleep: async () => {},
+		warn: () => {},
+		fetch: async (url, init) => {
+			expect(new URL(String(url)).pathname).toBe("/graphql");
+			queries.push(JSON.parse(String(init?.body)).variables);
+			const body = bodies.shift();
+			if (body === undefined) throw new Error("unexpected request");
+			return new Response(JSON.stringify(body));
+		},
+	};
+	return { deps, queries };
+}
+
+test("reports checks by requiredness, each reviewer's latest review against the head, and open threads", async () => {
+	const fixture = setup([
+		pull({
+			checks: page([
+				run("lint", "COMPLETED", "FAILURE", true),
+				run("docs", "COMPLETED", "CANCELLED", false),
+				run("test", "IN_PROGRESS", null, true),
+				run("build", "COMPLETED", "SUCCESS", true),
+				run("publish", "COMPLETED", "SKIPPED", false),
+				{
+					__typename: "StatusContext",
+					context: "ci/legacy",
+					state: "ERROR",
+					targetUrl: null,
+					isRequired: false,
+				},
+				{ __typename: "StatusContext", context: "deploy", state: "EXPECTED", targetUrl: "", isRequired: true },
+			]),
+			reviews: page([
+				review("alice", "APPROVED", B, 1),
+				review("bob", "CHANGES_REQUESTED", B, 2),
+				review("alice", "COMMENTED", A, 3, [
+					{ content: "THUMBS_UP", createdAt: "2026-10-07T12:04:00Z", user: { login: "codex[bot]" } },
+				]),
+				review("viewer", "PENDING", A, 4),
+				review("gone", "COMMENTED", null, 5),
+			]),
+			threads: page([thread("T1", true), thread("T2", false), thread("T3", false, null, "author")]),
+			reactions: [{ content: "EYES", createdAt: "2026-10-07T12:00:00Z", user: null }],
+		}),
+	]);
+	const status = await pullRequestStatus(pr, fixture.deps);
+	expect(fixture.queries).toHaveLength(1);
+	expect(fixture.queries[0]).toMatchObject({ number: 1, moreChecks: true, moreReviews: true, moreThreads: true });
+	expect(statusLines(status)).toEqual([
+		`url ${URL_}`,
+		"state open",
+		"draft false",
+		`head ${A}`,
+		"mergeable mergeable",
+		"merge-state blocked",
+		"review-decision review_required",
+		"auto-merge -",
+		"merge-queue -",
+		"checks failure passed=2 failing=3 pending=2",
+		"check failing required failure https://github.com/example/project/actions/runs/1/job/lint lint",
+		"check failing optional cancelled https://github.com/example/project/actions/runs/1/job/docs docs",
+		"check failing optional error - ci/legacy",
+		"check pending required in_progress https://github.com/example/project/actions/runs/1/job/test test",
+		"check pending required expected - deploy",
+		`review stale changes_requested bob 2026-10-07T12:02:00Z ${URL_}#pullrequestreview-2`,
+		`review current commented alice 2026-10-07T12:03:00Z ${URL_}#pullrequestreview-3`,
+		`review stale commented gone 2026-10-07T12:05:00Z ${URL_}#pullrequestreview-5`,
+		`reacted:eyes - 2026-10-07T12:00:00Z ${URL_}`,
+		`reacted:thumbs_up codex[bot] 2026-10-07T12:04:00Z ${URL_}#pullrequestreview-3`,
+		`thread T2 current reviewer ${URL_}#discussion_rT2 src/a.ts:3`,
+		`thread T3 outdated author ${URL_}#discussion_rT3 src/a.ts:2`,
+	]);
+});
+
+test("a queued PR with auto-merge and no checks reports both, and JSON is deterministic", async () => {
+	const body = pull({
+		state: "OPEN",
+		isDraft: true,
+		reviewDecision: null,
+		autoMergeRequest: {
+			enabledAt: "2026-10-07T12:00:00Z",
+			mergeMethod: "SQUASH",
+			enabledBy: { login: "kixelated" },
+		},
+		mergeQueueEntry: { state: "AWAITING_CHECKS", position: 2, enqueuedAt: "2026-10-07T12:01:00Z" },
+		checks: null,
+		reviews: page([]),
+		threads: page([]),
+	});
+	const status = await pullRequestStatus(pr, setup([body]).deps);
+	expect(statusLines(status).slice(2, 10)).toEqual([
+		"draft true",
+		`head ${A}`,
+		"mergeable mergeable",
+		"merge-state blocked",
+		"review-decision -",
+		"auto-merge squash kixelated 2026-10-07T12:00:00Z",
+		"merge-queue awaiting_checks 2 2026-10-07T12:01:00Z",
+		"checks - passed=0 failing=0 pending=0",
+	]);
+	expect(JSON.stringify(await pullRequestStatus(pr, setup([body]).deps))).toBe(JSON.stringify(status));
+	expect(status.mergeQueue).toEqual({ state: "awaiting_checks", position: 2, enqueuedAt: "2026-10-07T12:01:00Z" });
+});
+
+test("long lists page only the connections that have more, keeping the first page's PR fields", async () => {
+	const fixture = setup([
+		pull({
+			checks: page([run("one", "COMPLETED", "FAILURE", true)], "c1"),
+			reviews: page([review("alice", "APPROVED", B, 1)], "r1"),
+			threads: page([thread("T1", false)]),
+			reactions: [{ content: "HEART", createdAt: "2026-10-07T12:00:00Z", user: { login: "x" } }],
+		}),
+		pull({
+			checks: page([run("two", "QUEUED", null, false)]),
+			reviews: page([review("alice", "APPROVED", A, 2)], "r2"),
+			reactions: [{ content: "HEART", createdAt: "2026-10-07T12:00:00Z", user: { login: "x" } }],
+		}),
+		pull({ reviews: page([review("bob", "COMMENTED", A, 3)]) }),
+	]);
+	const status = await pullRequestStatus(pr, fixture.deps);
+	expect(
+		fixture.queries.map(({ checks, reviews, threads, moreChecks, moreReviews, moreThreads }) => ({
+			checks,
+			reviews,
+			threads,
+			moreChecks,
+			moreReviews,
+			moreThreads,
+		})),
+	).toEqual([
+		{ checks: null, reviews: null, threads: null, moreChecks: true, moreReviews: true, moreThreads: true },
+		{ checks: "c1", reviews: "r1", threads: null, moreChecks: true, moreReviews: true, moreThreads: false },
+		{ checks: null, reviews: "r2", threads: null, moreChecks: false, moreReviews: true, moreThreads: false },
+	]);
+	expect(status.checks.failing.map((check) => check.name)).toEqual(["one"]);
+	expect(status.checks.pending.map((check) => check.name)).toEqual(["two"]);
+	expect(status.reviews.map((r) => [r.reviewer, r.current])).toEqual([
+		["alice", true],
+		["bob", true],
+	]);
+	expect(status.reactions).toHaveLength(1);
+	expect(status.threads.map((t) => t.id)).toEqual(["T1"]);
+});
+
+test("a push between pages, a GraphQL error, or a missing PR fails instead of mixing heads", async () => {
+	const moved = setup([
+		pull({ checks: page([], "c1"), reviews: page([]), threads: page([]) }),
+		pull({ head: B, checks: page([]) }),
+	]);
+	await expect(pullRequestStatus(pr, moved.deps)).rejects.toThrow("head changed");
+	const errored = setup([{ errors: [{ message: "Field 'isRequired' is missing" }] }]);
+	await expect(pullRequestStatus(pr, errored.deps)).rejects.toThrow("GitHub GraphQL error: Field 'isRequired'");
+	const missing = setup([{ data: { repository: { pullRequest: null } } }]);
+	await expect(pullRequestStatus(pr, missing.deps)).rejects.toThrow("is not a pull request");
+});
+
+test("an invalid PR argument is a usage error before authentication", () => {
+	const errors: string[] = [];
+	const output = { stdout: () => {}, stderr: (text: string) => errors.push(text) };
+	expect(main(["status", "https://evil.example/example/project/pull/1"], output)).toBe(2);
+	expect(errors.join("")).toContain("GitHub pull request URL");
+});
