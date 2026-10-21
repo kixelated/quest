@@ -126,8 +126,9 @@ saw, and is refused once observations moved past it.
 The current attempt publishes its work over HTTPS at `POST /api/runner/publish`,
 not over its connection, so slow GitHub writes never hold up the hub. It sends
 file changes as data; the Worker commits them as the GitHub App to the job's
-one branch, which a reassigned attempt continues from, and opens or updates
-the job's pull request. Each job records its branch's `head` and its `pull`.
+one branch, which a reassigned attempt or a retried failed job continues from,
+and opens or updates the job's pull request. Each job records its branch's
+`head` and its `pull`.
 Changes a workflow may not publish pause the job with a `publication`
 decision. [GITHUB.md](GITHUB.md#publication) describes the request, its
 validation, and how interrupted publications are reconciled.

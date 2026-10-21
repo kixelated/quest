@@ -557,12 +557,17 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const pin = [runner, runner, input.actor, trusted, account, account];
 	const id = crypto.randomUUID();
 	// The insert checks the project and pins again, since a pause or a
-	// runner's status can commit after the request read them.
+	// runner's status can commit after the request read them. An iteration
+	// continues the pull request's existing head branch. Retrying a target
+	// whose latest job failed continues that job's branch and pull request
+	// where it left them, as a reassigned attempt would.
 	const [insert, active, enabled, pinned] = await db.batch([
 		db
 			.prepare(
-				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,id,?,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled' AND ${pinnable}`,
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,?,?,?,?,'queued',?,? FROM github_projects p
+ LEFT JOIN jobs f ON ?<>'iterate' AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
+ WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
 			.bind(
 				id,
@@ -570,7 +575,6 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				input.target,
 				input.revision,
 				input.branch,
-				// An iteration continues the pull request's existing head branch.
 				input.workflow === "iterate" ? input.revision : null,
 				input.actor,
 				trusted,
@@ -578,6 +582,9 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				account,
 				now,
 				now,
+				input.workflow,
+				input.branch,
+				input.target,
 				input.repository,
 				...pin,
 			),
