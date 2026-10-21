@@ -35,9 +35,8 @@ ownership-manifest design:
 
 ## Required
 
-- [Accurate landed quests](/quest/m0/landed-quests.md) - a quest-branch PR deletes or rewrites its quest, and `quest check --base` refuses one that does neither
 - [Gate contention measurements](/quest/m0/local-gate.md) - evidence that gated checks stay responsive under shared load
-- [Recoverable worktrees](/quest/m0/worktree.md) - disk admission, checkpoints, release, and restore
+- [Worktree process ownership](/quest/m0/worktree.md) - supervise checkout commands and release checkouts automatically
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
 

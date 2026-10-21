@@ -32,7 +32,9 @@ their 5-second timeouts, before claiming a responsiveness improvement.
   best-effort registration and bounded PID-tree walks do not establish exact
   ownership by themselves.
 - Decided 2026-10-15: at most one admission per 5-second window across all
-  callers, claimed by exclusively creating a per-window file. The load average
+  callers, claimed by exclusively creating a per-window file. A claim is
+  refused while the previous window's claim exists, so admissions are always a
+  full window apart (revised 2026-10-21 after a Codex finding). The load average
   lags new work and is sampled every 5 seconds, so waiters that all see it fall
   must not start together. Nothing is held across the command, so a crash
   leaves no stale lock. Claims live in `$XDG_RUNTIME_DIR`, or a per-hostname
@@ -53,5 +55,5 @@ their 5-second timeouts, before claiming a responsiveness improvement.
 
 ## Related
 
-- [Recoverable worktrees](/quest/m0/worktree.md) - owns command descendants, with its own process-ownership backend
+- [Worktree process ownership](/quest/m0/worktree.md) - owns checkout command descendants, with its own process-ownership backend
 - [Own-PC runner](/quest/m0/kix/runner.md) - can gate expensive job phases on host room

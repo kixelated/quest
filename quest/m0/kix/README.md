@@ -104,7 +104,6 @@ operator-paid-hosting decisions:
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
 - [Decision paper trail](/quest/m0/kix/paper-trail.md) - planning PRs carry the recorded questions and answers, rendered by the service
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
-- [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions
 - [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

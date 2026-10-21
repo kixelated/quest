@@ -1,7 +1,7 @@
 import { type Pull, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
-import { Marker } from "../layout";
+import { Marker, Notifications } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
 
@@ -21,6 +21,8 @@ export type InboxProps = {
 	working: Item[];
 	skipped: Item[];
 	runners: Map<string, Runners>;
+	/** The VAPID public key, or null where notifications are not configured. */
+	notifications: string | null;
 };
 
 const recorded: Record<Done, string> = {
@@ -498,6 +500,7 @@ export function InboxPage(props: InboxProps) {
 					{recorded[props.done as Done]}
 				</p>
 			)}
+			<Notifications publicKey={props.notifications} compact />
 			{props.missing && (
 				<p class="note" role="status">
 					That decision is no longer open. It may have been answered or changed on GitHub.

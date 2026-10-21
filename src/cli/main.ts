@@ -20,6 +20,7 @@ import {
 import { claims, questBranch } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
+import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { init, uninstall } from "./setup";
 import { Refusal, describe, releaseQuest, startQuest } from "./start";
@@ -28,6 +29,7 @@ import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
 import { pullRequestStatus, statusLines } from "./status";
 import { waitForActivity, WaitTimeout } from "./wait";
+import { Worktrees } from "./worktree";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
@@ -87,9 +89,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("check")
-		.description("Report every structural mistake in the tree; exit non-zero if any")
-		.action(() => {
+		.summary("Report every structural mistake in the tree; exit non-zero if any")
+		.description(
+			"Report every structural mistake in the tree; exit non-zero if any.\n\n" +
+				"With --base, also check that a PR from a quest's branch leaves that quest accurate. When the branch " +
+				"is a quest's path without .md (an epic's is quest/<path>/README) and that quest exists at the merge " +
+				"base with <ref>, the working tree must delete or edit it; a PR that finishes the quest deletes it, and " +
+				"one that leaves work rewrites it to what remains. Any other branch adds no finding. Fetch <ref> " +
+				"first: a stale base can predate the quest and skip it.",
+		)
+		.option("--base <ref>", "Also check the quest branch's diff from its merge base with this ref")
+		.option("--branch <name>", "The PR's head branch, when it differs from the current branch (needs --base)")
+		.action((options: { base?: string; branch?: string }) => {
+			if (options.branch !== undefined && options.base === undefined) {
+				throw new UsageError("--branch requires --base");
+			}
 			const findings = check(load(root()), (path) => exists(root(), path));
+			if (options.base !== undefined) findings.push(...landed(root(), options.base, options.branch));
 			if (findings.length === 0) {
 				const count = collect(root()).length;
 				print(theme ? theme.checked(count) : `quest: ${count} documents ok`);
@@ -171,7 +187,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.argument("[path]", "Quest to explain instead of ranking every ready quest")
 		.option("--json", "Print a deterministic JSON array")
-		.option("--limit <count>", "Maximum number of ready quests to print", positiveInteger)
+		.option("--limit <count>", "Maximum number of ready quests to print", positiveInteger("limit"))
 		.option("--unclaimed", "Skip quests with a claim branch or open PR, listing them on stderr")
 		.option("--remote <name>", "Remote whose upstream holds the claims", "origin")
 		.action(
@@ -329,6 +345,39 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				},
 			);
 		});
+
+	const worktree = program
+		.command("worktree")
+		.description("Reserve disk for Git checkouts and release it by pruning their scratch in place");
+	const state = () => new Worktrees();
+	const record = (value: unknown) => print(JSON.stringify(value));
+	worktree
+		.command("capacity <bytes>")
+		.description("Set this user's shared disk budget in bytes")
+		.action((bytes: string) => {
+			state().configure(positiveInteger("bytes")(bytes));
+		});
+	worktree
+		.command("status")
+		.description("Print the capacity, allocated bytes, and checkouts as JSON")
+		.action(() => record(state().status()));
+	worktree
+		.command("create <name>")
+		.description("Create an exclusively owned detached Git worktree under .worktrees/")
+		.requiredOption("--reserve <bytes>", "Checkout and expected build growth in bytes", positiveInteger("bytes"))
+		.option("--ref <ref>", "Initial Git revision", "HEAD")
+		.action((name: string, options: { reserve: number; ref: string }) =>
+			record(state().create(root(), name, options.reserve, options.ref)),
+		);
+	worktree
+		.command("release <id>")
+		.description("Delete declared scratch and keep the checkout; drop the record of a removed checkout")
+		.option("--scratch <path...>", "Ignored paths without tracked files, such as dependencies and build output", [])
+		.action((id: string, options: { scratch: string[] }) => record(state().release(id, options.scratch)));
+	worktree
+		.command("restore <id>")
+		.description("Reserve a released checkout's disk again before rebuilding its scratch")
+		.action((id: string) => record(state().restore(id)));
 
 	/** Changes on stdout; mentions and check findings on stderr, which fail the command. */
 	const report = (result: Report): number => {
@@ -490,11 +539,13 @@ export function gateBoundary(argv: string[]): string[] {
 	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }
 
-/** A result limit must be a positive, safe integer. */
-function positiveInteger(value: string): number {
-	const count = Number(value);
-	if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count <= 0) {
-		throw new InvalidArgumentError("limit must be a positive safe integer");
-	}
-	return count;
+/** Parses a positive, safe integer option named `name`. */
+function positiveInteger(name: string): (value: string) => number {
+	return (value) => {
+		const count = Number(value);
+		if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count <= 0) {
+			throw new InvalidArgumentError(`${name} must be a positive safe integer`);
+		}
+		return count;
+	};
 }

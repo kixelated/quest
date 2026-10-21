@@ -2,9 +2,10 @@
 
 ## Goal
 
-Quest workflows use recoverable worktree ownership through supported Codex and
-Claude lifecycle integrations. A completed or suspended worker releases its
-checkout without waiting for the parent chat to end or the PR to merge.
+Quest workflows use `quest worktree` checkout ownership through supported
+Codex and Claude lifecycle integrations. A completed or suspended worker
+releases its checkout without waiting for the parent chat to end or the PR to
+merge.
 
 ## Plan
 
@@ -38,7 +39,7 @@ checkout without waiting for the parent chat to end or the PR to merge.
 
 ## Required
 
-- [Recoverable worktrees](/quest/m0/worktree.md) - checkpoint, release, and restore
+- [Worktree process ownership](/quest/m0/worktree.md) - supervised commands and automatic scratch release
 - [Expensive command gate](/quest/m0/local-gate.md) - resource control before removing agent-count throttles
 
 ## Related

@@ -185,6 +185,7 @@ export async function delivery(
 	);
 	const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
 	const signature = "sha256=" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+	// Background work, such as reads and notifications, finishes before the test goes on.
 	const ctx = createExecutionContext();
 	const response = await app.request(
 		"http://localhost:8787/webhooks/github",
