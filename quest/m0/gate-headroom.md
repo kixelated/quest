@@ -33,38 +33,48 @@ burst of 8 took 104 s gated versus 19 s ungated.
   OOM; counting recent admissions against it keeps a burst from passing on
   one shared free-memory sample. Rejected: fixing the spacing only, taking
   the gate out of `just check` and `just test`, and keeping today's delay.
-- **Admission records.** Today a claim is one `O_EXCL` file per 5-second
-  window, and each admission deletes the older ones. Headroom needs several
-  admissions per window, records kept for a minute, and a count-then-claim
-  step that is atomic across processes, or a burst that all reads "0 recent"
-  is admitted together. It must also elect a winner: if every caller in an
-  over-capacity burst records, sees no room, and withdraws, waiters that wake
-  together can repeat that forever. This replaces `Host.claim(window)`. For
-  example, prune, count, and record under a short host-wide lock that a caller
-  reclaims once its owner process has exited, like the worktree registry lock
-  (`acquire()` in `src/cli/worktree.ts`). Count the unexpired records rather
-  than reading a slot number, since expired slots leave holes.
-- **`SETTLE_MS` apart, not two windows.** Today a claim is refused while the
-  previous window's claim exists, and every waiter wakes at the next boundary,
-  so queued commands start about 10 s apart. Keep the full-`SETTLE_MS`
-  minimum (decision 8 in
-  [kixelated/quest#128](https://github.com/kixelated/quest/pull/128)), but
-  measure it from the previous admission's time rather than its window, and
-  have waiters sleep until that admission plus `SETTLE_MS`. Update the
-  README's "Gate expensive commands" admission paragraph and the `admit()` doc
-  comment, which both describe today's behaviour.
+- **Admission requirements.** Today a claim is one `O_EXCL` file per 5-second
+  window, and each admission deletes the older ones; the replacement for
+  `Host.claim(window)` is left to the implementation, which must meet these:
+  - Count and claim atomically across processes, with several admissions per
+    window and each admission remembered for a minute.
+  - Never admit past the three-band rule, and always admit some waiter when
+    the rule has room.
+  - Recover from a caller that crashes mid-admission on every platform the
+    gate runs on, without blocking admission indefinitely.
+  - Bound the effect of a wall-clock step in either direction to about one
+    record lifetime.
+  - Space band-2 admissions at least `SETTLE_MS` apart, measured from the
+    previous admission's time (decision 8 in
+    [kixelated/quest#128](https://github.com/kixelated/quest/pull/128)), with
+    waiters waking when that interval ends rather than at the next window
+    boundary, so queued commands stop starting about 10 s apart.
+  - Update the README's "Gate expensive commands" admission paragraph and the
+    `admit()` doc comment, which both describe today's behaviour.
+- **Hazards to test.** Each came up in review of the plan in
+  [kixelated/quest#180](https://github.com/kixelated/quest/pull/180):
+  - A burst passing one shared free-memory sample, so every caller fits a
+    budget that only one does.
+  - A burst that all reads "0 recent" before any of them records.
+  - Two admissions milliseconds apart across a window boundary.
+  - Expired records leaving holes in numbered slots, so a slot number
+    undercounts recent admissions.
+  - Every caller in an over-capacity burst recording, seeing no room, and
+    withdrawing, then repeating that together forever.
+  - A dead lock holder's PID reused on macOS or Windows, where only Linux
+    records a process start time, keeping the lock held indefinitely.
+  - A backward clock step leaving records dated far in the future, which
+    count as recent indefinitely or are discarded while still valid.
+  - A forward clock step past the record lifetime, expiring records early and
+    dropping their spacing and reservations.
+  - `performance.now()` differing per process, and `CLOCK_MONOTONIC`
+    restarting at boot while the fallback claim directory persists.
 - **Stable claim directory.** Callers with and without `XDG_RUNTIME_DIR` use
   different claim directories today. Use `/run/user/<uid>/quest/gate` when
   `/run/user/<uid>` exists, otherwise `~/.cache/quest/gate/<hostname>` for
   shared home directories, so the choice depends only on the host, never on
   the caller's environment.
   `gate-bench.sh overhead` needs another way to get a fresh directory.
-- **Backward clock steps.** A wall clock stepping back can admit two commands
-  closer than `SETTLE_MS`. Keep the wall clock: `performance.now()` is
-  per-process, and `CLOCK_MONOTONIC` restarts at boot while the fallback
-  directory persists. A record dated in the future means the clock stepped
-  back: rewrite its time to now, so it still counts and spaces admissions
-  however far the clock stepped, then expires a minute later.
 - **Ctrl-C once.** In both `quest gate` and `quest worktree run`
   (`src/cli/supervise.ts`), a terminal Ctrl-C reaches the child directly and
   again through the forwarder. Share one fix between them. On Unix, while
