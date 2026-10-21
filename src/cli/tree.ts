@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { type Doc, comparePaths, isQuest, parse } from "../core";
+import { type Doc, type Source, comparePaths, isQuest, parse } from "../core";
 
 /**
  * `<root>/<path>` as a user would name it in an error: `./quest`, not the
@@ -36,11 +36,16 @@ export function collect(root: string): string[] {
 	return out.sort(comparePaths);
 }
 
-/** Every quest document, parsed, in tree order. */
-export function load(root: string): Doc[] {
+/** Every quest document's source text, in tree order. */
+export function sources(root: string): Source[] {
 	const paths = collect(root);
 	if (paths.length === 0) throw new Error(`no quest documents found under ${under(root, "quest")}`);
-	return paths.map((path) => parse(path, read(root, path)));
+	return paths.map((path) => ({ path, text: read(root, path) }));
+}
+
+/** Every quest document, parsed, in tree order. */
+export function load(root: string): Doc[] {
+	return sources(root).map((source) => parse(source.path, source.text));
 }
 
 /** Whether a repository-relative path exists under `root`. */

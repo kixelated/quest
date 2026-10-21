@@ -39,12 +39,20 @@ export interface Link {
 	target: string;
 	/** Where the link sits in its section. */
 	position: Position;
+	/**
+	 * Source offsets bounding where the destination is written: after the
+	 * link's text to the end of the link, or after the label of the
+	 * definition a reference-style link uses. An edit searches it for `target`.
+	 */
+	span: [number, number];
 }
 
 /** One top-level list entry: the shape a `Required` child or blocker has. */
 export interface Entry {
 	/** 1-based source line, for findings. */
 	line: number;
+	/** 1-based last source line of the item, so an edit can remove it. */
+	end: number;
 	/** The enclosing `## Heading`, or `null` above the first one. */
 	section: string | null;
 	/**
@@ -211,7 +219,7 @@ export function parse(path: string, text: string): Doc {
 	// Lines as grep sees them: a bare `\r` does not end one, so a CR-only file is
 	// one line and none of its headings are literal, which is what grep finds.
 	const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
-	const definitions = collectDefinitions(tree);
+	const definitions = collectDefinitions(tree, text);
 
 	let title: Heading | null = null;
 	const headings: Heading[] = [];
@@ -234,6 +242,8 @@ export function parse(path: string, text: string): Doc {
 	let heading: { depth: number; line: number; text: string } | null = null;
 
 	const lineOf = (node: Nodes) => node.position?.start.line ?? 1;
+	const offsetOf = (node: Nodes) => node.position?.start.offset ?? 0;
+	const endOf = (node: Nodes) => node.position?.end.offset ?? text.length;
 
 	const addText = (value: string) => {
 		if (heading) {
@@ -252,7 +262,7 @@ export function parse(path: string, text: string): Doc {
 		if (itemDepth > 0) fresh = false;
 	};
 
-	const link = (node: Nodes, target: string) => {
+	const link = (node: Nodes, target: string, span: [number, number]) => {
 		// Reference-style links resolve to their definition, so they carry an
 		// edge like any other link. Only a top-level, unquoted item can hold an
 		// entry.
@@ -260,7 +270,7 @@ export function parse(path: string, text: string): Doc {
 			itemDepth === 0 ? "prose" : fresh && itemDepth === 1 && quoteDepth === 0 ? "entry" : "inside";
 		fresh = false;
 		if (position === "entry" && entry) entry.target = target;
-		links.push({ line: lineOf(node), section, target, position });
+		links.push({ line: lineOf(node), section, target, position, span });
 	};
 
 	const enter = (node: Nodes) => {
@@ -278,20 +288,29 @@ export function parse(path: string, text: string): Doc {
 				break;
 			case "listItem":
 				if (itemDepth === 0 && quoteDepth === 0) {
-					entry = { line: lineOf(node), section, text: "", target: null };
+					entry = {
+						line: lineOf(node),
+						end: node.position?.end.line ?? lineOf(node),
+						section,
+						text: "",
+						target: null,
+					};
 				}
 				itemDepth++;
 				fresh = true;
 				break;
-			case "link":
-				link(node, node.url);
+			case "link": {
+				// The destination follows the text, which may mention it too.
+				const last = node.children.at(-1);
+				link(node, node.url, [last ? endOf(last) : offsetOf(node), endOf(node)]);
 				break;
+			}
 			case "linkReference": {
-				const url = definitions.get(node.identifier);
-				if (url === undefined) {
+				const definition = definitions.get(node.identifier);
+				if (definition === undefined) {
 					other();
 				} else {
-					link(node, url);
+					link(node, definition.url, definition.span);
 				}
 				break;
 			}
@@ -405,12 +424,17 @@ export function parse(path: string, text: string): Doc {
 	return { path, title, headings, links, entries: found };
 }
 
-/** The first definition of each reference label, which is the one CommonMark uses. */
-function collectDefinitions(tree: Root): Map<string, string> {
-	const definitions = new Map<string, string>();
+/**
+ * The first definition of each reference label, which is the one CommonMark
+ * uses, with the span its destination is written in: after the label's `]:`.
+ */
+function collectDefinitions(tree: Root, text: string): Map<string, { url: string; span: [number, number] }> {
+	const definitions = new Map<string, { url: string; span: [number, number] }>();
 	const visit = (node: Nodes) => {
 		if (node.type === "definition" && !definitions.has(node.identifier)) {
-			definitions.set(node.identifier, node.url);
+			const start = node.position?.start.offset ?? 0;
+			const end = node.position?.end.offset ?? text.length;
+			definitions.set(node.identifier, { url: node.url, span: [text.indexOf("]:", start) + 2, end] });
 		}
 		if ("children" in node) for (const child of node.children) visit(child);
 	};
