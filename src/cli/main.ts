@@ -11,8 +11,10 @@ import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
+import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
+import { pullRequestStatus, statusLines } from "./status";
+import { waitForActivity, WaitTimeout } from "./wait";
 import { Worktrees } from "./worktree";
-import { pullRequest, waitDependencies, waitForActivity, WaitInputError, WaitTimeout } from "./wait";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
@@ -155,9 +157,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--timeout <seconds>", "Maximum wait in seconds", positiveSeconds)
 		.action((value: string, options: { since?: string; timeout?: number }) => {
 			const pr = pullRequest(value, root());
-			const deps = waitDependencies();
-			deps.warn = warn;
-			pending = waitForActivity(pr, options, deps).then(
+			pending = waitForActivity(pr, options, gitHubDependencies(warn)).then(
 				(lines) => {
 					for (const line of lines) print(line);
 					return 0;
@@ -165,7 +165,39 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				(error: unknown) => {
 					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
 					warn(error instanceof Error ? error.message : String(error));
-					return error instanceof WaitTimeout ? 3 : error instanceof WaitInputError ? 2 : 1;
+					return error instanceof WaitTimeout ? 3 : error instanceof GitHubInputError ? 2 : 1;
+				},
+			);
+		});
+
+	program
+		.command("status")
+		.summary("Print a pull request's current state on GitHub")
+		.description(
+			"Print a pull request's head, checks, merge state, reviews, reactions, and unresolved review threads " +
+				"in one call. It reports facts; it does not decide whether the PR is ready or whose review counts.\n\n" +
+				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
+				"url, state, draft, head, mergeable, merge-state, review-decision, auto-merge, merge-queue, and checks; " +
+				"then a check line per failing or pending check, marked required or optional; a review line per " +
+				"reviewer's latest review, marked current or stale against the head; a reacted:<content> line per " +
+				"reaction on the PR or a review; and a thread line per unresolved review thread, led by its node ID. " +
+				"A missing value prints as -. --json prints the same facts as one deterministic object.\n\n" +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for any PR state, 2 for invalid arguments, " +
+				"and 1 for other failures.",
+		)
+		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.option("--json", "Print a deterministic JSON object")
+		.action((value: string, options: { json?: boolean }) => {
+			const pr = pullRequest(value, root());
+			pending = pullRequestStatus(pr, gitHubDependencies(warn)).then(
+				(status) => {
+					if (options.json) print(JSON.stringify(status));
+					else for (const line of statusLines(status)) print(line);
+					return 0;
+				},
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
 				},
 			);
 		});
@@ -253,7 +285,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			// Help and version exit 0; any other parse failure is a usage error.
 			return error.exitCode === 0 ? 0 : 2;
 		}
-		if (error instanceof UsageError || error instanceof WaitInputError) {
+		if (error instanceof UsageError || error instanceof GitHubInputError) {
 			out.stderr(`error: ${error.message}\n`);
 			return 2;
 		}
