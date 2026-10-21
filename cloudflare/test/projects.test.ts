@@ -7,6 +7,7 @@ import type { ActivityPage } from "../src/github/state";
 import { GitHubService } from "../src/github/service";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
+import { delivery } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const repo = { owner: "upstream", name: "project", id: 10 };
@@ -701,12 +702,24 @@ function pull(branch = "quest/first", id = 200) {
 	};
 }
 function activity(): ActivityPage {
+	const pulls = [pull(), pull("human-branch", 201)];
 	return {
 		issues: connection([issue()]),
-		pullRequests: connection([pull(), pull("human-branch", 201)]),
+		pullRequests: connection(pulls),
+		open: connection(pulls),
 		refs: connection([{ name: "second", prefix: "refs/heads/quest/" }]),
 	};
 }
+// A long history whose open PRs and quest branches fit in one page.
+function history(): ActivityPage {
+	return {
+		issues: connection([issue()], true, "issue-cursor"),
+		pullRequests: connection([pull("human-branch", 201)]),
+		open: connection([]),
+		refs: connection([]),
+	};
+}
+const event = { installation: { id: 5 }, repository: { id: 10, default_branch: "trunk" } };
 
 describe("enrolled project observations", () => {
 	async function enrolled() {
@@ -718,9 +731,13 @@ describe("enrolled project observations", () => {
 		const state = await service.projectState(repo, "enrollment-test", true);
 		expect(state).toMatchObject({
 			complete: true,
-			available: [],
 			claims: ["quest/second.md"],
-			project: { commit, changes: [{ quest: "quest/first.md" }], issues: [{ title: issue().title }] },
+			project: {
+				commit,
+				available: [],
+				changes: [{ quest: "quest/first.md" }],
+				issues: [{ title: issue().title }],
+			},
 		});
 		expect(state!.activity).toHaveLength(3);
 		expect(state!.activity.filter((item) => item.kind === "pull")).toHaveLength(2);
@@ -761,22 +778,81 @@ describe("enrolled project observations", () => {
 		page.issues = connection([issue()], true, "issue-cursor");
 		const first = await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
 		expect(first!.complete).toBe(false);
-		expect(first!.available).toEqual([]);
-		const second = github({ activity: { issues: connection([issue(101, 3)]) } });
+		expect(first!.project.available).toEqual([]);
+		const second = github({
+			activity: { issues: connection([issue(101, 3)]), open: activity().open, refs: activity().refs },
+		});
 		const result = await second.service.projectState(repo, "enrollment-test", true);
 		expect(result!.complete).toBe(true);
 		expect(result!.activity).toHaveLength(4);
 		const query = second.calls.filter((c) => c.path === "/graphql").at(-1)!;
 		expect(query.body.variables.issues).toBe("issue-cursor");
-		expect(query.body.query).not.toContain("pullRequests(");
+		expect(query.body.query).not.toContain("pullRequests(first:50");
 		const closed = activity();
 		closed.issues!.nodes[0]!.state = "CLOSED";
 		closed.pullRequests!.nodes.forEach((p) => (p.state = "CLOSED"));
+		closed.open = connection([]);
 		closed.refs = connection([]);
 		const last = await github({ activity: closed }).service.projectState(repo, "enrollment-test", true);
 		expect(last!.project.changes).toEqual([]);
 		expect(last!.claims).toEqual([]);
-		expect(last!.available).toEqual(["quest/first.md"]);
+		expect(last!.project.available).toEqual(["quest/first.md"]);
+	});
+	it("keeps candidates and history progress through activity that cannot occupy a quest", async () => {
+		await enrolled();
+		const first = await github({ activity: history() }).service.projectState(repo, "enrollment-test", true);
+		expect(first!.complete).toBe(false);
+		expect(first!.project.available).toEqual(["quest/first.md"]);
+		const unrelated = [
+			["check_run", {}],
+			["check_suite", {}],
+			["status", {}],
+			["issues", { action: "opened", issue: { id: 102, number: 5 } }],
+			["issue_comment", { action: "created", issue: { id: 100, number: 1 } }],
+			["pull_request", { action: "edited", pull_request: { id: 201, number: 2 } }],
+			["pull_request_review", { action: "submitted", pull_request: { id: 201, number: 2 } }],
+			["push", { ref: "refs/heads/human-branch" }],
+			["push", { ref: "refs/heads/quest/first", created: false, deleted: false }],
+		] as const;
+		for (const [name, payload] of unrelated)
+			expect((await delivery(name, { ...event, ...payload })).status).toBe(202);
+		const cached = await github().service.projectState(repo, "enrollment-test");
+		expect(cached!.project.available).toEqual(["quest/first.md"]);
+		// CI activity during a refresh does not race it either.
+		const second = github({
+			activity: { issues: connection([issue(101, 3)]), open: connection([]), refs: connection([]) },
+			onActivity: async () => void (await delivery("status", event)),
+		});
+		const result = await second.service.projectState(repo, "enrollment-test", true);
+		const query = second.calls.filter((c) => c.path === "/graphql").at(-1)!;
+		expect(query.body.variables.issues).toBe("issue-cursor");
+		expect(result!.complete).toBe(true);
+		expect(result!.project.available).toEqual(["quest/first.md"]);
+	});
+	it.each([
+		["pull_request", { action: "opened", pull_request: { id: 202, number: 4 } }],
+		["pull_request", { action: "reopened", pull_request: { id: 202, number: 4 } }],
+		["pull_request", { action: "synchronize", pull_request: { id: 202, number: 4 } }],
+		["push", { ref: "refs/heads/quest/first", created: true }],
+		["push", { ref: "refs/heads/trunk" }],
+	] as const)("withholds candidates after %s %j until a refresh rereads occupancy", async (name, payload) => {
+		await enrolled();
+		await github({ activity: history() }).service.projectState(repo, "enrollment-test", true);
+		expect((await delivery(name, { ...event, ...payload })).status).toBe(202);
+		const cached = await github().service.projectState(repo, "enrollment-test");
+		expect(cached!.project.available).toBeNull();
+		expect(readBoard(cached!.project).quests.get("quest/first.md")!.status.kind).not.toBe("available");
+		const second = github({
+			activity: {
+				issues: connection([issue(101, 3)]),
+				open: connection([pull("quest/first", 202)]),
+				refs: connection([]),
+			},
+		});
+		const result = await second.service.projectState(repo, "enrollment-test", true);
+		expect(second.calls.filter((c) => c.path === "/graphql").at(-1)!.body.variables.issues).toBe("issue-cursor");
+		expect(result!.project.available).toEqual([]);
+		expect(result!.project.changes).toMatchObject([{ quest: "quest/first.md" }]);
 	});
 	it("never publishes partial GraphQL results or check state from a different PR head", async () => {
 		await enrolled();
@@ -844,7 +920,12 @@ describe("enrolled project observations", () => {
 		await enrolled();
 		await github().service.projectState(repo, "enrollment-test", true);
 		const next = await github({
-			activity: { issues: connection([]), pullRequests: connection([]), refs: connection([]) },
+			activity: {
+				issues: connection([]),
+				pullRequests: connection([]),
+				open: connection([]),
+				refs: connection([]),
+			},
 		}).service.projectState(repo, "enrollment-test", true);
 		expect(next!.activity).toHaveLength(3);
 		expect(next!.activity.every((item) => item.missing === 1)).toBe(true);
@@ -854,9 +935,17 @@ describe("enrolled project observations", () => {
 
 	it("retains observations while paused, clears candidates, and cascades caches on disconnect", async () => {
 		await enrolled();
-		await github().service.projectState(repo, "enrollment-test", true);
+		const quiet = {
+			issues: connection([]),
+			pullRequests: connection([]),
+			open: connection([]),
+			refs: connection([]),
+		};
+		await github({ activity: quiet }).service.projectState(repo, "enrollment-test", true);
 		await github().service.setContributions(repo, "enrollment-test", "paused");
-		expect((await github().service.projectState(repo, "enrollment-test"))!.available).toEqual([]);
+		const paused = await github().service.projectState(repo, "enrollment-test");
+		expect(paused!.project.available).toEqual([]);
+		expect(readBoard(paused!.project).counts.available).toBe(0);
 		await github().service.setContributions(repo, "enrollment-test", "disconnected");
 		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toEqual([]);
 		expect(await env.DB.prepare("SELECT * FROM github_project_state").first()).toBeNull();
@@ -920,7 +1009,7 @@ describe("project activity routes", () => {
 	});
 	it("keeps tree-ready quests pending until a claiming PR on an unvisited page is observed", async () => {
 		const page = activity();
-		page.pullRequests = connection([pull("human-branch", 201)], true, "pull-cursor");
+		page.open = connection([pull("human-branch", 201)], true, "open-cursor");
 		page.refs = connection([]);
 		const cookie = await session({ activity: page });
 		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
@@ -933,7 +1022,10 @@ describe("project activity routes", () => {
 		expect(quest).toContain("Availability pending");
 		expect(quest).not.toContain("/quest-start");
 
-		const rest = github({ account: githubId, activity: { pullRequests: connection([pull()]) } });
+		const rest = github({
+			account: githubId,
+			activity: { issues: connection([]), pullRequests: connection([pull()]), open: connection([pull()]) },
+		});
 		vi.spyOn(globalThis, "fetch").mockImplementation(rest.request as typeof fetch);
 		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
 		const board = await (await app.request(`${base}/board`, { headers: { Cookie: cookie } }, testEnv)).text();
