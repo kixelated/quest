@@ -7,6 +7,7 @@ import { type Branch, type Change, GitHubService, PublicationBlocked, type GitHu
 import { id, text } from "./protocol";
 import * as store from "./store";
 import { JobError, type Runner, type Workflow } from "./store";
+import { withDecisions } from "./trail";
 
 /** Bounds one request's GitHub writes: inline text costs no extra request, other files one each. */
 export const LIMITS = { changes: 500, bytes: 16 * 1024 * 1024, request: 24 * 1024 * 1024 };
@@ -102,12 +103,13 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	return { job, attempt, head: body.head as string | null, session, message, changes, pull };
 }
 
-type Decision = { decision: string; cancel: boolean };
+/** A pause on a decision; `asked` is false for a retry of one already asked. */
+type Decision = { decision: string; cancel: boolean; asked: boolean };
 type Published = { head: string | null; pull?: { number: number; url: string; draft: boolean } };
 
 /** Pause the attempt on a decision the maintainer must make before this can publish. */
 async function decide(db: D1Database, runner: Runner, input: Publication, prompt: unknown): Promise<Decision> {
-	const { question, cancel } = await store.ask(
+	const { question, cancel, asked } = await store.ask(
 		db,
 		runner,
 		input.job,
@@ -120,7 +122,7 @@ async function decide(db: D1Database, runner: Runner, input: Publication, prompt
 		},
 		Date.now(),
 	);
-	return { decision: question, cancel };
+	return { decision: question, cancel, asked };
 }
 
 /**
@@ -195,7 +197,12 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 	const current = await store.publishing(db, runner, input.job, input.attempt);
 	// Planning PRs always await maintainer review; so does work that was asked to stop.
 	const draft = input.pull.draft || current.workflow === "plan" || current.cancel === 1;
-	const pull = await github.deliver(upstream, current.actor, current, { ...input.pull, draft });
+	// A planning pull request's decision record comes from the answers kix recorded, not the agent.
+	const body =
+		current.workflow === "plan"
+			? withDecisions(input.pull.body, await store.decisions(db, job.id))
+			: input.pull.body;
+	const pull = await github.deliver(upstream, current.actor, current, { ...input.pull, body, draft });
 	await store.delivered(db, job.id, pull.number);
 	return { head, pull };
 }

@@ -1,7 +1,7 @@
-import type { Pull } from "../github/state";
+import { type Pull, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
-import { PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
-import { Marker } from "../layout";
+import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
+import { Marker, Notifications } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
 
@@ -15,10 +15,22 @@ export type InboxProps = {
 	active: Item | null;
 	/** The requested item is gone, such as a question another maintainer answered. */
 	missing: boolean;
+	/** What the previous form recorded, from the redirect's query. */
+	done: string | undefined;
 	decisions: Item[];
 	working: Item[];
 	skipped: Item[];
 	runners: Map<string, Runners>;
+	/** The VAPID public key, or null where notifications are not configured. */
+	notifications: string | null;
+};
+
+const recorded: Record<Done, string> = {
+	answer: "Answer recorded.",
+	start: "Job requested.",
+	stop: "Stop requested.",
+	skip: "Skipped until it changes.",
+	merge: "Pull request merged.",
 };
 
 const kinds = { pull: "Pull request", issue: "Issue", quest: "Ready quest", plan: "Plan", devshell: "Bootstrap" };
@@ -255,12 +267,17 @@ function AccountForm(props: { item: Item; runners: Runners }) {
 /** Why new work cannot start from here yet, and how to fix it; `null` when it can. */
 function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
-	const available = view?.state?.project.available;
-	if (!available) return "GitHub reported changes. Refresh to start new work from current state.";
-	if (item.kind === "quest" && !available.includes(item.target))
+	const state = view?.state;
+	// Webhooks reread the project in the background; a failed read says why.
+	const failed = state?.failure ? `The background read failed: ${state.failure}. ` : "";
+	if (!state?.project.available)
+		return `${failed || "GitHub reported changes. "}Refresh to start new work from current state.`;
+	// A retry continues its failed job's pull request, so that claim does not block it.
+	const retry = item.need === "retry" ? (item.job?.pull ?? null) : null;
+	if (item.kind === "quest" && !startable(state, item.target, retry))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
-		return "Refresh to read this from GitHub.";
+		return `${failed}Refresh to read this from GitHub.`;
 	return null;
 }
 
@@ -282,6 +299,16 @@ function work(item: Item, view: ProjectView) {
 	return { workflow: "start", target: item.target, revision: commit, label: "Start this quest" };
 }
 
+/**
+ * The observed pull request when GitHub reports it can merge as is: no
+ * conflicts, and its checks and branch rules satisfied. Anything else is
+ * reviewed on GitHub or merged by a later merge job.
+ */
+function clean(item: Item) {
+	const pull = item.kind === "pull" ? (item.activity?.data as Pull | null | undefined) : null;
+	return pull?.state === "OPEN" && ["CLEAN", "HAS_HOOKS"].includes(pull.mergeStateStatus ?? "") ? pull : null;
+}
+
 function Refresh(props: { project: Item["project"] }) {
 	return (
 		<form method="post" action={`${projectURL(props.project.owner, props.project.name)}/refresh`}>
@@ -298,9 +325,18 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 	const reason = starts ? blocked(item, view) : null;
 	// Only an unblocked item has the observations its work is bound to.
 	const job = starts && !reason ? work(item, view!) : null;
+	// Only an idle item offers merge: no queued, running, or waiting job can still push to its head.
+	const merge = starts && !reason ? clean(item) : null;
 	const active = item.job && ["queued", "running", "waiting"].includes(item.job.state) && !item.job.cancel;
 	return (
 		<div class="decision-actions">
+			{merge && (
+				<form method="post" action={`${base}/pulls/${merge.number}/merge`}>
+					<input type="hidden" name="head" value={merge.headRefOid} />
+					<input type="hidden" name="version" value={item.version} />
+					<button class="button primary">Merge this PR</button>
+				</form>
+			)}
 			{reason ? (
 				<>
 					<p class="muted">{reason}</p>
@@ -312,7 +348,9 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 						<input type="hidden" name="workflow" value={job.workflow} />
 						{job.target && <input type="hidden" name="target" value={job.target} />}
 						<input type="hidden" name="revision" value={job.revision} />
-						<button class="button primary">{item.need === "retry" ? "Try again" : job.label}</button>
+						<button class={merge ? "button quiet" : "button primary"}>
+							{item.need === "retry" ? "Try again" : job.label}
+						</button>
 					</form>
 				)
 			)}
@@ -422,6 +460,7 @@ function Project(props: { view: ProjectView }) {
 					<>
 						<span>{project.state === "enabled" ? "Contributions enabled" : "Contributions paused"}</span>
 						{!state?.project.available && <span>Refresh needed</span>}
+						{state?.failure && <span role="alert">Background read failed: {state.failure}</span>}
 						<a href={`${base}/board`}>Quest board</a>
 						<a href={`${base}/state`}>Activity</a>
 					</>
@@ -456,6 +495,12 @@ export function InboxPage(props: InboxProps) {
 					? `${props.decisions.length} waiting on you${unread ? `, ${unread} new` : ""}.`
 					: "Nothing needs a decision right now."}
 			</p>
+			{props.done && Object.hasOwn(recorded, props.done) && (
+				<p class="note" role="status">
+					{recorded[props.done as Done]}
+				</p>
+			)}
+			<Notifications publicKey={props.notifications} compact />
 			{props.missing && (
 				<p class="note" role="status">
 					That decision is no longer open. It may have been answered or changed on GitHub.
@@ -491,12 +536,13 @@ export function InboxPage(props: InboxProps) {
 					</ul>
 				) : (
 					<p>
-						No enrolled projects yet. <a href="/projects">Enroll a project</a> to get its issues, pull
-						requests, and ready quests here.
+						No enrolled projects yet. <a href="/projects">Enroll a project</a>, or open one a co-maintainer
+						enrolled, to get its issues, pull requests, and ready quests here.
 					</p>
 				)}
 				<p class="note-small muted">
-					Lists projects you enrolled. Runners and accounts are set up with <code>quest runner</code>.
+					Lists enrolled projects you maintain, once you open each one's setup page. Runners and accounts are
+					set up with <code>quest runner</code>.
 				</p>
 			</section>
 			{props.skipped.length > 0 && (

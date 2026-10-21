@@ -5,8 +5,8 @@
 
 import { parse } from "quest/core";
 import { encodePath } from "../board/model";
-import { GitHubError, type Enrollment, GitHubService } from "../github/service";
-import type { Activity, ProjectState } from "../github/state";
+import { GitHubError, type Enrollment, GitHubService, NotMaintainer } from "../github/service";
+import { type Activity, type ProjectState, readState } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { hub } from "../jobs/routes";
 import * as store from "../jobs/store";
@@ -80,6 +80,9 @@ export function entities(project: Enrollment, state: ProjectState | null) {
 		// A webhook's pointer has no data until a refresh reads it, but it is already news.
 		if (activity.missing || (activity.data && activity.data.state !== "OPEN")) continue;
 		const pull = activity.kind === "pull";
+		// A PR the latest occupancy pass did not find open has closed since its
+		// row was read, even if no webhook said so.
+		if (pull && activity.data && state.open && !state.open.includes(activity.id)) continue;
 		found.set(`${pull ? "pulls" : "issues"}/${activity.number}`, {
 			kind: activity.kind,
 			title: activity.data?.title ?? `${pull ? "Pull request" : "Issue"} #${activity.number}`,
@@ -195,29 +198,60 @@ export function arrange(items: Item[]) {
 
 export type Runners = Awaited<ReturnType<typeof store.listRunners>>;
 
+/** Every project's items, from its observations, its jobs, and the maintainer's read state. */
+async function collect(db: D1Database, user: string, views: ProjectView[]) {
+	const found = views.map((view) => entities(view.project, view.state));
+	const [reads, jobs] = await Promise.all([
+		db.prepare("SELECT repository,item,seen,skipped FROM inbox_items WHERE user=?").bind(user).all<Read>(),
+		Promise.all(views.map((view, i) => store.listInboxJobs(db, view.project.id, [...found[i]!.keys()]))),
+	]);
+	return views.flatMap((view, i) => decisions(view, found[i]!, jobs[i]!, reads.results));
+}
+
 /**
- * Load the inbox across the projects a maintainer enrolled. Every project
- * rechecks current GitHub authority; one that fails is reported, not hidden.
+ * How many decisions are new to a maintainer, for the nav and the app icon
+ * badge. It reads only stored observations, without rechecking GitHub
+ * authority on every page, so it reveals a count and nothing else.
+ */
+export async function unread(env: Env, user: string) {
+	const projects = await new GitHubService(env).projects(user);
+	const views = await Promise.all(
+		projects.map(async (project) => ({ project, state: await readState(env.DB, project), error: null })),
+	);
+	return (await collect(env.DB, user, views)).filter((item) => item.need !== null && !item.skipped && item.unread)
+		.length;
+}
+
+/** What a notification calls an item: its issue, pull request, or quest title, as the inbox shows it. */
+export async function title(db: D1Database, project: Enrollment, target: string) {
+	const state = await readState(db, project);
+	return (entities(project, state).get(target) ?? fallback(project, target)).title;
+}
+
+/**
+ * Load the inbox across the projects the user is a member of. Every project
+ * rechecks current GitHub authority. A denied check ends the membership and
+ * hides the project; one that cannot complete is reported, not hidden.
  */
 export async function load(env: Env, user: string) {
 	const github = new GitHubService(env);
-	const projects: ProjectView[] = await Promise.all(
-		(await github.projects(user)).map(async (project) => {
+	const views = await Promise.all(
+		(await github.projects(user)).map(async (project): Promise<ProjectView | null> => {
 			try {
 				return { project, state: await github.projectState(project, user), error: null };
 			} catch (error) {
+				if (error instanceof NotMaintainer) return null;
 				if (!(error instanceof GitHubError)) throw error;
 				return { project, state: null, error: error.message };
 			}
 		}),
 	);
-	const usable = projects.filter((view) => !view.error);
-	const found = usable.map((view) => entities(view.project, view.state));
-	const [reads, jobs] = await Promise.all([
-		env.DB.prepare("SELECT repository,item,seen,skipped FROM inbox_items WHERE user=?").bind(user).all<Read>(),
-		Promise.all(usable.map((view, i) => store.listInboxJobs(env.DB, view.project.id, [...found[i]!.keys()]))),
-	]);
-	const items = usable.flatMap((view, i) => decisions(view, found[i]!, jobs[i]!, reads.results));
+	const projects = views.filter((view) => view !== null);
+	const items = await collect(
+		env.DB,
+		user,
+		projects.filter((view) => !view.error),
+	);
 	// Jobs run on their requester's runners, so presence comes from each requester's hub.
 	const actors = [...new Set(items.flatMap((item) => (item.job ? [item.job.actor] : [])))];
 	const runners = new Map<string, Runners>(

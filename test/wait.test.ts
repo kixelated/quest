@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
-import { pullRequest, waitForActivity, WaitTimeout, type WaitDependencies } from "../src/cli/wait";
+import { type GitHubDependencies, pullRequest } from "../src/cli/github";
+import { waitForActivity, WaitTimeout } from "../src/cli/wait";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -10,6 +11,8 @@ const POINT = "2026-10-07T12:00:00Z";
 const pr = { owner: "example", repo: "project", number: 1 };
 const base = "/repos/example/project";
 const timeline = `${base}/issues/1/timeline?per_page=100`;
+/** The GitHub Actions app, which reports workflow check runs. */
+const ACTIONS = 15368;
 
 function response(body: unknown, headers?: Record<string, string>, status = 200): Response {
 	return new Response(status === 304 ? null : JSON.stringify(body), { status, headers });
@@ -69,14 +72,99 @@ function replied(id: number, time = POINT, login = "reviewer", inReplyTo: number
 	};
 }
 
-/** Review comments and reactions come from their own queues, empty once drained. */
-function setup(responses: Response[], baseline = [A], side: { comments?: Response[]; graphql?: Response[] } = {}) {
+interface CheckFixture {
+	name: string;
+	required?: boolean;
+	/** A check run's conclusion, or a commit status's state; omitted while it runs. */
+	result?: string;
+	time?: string;
+	status?: boolean;
+	/** The workflow file a job runs in, and whether its run is still going, so it may yet create jobs. */
+	workflow?: string;
+	running?: boolean;
+}
+
+/** The head's checks; `null` means the head has no checks at all. */
+function checks(
+	contexts: CheckFixture[] | null = null,
+	head = A,
+	page: { hasNextPage: boolean; endCursor: string | null } = { hasNextPage: false, endCursor: null },
+	listed = head,
+) {
+	const node = (entry: CheckFixture) =>
+		entry.status
+			? {
+					__typename: "StatusContext",
+					context: entry.name,
+					state: entry.result ?? "PENDING",
+					createdAt: entry.time ?? POINT,
+					targetUrl: null,
+					isRequired: entry.required ?? false,
+				}
+			: {
+					__typename: "CheckRun",
+					name: entry.name,
+					status: entry.result ? "COMPLETED" : "IN_PROGRESS",
+					conclusion: entry.result ?? null,
+					completedAt: entry.result ? (entry.time ?? POINT) : null,
+					detailsUrl: `https://github.com/example/project/actions/runs/1/job/${entry.name.length}`,
+					isRequired: entry.required ?? false,
+					checkSuite: {
+						status: entry.result && !entry.running ? "COMPLETED" : "IN_PROGRESS",
+						workflowRun: { file: { path: entry.workflow ?? ".github/workflows/check.yml" } },
+					},
+				};
+	return response({
+		data: {
+			repository: {
+				pullRequest: {
+					baseRefName: "main",
+					headRefOid: head,
+					commits: {
+						nodes: [
+							{
+								commit: {
+									oid: listed,
+									statusCheckRollup: contexts && {
+										contexts: { pageInfo: page, nodes: contexts.map(node) },
+									},
+								},
+							},
+						],
+					},
+				},
+			},
+		},
+	});
+}
+
+/**
+ * Review comments, reactions, and checks come from their own queues, empty once drained.
+ * The base branch requires `protected` through branch protection and `ruled` through rulesets,
+ * reported by GitHub Actions. `rules` adds further rules on a second page.
+ */
+function setup(
+	responses: Response[],
+	baseline = [A],
+	side: {
+		comments?: Response[];
+		graphql?: Response[];
+		checks?: Response[];
+		protected?: string[];
+		/** Classic protection that lists only `contexts`, without `checks`. */
+		contextsOnly?: boolean;
+		ruled?: string[];
+		rules?: unknown[];
+	} = {},
+) {
 	let now = Date.parse("2026-10-07T12:10:00Z");
 	const calls: { path: string; headers: Headers }[] = [];
 	const sideCalls: { path: string; headers: Headers; body?: unknown }[] = [];
+	const checkCalls: { path: string; headers: Headers; body?: unknown }[] = [];
+	const ruleCalls: { path: string; headers: Headers }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
-	const deps: WaitDependencies = {
+	const deps: GitHubDependencies = {
 		token: "test-token",
 		now: () => now,
 		sleep: async (ms) => {
@@ -92,8 +180,42 @@ function setup(responses: Response[], baseline = [A], side: { comments?: Respons
 				return side.comments?.shift() ?? response([]);
 			}
 			if (parsed.pathname === "/graphql") {
-				sideCalls.push({ ...call, body: JSON.parse(String(init?.body)) });
+				const body = JSON.parse(String(init?.body)) as { query: string };
+				if (body.query.includes("statusCheckRollup")) {
+					checkCalls.push({ ...call, body });
+					return side.checks?.shift() ?? checks();
+				}
+				sideCalls.push({ ...call, body });
 				return side.graphql?.shift() ?? reactions();
+			}
+			if (parsed.pathname === `${base}/branches/main`) {
+				ruleCalls.push(call);
+				const contexts = side.protected ?? [];
+				const checks = contexts.map((context) => ({ context, app_id: null }));
+				const level = contexts.length ? "everyone" : "off";
+				return response({
+					protection: {
+						enabled: contexts.length > 0,
+						required_status_checks: side.contextsOnly
+							? { enforcement_level: level, contexts }
+							: { enforcement_level: level, checks },
+					},
+				});
+			}
+			if (parsed.pathname === `${base}/rules/branches/main`) {
+				ruleCalls.push(call);
+				if (parsed.searchParams.get("page") === "2") return response(side.rules);
+				const checks = (side.ruled ?? []).map((context) => ({ context, integration_id: ACTIONS }));
+				const next = `<https://api.github.com${base}/rules/branches/main?per_page=100&page=2>; rel="next"`;
+				return response(
+					[
+						{ type: "deletion" },
+						...(checks.length
+							? [{ type: "required_status_checks", parameters: { required_status_checks: checks } }]
+							: []),
+					],
+					side.rules ? { link: next } : undefined,
+				);
 			}
 			calls.push(call);
 			if (parsed.pathname.endsWith("/commits")) return response(baseline.map((sha) => ({ sha })));
@@ -102,7 +224,7 @@ function setup(responses: Response[], baseline = [A], side: { comments?: Respons
 			return next;
 		},
 	};
-	return { deps, calls, sideCalls, sleeps, warnings, responses };
+	return { deps, calls, sideCalls, checkCalls, ruleCalls, sleeps, warnings, responses };
 }
 
 function graphql(fixture: ReturnType<typeof setup>) {
@@ -616,4 +738,324 @@ test("GraphQL errors fail loudly instead of hiding reactions", async () => {
 		graphql: [response({ errors: [{ message: "Could not resolve to a PullRequest" }] })],
 	});
 	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("GitHub GraphQL error");
+});
+
+const LATER = "2026-10-07T12:05:00Z";
+const LATEST = "2026-10-07T12:08:00Z";
+
+test("a required failure wakes the wait, naming the check and linking its details", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [
+			checks([
+				{ name: "lint", result: "FAILURE", time: LATER },
+				{ name: "build and test", required: true, result: "TIMED_OUT", time: LATEST },
+				{ name: "check", required: true },
+			]),
+		],
+		protected: ["build and test", "check"],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(
+		/^2026-10-07T12:08:00Z checks:failed build_and_test https:\/\/github.com\/example\/project\/actions\/runs\/1\/job\/14 q1\./,
+	);
+	expect(fixture.checkCalls[0].body).toMatchObject({ variables: { owner: "example", repo: "project", number: 1 } });
+});
+
+test("an optional failure never wakes the wait, and checks:passed waits for every check to finish", async () => {
+	const fixture = setup(
+		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
+		[A],
+		{
+			checks: [
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "test", required: true },
+				]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "test", required: true, result: "SKIPPED", time: LATEST },
+					{ name: "slow" },
+				]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "test", required: true, result: "SKIPPED", time: LATEST },
+					{ name: "slow", result: "SUCCESS", time: LATER },
+				]),
+			],
+			ruled: ["check", "test"],
+		},
+	);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(
+		/^2026-10-07T12:08:00Z checks:passed test https:\/\/github.com\/example\/project\/actions\/runs\/1\/job\/4 q1\./,
+	);
+	// The base branch's requirements are read once per wait.
+	expect(fixture.ruleCalls.map((call) => call.path)).toEqual([
+		`${base}/branches/main`,
+		`${base}/rules/branches/main?per_page=100`,
+	]);
+});
+
+test("classic protection that lists only contexts still names required checks", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }]),
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "gate", required: true, result: "SUCCESS", time: LATEST },
+			]),
+		],
+		protected: ["check", "gate"],
+		contextsOnly: true,
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
+});
+
+test("optional checks never stand in for required checks that have not started", async () => {
+	const fixture = setup(
+		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
+		[A],
+		{
+			checks: [
+				checks([{ name: "lint", result: "FAILURE", time: LATER }]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "gate", required: true, result: "SUCCESS", time: LATEST },
+				]),
+			],
+			protected: ["check"],
+			ruled: ["gate"],
+		},
+	);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
+});
+
+test("a required check named on a later page of rules holds back checks:passed", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }]),
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "deploy", required: true, result: "SUCCESS", time: LATEST },
+			]),
+		],
+		ruled: ["check"],
+		rules: [
+			{
+				type: "required_status_checks",
+				parameters: { required_status_checks: [{ context: "deploy", integration_id: 42 }] },
+			},
+		],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed deploy /);
+	expect(fixture.ruleCalls.map((call) => call.path)).toEqual([
+		`${base}/branches/main`,
+		`${base}/rules/branches/main?per_page=100`,
+		`${base}/rules/branches/main?per_page=100&page=2`,
+	]);
+});
+
+const CI = ".github/workflows/ci.yml";
+const workflowRule = { type: "workflows", parameters: { workflows: [{ path: CI, repository_id: 1 }] } };
+
+test("a required workflow requires its jobs, keeps optional checks optional, and holds back checks:passed until its run finishes", async () => {
+	const fixture = setup(
+		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
+		[A],
+		{
+			checks: [
+				checks([{ name: "lint", result: "FAILURE", time: LATER }]),
+				// The run's next job has not been created yet.
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI, running: true },
+				]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI },
+					{ name: "gate", result: "SUCCESS", time: LATEST, workflow: CI },
+				]),
+			],
+			rules: [workflowRule],
+		},
+	);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
+});
+
+test("a failing job in a required workflow wakes the wait", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [
+			checks([
+				{ name: "lint", result: "SUCCESS", time: LATER },
+				{ name: "build", result: "FAILURE", time: LATEST, workflow: CI, running: true },
+			]),
+		],
+		rules: [workflowRule],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed build /);
+});
+
+test("checks:passed is dated when the head goes idle, after required checks finished before the start", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "SUCCESS", time: POINT }, { name: "slow" }]),
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: POINT },
+				{ name: "slow", result: "SUCCESS", time: LATEST },
+			]),
+		],
+		protected: ["check"],
+	});
+	const lines = await waitForActivity(pr, { since: LATER }, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed slow /);
+});
+
+test("with no required checks, an unfinished workflow run holds back checks:passed", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "build", result: "SUCCESS", time: LATER, running: true }]),
+			checks([
+				{ name: "build", result: "SUCCESS", time: LATER },
+				{ name: "gate", result: "SUCCESS", time: LATEST },
+			]),
+		],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
+});
+
+test("a repository with no required checks requires every check, commit statuses included", async () => {
+	const fixture = setup(
+		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
+		[A],
+		{
+			checks: [
+				checks([]),
+				checks([
+					{ name: "check", result: "NEUTRAL", time: LATER },
+					{ name: "ci/legacy", status: true },
+				]),
+				checks([
+					{ name: "check", result: "NEUTRAL", time: LATER },
+					{ name: "ci/legacy", status: true, result: "ERROR", time: LATEST },
+				]),
+			],
+		},
+	);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(
+		/^2026-10-07T12:08:00Z checks:failed ci\/legacy https:\/\/github.com\/example\/project\/pull\/1\/checks q1\./,
+	);
+});
+
+test("results reached before an explicit starting point are not reported", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [checks([{ name: "check", required: true, result: "FAILURE", time: LATER }])],
+		protected: ["check"],
+	});
+	const timeout = await waitForActivity(pr, { since: LATEST, timeout: 10 }, fixture.deps).catch(
+		(error: unknown) => error,
+	);
+	expect(timeout).toBeInstanceOf(WaitTimeout);
+});
+
+test("a resumed wait never replays a reported result, but a push starts over for the new head", async () => {
+	const failing = (head: string, time = LATER) =>
+		checks([{ name: "check", required: true, result: "FAILURE", time }], head);
+	const protect = { protected: ["check"] };
+	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [failing(A)],
+		...protect,
+	});
+	const reported = await waitForActivity(pr, {}, first.deps);
+	expect(reported[0]).toContain("checks:failed check");
+	// The same failure is not reported again; the push is.
+	const second = setup([response([committed(A)]), response([committed(A), committed(B)])], [A], {
+		checks: [failing(A), failing(A)],
+		...protect,
+	});
+	const pushedLines = await waitForActivity(pr, { since: cursor(reported) }, second.deps);
+	expect(second.sleeps).toEqual([300_000]);
+	expect(pushedLines).toHaveLength(1);
+	expect(pushedLines[0]).toMatch(new RegExp(`^${B} committed `));
+	// The new head's failure is reported even though the old head's was.
+	const third = setup([response([committed(A), committed(B)])], [A], { checks: [failing(B, LATEST)], ...protect });
+	const again = await waitForActivity(pr, { since: cursor(pushedLines) }, third.deps);
+	expect(again).toHaveLength(1);
+	expect(again[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed check /);
+	// A later pass on that head is still reported once.
+	const fourth = setup([response([committed(A), committed(B)])], [A], {
+		checks: [checks([{ name: "check", required: true, result: "SUCCESS", time: "2026-10-07T12:09:00Z" }], B)],
+		...protect,
+	});
+	const passed = await waitForActivity(pr, { since: cursor(again) }, fourth.deps);
+	expect(passed).toHaveLength(1);
+	expect(passed[0]).toContain("checks:passed check");
+});
+
+test("a timed-out wait's cursor still reports a result reached during the first wait", async () => {
+	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [checks([{ name: "check", required: true }])],
+		protected: ["check"],
+	});
+	const timeout = await waitForActivity(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
+	const second = setup([response([committed(A)])], [A], {
+		checks: [checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }])],
+		protected: ["check"],
+	});
+	const lines = await waitForActivity(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toContain("checks:passed check");
+});
+
+test("checks are read from every page, and a head racing the read waits for the next poll", async () => {
+	const page = { hasNextPage: true, endCursor: "next" };
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "FAILURE", time: LATER }], A, undefined, B),
+			checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }], A, page),
+			checks([{ name: "test", required: true, result: "FAILURE", time: LATEST }]),
+		],
+		protected: ["check", "test"],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed test /);
+	expect(fixture.checkCalls.map((call) => (call.body as { variables: { after: unknown } }).variables.after)).toEqual([
+		null,
+		null,
+		"next",
+	]);
 });

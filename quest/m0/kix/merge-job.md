@@ -12,7 +12,7 @@ PR.
 ## Plan
 
 Decided 2026-10-20 (user) from the transcript audit recorded in
-[quest start](/quest/m0/helpers/start.md). Locally, a long-lived
+[quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md). Locally, a long-lived
 `/quest-complete` session per repository (median about 31 PR merges in moq)
 sends sub-agents to fix PRs, and the user's pick covers a PR until it lands
 or needs them.
@@ -28,10 +28,12 @@ or needs them.
   service applies labels and the job's instructions say so.
 - Decided (user): the pick covers the job's own pushes for conflicts, CI, and
   review findings. A head moved by anyone else, a design change, or the merge
-  skill's design checkpoint pauses the job into a decision. The
-  [inbox merge](/quest/m0/kix/merge.md) button keeps its exact-head binding
-  for a PR that is already clean.
-- Widen the inbox merge button: a maintainer sees merge on an open PR that
+  skill's design checkpoint pauses the job into a decision. The inbox merge
+  button keeps its exact-head binding for a PR that is already clean.
+- Widen the inbox merge button, which today appears only when GitHub's
+  `mergeStateStatus` is `CLEAN` or `HAS_HOOKS` and no job holds the PR
+  (`clean` in `cloudflare/src/inbox/page.tsx`, the merge route in
+  `cloudflare/src/index.tsx`): a maintainer sees merge on an open PR that
   is not clean (conflicted, failing, or unreviewed), and picking it starts
   this job. A clean PR keeps the direct exact-head merge.
 - Land by enabling auto-merge bound to the head the job verified, unless the
@@ -47,4 +49,3 @@ or needs them.
 
 - [Runner](/quest/m0/kix/runner.md) - jobs that run the merge skill
 - [PR state commands](/quest/m0/helpers/pr-states.md) - the label contract kix shares with local sessions
-- [Inbox merge](/quest/m0/kix/merge.md) - the merge button this widens to unclean PRs

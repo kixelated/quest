@@ -1,8 +1,18 @@
 // GitHub-specific PR activity waiting stays outside the repository-independent core.
-import { execFileSync } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
+import {
+	actor,
+	array,
+	GitHub,
+	type GitHubDependencies,
+	GitHubInputError,
+	link,
+	object,
+	type ObjectValue,
+	type PullRequest,
+	string,
+} from "./github";
+import { classifyCheck } from "./status";
 
-const API = "https://api.github.com";
 const POLL = 5 * 60_000;
 const SHA = /^[a-f\d]{7,40}$/i;
 /** The timeline records a force push a few seconds after repository activity (1-2s observed). */
@@ -21,28 +31,34 @@ const REACTIONS = `query($owner: String!, $repo: String!, $number: Int!, $after:
 	}
 }
 fragment reaction on Reaction { id content createdAt user { login } }`;
-
-export interface PullRequest {
-	owner: string;
-	repo: string;
-	number: number;
-}
+/** The head's check runs and commit statuses, with whether the base branch requires each. */
+const CHECKS = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+	repository(owner: $owner, name: $repo) {
+		pullRequest(number: $number) {
+			baseRefName
+			headRefOid
+			commits(last: 1) { nodes { commit { oid statusCheckRollup {
+				contexts(first: 100, after: $after) {
+					pageInfo { hasNextPage endCursor }
+					nodes {
+						__typename
+						... on CheckRun {
+							name status conclusion completedAt detailsUrl isRequired(pullRequestNumber: $number)
+							checkSuite { status workflowRun { file { path } } }
+						}
+						... on StatusContext { context state createdAt targetUrl isRequired(pullRequestNumber: $number) }
+					}
+				}
+			} } } }
+		}
+	}
+}`;
 
 export interface WaitOptions {
 	since?: string;
 	/** Seconds; omitted means no deadline. */
 	timeout?: number;
 }
-
-export interface WaitDependencies {
-	fetch: typeof fetch;
-	now(): number;
-	sleep(milliseconds: number): Promise<unknown>;
-	token: string;
-	warn(message: string): void;
-}
-
-export class WaitInputError extends Error {}
 
 export class WaitTimeout extends Error {
 	/** Where to resume, when the wait got far enough to know. */
@@ -51,7 +67,6 @@ export class WaitTimeout extends Error {
 	}
 }
 
-type ObjectValue = Record<string, unknown>;
 interface Activity {
 	point: string;
 	time: number;
@@ -77,48 +92,35 @@ interface Cursor {
 	commits: string[];
 	/** Force pushes at or before the starting point, at their repository-activity time. */
 	pushes: { sha: string; time: number }[];
+	/** Check results reached at or after `since` are reported once per head, as `<sha>:<outcome>`. */
+	checks: { since: number; reported: string[] };
 }
 
-/** Accept a GitHub PR URL, or a number in the origin repository. */
-export function pullRequest(value: string, root: string): PullRequest {
-	if (/^[1-9]\d*$/.test(value)) {
-		const origin = execFileSync("git", ["-C", root, "remote", "get-url", "origin"], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		const match =
-			/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?$/.exec(
-				origin,
-			);
-		if (!match) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
-		return { owner: match[1], repo: match[2], number: Number(value) };
-	}
-	const match = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value);
-	if (!match) throw new WaitInputError("expected a GitHub pull request URL or a PR number in origin");
-	return { owner: match[1], repo: match[2], number: Number(match[3]) };
+/** One check run or commit status on the head, with its result once it has one. */
+interface Check {
+	name: string;
+	required: boolean;
+	url: string | null;
+	/** The workflow file a GitHub Actions job runs in. */
+	workflow?: string;
+	/** A GitHub Actions job whose workflow run has not finished, so it may still create jobs. */
+	running: boolean;
+	result?: { outcome: "passed" | "failed"; point: string; time: number };
 }
 
-export function waitDependencies(): WaitDependencies {
-	let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
-	if (!token) {
-		try {
-			token = execFileSync("gh", ["auth", "token", "--hostname", "github.com"], {
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "pipe"],
-			}).trim();
-		} catch {
-			throw new Error("set GH_TOKEN or GITHUB_TOKEN, or sign in with gh auth login");
-		}
-	}
-	if (!token) throw new Error("GitHub authentication returned an empty token");
-	return { fetch, now: Date.now, sleep, token, warn: (message) => process.stderr.write(`quest: ${message}\n`) };
+/** What the base branch requires, read from branch protection and rulesets. */
+interface Requirements {
+	/** Required check names. */
+	names: Set<string>;
+	/** Workflow files that must pass as a whole, so each of their jobs is required. */
+	workflows: string[];
 }
 
 /** Wait until activity, returning plain output lines. Network and time are injected. */
 export async function waitForActivity(
 	pr: PullRequest,
 	options: WaitOptions,
-	deps: WaitDependencies,
+	deps: GitHubDependencies,
 ): Promise<string[]> {
 	const started = deps.now();
 	const progress = { resume: options.since };
@@ -135,7 +137,7 @@ export async function waitForActivity(
 async function watch(
 	pr: PullRequest,
 	options: WaitOptions,
-	deps: WaitDependencies,
+	deps: GitHubDependencies,
 	started: number,
 	progress: { resume?: string },
 ): Promise<string[]> {
@@ -143,74 +145,14 @@ async function watch(
 		try {
 			timestamp(options.since);
 		} catch (error) {
-			throw new WaitInputError((error as Error).message);
+			throw new GitHubInputError((error as Error).message);
 		}
 	}
 	const name = `${pr.owner}/${pr.repo}#${pr.number}`;
 	const base = `/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}`;
 	const prUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`;
 	const deadline = options.timeout === undefined ? Infinity : started + options.timeout * 1000;
-	const pause = async (milliseconds: number) => {
-		const remaining = deadline - deps.now();
-		if (remaining <= 0) throw new WaitTimeout();
-		await deps.sleep(Math.min(milliseconds, remaining, 2_147_483_647));
-		if (deps.now() >= deadline) throw new WaitTimeout();
-	};
-	let pollInterval = POLL;
-	const request = async (path: string, etag?: string, payload?: unknown): Promise<Response> => {
-		// Follow only same-origin pagination links; never send a token to another host.
-		const url = new URL(path, API);
-		if (url.origin !== API || url.username || url.password) throw new Error("invalid GitHub pagination URL");
-		let attempts = 0;
-		for (;;) {
-			const remaining = deadline - deps.now();
-			if (remaining <= 0) throw new WaitTimeout();
-			let response: Response;
-			try {
-				response = await deps.fetch(url, {
-					...(payload === undefined ? {} : { method: "POST", body: JSON.stringify(payload) }),
-					headers: {
-						Accept: "application/vnd.github+json",
-						Authorization: `Bearer ${deps.token}`,
-						"X-GitHub-Api-Version": "2022-11-28",
-						"User-Agent": "quest",
-						...(etag ? { "If-None-Match": etag } : {}),
-					},
-					...(Number.isFinite(remaining) ? { signal: AbortSignal.timeout(Math.ceil(remaining)) } : {}),
-				});
-			} catch (error) {
-				if (deps.now() >= deadline) throw new WaitTimeout();
-				throw error;
-			}
-			pollInterval = Math.max(pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
-			if (response.status === 200 || response.status === 304) return response;
-			const body = await response.text();
-			const limited =
-				response.status === 429 ||
-				(response.status === 403 &&
-					(response.headers.has("retry-after") ||
-						response.headers.get("x-ratelimit-remaining") === "0" ||
-						/rate limit/i.test(body)));
-			if (!limited || attempts >= 6)
-				throw new Error(
-					`GitHub HTTP ${response.status} for ${url.pathname}; ${limited ? "rate limit persisted" : "check repository access and token permissions"}`,
-				);
-			const retry = seconds(response.headers.get("retry-after"));
-			const reset =
-				response.headers.get("x-ratelimit-remaining") === "0"
-					? seconds(response.headers.get("x-ratelimit-reset"))
-					: undefined;
-			const delay = retry ?? (reset === undefined ? 60_000 * 2 ** attempts : Math.max(1000, reset - deps.now()));
-			attempts++;
-			deps.warn(`GitHub rate limited this request; waiting ${Math.ceil(delay / 1000)} seconds`);
-			await pause(delay);
-		}
-	};
-	const list = async (path: string): Promise<{ rows: ObjectValue[]; response: Response }> => {
-		const response = await request(path);
-		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
-		return { rows: array(await response.json()), response };
-	};
+	const github = new GitHub(deps, deadline);
 
 	let cursor: Cursor;
 	let historical: Activity[] = [];
@@ -219,7 +161,7 @@ async function watch(
 	if (options.since?.startsWith("q1.")) {
 		cursor = decodeCursor(options.since, name);
 	} else {
-		const pullResponse = await request(`${base}/pulls/${pr.number}`);
+		const pullResponse = await github.request(`${base}/pulls/${pr.number}`);
 		const pull = object(await pullResponse.json());
 		const head = object(pull.head);
 		const currentSha = string(head.sha);
@@ -230,7 +172,7 @@ async function watch(
 		let commitsPath: string | undefined = `${base}/pulls/${pr.number}/commits?per_page=100`;
 		let listedHead: string | undefined;
 		while (commitsPath) {
-			const { rows, response } = await list(commitsPath);
+			const { rows, response } = await github.list(commitsPath);
 			for (const commit of rows) {
 				listedHead = string(commit.sha);
 				if (!fullSha(listedHead)) throw new Error("invalid GitHub commit SHA");
@@ -254,7 +196,7 @@ async function watch(
 			let path: string | undefined =
 				`/repos/${fullName}/activity?ref=${encodeURIComponent(string(head.ref))}&per_page=100`;
 			while (path) {
-				const { rows, response } = await list(path);
+				const { rows, response } = await github.list(path);
 				activities.push(...rows);
 				if (
 					shaPoint
@@ -291,6 +233,7 @@ async function watch(
 			pushes: forced
 				.filter((row) => !after(row))
 				.map((row) => ({ sha: string(row.after), time: timestamp(string(row.timestamp)) })),
+			checks: { since, reported: [] },
 		};
 		const plain = pushed.filter((row) => string(row.activity_type) !== "force_push" && after(row));
 		// A push racing setup is reported once, as a push, not again as a new commit.
@@ -328,7 +271,7 @@ async function watch(
 		return async (): Promise<ObjectValue[]> => {
 			const rows: ObjectValue[] = [];
 			for (;;) {
-				const response = await request(path, etag);
+				const response = await github.request(path, { etag });
 				if (response.status === 304) {
 					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
 					return rows;
@@ -344,24 +287,15 @@ async function watch(
 			}
 		};
 	};
+	const graphql = (query: string, after: string | null) =>
+		github.graphql(query, { owner: pr.owner, repo: pr.repo, number: pr.number, after });
 	/** REST has no endpoint for reactions on reviews, and GraphQL also names the waiter. */
 	const reactions = async (): Promise<{ viewer: string; events: Activity[] }> => {
 		const events: Activity[] = [];
 		let viewer: string;
 		let after: string | null = null;
 		do {
-			const response = await request("/graphql", undefined, {
-				query: REACTIONS,
-				variables: { owner: pr.owner, repo: pr.repo, number: pr.number, after },
-			});
-			const body = object(await response.json());
-			if (body.errors !== undefined)
-				throw new Error(
-					`GitHub GraphQL error: ${array(body.errors)
-						.map((error) => String(error.message))
-						.join("; ")}`,
-				);
-			const data = object(body.data);
+			const data = await graphql(REACTIONS, after);
 			viewer = string(object(data.viewer).login);
 			const pull = object(object(data.repository).pullRequest);
 			const reviews = object(pull.reviews);
@@ -374,6 +308,62 @@ async function watch(
 		} while (after !== null);
 		return { viewer, events };
 	};
+	/** GraphQL says which checks the base branch requires, through branch protection or rulesets. */
+	const checks = async (): Promise<{ head: string; base: string; checks: Check[] } | undefined> => {
+		const result: Check[] = [];
+		let head: string | undefined;
+		let after: string | null = null;
+		let pull: ObjectValue;
+		do {
+			pull = object(object((await graphql(CHECKS, after)).repository).pullRequest);
+			const commit = object(array(object(pull.commits).nodes)[0]?.commit);
+			// A push racing these pages is read whole on the next poll.
+			if (commit.oid !== pull.headRefOid || (head !== undefined && commit.oid !== head)) return undefined;
+			head = string(commit.oid);
+			if (!fullSha(head)) throw new Error("invalid GitHub head SHA");
+			if (commit.statusCheckRollup === null) break;
+			const contexts = object(object(commit.statusCheckRollup).contexts);
+			result.push(...array(contexts.nodes).map(check));
+			const page = object(contexts.pageInfo);
+			after = page.hasNextPage === true ? string(page.endCursor) : null;
+		} while (after !== null);
+		return { head: head!, base: string(pull.baseRefName), checks: result };
+	};
+	/**
+	 * What the base branch requires, read once per wait. Only a requirement says whether a missing
+	 * check has yet to start, or whether the repository requires none.
+	 */
+	const requirements = new Map<string, Requirements>();
+	const required = async (branch: string): Promise<Requirements> => {
+		const known = requirements.get(branch);
+		if (known) return known;
+		const ref = encodeURIComponent(branch);
+		const protection = object(
+			object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {},
+		);
+		const legacy = object(protection.required_status_checks ?? {});
+		// Classic protection may list only `contexts`, without the newer `checks`.
+		const contexts =
+			legacy.checks === undefined
+				? (Array.isArray(legacy.contexts) ? legacy.contexts : []).map(string)
+				: array(legacy.checks).map((row) => string(row.context));
+		const rules = await github.all(`${base}/rules/branches/${ref}?per_page=100`);
+		const found: Requirements = {
+			names: new Set([
+				...(legacy.enforcement_level === "off" ? [] : contexts),
+				...rules
+					.filter((rule) => rule.type === "required_status_checks")
+					.flatMap((rule) => array(object(rule.parameters).required_status_checks))
+					.map((row) => string(row.context)),
+			]),
+			workflows: rules
+				.filter((rule) => rule.type === "workflows")
+				.flatMap((rule) => array(object(rule.parameters).workflows))
+				.map((row) => string(row.path)),
+		};
+		requirements.set(branch, found);
+		return found;
+	};
 
 	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=100`);
 	// `since` excludes its own instant and filters by update time, which is never before
@@ -383,7 +373,7 @@ async function watch(
 	);
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
 	for (;;) {
-		pollInterval = POLL;
+		github.pollInterval = POLL;
 		for (const row of await timeline()) {
 			const type = string(row.event);
 			if (type === "committed") {
@@ -426,8 +416,13 @@ async function watch(
 			if (event.actor !== viewer && fresh("replies", event)) found.replies.push(event);
 		}
 		found.reactions.push(...events.filter((event) => event.actor !== viewer && fresh("reactions", event)));
+		// Check results are state rather than a log, so each poll reads them afresh.
+		const head = await checks();
+		const reached = head
+			? checkActivities(head.head, head.checks, await required(head.base), cursor.checks, prUrl)
+			: [];
 
-		if (SOURCES.some((source) => found[source].length)) {
+		if (reached.length || SOURCES.some((source) => found[source].length)) {
 			const marks = Object.fromEntries(
 				SOURCES.map((source) => {
 					const mark = cursor.marks[source];
@@ -444,15 +439,23 @@ async function watch(
 				marks,
 				commits: [...seenCommits],
 				pushes: cursor.pushes.filter((push) => push.time + TIMELINE_LAG >= marks.timeline.time),
+				checks: {
+					since: cursor.checks.since,
+					// A new head starts over, so only the current head's reports are kept.
+					reported: [
+						...cursor.checks.reported.filter((id) => !head || id.startsWith(`${head.head}:`)),
+						...reached.map((event) => event.id),
+					],
+				},
 			});
-			const all = SOURCES.flatMap((source) => found[source]).sort((a, b) => a.time - b.time);
+			const all = [...SOURCES.flatMap((source) => found[source]), ...reached].sort((a, b) => a.time - b.time);
 			const unique = [...new Map(all.map((event) => [event.id, event])).values()];
 			return unique.map(
 				(event, index) =>
 					`${event.point} ${event.type} ${event.actor} ${event.url}${index === unique.length - 1 ? ` ${nextCursor}` : ""}`,
 			);
 		}
-		await pause(pollInterval);
+		await github.pause(github.pollInterval);
 	}
 }
 
@@ -474,6 +477,74 @@ function timelineActivities(row: ObjectValue, prUrl: string): Activity[] {
 	}
 	if (!WAKES.includes(type)) return [];
 	return [timedActivity(row, type, type === "reviewed" ? "submitted_at" : "created_at", prUrl)];
+}
+
+/** A check run or commit status, classified as `quest status` does, with when it finished. */
+function check(row: ObjectValue): Check {
+	const run = row.__typename === "CheckRun";
+	const { check: classified, outcome } = classifyCheck(row);
+	const suite = run && row.checkSuite ? object(row.checkSuite) : undefined;
+	const file = suite?.workflowRun ? object(suite.workflowRun).file : null;
+	const found: Check = {
+		name: classified.name,
+		required: classified.required,
+		url: classified.url,
+		...(file ? { workflow: string(object(file).path) } : {}),
+		running: suite?.workflowRun ? suite.status !== "COMPLETED" : false,
+	};
+	if (outcome === "pending") return found;
+	const point = string(run ? row.completedAt : row.createdAt);
+	found.result = { outcome: outcome === "passed" ? "passed" : "failed", point, time: timestamp(point) };
+	return found;
+}
+
+/**
+ * The head's first required failure, and every required check passing once the head is idle, each
+ * reported once per head when reached at or after the starting point. A base branch that requires
+ * no checks requires them all.
+ */
+function checkActivities(
+	head: string,
+	all: Check[],
+	needs: Requirements,
+	state: Cursor["checks"],
+	prUrl: string,
+): Activity[] {
+	const inWorkflow = (entry: Check) => entry.workflow !== undefined && needs.workflows.includes(entry.workflow);
+	const required =
+		needs.names.size || needs.workflows.length ? all.filter((entry) => entry.required || inWorkflow(entry)) : all;
+	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
+		const id = `${head}:${outcome}`;
+		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
+		return [
+			{
+				point: entry.result.point,
+				time: entry.result.time,
+				type: `checks:${outcome}`,
+				actor: entry.name.replace(/\s/g, "_"),
+				url: entry.url ?? `${prUrl}/checks`,
+				id,
+			},
+		];
+	};
+	const settled = required.flatMap((entry) => (entry.result ? [{ ...entry, result: entry.result }] : []));
+	settled.sort((a, b) => a.result.time - b.result.time);
+	const failed = settled.find((entry) => entry.result.outcome === "failed" && entry.result.time >= state.since);
+	// GitHub lists a check only once it starts, so a pass waits until nothing on the head is still
+	// going: no pending check, no workflow run that may yet create a job, and every required name
+	// and workflow present. It is dated by the last check to finish, when the head went idle.
+	const idle =
+		all.every((entry) => entry.result && !entry.running) &&
+		[...needs.names].every((name) => all.some((entry) => entry.name === name)) &&
+		needs.workflows.every((path) => all.some((entry) => entry.workflow === path));
+	const passed =
+		idle && settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
+			? all.reduce<Check | undefined>(
+					(last, entry) => (!last || entry.result!.time >= last.result!.time ? entry : last),
+					undefined,
+				)
+			: undefined;
+	return [...reached("failed", failed), ...reached("passed", passed)];
 }
 
 function timedActivity(row: ObjectValue, type: string, timeField: string, fallback: string): Activity {
@@ -502,51 +573,11 @@ function reaction(row: ObjectValue, url: string): Activity {
 	};
 }
 
-function actor(value: unknown): string {
-	if (value === null || value === undefined) return "-";
-	const record = object(value);
-	return typeof record.login === "string"
-		? record.login
-		: typeof record.name === "string"
-			? record.name.replace(/\s/g, "_")
-			: "-";
-}
-
-function object(value: unknown): ObjectValue {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		throw new Error("invalid GitHub response: expected an object");
-	return value as ObjectValue;
-}
-
-function array(value: unknown): ObjectValue[] {
-	if (!Array.isArray(value)) throw new Error("invalid GitHub response: expected an array");
-	return value.map(object);
-}
-
-function string(value: unknown): string {
-	if (typeof value !== "string" || !value) throw new Error("invalid GitHub response: expected a nonempty string");
-	return value;
-}
-
 function timestamp(value: string): number {
 	const result = Date.parse(value);
 	if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(result))
 		throw new Error(`invalid timestamp: ${value}; use an ISO 8601 timestamp, a pushed SHA, or a returned cursor`);
 	return result;
-}
-
-function seconds(value: string | null): number | undefined {
-	if (value === null || !/^\d+(?:\.\d+)?$/.test(value)) return undefined;
-	const result = Number(value) * 1000;
-	return Number.isFinite(result) ? result : undefined;
-}
-
-function link(response: Response, relation: string): string | undefined {
-	return response.headers
-		.get("link")
-		?.split(",")
-		.map((entry) => /<([^>]+)>;\s*rel="([^"]+)"/.exec(entry.trim()))
-		.find((match) => match?.[2] === relation)?.[1];
 }
 
 function fullSha(value: unknown): boolean {
@@ -561,6 +592,7 @@ function decodeCursor(value: string, pr: string): Cursor {
 	try {
 		const parsed = object(JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8")));
 		const marks = object(parsed.marks);
+		const checks = object(parsed.checks);
 		if (
 			parsed.pr !== pr ||
 			!SOURCES.every((source) => {
@@ -575,11 +607,14 @@ function decodeCursor(value: string, pr: string): Cursor {
 			!Array.isArray(parsed.commits) ||
 			!parsed.commits.every(fullSha) ||
 			!Array.isArray(parsed.pushes) ||
-			!parsed.pushes.every((push: ObjectValue | null) => fullSha(push?.sha) && Number.isFinite(push?.time))
+			!parsed.pushes.every((push: ObjectValue | null) => fullSha(push?.sha) && Number.isFinite(push?.time)) ||
+			!Number.isFinite(checks.since) ||
+			!Array.isArray(checks.reported) ||
+			!checks.reported.every((id) => typeof id === "string")
 		)
 			throw new Error();
 		return parsed as unknown as Cursor;
 	} catch {
-		throw new WaitInputError("invalid --since cursor, or cursor belongs to another pull request");
+		throw new GitHubInputError("invalid --since cursor, or cursor belongs to another pull request");
 	}
 }

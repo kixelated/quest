@@ -2,8 +2,9 @@
 
 A deployable foundation for Quest on Cloudflare, and the site at
 `https://kix.quest`: the quest log for your repo and your agents, on the web.
-Hono serves HTML directly, so there is no client bundle; only passkeys need a
-small script (`src/passkey.js`). Every page renders
+Hono serves HTML directly, so there is no client bundle; only passkeys
+(`src/passkey.js`) and the installed app (`src/app.js` and `src/sw.js`) need
+small scripts. Every page renders
 inside the shared layout in `src/layout.tsx`, which follows
 [the quest log theme](../design/theme.md): the home page (`src/home.tsx`), the
 docs under `/docs` (`src/docs.tsx`), the quest board under `/repos`
@@ -16,7 +17,7 @@ its epics and quests with their statuses, filtered by status with
 `?show=available` and the like. Each quest has a page at its path without
 `.md`, such as `/repos/quest/quest/m0/kix/prompts`: its Markdown rendered
 with raw HTML escaped, its status, and what to do next. Readiness comes from
-`quest/core`, so the board agrees with `quest ready`. Progress counts finished
+`quest/core`, so the board agrees with `quest unblocked`. Progress counts finished
 quests, which merges delete, from Git history (`scripts/history.ts`), weighted
 by size. A deletion counts only when its commit changed something outside
 `quest/`, since deleting only plans abandons a quest.
@@ -28,9 +29,11 @@ other docs become `/docs/<name>` and other repository paths point at GitHub. It
 also snapshots this repository's `quest/` tree and finished quests into
 `build/board.json`, which supplies the public board. Enrolled repositories use authenticated
 GitHub snapshots through the same board model. A shallow clone has no
-history, so its board shows no finished work. It also copies `design/theme/` and `src/site.css` into `build/public/`, which the
-Worker serves as static assets (`/theme/theme.css`, `/theme/logo.svg`,
-`/theme/og.png`, and `/site.css`). `build/` is ignored by Git.
+history, so its board shows no finished work. It also copies `design/theme/`,
+`src/site.css`, the scripts, and the web app manifest into `build/public/`,
+which the Worker serves as static assets (`/theme/theme.css`,
+`/theme/logo.svg`, `/theme/og.png`, `/site.css`, `/sw.js`, and the like).
+`build/` is ignored by Git.
 
 Better Auth uses D1 for accounts and sessions;
 adding social providers or plugins belongs in `src/auth.ts`. It handles OAuth
@@ -76,7 +79,8 @@ A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
 `bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
 create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
 every request rechecks current GitHub authority. `start` takes only quests that
-observations show ready and unclaimed. A job on an issue or pull request
+observations show ready and unclaimed, except that retrying a failed job does
+not count that job's own open pull request as a claim. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
 observations read it. `iterate` jobs are untrusted and route
 only to Linux runners that declare VM builds. Without a `flake.nix`, the route
@@ -98,7 +102,10 @@ attempts it is running, and its free job slots. It also sends `checkpoint`,
 whenever jobs or connections change. A status that lists an assigned attempt
 acknowledges it; until then the assignment holds one of the runner's slots and
 the hub resends it, and cancelling a
-job whose assignment was never acknowledged stops it at once.
+job whose assignment was never acknowledged stops it at once. An `assign`
+carries the job and its `instructions`, which the runner gives the agent
+alongside the workflow's skill, or `null`. A planning job's instructions say
+kix writes its pull request's decision record, so the agent does not.
 
 Routing gives a job to the connected runner with a free slot and the owner's
 most preferred usable account. A pin, the job's trust, or a paused session's
@@ -126,8 +133,9 @@ saw, and is refused once observations moved past it.
 The current attempt publishes its work over HTTPS at `POST /api/runner/publish`,
 not over its connection, so slow GitHub writes never hold up the hub. It sends
 file changes as data; the Worker commits them as the GitHub App to the job's
-one branch, which a reassigned attempt continues from, and opens or updates
-the job's pull request. Each job records its branch's `head` and its `pull`.
+one branch, which a reassigned attempt or a retried failed job continues from,
+and opens or updates the job's pull request. Each job records its branch's
+`head` and its `pull`.
 Changes a workflow may not publish pause the job with a `publication`
 decision. [GITHUB.md](GITHUB.md#publication) describes the request, its
 validation, and how interrupted publications are reconciled.
@@ -165,26 +173,83 @@ and deletes its own object.
 ### Decision inbox
 
 After signing in, a maintainer lands on `/inbox` (`src/inbox/`): one active
-decision thread across the projects they enrolled, then what is up next, what
-is in progress, and their projects. Each item is one job target (`issues/1`,
+decision thread across their projects, then what is up next, what is in
+progress, and their projects. Each item is one job target (`issues/1`,
 `pulls/2`, a quest path), so an issue, its planning job, and that job's
 questions stay one item, and webhook updates and reconnects never add another
 prompt. Agents waiting on an answer come first, then failed jobs, new pull
-requests, new issues, and ready quests. An item offers only actions that
-would work: none on a paused project, and only a refresh while availability
-is pending. Every action is a plain form post to the job routes, which
-recheck authority and return to the inbox; prompts render as escaped text and
-never preselect the recommendation. A `publication` decision lists the refused
+requests, new issues, and ready quests. Each webhook rereads its project in the
+background, so a new issue or PR arrives with its title, ready to act on. An
+item offers only actions that would work: none on a paused project, and only a
+refresh while availability is pending or a background read failed, with the
+failure's reason. Every action is a plain form post to the job routes, which
+recheck authority and move on to the next active decision (or the empty
+state) with a short notice such as "Answer recorded"; the item acted on stays
+reachable from its list with its earlier answers. A refused action says why
+and links back to its item. Prompts render as escaped text and never
+preselect the recommendation. A `publication` decision lists the refused
 paths or why the branch is blocked, and takes the maintainer's reply as text.
 The inbox reads each target's latest job however old it is: every one that
 awaits a decision, and any other whose issue, pull request, or quest is still
 observed, so finished work stays set aside. Retrying a failed planning
 interview keeps its `plans/<id>` target.
 
+A user's projects are those in `github_project_members`. Enrolling a project
+adds its enroller, and any other user joins by passing the maintainer check on
+one of its pages, such as its setup page; no extra GitHub calls list
+maintainers. Membership only decides what the inbox lists: every action still
+rechecks authority. A check GitHub denies drops the user's membership along with
+their read and skip state for the project, while one that cannot complete, such
+as a rate limit, fails the request and leaves membership as it is.
+Disconnecting a project removes its memberships.
+
 Each maintainer's read state lives in `inbox_items`, keyed by a version of what
 the item showed (a question, a GitHub change, a quest's text). A newer version
 is unread again, and skipping an item lasts until it changes. A finished or
 stopped job sets its item aside the same way.
+
+### Installed app and notifications
+
+kix.quest installs as a progressive web app (`src/manifest.webmanifest`,
+starting at `/inbox`) on Android, desktop browsers, and iOS/iPadOS 16.4+ once
+added to the Home Screen. Signed-in pages load `src/app.js`, which registers
+the service worker `src/sw.js`, sets the installed app's icon badge to the
+unread decision count where the Badging API exists, and drives the
+notification switch on `/inbox` and `/account`. The nav shows the same count.
+It reads stored observations without rechecking GitHub on every page, so it
+reveals a number and nothing else.
+
+A device turns notifications on only from a click, which asks the browser for
+permission and stores its push subscription (`push_subscriptions`) for that
+user and session. Subscriptions must name a known push service. Signing out
+deletes the session's subscriptions, and the sign-out form first drops the
+browser's own, which discards pushes still queued for it (a sign-out without
+JavaScript leaves those to arrive within the 24-hour TTL). A push service
+reporting one gone (404 or 410) deletes it. The switch shows a device as notified only while the
+server stores its subscription for the signed-in user, so whoever signs in
+next on that browser turns notifications on with their own click. A rotated
+subscription replaces the old one only for the user who enabled it, and the
+switch drops a browser subscription made for an earlier VAPID key pair. Each push
+rechecks that its recipient still maintains the project, as the inbox does.
+
+Only decisions push (`src/push/notify.ts`): an agent's question, a
+publication decision, an account limit, a failed job, a new or reopened issue,
+and a pull request opened ready for review or marked ready. Drafts,
+progress, presence, and finished work never push, and neither does anything on
+a paused project. Each push goes once, from the first delivery or the attempt
+that changed, to the devices of the project's members, whose inbox shows it. It
+carries the project, the item's title, and the unread count; one
+notification tag and push `Topic` per item replace an earlier one instead of
+stacking. Tapping it opens the item in the inbox. Notifications have no answer
+buttons: iOS Web Push does not support them, and every answer goes through the
+inbox's stale- and duplicate-answer checks.
+
+`src/push/webpush.ts` implements RFC 8291 message encryption and RFC 8292 VAPID
+signing with WebCrypto, so there is no push library; tests check it against
+RFC 8291's worked example. Notifications are on only when both
+`VAPID_PUBLIC_KEY` (in `wrangler.jsonc`) and the `VAPID_PRIVATE_KEY` secret are
+set. `bun scripts/vapid.ts` prints a new pair; replacing it stops every
+existing subscription until each device turns notifications on again.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -224,6 +289,39 @@ under `cloudflare/.wrangler/`. There are no remote-only bindings: local
 development and tests need no Cloudflare login. Wrangler reruns the build when
 `src/`, `scripts/`, or `docs/` change.
 
+### Seeded local server
+
+Check UI changes in a browser with representative data, and no OAuth app or
+Cloudflare login:
+
+```sh
+just worker-seeded  # or: just worker-seeded --port 8788
+```
+
+This bundles the Worker as `wrangler deploy --dry-run` does and serves it with
+Miniflare at `http://localhost:8787`, on in-memory D1, R2, and Durable
+Objects, so every run starts from the same seed. It works where `wrangler dev`
+hangs, such as sandboxed agent environments. After applying the checked-in
+migrations, `dev/seed.ts` signs in a maintainer and enrolls and observes their
+projects through the Worker's own routes: ready, claimed, and blocked quests,
+issues (one known only from a webhook, one with a long title), pull requests
+with checks and reviews (one clean to merge), and a paused second project. It then adds runners and
+jobs that are queued, running, failed, or waiting on an agent's questions, a
+tool permission, or an account limit.
+
+`dev/github.ts` fakes GitHub for every outbound request, so nothing leaves
+localhost and no real credential is used. Notifications are off, since a push
+would reach a real push service. Sign in with GitHub completes as the
+seeded maintainer. From a shell, sign in with a cookie jar:
+
+```sh
+curl -sL -c jar -b jar -H 'Origin: http://localhost:8787' -d provider=github http://localhost:8787/sign-in
+```
+
+Check phone and desktop widths with the browser's device emulation. The Worker
+tests run the same seed (`test/seed.test.ts`), so it follows schema and route
+changes, and later end-to-end tests can start from it.
+
 ## Checks
 
 ```sh
@@ -250,7 +348,9 @@ limits and their decisions, lost branch updates and deliveries, iterated heads,
 and token scopes. Output tests use local R2 for chunk ordering, retries, the
 caps, expiry, and cleanup after a disconnect. Inbox tests answer prompts
 through the forms, reject stale revisions and repeated answers, coalesce
-duplicate webhooks, and hide a project whose maintainer lost authority. No
+duplicate webhooks, and hide a project whose maintainer lost authority. Push
+tests encrypt RFC 8291's example, verify VAPID signatures, decrypt what a
+subscribed device receives, and check that only decisions push, once each. No
 OAuth credentials or Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
@@ -299,7 +399,10 @@ a production Google OAuth web client with redirect URI
 `https://kix.quest/api/auth/callback/google`, set its public client ID as
 `GOOGLE_CLIENT_ID` in `wrangler.jsonc`, and set the secret with
 `bun run wrangler secret put GOOGLE_CLIENT_SECRET`; without both, Google is
-not offered. The secret is optional, so it is not listed under `secrets.required`. Deploys fail until every
+not offered. The secret is optional, so it is not listed under `secrets.required`.
+Notifications are optional the same way: run `bun scripts/vapid.ts`, set its
+public key as `VAPID_PUBLIC_KEY` in `wrangler.jsonc`, and set the private key
+with `bun run wrangler secret put VAPID_PRIVATE_KEY`. Deploys fail until every
 required secret is set, so register the GitHub App first ([GITHUB.md](GITHUB.md)
 steps 1 and 2), then set secrets interactively:
 

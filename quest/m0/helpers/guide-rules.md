@@ -4,8 +4,9 @@
 
 Agents stop needing the same corrections from the maintainer, because the
 guide and skills state them: who may push to a branch, what a brief carries,
-where follow-ups go, whose review counts, which choices are the user's, and
-searching for duplicates before planning. Each rule comes from steering the
+when a finished quest's PR is marked ready, where follow-ups go, whose review
+counts, which choices are the user's, and searching for duplicates before
+planning. Each rule comes from steering the
 moq maintainer typed repeatedly over a month of transcripts.
 
 Non-goals: CLI changes, and restating repository rules; a repository's own
@@ -20,11 +21,20 @@ edits through this plan; follow `PROMPTING.md` (goals over prescriptions).
 - Pushing (guide): never rebase or force-push a branch another session may
   hold. Before every push to a branch that already has a PR, confirm the PR
   is still open, because a push after the merge brings the deleted branch
-  back. The first claim push, which comes before its draft PR exists, is
-  exempt.
+  back. The claim push `quest start` makes, which comes before its draft PR
+  exists, is exempt.
 - Briefs (`spawn`, `complete`): a sub-agent's brief carries the quest or PR,
   the user's picks, and the scope, and leaves repository rules to that
   repository's own instructions instead of restating them.
+- Hand-back (guide, `start`): a complete quest is marked ready even if the
+  agent made choices without asking; it lists those choices in the PR body
+  for review. Only a decision left for the maintainer keeps the PR a draft
+  with `## Decisions needed`. Drop the `start` skill's "the user has settled
+  every decision, including choices you made without asking" gate, which
+  disagrees with the guide's Execution section. "Should I mark it ready?"
+  came up in about 18 moq sessions. Planned for quest start, which landed in
+  [kixelated/quest#167](https://github.com/kixelated/quest/pull/167)
+  without it.
 - Planning (`plan`): search the quest tree, git history for deleted quests,
   and open PRs touching `quest/` before anything else, and show any overlap in
   the first round. The maintainer asked "double check we don't already have
@@ -52,6 +62,5 @@ edits through this plan; follow `PROMPTING.md` (goals over prescriptions).
 
 ## Related
 
-- [quest start](/quest/m0/helpers/start.md) - carries the ready-at-hand-back fix from the same audit
 - [PR state commands](/quest/m0/helpers/pr-states.md) - refuses a merged PR mechanically and carries the merge method
 - [Unattended work](/quest/m0/helpers/afk.md) - the guide's final-summary rule

@@ -6,11 +6,12 @@ Before you begin, run `quest guide` and read its output completely.
 
 Your goal is to execute many quests in parallel.
 The scope consists of all ready quests that are not claimed.
-Run `quest unblocked --json` for ready candidates in milestone priority, descending downstream impact, then tree order.
+Run `quest unblocked --unclaimed --json` for unclaimed ready candidates in milestone priority, descending downstream impact, then tree order.
 The count is distinct transitive dependents; other prerequisites may still remain.
 Use that order when dispatching, and recompute after the quest tree changes.
 An explicit argument takes precedence: filter to the selected quests/epics and honor their requested order.
-Ranking does not establish that work is unclaimed: verify live locks, open changes (including PRs from forks), and remote branch claims before starting.
+It lists each skipped claim on stderr with how long ago it was last active; offer the user any that look stale, as the guide describes.
+Each agent claims its quest with `quest start`, which refuses one claimed since; a refusal is a skip, not a failure.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Start every quest you would recommend starting, without asking: well planned, with no blockers or conflicts with quests already started.
@@ -28,7 +29,6 @@ Start each quest in a background sub-agent with its own isolated worktree, since
 
 Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
-Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
 When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
 Its report lists every open decision and suggested follow-up with a recommendation.
@@ -50,6 +50,15 @@ Run selected `/quest-plan` sessions in the foreground.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
+
+## Unattended
+
+With an `afk` argument, the user has stepped away: your recommendation stands in for their pick of `/quest-start`, skip, `/quest-ready`, or `/quest-iterate`, so act on it without asking.
+It also answers each simple decision an agent reports, including when you resume a headless agent.
+Still ask about each `/quest-merge` and `/quest-delete` you recommend, as one simple question with your recommendation first.
+Skip a quest, PR, or reported decision that is not simple, noting why in the summary instead of asking.
+Hold `/quest-plan` sessions, including deprioritizing and suggested follow-ups, for the summary, since planning is an interview.
+The rest of the argument still filters the quests in scope.
 
 ## API keys
 

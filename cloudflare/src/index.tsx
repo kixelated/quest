@@ -15,9 +15,10 @@ import { githubWebhooks } from "./github/webhook";
 import * as inbox from "./inbox/model";
 import { InboxPage } from "./inbox/page";
 import { purge, retain } from "./jobs/output";
-import { BootstrapRequired, fromForm, jobs, resume, stop } from "./jobs/routes";
-import { JobError } from "./jobs/store";
+import { BootstrapRequired, fromForm, inboxURL, jobs, nextURL, resume, stop } from "./jobs/routes";
+import { JobError, active } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
+import * as push from "./push/notify";
 
 export const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
@@ -28,6 +29,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // Short link for the one-line setup paste.
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+app.route("/", push.subscriptions);
 
 // The page a visitor is on, still percent-encoded, to return to after signing in.
 function here(c: Context): string {
@@ -38,15 +40,16 @@ function here(c: Context): string {
 // Every HTML page renders in the shared layout, with the visitor's session in the nav.
 async function page(
 	c: Context<{ Bindings: Env }>,
-	props: Omit<Page, "origin" | "path" | "user">,
+	props: Omit<Page, "origin" | "path" | "user" | "unread">,
 	body: Child | ((user: User | null) => Child),
 	status: ContentfulStatusCode = 200,
 ) {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	const user = session?.user ?? null;
+	const unread = user ? await inbox.unread(c.env, user.id) : 0;
 	c.header("Cache-Control", "no-store");
 	return c.html(
-		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={here(c)} user={user}>
+		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={here(c)} user={user} unread={unread}>
 			{typeof body === "function" ? body(user) : body}
 		</Layout>,
 		status,
@@ -230,7 +233,27 @@ app.post("/projects/github/:owner/:repository/skip", async (c) => {
 	if (typeof item !== "string" || typeof version !== "string" || item.length > 300 || version.length > 100)
 		return c.json({ error: "Item and version required" }, 400);
 	await inbox.skip(c.env.DB, session.user.id, repo.id, item, version);
-	return c.redirect("/inbox", 303);
+	return c.redirect(nextURL("skip"), 303);
+});
+// A merge is the maintainer's own click on the head they saw; GitHub's rules decide whether it lands.
+app.post("/projects/github/:owner/:repository/pulls/:number/merge", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) throw new GitHubError("Sign in required");
+	const github = new GitHubService(c.env);
+	const repo = await github.enrolledProject(c.req.param("owner"), c.req.param("repository"), session.user.id);
+	if (!repo) throw new GitHubError("Project is not enrolled");
+	const number = c.req.param("number");
+	const { head, version } = await c.req.parseBody();
+	if (!/^[1-9]\d{0,14}$/.test(number) || typeof head !== "string")
+		return c.json({ error: "Pull request and head required" }, 400);
+	const target = `pulls/${number}`;
+	// A job may still push to the pull request, so it never merges under one.
+	if (await active(c.env.DB, repo.id, target)) throw new JobError("Stop this pull request's job before merging it");
+	await github.mergePullRequest(repo, session.user.id, Number(number), head);
+	// The merged item is finished for this maintainer until GitHub's next observation drops it.
+	if (typeof version === "string" && version.length <= 100)
+		await inbox.skip(c.env.DB, session.user.id, repo.id, target, version);
+	return c.redirect(nextURL("merge"), 303);
 });
 
 // The signed-in home: one decision at a time across the maintainer's projects.
@@ -244,7 +267,11 @@ app.get("/inbox", async (c) => {
 	const target = c.req.query("item");
 	const chosen = target ? items.find((i) => String(i.project.id) === project && i.target === target) : undefined;
 	const active = chosen ?? decisions[0] ?? null;
-	if (active?.need) await inbox.markSeen(c.env.DB, user, active);
+	// Seen once shown, before the nav and the app badge count what is new.
+	if (active?.need) {
+		await inbox.markSeen(c.env.DB, user, active);
+		active.unread = false;
+	}
 	return page(
 		c,
 		{ title: "Decisions", description: "Your decision inbox: questions, issues, pull requests, and ready quests." },
@@ -253,10 +280,12 @@ app.get("/inbox", async (c) => {
 			projects={projects}
 			active={active}
 			missing={!!target && !chosen}
+			done={c.req.query("done")}
 			decisions={decisions}
 			working={working}
 			skipped={skipped}
 			runners={runners}
+			notifications={push.keys(c.env)?.publicKey ?? null}
 		/>,
 	);
 });
@@ -357,12 +386,27 @@ app.notFound((c) =>
 	),
 );
 
+/** The inbox item a refused form was posted from, or the inbox itself. */
+function back(c: Context<{ Bindings: Env }>) {
+	try {
+		const from = new URL(c.req.header("Referer") ?? "");
+		const project = from.searchParams.get("project");
+		const item = from.searchParams.get("item");
+		const here = from.origin === new URL(c.env.AUTH_URL).origin && from.pathname === "/inbox";
+		if (here && /^\d{1,15}$/.test(project ?? "") && item)
+			return { href: inboxURL(Number(project), item), label: "Return to the item" };
+	} catch {}
+	return { href: "/inbox", label: "Return to your decisions" };
+}
+
+// Any action can be refused, not only an answer, so the page names none.
 function refused(c: Context<{ Bindings: Env }>, message: string, bootstrap: boolean, status: 403 | 409) {
+	const to = back(c);
 	return page(
 		c,
-		{ title: "Not recorded", description: "The decision was not recorded." },
+		{ title: "Couldn't do that", description: "The request was refused." },
 		<section class="wrap docs">
-			<h1>Not recorded</h1>
+			<h1>Couldn't do that</h1>
 			<p role="alert">{message}</p>
 			{bootstrap && (
 				<form method="post" action={c.req.path}>
@@ -373,7 +417,7 @@ function refused(c: Context<{ Bindings: Env }>, message: string, bootstrap: bool
 				</form>
 			)}
 			<p>
-				<a href="/inbox">Return to your decisions</a>.
+				<a href={to.href}>{to.label}</a>.
 			</p>
 		</section>,
 		status,
@@ -451,11 +495,15 @@ app.post("/sign-in", async (c) => {
 	);
 });
 app.post("/sign-out", async (c) => {
-	const response = await createAuth(c.env).api.signOut({
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	const response = await auth.api.signOut({
 		headers: c.req.raw.headers,
 		asResponse: true,
 	});
 	if (!response.ok) return response;
+	// This device stops notifying once it signs out.
+	if (session) await push.forget(c.env.DB, session.session.id);
 	return redirect(response, "/");
 });
 
@@ -463,10 +511,12 @@ app.post("/sign-out", async (c) => {
 app.get("/account", async (c) => {
 	const auth = createAuth(c.env);
 	const headers = c.req.raw.headers;
-	if (!(await auth.api.getSession({ headers }))) return c.redirect("/sign-in?next=/account", 303);
-	const [accounts, passkeys] = await Promise.all([
+	const session = await auth.api.getSession({ headers });
+	if (!session) return c.redirect("/sign-in?next=/account", 303);
+	const [accounts, passkeys, devices] = await Promise.all([
 		auth.api.listUserAccounts({ headers }),
 		auth.api.listPasskeys({ headers }),
+		push.count(c.env.DB, session.user.id),
 	]);
 	const linked = providers(c.env).filter((p) => accounts.some((account) => account.providerId === p));
 	return page(c, { title: "Account", description: "Your Quest sign-in methods and passkeys." }, (user) => (
@@ -475,6 +525,8 @@ app.get("/account", async (c) => {
 			linked={linked}
 			providers={providers(c.env)}
 			passkeys={passkeys}
+			notifications={push.keys(c.env)?.publicKey ?? null}
+			devices={devices}
 			error={c.req.query("error")}
 		/>
 	));

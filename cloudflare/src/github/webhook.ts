@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { arrived } from "../push/notify";
+import { GitHubService } from "./service";
 
 export function positiveId(value: unknown): value is number {
 	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -120,6 +122,8 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 			).bind(`repositories_${action}`, installation, delivery, digest, event),
 		);
 	}
+	// The statement that asks for a background read, if this delivery does.
+	let reads: number | null = null;
 	if (observed.has(event)) {
 		const pending = "EXISTS(SELECT 1 FROM github_deliveries WHERE id=? AND digest=? AND event=? AND processed=0)";
 		const enrolled = "EXISTS(SELECT 1 FROM github_projects WHERE id=? AND installation=?)";
@@ -129,12 +133,13 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 		const issue = payload.issue;
 		const kind = pull ? "pull" : issue && !issue.pull_request ? "issue" : null;
 		const entity = pull ?? issue;
-		if (kind && positiveId(entity.id) && positiveId(entity.number)) {
+		const named = kind && positiveId(entity.id) && positiveId(entity.number);
+		if (named) {
 			statements.push(
 				c.env.DB.prepare(
-					`INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt)
-			SELECT ?,?,?,?,?,? WHERE ${pending} AND ${enrolled}
-			ON CONFLICT(repository,kind,id) DO UPDATE SET changedAt=excluded.changedAt`,
+					`INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt,stale)
+			SELECT ?,?,?,?,?,?,1 WHERE ${pending} AND ${enrolled}
+			ON CONFLICT(repository,kind,id) DO UPDATE SET changedAt=excluded.changedAt,stale=github_project_activity.stale+1`,
 				).bind(
 					repository,
 					kind,
@@ -150,12 +155,34 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 				),
 			);
 		}
-		if (invalidates(event, payload))
+		// A comment on a PR carries the PR's number, but under its issue ID, so
+		// it marks the PR's row by number. An untracked PR waits for history.
+		const discussed = !pull && issue?.pull_request && positiveId(issue.number);
+		if (discussed)
+			statements.push(
+				c.env.DB.prepare(
+					`UPDATE github_project_activity SET changedAt=?,stale=stale+1
+			WHERE repository=? AND kind='pull' AND number=? AND ${pending} AND ${enrolled}`,
+				).bind(now, repository, issue.number, delivery, digest, event, repository, installation),
+			);
+		const invalidating = invalidates(event, payload);
+		if (invalidating)
 			statements.push(
 				c.env.DB.prepare(
 					`UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=? AND ${pending} AND ${enrolled}`,
 				).bind(repository, delivery, digest, event, repository, installation),
 			);
+		// What the inbox shows changed: ask for a background read. CI and other
+		// pushes change neither, so they cost no read.
+		if (named || discussed || invalidating) {
+			reads = statements.length;
+			statements.push(
+				c.env.DB.prepare(
+					`INSERT INTO github_project_state(repository,epoch,requested) SELECT ?,?,1 WHERE ${pending} AND ${enrolled}
+			ON CONFLICT(repository) DO UPDATE SET requested=1`,
+				).bind(repository, crypto.randomUUID(), delivery, digest, event, repository, installation),
+			);
+		}
 	}
 
 	statements.push(
@@ -177,7 +204,20 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 		if (winner?.digest !== digest || winner.event !== event) return c.json({ error: "Delivery conflict" }, 409);
 		return c.json({ status: "duplicate" });
 	}
-	// Observations never approve or launch work. Trusted consumers reconcile
+	// Observations never approve or launch work. The background read reconciles
 	// current GitHub state rather than treating delayed webhook bodies as facts.
+	// A new decision item still notifies, once, from the first delivery, after
+	// the read so a title the webhook lacks can come from GitHub.
+	const read = reads !== null && committed[reads]!.meta.changes > 0;
+	if (read || observed.has(event))
+		c.executionCtx.waitUntil(
+			(async () => {
+				try {
+					if (read) await new GitHubService(c.env).observe(repository);
+				} finally {
+					if (observed.has(event)) await arrived(c.env, repository, installation, event, payload);
+				}
+			})(),
+		);
 	return c.json({ status: "accepted" }, 202);
 });

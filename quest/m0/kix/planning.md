@@ -10,7 +10,7 @@ interview runs on one of their runners; they never see a terminal.
 ## Plan
 
 Decided 2026-10-20 (user) from the transcript audit recorded in
-[quest start](/quest/m0/helpers/start.md), where `/quest-plan` arguments
+[quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md), where `/quest-plan` arguments
 were mostly free-form ideas, pasted outside input (emails, call notes,
 findings), and "follow-ups":
 
@@ -38,8 +38,9 @@ Earlier guidance:
 - Keep the current frontier of questions, prior answers, and draft proposal
   across reconnects. Consequential choices wait for answers; time passing
   and selected defaults are not approval.
-- The bot creates/updates a draft quest PR with settled decisions and the
-  interview paper trail. Merging through GitHub makes the resulting ready
+- The bot creates/updates a draft quest PR with settled decisions; the
+  service renders the interview paper trail from the recorded answers
+  ([publication](/cloudflare/GITHUB.md#publication)). Merging through GitHub makes the resulting ready
   quests eligible; a draft planning branch cannot start implementation.
 - Reuse the same prompt flow when an implementation worker needs a decision.
   Record the settled answer in its plan where relevant without adding a

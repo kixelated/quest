@@ -389,7 +389,7 @@ export async function ask(
 			.bind(input.summary, input.session, now, job, attempt, runner.id, id),
 	]);
 	if (question!.meta.changes === 1)
-		return { question: id, cancel: !!(update!.results[0] as { cancel: number }).cancel };
+		return { question: id, cancel: !!(update!.results[0] as { cancel: number }).cancel, asked: true };
 	// An identical retry after the first request landed; anything else is refused.
 	const existing = await db
 		.prepare(
@@ -407,13 +407,14 @@ export async function ask(
 		)
 		.first<{ id: string; cancel: number }>();
 	if (!existing) throw new JobError("Attempt is no longer current");
-	return { question: existing.id, cancel: !!existing.cancel };
+	return { question: existing.id, cancel: !!existing.cancel, asked: false };
 }
 
 /**
  * Finish the current attempt. An account limit pauses the job with a
  * decision instead of moving it to another account. A requested cancel wins
- * over whatever the runner reports, keeping its partial result.
+ * over whatever the runner reports, keeping its partial result. Returns the
+ * job's new state, or null for a retry of a report that already landed.
  */
 export async function finish(
 	db: D1Database,
@@ -447,7 +448,7 @@ export async function finish(
 	statements.push(
 		db
 			.prepare(
-				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE ? END,summary=?,result=?,lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running'",
+				"UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE ? END,summary=?,result=?,lease=NULL,updatedAt=? WHERE id=? AND attempt=? AND runner=? AND state='running' RETURNING state",
 			)
 			.bind(
 				input.outcome === "limited" ? "waiting" : input.outcome,
@@ -460,7 +461,8 @@ export async function finish(
 			),
 	);
 	const results = await db.batch(statements);
-	if (results.at(-1)!.meta.changes === 1) return;
+	const finished = results.at(-1)!.results[0] as { state: JobState } | undefined;
+	if (finished) return finished.state;
 	// An identical retry after the first report landed is accepted; anything else is refused.
 	const landed = await db
 		.prepare(
@@ -469,6 +471,7 @@ export async function finish(
 		.bind(job, attempt, body, stored, attempt, runner.id)
 		.first();
 	if (!landed) throw new JobError("Attempt is no longer current");
+	return null;
 }
 
 /** How long an unrecorded branch update blocks another publication of the same job. */
@@ -534,6 +537,27 @@ export async function settle(db: D1Database, job: string, commit: string, landed
 		.run();
 }
 
+/**
+ * The answered agent questions behind the job's pull request, oldest first,
+ * for its decision record: the job's own, and those of any earlier job on its
+ * target that delivered the same pull request, which a retry continues.
+ */
+export async function decisions(db: D1Database, job: string) {
+	const { results } = await db
+		.prepare(
+			`SELECT q.prompt,q.answer FROM jobs c
+ JOIN jobs j ON j.id=c.id OR (j.repository=c.repository AND j.target=c.target AND j.pull=c.pull)
+ JOIN job_questions q ON q.job=j.id
+ WHERE c.id=? AND q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
+		)
+		.bind(job)
+		.all<{ prompt: string; answer: string }>();
+	return results.map((row) => ({
+		prompt: JSON.parse(row.prompt) as unknown,
+		answer: JSON.parse(row.answer) as unknown,
+	}));
+}
+
 /** Remember the pull request a job delivered, so later deliveries update it. */
 export async function delivered(db: D1Database, job: string, pull: number) {
 	await db.prepare("UPDATE jobs SET pull=? WHERE id=?").bind(pull, job).run();
@@ -557,12 +581,17 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const pin = [runner, runner, input.actor, trusted, account, account];
 	const id = crypto.randomUUID();
 	// The insert checks the project and pins again, since a pause or a
-	// runner's status can commit after the request read them.
+	// runner's status can commit after the request read them. An iteration
+	// continues the pull request's existing head branch. Retrying a target
+	// whose latest job failed continues that job's branch and pull request
+	// where it left them, as a reassigned attempt would.
 	const [insert, active, enabled, pinned] = await db.batch([
 		db
 			.prepare(
-				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,id,?,?,?,?,?,?,?,?,?,'queued',?,? FROM github_projects WHERE id=? AND state='enabled' AND ${pinnable}`,
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,?,?,?,?,'queued',?,? FROM github_projects p
+ LEFT JOIN jobs f ON ?<>'iterate' AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
+ WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
 			.bind(
 				id,
@@ -570,7 +599,6 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				input.target,
 				input.revision,
 				input.branch,
-				// An iteration continues the pull request's existing head branch.
 				input.workflow === "iterate" ? input.revision : null,
 				input.actor,
 				trusted,
@@ -578,6 +606,9 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				account,
 				now,
 				now,
+				input.workflow,
+				input.branch,
+				input.target,
 				input.repository,
 				...pin,
 			),
@@ -626,6 +657,25 @@ export async function listJobs(db: D1Database, repository: number) {
 		.bind(repository)
 		.all<{ id: string }>();
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+}
+
+/** The pull request of the target's latest job when that job failed: what a retry continues. */
+export async function failedPull(db: D1Database, repository: number, target: string) {
+	const latest = await db
+		.prepare("SELECT state,pull FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1")
+		.bind(repository, target)
+		.first<Pick<Job, "state" | "pull">>();
+	return latest?.state === "failed" ? latest.pull : null;
+}
+
+/** Whether a job on `target` is queued, running, or waiting, and so may still push to it. */
+export async function active(db: D1Database, repository: number, target: string) {
+	return !!(await db
+		.prepare(
+			"SELECT 1 FROM jobs WHERE repository=? AND target=? AND state IN ('queued','running','waiting') LIMIT 1",
+		)
+		.bind(repository, target)
+		.first());
 }
 
 /**

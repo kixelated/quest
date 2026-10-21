@@ -53,7 +53,8 @@ own quest, and it becomes ready once its children have merged. The top folders
 (`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
-on it, so the quests that required it can become ready. Milestones are never
+on it, so the quests that required it can become ready. A PR that leaves work
+rewrites the plan to what remains. Milestones are never
 deleted, so a PR that finishes one (its README has no `Required` left) removes
 the links to that milestone too; `quest check` flags any it misses. The
 finished plan stays in Git history, beside the code that completed it.
@@ -61,8 +62,8 @@ finished plan stays in Git history, beside the code that completed it.
 Work is taken through a live runner lock or an open change on the forge.
 kix.quest records each active job in its database and reassigns a job whose
 runner goes offline. On GitHub, a draft PR
-opened from the quest's branch, including from a fork, claims the work. These
-states stay out of the plan file.
+opened from the quest's branch, including from a fork, claims the work;
+`quest start` opens one. These states stay out of the plan file.
 
 ## Try it
 
@@ -89,17 +90,16 @@ quest tree. From this checkout:
 $ quest --root examples/export check
 The quest log is in order: 4 documents checked.
 
-$ quest --root examples/export ready
-1 quest ready
-! [S] Add a CSV export endpoint  quest/m0/export.md
+$ quest --root examples/export unblocked
+1	quest/m0/export.md
 
-$ quest --root examples/export ready quest/m0/download.md
+$ quest --root examples/export unblocked quest/m0/download.md
 ! [S] Add a download button        quest/m0/download.md
   Required:
     [S] Add a CSV export endpoint  quest/m0/export.md
 ```
 
-With no path, `ready` lists every ready quest. Given a path, it shows what
+With no path, `unblocked` ranks every ready quest. Given a path, it shows what
 blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
 `!` a blocked one, and each size label takes its colour, like loot rarity: XS
 grey, S green, M blue, L purple, and XL orange (your terminal's yellow). Set
@@ -108,19 +108,13 @@ grey, S green, M blue, L purple, and XL orange (your terminal's yellow). Set
 Scripts and agents read the piped form, which is plain text:
 
 ```console
-$ quest --root examples/export ready | cat
-quest/m0/export.md
-
-$ quest --root examples/export ready quest/m0/download.md | cat
+$ quest --root examples/export unblocked quest/m0/download.md | cat
 quest/m0/export.md
 ```
 
-Piped, `ready` prints one path per line. Given a path, it prints that quest's
-blockers, with an explanation on stderr; no blockers means no stdout.
-It exits zero for both ready and blocked quests; a nonzero exit means the
-command failed. Run `check` first to catch malformed plans. `ready` reads
-dependencies in the quest tree; it does not inspect live runner locks, open changes, or GitHub branch
-claims. Check those before you start work someone else may already be on.
+Piped, a path prints that quest's blockers, with an explanation on stderr; no
+blockers means no stdout. It exits zero for both ready and blocked quests; a
+nonzero exit means the command failed.
 
 ## Prioritize ready work
 
@@ -142,15 +136,115 @@ $ quest --root examples/export unblocked --json --limit 1
 Each plain output line contains the count, a tab, and the path. On a terminal,
 a heading explains the count. `--json` prints an ordered array, including `[]`
 when no quests are ready; `--limit <count>` requires a positive integer.
-Invalid trees fail with diagnostics and no ranking. This command uses the same
-local readiness as `ready`; verify claims and outside conditions before starting.
+Invalid trees fail with diagnostics and no ranking.
 `quest-spawn` uses the ranking unless you explicitly select work in another order.
+
+`--unclaimed` drops quests someone already holds: the quest's branch on the
+upstream repository, or an open PR from that branch in any repository, forks
+included. It lists each one it skips on stderr with its PR and how long ago
+that PR was last active, so you can decide whether a stale claim should be
+taken over. In a fork's clone, the upstream is the fork's parent, and the
+fork's own branches and PRs count too; `--remote` picks a remote other than
+`origin`. Off GitHub, only branches are checked.
+Neither form inspects kix.quest runner locks or outside conditions.
+
+## Claim a quest
+
+`quest start` claims a ready quest so every claim is visible on GitHub:
+
+```sh
+quest start quest/m0/export.md
+quest start --release quest/m0/export.md
+```
+
+It pushes an empty claim commit, built on the upstream default branch, to the
+quest's branch (its path without `.md`) without forcing, then opens a draft PR
+from it right away and prints the PR's URL. It switches your checkout to the
+claim on a new local branch, or fast-forwards that branch if it is already
+checked out. A fork pushes to itself and opens the PR on its parent. It fails
+on a tree `quest check` rejects, which can hide a blocker, and refuses a
+blocked quest and one someone else holds; a rejected push means
+another claimer got there first, and when two PRs race, the earliest open one
+keeps the claim and the later one is closed. Off GitHub, it pushes the branch
+without a PR.
+
+`--release` deletes the branch, with a lease on its tip, and closes its PR, but
+only while the tip is still an empty commit. Once work is on the branch, hand
+the draft back instead: a `## Decisions needed` section in its body marks it as
+waiting on the maintainer.
+
+`quest start` exits 0 when done, 3 when it refuses (blocked, held, or work on
+the branch), 2 for invalid arguments, and 1 for other failures. On GitHub it
+uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
+
+Draft claims are placeholders, so CI can skip them. This repository runs its
+checks only on PRs ready for review: the `pull_request` trigger lists
+`ready_for_review`, and each job has the condition
+`github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
+
+## Check a quest's PR
+
+A PR from a quest's branch must leave that quest accurate. `quest check --base
+<ref>` runs the usual check, then compares the working tree with its merge base
+with `<ref>`. When the branch is a quest's path without `.md` (an epic's is
+`quest/<path>/README`) and that quest exists at the merge base, the diff must
+delete or edit it. Any other branch passes. The branch defaults to the current one;
+`--branch <name>` names the PR's head branch instead:
+
+```sh
+git fetch origin main
+quest check --base origin/main --branch quest/m0/export
+```
+
+Fetch the base first, since a stale one can predate the quest. The
+`quest-merge` skill runs this before enabling auto-merge. A repository with
+`quest` installed in CI can also run it on pull requests, where the checkout is
+detached, so pass the head branch:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    fetch-depth: 0
+- run: quest check --base "origin/$GITHUB_BASE_REF" --branch "$GITHUB_HEAD_REF"
+```
+
+The check is a floor, not a review: any edit to the quest passes, so reviewers
+still judge whether a rewrite matches what remains.
+
+## Move and delete quests
+
+`quest mv` and `quest rm` move or delete a quest or an epic with `git mv` and
+`git rm`, then fix the links so the tree still passes `quest check`:
+
+```sh
+quest mv quest/m0/export.md quest/m1/export.md
+quest mv quest/m0/drain quest/m1/drain
+quest rm quest/m0/download.md
+quest rm -r quest/m1/drain
+```
+
+`mv` rewrites every root-absolute link to the moved path, and to everything
+under a moved epic. `rm` drops each `Required`, `Related`, or `Closes` entry
+that links to what it deleted, and the heading if that was the last entry.
+It also drops every `Required` link to a finished milestone, including one it
+just finished, but keeps the root's listing of the milestone.
+Both stage the change, print one line per file (`R from -> to`, `D path`, or
+`M path`), and report on stderr any other mention of the path, such as prose
+or files outside `quest/`, without editing it. They run `quest check` on the
+result and exit 1 if it fails, for example when a quest moved out of its epic.
+
+An epic is its directory or README; removing one that holds other quests needs
+`-r`. The root and milestones are never moved or removed. `mv` refuses a
+destination that exists, and refuses to move a quest while it has a claim
+branch or open PR on `origin`, or on the repository a GitHub fork came from,
+since the branch would no longer name it.
+Neither command touches branches or PRs.
 
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
 reply, reaction to the PR or one of its reviews, push, merge, close, removal
-from the merge queue, or disabled auto-merge:
+from the merge queue, disabled auto-merge, or required CI result:
 
 ```sh
 quest wait 101
@@ -176,10 +270,26 @@ pushes come from repository activity; pushes observed while waiting come from ne
 commit SHAs, regardless of git author dates. Force pushes come from the PR
 timeline, excluding the one that created the starting head. A merge through
 the queue prints `removed_from_merge_queue` about a second before `merged`, so a
-poll can catch the removal alone; check the PR's state before treating it as a
+poll can catch the removal alone; check `quest status` before treating it as a
 failed merge. Actors are printed without deciding
-whose review counts. Check runs and edits to existing comments or reviews are
-outside this command's scope.
+whose review counts. Edits to existing comments or reviews are outside this
+command's scope.
+
+CI results are read for the current head. The first required check to fail
+prints `checks:failed` right away. `checks:passed` prints once nothing on the
+head is still going (no pending check and no unfinished GitHub Actions run, which
+may still create jobs), every check and workflow the base branch names is
+present, and every required check passed; it names the last check to finish,
+when the head went idle. Each prints once per head, with the check's name
+(spaces as `_`) in the actor field and its details URL. Results count as
+`quest status` counts them, so neutral and skipped results pass. Each job of a
+workflow a ruleset requires is required.
+Requiredness comes from the base branch's protection and rulesets, readable
+with read access; optional checks never wake the wait, unless the base branch
+requires none, in which case every check is required. A result counts when it
+was reached at or after the starting point, so a wait started after CI finished
+still reports it; a push starts over for the new head, and the cursor records
+what was reported, so resuming never replays it.
 
 Review-thread replies and reactions never reach the PR timeline, so they are
 read separately. A reply prints as `replied`; a thread's first comment is part
@@ -195,14 +305,140 @@ visible after a newer reaction is still reported.
 
 Each poll makes one conditional timeline request and one conditional
 review-comment request every five minutes once it has read the existing pages,
-following a new page when the current one fills, plus one GraphQL query for
-reactions. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
+following a new page when the current one fills, plus one GraphQL query each
+for reactions and checks. It reads the base branch's required checks once per
+call. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
 a cursor, or the given `--since` (else the head SHA) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
+
+## Read a pull request's state
+
+`quest status` prints a GitHub PR's current state in one call, such as after
+`quest wait` wakes. It accepts the same PR argument and authentication as
+`quest wait`, and reports facts without deciding whether the PR is ready or
+whose review counts:
+
+```console
+$ quest status 128
+url https://github.com/kixelated/quest/pull/128
+state open
+draft false
+head 0ade9d977d54c6f48152410532c58e9ea78db3d0
+mergeable conflicting
+merge-state dirty
+review-decision -
+auto-merge -
+merge-queue -
+checks success passed=14 failing=0 pending=0
+review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
+review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
+thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+```
+
+Each line starts with its record type; any free text, a check name or a path,
+comes last, and a missing value prints as `-`:
+
+| Line | Fields |
+| --- | --- |
+| `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
+| `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
+| `auto-merge` | Method, who enabled it, and when. |
+| `merge-queue` | Queue state, position, and when it was enqueued. |
+| `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
+| `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
+| `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
+| `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
+| `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+
+The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
+`resolveReviewThread` take. Neutral and skipped checks pass. A required check
+is one branch protection or a ruleset requires for this PR. `--json` prints the
+same facts as one object with the fields `url`, `state`, `draft`, `head`,
+`mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
+`checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
+`threads`. Long lists are paged; reactions are the newest 100 per PR or review,
+as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
+failures exit 1.
+
+## Gate expensive commands
+
+`quest gate <command> [args...]` holds an expensive command until the host has
+room for it, across all of a user's repositories and worktrees:
+
+```sh
+quest gate bun run test
+quest gate cargo build --release
+```
+
+Admission is sized from the host, with no configuration. Every platform waits
+while the host-wide 1-minute load average exceeds the host's CPU count, or while
+available memory is below one command's budget: 4 GiB, or a quarter of RAM on
+smaller hosts, where RAM is capped by any container memory limit. On Linux,
+available memory includes reclaimable host and cgroup file cache and is bounded
+by the remaining budget of each enclosing memory cgroup. Load and memory count
+work from every session and user. The load average lags new work, so the gate
+admits at most one waiting command every 5 seconds per host rather than
+releasing every waiter at once. Windows reports no load
+average and macOS counts reclaimable cache as used memory, so those signals are
+skipped there.
+
+Admission is the gate's only job: it holds no slot or lock while the command
+runs and does not track the command's descendants. A nested invocation runs
+immediately inside the admitted command. Internal compiler or test worker
+parallelism remains the command's responsibility.
+
+This repository's `just check`, `just test`, `just worker-check`, and
+`just worker-test` run through the gate.
+
+Arguments, working directory, environment and terminal streams pass through to
+the executable, and waiting happens before it starts. There is no fairness
+guarantee or timeout: a command waits as long as the host stays busy.
+
+## Prunable local checkouts
+
+The experimental `quest worktree` commands share one disk budget across this
+user's repositories and release a checkout's disk by deleting its declared
+scratch in place. They only operate on Git worktrees they create; use the
+owning application for Codex, Claude, or other managed checkouts. Process
+supervision remains unfinished: stop agents and commands in a checkout before
+releasing it.
+
+Set a shared capacity and an explicit reservation in bytes, covering the
+checkout and its expected build output. Measure representative jobs before
+choosing the budget. Reservations serialize creators and account for concurrent
+expected growth. They do not enforce filesystem quotas against arbitrary
+writers, and Git objects stored in the shared repository are not charged.
+
+```sh
+quest worktree capacity 20000000000
+quest worktree create example --reserve 3000000000 --ref HEAD
+quest worktree status
+quest worktree release example --scratch node_modules dist
+quest worktree restore example
+```
+
+Creation prints JSON with the ID and the detached, locked checkout path under
+`.worktrees/`. Release deletes only its `--scratch` paths, and refuses one that
+Git does not ignore, that holds tracked files or another Git worktree, or that
+is reached through a symbolic link; links inside scratch are removed, never
+followed. Missing paths
+are skipped, so release can be rerun. The checkout, its Git state, and
+untracked files stay in place, and `status` charges what remains. Restore
+reserves the checkout's disk again; then reinstall or rebuild its scratch, for
+example with `just install`.
+
+Quest never removes a checkout. Once one is finished, remove it with
+`git worktree unlock` and `git worktree remove`, which refuses modified or
+untracked files but deletes ignored ones; `release` then drops its record. A
+failed creation stays charged until `release` drops it. Records live in
+`$QUEST_WORKTREE_HOME`, or `$XDG_STATE_HOME/quest/worktrees` (default
+`~/.local/state/quest/worktrees`). No live lock is stolen: after a crash,
+confirm the registry lock's owner has exited before removing it. This initial
+interface refuses unknown or changed checkout ownership.
 
 ## Work with your agents
 
@@ -228,6 +464,9 @@ the version you pin decides what your agents follow:
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
 a separate invocation, so you review every change.
+
+Before stepping away, add `afk` to `/quest-spawn` or `/quest-complete`: the
+agent acts on its own recommendations and asks only before merging or deleting.
 
 To bill spawned agents to API keys instead of your agent's account, export
 `QUEST_API_KEYS` with one or more whitespace-separated keys and run

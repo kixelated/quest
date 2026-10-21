@@ -20,7 +20,8 @@ answer planning prompts, publish a draft quest PR, merge through GitHub's
 rules, start a ready quest, follow its summaries, answer an implementation
 question from a push notification, take its runner offline so the job is
 reassigned to the other, and receive its contribution PR notification. Exercise duplicate events,
-interrupted sessions, and an exhausted account with stubbed agents before a
+interrupted sessions, and an exhausted account with stubbed agents, starting
+from the seeded local server's fake GitHub and seed (`cloudflare/dev/`), before a
 live rehearsal on the operator's runner.
 
 ## Plan
@@ -84,7 +85,7 @@ operator-paid-hosting decisions:
   quest branches and PRs, which count as claims and get the usual PR
   decision items. There is no plugin or session mirroring.
 - **One owner per quest and PR** (decided 2026-10-20 from a transcript
-  audit, see [quest start](/quest/m0/helpers/start.md)). Claims are draft
+  audit, see [quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md)). Claims are draft
   PRs. A PR is owned while it is a draft without a `## Decisions needed`
   section or carries one `quest:*` state label, shared with local sessions. There is no repository-wide merge agent and no user-facing
   parallelism limit; runner slots and account quota cap it.
@@ -94,22 +95,14 @@ operator-paid-hosting decisions:
 
 ## Required
 
-- [Local harness](/quest/m0/kix/harness.md) - the Worker served locally with seeded data and mocked GitHub for browser checks
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
 - [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
-- [Webhook reconcile](/quest/m0/kix/reconcile.md) - new issues and PRs arrive in the inbox ready to act on, without a manual refresh
-- [Inbox merge](/quest/m0/kix/merge.md) - PR items merge the reviewed head through GitHub's rules
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
-- [Co-maintainer inbox](/quest/m0/kix/members.md) - every current maintainer sees enrolled projects in their inbox
-- [Answer flow](/quest/m0/kix/answer-flow.md) - move to the next decision after an answer, with neutral refusals
-- [Retry from the branch](/quest/m0/kix/retry.md) - a retried job continues from the head its failed attempt published
-- [Decision paper trail](/quest/m0/kix/paper-trail.md) - planning PRs carry the recorded questions and answers, rendered by the service
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
-- [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions
 - [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

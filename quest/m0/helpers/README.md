@@ -24,9 +24,8 @@ commands from Sep-Oct. Session counts in each child come from that window.
   `quest status`, since that body format is a skill convention.
 - GitHub calls live in `src/cli/` beside `quest wait`, outside the
   forge-agnostic core. Pure tree edits, such as link rewriting, go in the
-  core. The first child to add a second GitHub caller extracts the client in
-  `src/cli/wait.ts` (auth, rate-limit retry, same-origin pagination) instead
-  of copying it.
+  core. GitHub commands share the client in `src/cli/github.ts` (auth,
+  rate-limit retry, same-origin pagination, GraphQL) instead of copying it.
 - Decided (user): no separate documentation page. Each child updates
   `--help`, README examples, and the skill prose it replaces; the user asked
   for those skill edits through this plan.
@@ -52,18 +51,15 @@ commands from Sep-Oct. Session counts in each child come from that window.
   `/quest-afk` and the guide rules rank first, since they save the most
   maintainer time and change only prose. The complete loop ranks right after
   the PR state commands, which also rewrite `complete`. Findings that fit an
-  existing child went into it: ready at hand-back into
-  [quest start](/quest/m0/helpers/start.md), and the merge method and the
-  merged-PR refusal into [PR state commands](/quest/m0/helpers/pr-states.md).
+  existing child went into it: the merge method and the merged-PR refusal
+  into [PR state commands](/quest/m0/helpers/pr-states.md). Ready at
+  hand-back went into [Guide rules](/quest/m0/helpers/guide-rules.md), since
+  quest start landed without it.
 
 ## Required
 
-- [Unattended work](/quest/m0/helpers/afk.md) - `/quest-afk` skips every decision and keeps starting agreed work; every skill ends with a summary
-- [Guide rules](/quest/m0/helpers/guide-rules.md) - pushing, briefs, follow-ups, whose review counts, and user-owned choices
-- [PR status](/quest/m0/helpers/status.md) - one call for head, checks, merge state, reviews by head, and unresolved threads
-- [Move and delete quests](/quest/m0/helpers/move.md) - `quest mv` and `quest rm` keep every root-absolute link valid
-- [CI checks in wait](/quest/m0/helpers/wait-checks.md) - `quest wait` wakes on required check results for the head
-- [quest start](/quest/m0/helpers/start.md) - claim a quest with a draft PR, the `## Decisions needed` hand-back, `quest unblocked --unclaimed`, and CI on ready PRs only
+- [Unattended work](/quest/m0/helpers/afk.md) - `/quest-afk` replaces the `afk` argument: it skips every decision and keeps starting agreed work; every skill ends with a summary
+- [Guide rules](/quest/m0/helpers/guide-rules.md) - pushing, briefs, ready at hand-back, follow-ups, whose review counts, and user-owned choices
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
 - [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows

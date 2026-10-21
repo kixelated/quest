@@ -98,7 +98,8 @@ Unlike a blocked quest it stays ready, so it resurfaces every time ready work is
 ## Execution
 
 Start only ready quests.
-`quest ready [<path>]` prints what blocks a quest, or every ready quest.
+`quest unblocked` ranks the ready quests, and `quest unblocked <path>` prints what blocks one.
+With `--unclaimed`, it skips quests someone holds and lists them on stderr.
 
 Work is taken when it has a live runner lock or an open change on the forge.
 kix.quest records each active job in its database and reassigns a job whose
@@ -106,27 +107,34 @@ runner goes offline. Check those locks and open changes before
 starting. These states stay out of the quest file.
 
 On GitHub, a quest is claimed by an open PR whose head branch is the quest's
-branch, from the upstream repository or a fork
-(`gh pr list --repo <upstream> --head <quest-branch>`), or by that branch
-upstream while its PR is being opened.
-Check both against the upstream repository; in a fork's clone, `origin` is
-usually the fork.
-To claim a quest, push an empty commit to its branch, upstream if you have push
-access and otherwise on your fork, then open a draft PR from it right away.
+branch, from the upstream repository or a fork, or by that branch upstream
+while its PR is being opened.
+The earliest open PR holds the claim.
+Claim a quest with `quest start <quest>`: it checks both, pushes an empty
+claim commit to the quest's branch, and opens a draft PR from it right away.
 That PR becomes the quest's PR.
-Then recheck: the earliest open PR holds the claim, and a later one closes and
-stops.
-If an upstream branch looks stale (old, with no open PR), offer the user to take
-it over.
+In a fork's clone, it pushes to the fork and opens the PR upstream.
+It exits 3 when the quest is blocked or someone else holds it; pick other work.
+`quest start --release <quest>` gives back a claim before any work is pushed.
+If a claim looks stale, such as a draft without `## Decisions needed` or a
+branch with no open PR that has been quiet a long time, offer the user to take
+it over, saying how long ago it was last active.
 
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 
-Push claims and updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
+Push updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
 
+A quest's PR leaves its quest accurate when it merges.
+The PR that finishes a quest deletes its file and every link to it.
+A PR that leaves work rewrites the quest to what remains, rather than noting it only in the PR body.
+`quest check --base <ref>` flags a quest branch whose diff does neither.
+
+Run the repository's checks locally while the PR is a draft; CI may run only on PRs ready for review.
 When a quest is complete with no open decisions, mark its PR ready for review.
-Otherwise keep it a draft and list its open decisions, or what remains unfinished, in the body.
+Otherwise keep it a draft and hand it back: add a `## Decisions needed` section to the body listing its open decisions, or what remains unfinished.
+Tools read only whether that heading is present; a draft without it still belongs to its starter.
 A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.
 Add a closing keyword for every issue under `Closes`.
@@ -147,6 +155,6 @@ Any findings that seem out-of-scope, or bugs encountered during the process, sho
 
 A quest that is no longer needed or cannot be completed is abandoned.
 Delete it and explain why in the PR.
-Grep its absolute path and remove every reference.
+Use `quest rm`, which deletes the quest and every link to it.
 
 Remove the `quest` label from issues no other quest tracks.

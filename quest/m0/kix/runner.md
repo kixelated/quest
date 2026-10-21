@@ -71,7 +71,8 @@ replacing the hosted Agent SDK runtime:
   says is no longer this runner's or whose `checkpoint` or `question`
   reply says `cancel`. Acknowledge an `assign` by sending a status that
   lists it; the hub resends it until then, so treat a repeated assignment
-  as one. Reconnect with backoff; running jobs move after two minutes
+  as one. Give the agent an assignment's `instructions`, when present,
+  alongside the workflow's skill. Reconnect with backoff; running jobs move after two minutes
   away. Each account's opaque ID must stay stable across restarts so its
   preference rank and paused sessions follow it. A CLI sign-in flow and a
   control to reorder account preference remain here.
@@ -88,4 +89,4 @@ replacing the hosted Agent SDK runtime:
 
 ## Required
 
-- [Recoverable worktrees](/quest/m0/worktree.md) - reuse checkout supervision, checkpoints, and disk admission
+- [Worktree process ownership](/quest/m0/worktree.md) - reuse checkout supervision, scratch release, and disk admission

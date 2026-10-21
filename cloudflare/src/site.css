@@ -1140,6 +1140,25 @@ a.entry-title:hover {
 		position: static;
 	}
 
+	/* A tighter nav leaves the screen to the decision. */
+	.nav {
+		gap: 0.25rem 1rem;
+		padding-block: 0.5rem;
+	}
+
+	.nav a {
+		font-size: 0.95rem;
+	}
+
+	.nav a.brand {
+		font-size: 1.25rem;
+	}
+
+	.account {
+		gap: 0.5rem;
+		font-size: 0.85rem;
+	}
+
 	.region {
 		padding: 0.75rem 0.75rem 1rem;
 	}
@@ -1342,4 +1361,36 @@ a.entry-title:hover {
 }
 .entry-title[aria-current] {
 	color: var(--ql-accent);
+}
+
+/* The nav's count of new decisions. */
+.nav .count {
+	display: inline-block;
+	min-width: 1.5em;
+	margin-left: 0.4em;
+	padding: 0 0.35em;
+	font-size: 0.85rem;
+	line-height: 1.5;
+	letter-spacing: 0;
+	text-align: center;
+	color: var(--ql-bg);
+	background: var(--ql-accent);
+	border-radius: 999px;
+}
+
+/* The notification switch for this device, revealed by /app.js. */
+.notify {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1rem;
+	align-items: center;
+	margin-block: 1rem;
+}
+.notify[hidden],
+.notify [hidden] {
+	display: none;
+}
+.notify p {
+	flex: 1 1 16rem;
+	margin: 0;
 }

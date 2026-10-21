@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
+import * as push from "../push/notify";
 import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
 import { JobError } from "./store";
+import { instructions } from "./trail";
 
 /** The authenticated runner the Worker forwards a connection for. */
 export const RUNNER_HEADER = "X-Quest-Runner";
@@ -119,7 +121,10 @@ export class RunnerHub extends DurableObject<Env> {
 			if (reported !== null) slots.set(runner, reported);
 		}
 		const { assign, cancel, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
-		for (const { runner, job } of assign) connections.get(runner)?.send(JSON.stringify({ type: "assign", job }));
+		for (const { runner, job } of assign) {
+			const message = { type: "assign", job, instructions: instructions(job.workflow) };
+			connections.get(runner)?.send(JSON.stringify(message));
+		}
 		for (const { runner, job, attempt } of cancel)
 			connections.get(runner)?.send(JSON.stringify({ type: "cancel", job, attempt }));
 		if (wake === null) await this.ctx.storage.deleteAlarm();
@@ -147,14 +152,28 @@ export class RunnerHub extends DurableObject<Env> {
 					message.session,
 					now,
 				);
-			case "question":
-				return store.ask(db, runner, message.job, message.attempt, message, now);
+			case "question": {
+				const { question, cancel, asked } = await store.ask(
+					db,
+					runner,
+					message.job,
+					message.attempt,
+					message,
+					now,
+				);
+				if (asked && !cancel) this.ctx.waitUntil(push.job(this.env, message.job, "question"));
+				return { question, cancel };
+			}
 			case "output":
 				// Past the attempt's cap the reply says `truncated`, and the job carries on.
 				return output.append(this.env, runner, message, now);
-			case "result":
-				await store.finish(db, runner, message.job, message.attempt, message, now);
+			case "result": {
+				const state = await store.finish(db, runner, message.job, message.attempt, message, now);
+				// A limit waits on an account choice; a failure waits on a retry.
+				if (state === "waiting" || state === "failed")
+					this.ctx.waitUntil(push.job(this.env, message.job, state === "waiting" ? "account" : "failed"));
 				return {};
+			}
 		}
 	}
 }
