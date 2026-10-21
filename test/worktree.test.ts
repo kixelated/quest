@@ -183,6 +183,16 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		expect(() => worktrees.release(record.id, [])).toThrow("ownership/lock changed");
 		expect(() => worktrees.restore(record.id)).toThrow("ownership/lock changed");
 	});
+	it.skipIf(process.platform === "win32")("refuses a root replaced by a link to another checkout", () => {
+		const { repo, worktrees } = fixture();
+		const replaced = worktrees.create(repo, "first", 10_000_000);
+		const other = worktrees.create(repo, "second", 10_000_000);
+		mkdirSync(join(other.path, "cache"));
+		rmSync(replaced.path, { recursive: true });
+		symlinkSync(other.path, replaced.path);
+		expect(() => worktrees.release(replaced.id, ["cache"])).toThrow("ownership/lock changed");
+		expect(existsSync(join(other.path, "cache"))).toBe(true);
+	});
 	it("wires capacity, reservation, and scratch through the command line", () => {
 		const { repo, home } = fixture();
 		vi.stubEnv("QUEST_WORKTREE_HOME", home);

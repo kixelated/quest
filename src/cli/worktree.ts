@@ -115,6 +115,20 @@ function ignored(root: string, paths: string[]): Set<string> {
 	}
 }
 
+/**
+ * Git's lock reason for the checkout actually at `path`, read through its own `.git` file and
+ * administrative directory, so a root replaced by another checkout reports that checkout's lock.
+ */
+function lockReason(path: string): string | undefined {
+	try {
+		const admin = /^gitdir: (.+)$/m.exec(readFileSync(join(path, ".git"), "utf8"))?.[1];
+		return admin && readFileSync(resolve(path, admin.trim(), "locked"), "utf8").replace(/\r?\n$/, "");
+	} catch (error) {
+		if (["ENOENT", "ENOTDIR", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return undefined;
+		throw error;
+	}
+}
+
 /** Allocated blocks, including ignored build output; symlinks are never traversed. */
 export function diskUsage(path: string): number {
 	const stat = entry(path);
@@ -250,9 +264,11 @@ export class Worktrees {
 	/** Refuses unless this record exclusively owns the checkout; false once Git and the disk both lack it. */
 	private owned(record: WorktreeRecord): boolean {
 		const path = canonical(record.path);
-		const entry = checkouts(record.repository).find((entry) => entry.path === path);
-		if (!entry && !existsSync(path)) return false;
-		if (entry?.locked !== `quest worktree ${record.id}`)
+		const registered = checkouts(record.repository).find((entry) => entry.path === path);
+		if (!registered && !existsSync(path)) return false;
+		// Canonical paths follow a replaced root to its target, so ask the checkout on disk for its lock.
+		const lock = existsSync(path) ? lockReason(record.path) : registered?.locked;
+		if (lock !== `quest worktree ${record.id}`)
 			throw new Error(
 				"checkout ownership/lock changed; use the owning tool, never adopt or remove a shared checkout",
 			);
