@@ -213,7 +213,7 @@ export async function seed(options: { fetch: Fetch; db: D1Database; world: World
 		"pause archive",
 	);
 
-	// An issue opened since the refresh: its webhook leaves a pointer with no data yet.
+	// An issue opened since the refresh: its webhook rereads the project in the background.
 	const pointer = { number: 9, title: "Sync stops after the laptop sleeps", author: "reporter" };
 	rocket.issues.push(pointer);
 	const body = JSON.stringify({
