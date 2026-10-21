@@ -347,10 +347,11 @@ never reach it, so a burst costs one or two reads rather than one each. A
 per-entity webhook count lets a read clear only the updates it saw. One
 invocation reads at most three rounds, to stay within a Worker's subrequest
 budget; a request left after them waits for the next webhook or a refresh.
+A read overtaken by another read or by a webhook's revision bump reads again.
 Paused and disconnected projects are not read. A failed or rate-limited read is
 recorded and shown next to the refresh fallback, and is not retried: only a
-request made during it, such as the webhook whose revision bump failed it, gets
-another round, and otherwise the next webhook or a refresh reads again. Checks, statuses and other pushes name no entity and
+request made during it gets another round, and otherwise the next webhook or a
+refresh reads again. Checks, statuses and other pushes name no entity and
 change no candidate, so they cost no read.
 
 The inbox also treats a PR whose row still says open as closed once a

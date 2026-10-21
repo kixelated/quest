@@ -1081,6 +1081,40 @@ describe("webhook reconciliation", () => {
 		expect((await github().service.projectState(repo, "enrollment-test"))!.failure).toBeNull();
 	});
 
+	it("reads again when a refresh that started first publishes first", async () => {
+		await enrolled();
+		const gate = () => {
+			let started!: () => void;
+			let release!: () => void;
+			const reading = new Promise<void>((resolve) => (started = resolve));
+			const held = new Promise<void>((resolve) => (release = resolve));
+			return { reading, release, hold: async () => (started(), await held) };
+		};
+		// The refresh lists stale entities before the webhook arrives.
+		const refresh = gate();
+		const refreshing = github({ onActivity: refresh.hold }).service.projectState(repo, "enrollment-test", true);
+		await refresh.reading;
+		const observer = gate();
+		let first = true;
+		const { calls } = mocked({
+			entities: { 5: issue(102, 5) },
+			onActivity: async () => {
+				if (!first) return;
+				first = false;
+				await observer.hold();
+			},
+		});
+		const pending = opened(102, 5);
+		await observer.reading;
+		refresh.release();
+		await refreshing;
+		observer.release();
+		await pending;
+		expect(reads(calls)).toHaveLength(2);
+		expect(await row("102")).toMatchObject({ stale: 0 });
+		expect((await github().service.projectState(repo, "enrollment-test"))!.failure).toBeNull();
+	});
+
 	it("rereads a PR by number after a comment on it", async () => {
 		await enrolled();
 		const { calls } = mocked({ entities: { 2: { ...pull(), comments: { totalCount: 3 } } } });

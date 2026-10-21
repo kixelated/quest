@@ -1,6 +1,6 @@
 import { parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
-import { GitHubError, type GitHubRepository } from "./service";
+import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
 
 type Cursor = string | null | false;
@@ -247,7 +247,7 @@ export async function reconcile(
 			.bind(JSON.stringify(snapshot), JSON.stringify(updated), now, repo.id, revision, epoch),
 	];
 	const result = await db.batch(statements);
-	if (result.at(-1)!.meta.changes !== 1) throw new GitHubError("Project changed during refresh; refresh again");
+	if (result.at(-1)!.meta.changes !== 1) throw new ProjectChanged();
 }
 
 /**

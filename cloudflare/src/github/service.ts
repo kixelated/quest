@@ -73,6 +73,13 @@ export class GitHubError extends Error {
 		super(message);
 	}
 }
+
+/** Another read published, or a webhook invalidated, while this one read, so it must read again. */
+export class ProjectChanged extends GitHubError {
+	constructor() {
+		super("Project changed during refresh; refresh again");
+	}
+}
 /** A publication the bot cannot make, which needs a maintainer's decision rather than a retry. */
 export class PublicationBlocked extends GitHubError {}
 
@@ -594,11 +601,11 @@ export class GitHubService {
 	 * deliveries costs one or two reads rather than one each. This publishes
 	 * observations only. It checks no maintainer, so it neither grants nor
 	 * caches authority; every page and action still rechecks whoever acts. A
-	 * failure is recorded for the inbox and not retried: only a request made
-	 * during the failed read, such as the webhook whose revision bump failed
-	 * it, gets another round. Each invocation reads at most three rounds to
-	 * stay within one Worker invocation's subrequest budget; a request left
-	 * after them waits for the next webhook or a refresh.
+	 * read that another read or a webhook overtook reads again. A failure is
+	 * recorded for the inbox and not retried: only a request made during the
+	 * failed read gets another round. Each invocation reads at most three
+	 * rounds to stay within one Worker invocation's subrequest budget; a
+	 * request left after them waits for the next webhook or a refresh.
 	 */
 	async observe(id: number) {
 		const db = this.#env.DB;
@@ -614,6 +621,7 @@ export class GitHubService {
 				.run();
 			if (claimed.meta.changes !== 1) return;
 			let failure: string | null = null;
+			let overtaken = false;
 			try {
 				const repo = await db
 					.prepare("SELECT id,owner,name FROM github_projects WHERE id=?")
@@ -627,13 +635,18 @@ export class GitHubService {
 						await this.#read(token, repo, current, installation, async () => {});
 					});
 			} catch (error) {
-				// Provider errors carry no response bodies or secrets; anything else is a bug.
-				failure = error instanceof GitHubError ? error.message : "Unexpected error";
-				if (!(error instanceof GitHubError))
-					console.error({ event: "github_observe_failed", name: (error as Error)?.name });
+				// A manual refresh that started before the webhook, or a webhook's
+				// revision bump, can publish first and leave this read's entities stale.
+				if (error instanceof ProjectChanged) overtaken = true;
+				else {
+					// Provider errors carry no response bodies or secrets; anything else is a bug.
+					failure = error instanceof GitHubError ? error.message : "Unexpected error";
+					if (!(error instanceof GitHubError))
+						console.error({ event: "github_observe_failed", name: (error as Error)?.name });
+				}
 			}
-			// More named entities than one read covers ask for another round.
-			const more = !failure && (await staleEntities(db, id)).length > 0;
+			// An overtaken read, or more named entities than one read covers, asks for another round.
+			const more = overtaken || (!failure && (await staleEntities(db, id)).length > 0);
 			await db
 				.prepare(
 					"UPDATE github_project_state SET lease=NULL,failure=COALESCE(?,failure),requested=MAX(requested,?) WHERE repository=? AND lease=?",
