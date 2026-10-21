@@ -37,7 +37,11 @@ export type ActivityPage = {
 	pullRequests?: Connection<Pull>;
 	open?: Connection<Pull>;
 	refs?: Connection<{ name: string; prefix: string }>;
+	/** Stale entities read by number, in the order requested; null when GitHub no longer has one. */
+	[stale: `s${number}`]: Entity | Pull | null | undefined;
 };
+/** An entity a webhook named since it was last read, and how many times. */
+export type Stale = { kind: "issue" | "pull"; id: string; number: number; stale: number };
 export type Activity = {
 	kind: "issue" | "pull";
 	id: string;
@@ -54,13 +58,17 @@ export type ProjectState = {
 	complete: boolean;
 	observedAt: number;
 	revision: number;
+	/** PRs the latest occupancy pass found open, or null until it completes after the last invalidating webhook. */
+	open: string[] | null;
+	/** Why the last background read failed, until a read or refresh succeeds. */
+	failure: string | null;
 };
 
 const entityFields = "databaseId:fullDatabaseId number title state updatedAt author { login } comments { totalCount }";
 const pullFields = `${entityFields} headRefName headRefOid isDraft reviewDecision reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
-export function activityQuery({ history, occupancy }: Scan) {
+export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {
 	const fields: string[] = [];
 	const variables = ["$owner: String!", "$name: String!"];
 	if (history.issues !== false) {
@@ -87,6 +95,15 @@ export function activityQuery({ history, occupancy }: Scan) {
 			'refs(refPrefix:"refs/heads/quest/",first:100,after:$refs) { nodes { name prefix } pageInfo { hasNextPage endCursor } }',
 		);
 	}
+	// Numbers come from validated webhook pointers and are interpolated as integers.
+	stale.forEach((entity, i) => {
+		if (!positiveId(entity.number)) throw new GitHubError("Invalid entity observation");
+		fields.push(
+			entity.kind === "pull"
+				? `s${i}:pullRequest(number:${entity.number}) { ${pullFields} }`
+				: `s${i}:issue(number:${entity.number}) { ${entityFields} }`,
+		);
+	});
 	return `query(${variables.join(",")}) { repository(owner:$owner,name:$name) { ${fields.join("\n")} } }`;
 }
 
@@ -107,12 +124,41 @@ export function associatedQuest(branch: string, paths: Set<string>) {
 	return paths.has(exact) ? exact : paths.has(epic) ? epic : null;
 }
 
+function validate(kind: "issue" | "pull", item: Entity) {
+	if (
+		typeof item.databaseId !== "string" ||
+		!/^[1-9]\d*$/.test(item.databaseId) ||
+		!positiveId(item.number) ||
+		typeof item.title !== "string" ||
+		!Number.isFinite(Date.parse(item.updatedAt))
+	)
+		throw new GitHubError("Invalid entity observation");
+	if (kind === "pull") {
+		const pull = item as Pull;
+		if (!/^[a-f0-9]{40}$/.test(pull.headRefOid) || pull.commits.nodes.at(-1)?.commit.oid !== pull.headRefOid)
+			throw new GitHubError("Pull request head changed; refresh again");
+	}
+}
+
+/** Entities that webhooks named since they were last read by number, oldest first. */
+export async function staleEntities(db: D1Database, repository: number) {
+	return (
+		await db
+			.prepare(
+				"SELECT kind,id,number,stale FROM github_project_activity WHERE repository=? AND stale>0 ORDER BY changedAt,id LIMIT 50",
+			)
+			.bind(repository)
+			.all<Stale>()
+	).results;
+}
+
 export async function reconcile(
 	db: D1Database,
 	repo: GitHubRepository,
 	snapshot: Snapshot,
 	scan: Scan,
 	page: ActivityPage,
+	stale: Stale[],
 	revision: number,
 	epoch: string,
 ) {
@@ -143,7 +189,8 @@ export async function reconcile(
 	updated.history.complete = updated.history.issues === false && updated.history.pulls === false;
 	updated.occupancy.complete = updated.occupancy.open === false && updated.occupancy.refs === false;
 	// Keyed by identity: an open PR can arrive from both PR connections at once.
-	const entities = new Map<string, { kind: string; item: Entity }>();
+	// `stale` is the webhook count a read by number saw, so only it is cleared.
+	const entities = new Map<string, { kind: string; item: Entity; stale: number }>();
 	for (const [kind, connection, cursor, open] of [
 		["issue", page.issues, history.issues, false],
 		["pull", page.pullRequests, history.pulls, false],
@@ -151,49 +198,51 @@ export async function reconcile(
 	] as const) {
 		if (cursor === false) continue;
 		for (const item of connection!.nodes) {
-			if (
-				typeof item.databaseId !== "string" ||
-				!/^[1-9]\d*$/.test(item.databaseId) ||
-				!positiveId(item.number) ||
-				typeof item.title !== "string" ||
-				!Number.isFinite(Date.parse(item.updatedAt))
-			)
-				throw new GitHubError("Invalid entity observation");
-			if (kind === "pull") {
-				const pull = item as Pull;
-				if (
-					!/^[a-f0-9]{40}$/.test(pull.headRefOid) ||
-					pull.commits.nodes.at(-1)?.commit.oid !== pull.headRefOid
-				)
-					throw new GitHubError("Pull request head changed; refresh again");
-			}
-			entities.set(`${kind}/${item.databaseId}`, { kind, item });
+			validate(kind, item);
+			entities.set(`${kind}/${item.databaseId}`, { kind, item, stale: 0 });
 			if (open) updated.occupancy.pulls.push(item.databaseId);
 		}
 	}
+	// A read by number is the latest, so it replaces a page's copy.
+	const gone: Stale[] = [];
+	stale.forEach((entity, i) => {
+		const item = page[`s${i}`];
+		if (item === undefined) throw new GitHubError("Incomplete project activity");
+		if (item) validate(entity.kind, item);
+		// A number GitHub no longer resolves to this entity, such as a deleted issue.
+		if (!item || item.databaseId !== entity.id) gone.push(entity);
+		else entities.set(`${entity.kind}/${entity.id}`, { kind: entity.kind, item, stale: entity.stale });
+	});
 	updated.occupancy.claims = [...new Set(updated.occupancy.claims)];
 	updated.occupancy.pulls = [...new Set(updated.occupancy.pulls)];
-	// json_each keeps the transaction to three statements and a few bindings,
+	const current = "EXISTS(SELECT 1 FROM github_project_state WHERE repository=? AND revision=? AND epoch=?)";
+	// json_each keeps the transaction to four statements and a few bindings,
 	// within D1's free query budget and SQLite's bound-parameter limit.
 	const statements = [
 		db
 			.prepare(
-				`INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt,data,seenIn)
- SELECT ?,json_extract(value,'$.kind'),json_extract(value,'$.item.databaseId'),json_extract(value,'$.item.number'),?,?,json_extract(value,'$.item'),?
- FROM json_each(?) WHERE EXISTS(SELECT 1 FROM github_project_state WHERE repository=? AND revision=? AND epoch=?)
- ON CONFLICT(repository,kind,id) DO UPDATE SET number=excluded.number,changedAt=CASE WHEN github_project_activity.data IS NOT excluded.data THEN excluded.changedAt ELSE github_project_activity.changedAt END,data=excluded.data,seenIn=excluded.seenIn,missing=0`,
+				`INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt,data,seenIn,stale)
+ SELECT ?,json_extract(value,'$.kind'),json_extract(value,'$.item.databaseId'),json_extract(value,'$.item.number'),?,?,json_extract(value,'$.item'),?,json_extract(value,'$.stale')
+ FROM json_each(?) WHERE ${current}
+ ON CONFLICT(repository,kind,id) DO UPDATE SET number=excluded.number,changedAt=CASE WHEN github_project_activity.data IS NOT excluded.data THEN excluded.changedAt ELSE github_project_activity.changedAt END,data=excluded.data,seenIn=excluded.seenIn,missing=0,stale=CASE WHEN excluded.stale>0 AND github_project_activity.stale=excluded.stale THEN 0 ELSE github_project_activity.stale END`,
 			)
 			.bind(repo.id, now, now, history.id, JSON.stringify([...entities.values()]), repo.id, revision, epoch),
 		db
 			.prepare(
-				"UPDATE github_project_activity SET missing=1 WHERE repository=? AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND EXISTS(SELECT 1 FROM github_project_state WHERE repository=? AND revision=? AND epoch=?)",
+				`UPDATE github_project_activity SET missing=1,stale=CASE WHEN stale=json_extract(value,'$.stale') THEN 0 ELSE stale END
+ FROM json_each(?) WHERE repository=? AND kind=json_extract(value,'$.kind') AND github_project_activity.id=json_extract(value,'$.id') AND ${current}`,
+			)
+			.bind(JSON.stringify(gone), repo.id, repo.id, revision, epoch),
+		db
+			.prepare(
+				`UPDATE github_project_activity SET missing=1 WHERE repository=? AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND ${current}`,
 			)
 			.bind(repo.id, history.id, updated.history.complete ? 1 : 0, repo.id, revision, epoch),
 		db
 			.prepare(
-				"UPDATE github_project_state SET snapshot=?,scan=?,observedAt=?,invalidated=?,revision=revision+1 WHERE repository=? AND revision=? AND epoch=?",
+				"UPDATE github_project_state SET snapshot=?,scan=?,observedAt=?,invalidated=0,failure=NULL,revision=revision+1 WHERE repository=? AND revision=? AND epoch=?",
 			)
-			.bind(JSON.stringify(snapshot), JSON.stringify(updated), now, 0, repo.id, revision, epoch),
+			.bind(JSON.stringify(snapshot), JSON.stringify(updated), now, repo.id, revision, epoch),
 	];
 	const result = await db.batch(statements);
 	if (result.at(-1)!.meta.changes !== 1) throw new GitHubError("Project changed during refresh; refresh again");
@@ -203,7 +252,7 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 	const records = await db.batch([
 		db
 			.prepare(
-				"SELECT snapshot,scan,observedAt,revision,invalidated FROM github_project_state WHERE repository=?",
+				"SELECT snapshot,scan,observedAt,revision,invalidated,failure FROM github_project_state WHERE repository=?",
 			)
 			.bind(repo.id),
 		db
@@ -213,7 +262,14 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 			.bind(repo.id),
 	]);
 	const row = records[0]!.results[0] as
-		| { snapshot: string | null; scan: string | null; observedAt: number; revision: number; invalidated: number }
+		| {
+				snapshot: string | null;
+				scan: string | null;
+				observedAt: number;
+				revision: number;
+				invalidated: number;
+				failure: string | null;
+		  }
 		| undefined;
 	if (!row?.snapshot || !row.scan) return null;
 	const snapshot: Snapshot = JSON.parse(row.snapshot);
@@ -245,10 +301,10 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 	const occupied = new Set([...claims, ...changes.map((c) => c.quest)]);
 	// Unknown until every open PR and quest branch is read since the last
 	// webhook that could have opened, closed, or claimed a quest.
-	const available =
-		scan.occupancy.complete && row.invalidated === 0
-			? ready(snapshot.documents.map((d) => parse(d.path, d.content))).filter((path) => !occupied.has(path))
-			: null;
+	const settled = scan.occupancy.complete && row.invalidated === 0;
+	const available = settled
+		? ready(snapshot.documents.map((d) => parse(d.path, d.content))).filter((path) => !occupied.has(path))
+		: null;
 	const project: Project = {
 		...snapshot,
 		name: `github/${repo.owner}/${repo.name}`,
@@ -269,5 +325,7 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 		complete: scan.history.complete,
 		observedAt: row.observedAt,
 		revision: row.revision,
+		open: settled ? scan.occupancy.pulls : null,
+		failure: row.failure,
 	};
 }

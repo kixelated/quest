@@ -80,6 +80,9 @@ export function entities(project: Enrollment, state: ProjectState | null) {
 		// A webhook's pointer has no data until a refresh reads it, but it is already news.
 		if (activity.missing || (activity.data && activity.data.state !== "OPEN")) continue;
 		const pull = activity.kind === "pull";
+		// A PR the latest occupancy pass did not find open has closed since its
+		// row was read, even if no webhook said so.
+		if (pull && activity.data && state.open && !state.open.includes(activity.id)) continue;
 		found.set(`${pull ? "pulls" : "issues"}/${activity.number}`, {
 			kind: activity.kind,
 			title: activity.data?.title ?? `${pull ? "Pull request" : "Issue"} #${activity.number}`,

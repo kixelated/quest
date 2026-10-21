@@ -1,5 +1,6 @@
 // A signed-in maintainer of an enrolled project with complete observations,
 // and a mocked GitHub that answers the requests authority checks make.
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { vi } from "vitest";
 import { app } from "../src/index";
@@ -130,12 +131,13 @@ export async function maintainerOf() {
 	return { user, cookie, github, mock };
 }
 
-/** Deliver a signed GitHub webhook. */
+/** Deliver a signed GitHub webhook, and finish the background read it asks for. */
 export async function delivery(
 	event: string,
 	payload: unknown,
 	id = crypto.randomUUID(),
 	changes: Record<string, string> = {},
+	bindings: Env = env,
 ) {
 	const body = typeof payload === "string" ? payload : JSON.stringify(payload);
 	const key = await crypto.subtle.importKey(
@@ -147,13 +149,17 @@ export async function delivery(
 	);
 	const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
 	const signature = "sha256=" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-	return app.request(
+	const ctx = createExecutionContext();
+	const response = await app.request(
 		"http://localhost:8787/webhooks/github",
 		{
 			method: "POST",
 			headers: { "X-GitHub-Event": event, "X-GitHub-Delivery": id, "X-Hub-Signature-256": signature, ...changes },
 			body,
 		},
-		env,
+		bindings,
+		ctx,
 	);
+	await waitOnExecutionContext(ctx);
+	return response;
 }
