@@ -9,6 +9,7 @@ Parse the arguments to determine the PR number. Any other text is the user's fee
 If you cannot push to the PR's branch, stop and report.
 
 Read the PR, its linked issues and quest, the reviews and comments posted on it, and the surrounding code.
+`quest status <pr>` reports its checks, reviews by head, and unresolved threads in one call.
 Judge the approach before touching anything: would you take a different one?
 
 Scope the changes this PR needs with the plan skill's interview, starting from the user's feedback, your judgment of the approach, and any review findings that need a decision.
