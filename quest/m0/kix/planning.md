@@ -9,6 +9,22 @@ interview runs on one of their runners; they never see a terminal.
 
 ## Plan
 
+Decided 2026-10-20 (user) from the transcript audit recorded in
+[quest start](/quest/m0/helpers/start.md), where `/quest-plan` arguments
+were mostly free-form ideas, pasted outside input (emails, call notes,
+findings), and "follow-ups":
+
+- Decided (user): a "new plan" box takes an idea plus an optional pasted
+  block, treated as untrusted context like issue text. A job's suggested
+  follow-ups become a "plan these?" decision. Issue notifications stay an
+  entry point.
+- Interviews are long (a median of 7 rounds and 17 questions), so the inbox
+  keeps each round's context and lets rounds wait while the maintainer is
+  away. Show the recommended option first and always allow a free-text
+  answer, which the prompt contract already supports.
+
+Earlier guidance:
+
 - Promoted from later work on 2026-10-13. The web quest-plan experience is
   central to the first release, not an add-on after a runner dashboard.
 - Use the shared quest-plan workflow through the runner's adapters. The
@@ -32,5 +48,3 @@ interview runs on one of their runners; they never see a terminal.
 ## Required
 
 - [Runner](/quest/m0/kix/runner.md) - planning sessions, questions, and resumption
-- [Decision inbox](/quest/m0/kix/prompts.md) - the interactive rounds and notifications
-- [Bot publication](/quest/m0/kix/publication.md) - draft planning PRs and recorded decisions

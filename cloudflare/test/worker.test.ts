@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as projects from "../src/board/project";
-import app from "../src/index";
+import { app } from "../src/index";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -118,7 +118,7 @@ describe("Worker", () => {
 			"/\n/x",
 			"/%2F/evil.example",
 			"/%5cevil.example",
-		].map((next) => [next, "/"]),
+		].map((next) => [next, "/inbox"]),
 	])("returns to a local page after signing in: %j -> %j", async (next, expected) => {
 		// Better Auth stores each sign-in's callback with its OAuth state.
 		await env.DB.prepare("DELETE FROM verification").run();
@@ -203,7 +203,7 @@ describe("Worker", () => {
 			redirect: "manual",
 		});
 		expect(callback.status).toBe(302);
-		expect(callback.headers.get("location")).toBe("/");
+		expect(callback.headers.get("location")).toBe("/inbox");
 		expect(outbound).toHaveBeenCalled();
 		const sessionCookie = callback.headers
 			.getSetCookie()

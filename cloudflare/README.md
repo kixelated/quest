@@ -65,8 +65,124 @@ The passkey relying party is the hostname of `AUTH_URL`, and its exact origin
 is the only one accepted. Changing the hostname orphans existing passkeys;
 people enroll new ones after signing in with a provider.
 
-GitHub is authoritative for enrolled project state. The Worker
-has no Durable Objects; D1 holds accounts, sessions, and GitHub App state.
+GitHub is authoritative for enrolled project state. D1 holds accounts,
+sessions, GitHub App state, and jobs. The R2 bucket bound as `OUTPUT` holds raw
+agent output. The one Durable Object, `RunnerHub`, holds runners' live
+connections and keeps no records of its own.
+
+### Jobs
+
+A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
+`bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
+create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
+every request rechecks current GitHub authority. `start` takes only quests that
+observations show ready and unclaimed. `iterate` jobs are untrusted and route
+only to Linux runners that declare VM builds. Without a `flake.nix`, the route
+offers a `bootstrap` job instead. A paused project gets no new jobs and none are
+claimed; resuming it dispatches the jobs that waited. Disconnecting a project
+deletes its jobs and their output and tells their runners to stop. Duplicate
+requests return the active job for the same target.
+
+Runners are a user's own machines. Each one registers at `POST /api/runners`
+and gets a bearer token, which kix stores only as a hash. With that token a
+runner opens a WebSocket at `/api/runner/connect`. The connection goes to its
+owner's `RunnerHub` (`src/jobs/hub.ts`), the one place that owner's jobs are
+routed, and the open connection is the runner's presence.
+
+Over the socket the runner sends `status` messages: its opaque accounts, the
+attempts it is running, and its free job slots. It also sends `checkpoint`,
+`question`, `output`, and `result` messages. Each gets a `reply` with the same
+`id` (`src/jobs/protocol.ts`). The hub pushes `assign` and `cancel` messages
+whenever jobs or connections change. A status that lists an assigned attempt
+acknowledges it; until then the assignment holds one of the runner's slots and
+the hub resends it, and cancelling a
+job whose assignment was never acknowledged stops it at once.
+
+Routing gives a job to the connected runner with a free slot and the owner's
+most preferred usable account. A pin, the job's trust, or a paused session's
+home runner can override that. Each assignment increments the job's attempt.
+Runner messages name their attempt and land only while it is current.
+
+When a runner disconnects, its running jobs get a two-minute grace deadline.
+The hub's alarm moves them once it passes, so a returning runner is fenced out.
+A status that omits an acknowledged job gives it up at once.
+
+An account limit pauses the job with an account decision; kix never switches
+accounts on its own. An answer requeues the job and resumes its session on the
+runner that holds it.
+
+A `question` carries one round of independent questions
+(`src/jobs/prompt.ts`): `{ kind, questions: [{ header?, question, options:
+[{ label, description?, recommended? }], multiple? }] }`, where `kind` is
+`decision` (the default) or `permission` for a tool permission request. The
+service refuses a prompt it cannot render. An agent question's answer is
+`{ answers: [{ choices, text? }] }`, one per question, naming offered labels,
+the maintainer's own words, or both; an account question's answer is
+`{ runner, account }`. A job request may name the `revision` the maintainer
+saw, and is refused once observations moved past it.
+
+The current attempt publishes its work over HTTPS at `POST /api/runner/publish`,
+not over its connection, so slow GitHub writes never hold up the hub. It sends
+file changes as data; the Worker commits them as the GitHub App to the job's
+one branch, which a reassigned attempt continues from, and opens or updates
+the job's pull request. Each job records its branch's `head` and its `pull`.
+Changes a workflow may not publish pause the job with a `publication`
+decision. [GITHUB.md](GITHUB.md#publication) describes the request, its
+validation, and how interrupted publications are reconciled.
+
+### Raw output
+
+Runners upload raw agent output as `output` messages of at most 1 MiB of UTF-8
+(`src/jobs/output.ts`). Each attempt numbers its chunks with a contiguous `seq`
+from 0 and sends them in order: kix accepts only the attempt's next `seq`,
+once the chunk before it is stored, or an identical retry of a chunk it still
+holds, which succeeds without writing again. A different chunk with a used `seq` is refused, and so is a retry of an
+expired one. Each chunk is one R2 object at `output/<job>/<attempt>/<seq>`,
+readable as soon as it lands, and D1 keeps a small index row per chunk plus each
+attempt's totals.
+
+An attempt keeps at most 64 MiB and 4096 chunks. The chunk that would pass
+either cap, and every later one, gets a reply with `truncated: true` instead of
+an error; the job keeps running and its summaries are unaffected. Expiring
+chunks never give that capacity back.
+
+Maintainers read output at `GET /projects/github/<owner>/<repo>/jobs/<job>/output`,
+in pages of four chunks ordered by `(attempt, seq)`; `?after=<attempt>.<seq>`
+continues from a page's `next`, and `truncated` lists the attempts that reached
+the cap. Every request rechecks current maintainer authority.
+
+Output is kept for 30 days from each chunk's upload. A bucket lifecycle rule
+deletes `output/` objects, and a daily cron (`triggers.crons` in
+`wrangler.jsonc`) deletes their index rows; reads skip a row whose object is
+already gone. Disconnecting a project queues its jobs' output for deletion in
+the same D1 batch that deletes the jobs, then deletes each `output/<job>/`
+prefix at once. The cron retries any deletion that failed. An upload racing the
+disconnect finds its index row gone, queues its job's prefix for the cron again,
+and deletes its own object.
+
+### Decision inbox
+
+After signing in, a maintainer lands on `/inbox` (`src/inbox/`): one active
+decision thread across the projects they enrolled, then what is up next, what
+is in progress, and their projects. Each item is one job target (`issues/1`,
+`pulls/2`, a quest path), so an issue, its planning job, and that job's
+questions stay one item, and webhook updates and reconnects never add another
+prompt. Agents waiting on an answer come first, then failed jobs, new pull
+requests, new issues, and ready quests. An item offers only actions that
+would work: none on a paused project, and only a refresh while observations
+are incomplete. Every action is a plain form post to the job routes, which
+recheck authority and return to the inbox; prompts render as escaped text and
+never preselect the recommendation. A `publication` decision lists the refused
+paths or why the branch is blocked, and takes the maintainer's reply as text.
+The inbox reads each target's latest job however old it is: every one that
+awaits a decision, and any other whose issue, pull request, or quest is still
+observed, so finished work stays set aside. Retrying a failed planning
+interview keeps its `plans/<id>` target.
+
+Each maintainer's read state lives in `inbox_items`, keyed by a version of what
+the item showed (a question, a GitHub change, a quest's text). A newer version
+is unread again, and skipping an item lasts until it changes. A finished or
+stopped job sets its item aside the same way.
 
 `cloudflare/` is a Bun workspace of the repository root, so the Worker
 imports the CLI's core as `quest/core` (`../src/core`), the same parser, checks,
@@ -122,8 +238,18 @@ finished quests from history, the mocked GitHub OAuth callback, persisted
 sessions, sign-out, and rejected origins/invalid state. Login tests mock GitHub
 and Google OAuth and run real P-256 WebAuthn registration and assertions: the
 linking rules, collisions, passkey user verification, origin, signature,
-replay, and ownership. No OAuth credentials or
-Cloudflare account are required for checks.
+replay, and ownership. Job tests race dispatch passes, reassign a disconnected
+runner's job and fence its late writes, and cover routing, questions, account
+limits, and cancellation. They drive real WebSocket connections through the hub,
+including a replaced connection and the alarm that reassigns work, and check the
+maintainer-only routes. Publication tests run against a stateful fake of
+GitHub's Git and pull request APIs: fenced and stale writes, workflow path
+limits and their decisions, lost branch updates and deliveries, iterated heads,
+and token scopes. Output tests use local R2 for chunk ordering, retries, the
+caps, expiry, and cleanup after a disconnect. Inbox tests answer prompts
+through the forms, reject stale revisions and repeated answers, coalesce
+duplicate webhooks, and hide a project whose maintainer lost authority. No
+OAuth credentials or Cloudflare account are required for checks.
 
 After changing bindings, regenerate types:
 
@@ -145,7 +271,14 @@ from CI. In the Nix shell, enter `cloudflare/` and authenticate:
 cd cloudflare
 bun run wrangler login
 bun run wrangler d1 create quest-auth
+bun run wrangler r2 bucket create quest-output
+bun run wrangler r2 bucket lifecycle add quest-output output-expiry output/ --expire-days 30
 ```
+
+The lifecycle rule is bucket configuration, not part of `wrangler.jsonc`, so
+check it on an existing bucket with
+`bun run wrangler r2 bucket lifecycle list quest-output`. Keep it at the
+30 days the Worker's cron uses (`RETENTION` in `src/jobs/output.ts`).
 
 The checked-in config deploys to `https://kix.quest` as a Workers custom
 domain, which requires the `kix.quest` zone in the same Cloudflare account;
@@ -153,9 +286,10 @@ domain, which requires the `kix.quest` zone in the same Cloudflare account;
 authentication origin and supplies generated absolute links.
 
 For an existing deployment, retain the Worker name, D1 database ID, and
-`AUTH_SECRET` so account data is preserved. The `d1 create` command above is
+`AUTH_SECRET` so account data is preserved. The `create` commands above are
 for a fresh deployment only. For another environment, change `routes`,
-`AUTH_URL`, Worker name, account, database, and OAuth credentials together.
+`AUTH_URL`, Worker name, account, database, bucket, and OAuth credentials
+together.
 
 Register the production GitHub OAuth app with callback
 `https://kix.quest/api/auth/callback/github`. For Google sign-in, also register
@@ -184,7 +318,8 @@ tombstone in `wrangler.jsonc` deletes the legacy `RepositoryCoordinator`
 Durable Object namespace, and any storage it held, from Workers deployed before
 it was removed; Wrangler reports a stale tombstone where none exists. Remove the
 tombstone after the next production deploy. This does not affect the D1 auth
-database.
+database. The same `exports` block creates the SQLite-backed `RunnerHub` class
+bound as `RUNNERS`; it stores only its owner's ID, so it needs no data migration.
 
 After deploying, verify `/health`, `/setup`, and a theme asset, then complete
 sign-in/sign-out in the browser.
