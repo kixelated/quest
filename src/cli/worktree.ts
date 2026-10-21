@@ -140,13 +140,18 @@ function lockReason(path: string): string | undefined {
 	}
 }
 
-/** Allocated blocks, including ignored build output; symlinks are never traversed. */
-export function diskUsage(path: string): number {
+/** Allocated blocks, including ignored build output; symlinks are never traversed and hard links count once. */
+export function diskUsage(path: string, seen = new Set<string>()): number {
 	const stat = entry(path);
 	if (!stat) return 0;
+	if (stat.nlink > 1 && !stat.isDirectory()) {
+		const inode = `${stat.dev}:${stat.ino}`;
+		if (seen.has(inode)) return 0;
+		seen.add(inode);
+	}
 	// Allocated blocks, not logical length, so sparse files are not overcharged. Windows reports no blocks.
 	let bytes = process.platform === "win32" ? stat.size : stat.blocks * 512;
-	if (stat.isDirectory()) for (const child of readdirSync(path)) bytes += diskUsage(join(path, child));
+	if (stat.isDirectory()) for (const child of readdirSync(path)) bytes += diskUsage(join(path, child), seen);
 	return bytes;
 }
 
@@ -312,7 +317,9 @@ export class Worktrees {
 					throw new Error(`scratch path is the checkout's .git entry: ${path}`);
 			}
 			if (paths.length) {
-				const tracked = git(root, "--literal-pathspecs", "ls-files", "-z", "--", ...paths)
+				// icase, because a case-insensitive filesystem resolves `CACHE` to a tracked `cache`.
+				const pathspecs = paths.map((path) => `:(literal,icase)${path}`);
+				const tracked = git(root, "ls-files", "-z", "--", ...pathspecs)
 					.split("\0")
 					.filter(Boolean);
 				if (tracked.length)

@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
+	appendFileSync,
 	existsSync,
 	linkSync,
 	lstatSync,
@@ -82,6 +83,10 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		git(record.path, "add", "-f", "cache/forced");
 		expect(() => worktrees.release(record.id, ["file"])).toThrow("tracked files: file");
 		expect(() => worktrees.release(record.id, ["cache"])).toThrow("tracked files: cache/forced");
+		// Another spelling, which a case-insensitive filesystem resolves to the tracked directory.
+		mkdirSync(join(record.path, "CACHE"), { recursive: true });
+		appendFileSync(join(repo, ".git", "info", "exclude"), "/CACHE/\n");
+		expect(() => worktrees.release(record.id, ["CACHE"])).toThrow("tracked files: cache/forced");
 		expect(() => worktrees.release(record.id, ["new"])).toThrow("ignored by Git: new");
 		expect(() => worktrees.release(record.id, ["../outside"])).toThrow("relative path");
 		expect(() => worktrees.release(record.id, [".git"])).toThrow("relative path");
@@ -118,6 +123,11 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		writeFileSync(sparse, "");
 		truncateSync(sparse, 1 << 30);
 		expect(diskUsage(sparse)).toBeLessThan(1 << 20);
+		const linked = join(root, "linked");
+		mkdirSync(linked);
+		writeFileSync(join(linked, "a"), Buffer.alloc(1 << 16, 1));
+		linkSync(join(linked, "a"), join(linked, "b"));
+		expect(diskUsage(linked)).toBe((lstatSync(linked).blocks + lstatSync(join(linked, "a")).blocks) * 512);
 	});
 	it("charges active reservations and the footprint released checkouts keep", () => {
 		const { repo, worktrees } = fixture();
