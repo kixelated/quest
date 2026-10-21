@@ -142,8 +142,9 @@ Invalid trees fail with diagnostics and no ranking.
 upstream repository, or an open PR from that branch in any repository, forks
 included. It lists each one it skips on stderr with its PR and how long ago
 that PR was last active, so you can decide whether a stale claim should be
-taken over. In a fork's clone, the upstream is the fork's parent; `--remote`
-picks a remote other than `origin`. Off GitHub, only branches are checked.
+taken over. In a fork's clone, the upstream is the fork's parent, and the
+fork's own branches and PRs count too; `--remote` picks a remote other than
+`origin`. Off GitHub, only branches are checked.
 Neither form inspects kix.quest runner locks or outside conditions.
 
 ## Claim a quest
@@ -180,6 +181,35 @@ checks only on PRs ready for review: the `pull_request` trigger lists
 `ready_for_review`, and each job has the condition
 `github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
 
+## Move and delete quests
+
+`quest mv` and `quest rm` move or delete a quest or an epic with `git mv` and
+`git rm`, then fix the links so the tree still passes `quest check`:
+
+```sh
+quest mv quest/m0/export.md quest/m1/export.md
+quest mv quest/m0/drain quest/m1/drain
+quest rm quest/m0/download.md
+quest rm -r quest/m1/drain
+```
+
+`mv` rewrites every root-absolute link to the moved path, and to everything
+under a moved epic. `rm` drops each `Required`, `Related`, or `Closes` entry
+that links to what it deleted, and the heading if that was the last entry.
+It also drops every `Required` link to a finished milestone, including one it
+just finished, but keeps the root's listing of the milestone.
+Both stage the change, print one line per file (`R from -> to`, `D path`, or
+`M path`), and report on stderr any other mention of the path, such as prose
+or files outside `quest/`, without editing it. They run `quest check` on the
+result and exit 1 if it fails, for example when a quest moved out of its epic.
+
+An epic is its directory or README; removing one that holds other quests needs
+`-r`. The root and milestones are never moved or removed. `mv` refuses a
+destination that exists, and refuses to move a quest while it has a claim
+branch or open PR on `origin`, or on the repository a GitHub fork came from,
+since the branch would no longer name it.
+Neither command touches branches or PRs.
+
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
@@ -210,7 +240,7 @@ pushes come from repository activity; pushes observed while waiting come from ne
 commit SHAs, regardless of git author dates. Force pushes come from the PR
 timeline, excluding the one that created the starting head. A merge through
 the queue prints `removed_from_merge_queue` about a second before `merged`, so a
-poll can catch the removal alone; check the PR's state before treating it as a
+poll can catch the removal alone; check `quest status` before treating it as a
 failed merge. Actors are printed without deciding
 whose review counts. Check runs and edits to existing comments or reviews are
 outside this command's scope.
@@ -237,6 +267,55 @@ with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
 a cursor, or the given `--since` (else the head SHA) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
+
+## Read a pull request's state
+
+`quest status` prints a GitHub PR's current state in one call, such as after
+`quest wait` wakes. It accepts the same PR argument and authentication as
+`quest wait`, and reports facts without deciding whether the PR is ready or
+whose review counts:
+
+```console
+$ quest status 128
+url https://github.com/kixelated/quest/pull/128
+state open
+draft false
+head 0ade9d977d54c6f48152410532c58e9ea78db3d0
+mergeable conflicting
+merge-state dirty
+review-decision -
+auto-merge -
+merge-queue -
+checks success passed=14 failing=0 pending=0
+review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
+review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
+thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+```
+
+Each line starts with its record type; any free text, a check name or a path,
+comes last, and a missing value prints as `-`:
+
+| Line | Fields |
+| --- | --- |
+| `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
+| `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
+| `auto-merge` | Method, who enabled it, and when. |
+| `merge-queue` | Queue state, position, and when it was enqueued. |
+| `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
+| `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
+| `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
+| `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
+| `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+
+The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
+`resolveReviewThread` take. Neutral and skipped checks pass. A required check
+is one branch protection or a ruleset requires for this PR. `--json` prints the
+same facts as one object with the fields `url`, `state`, `draft`, `head`,
+`mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
+`checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
+`threads`. Long lists are paged; reactions are the newest 100 per PR or review,
+as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
+failures exit 1.
 
 ## Work with your agents
 

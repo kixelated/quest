@@ -19,10 +19,14 @@ describe("current SPDX OSI approval", () => {
 		expect(await osiApproved("MIT", request)).toBe(false);
 		expect(request).toHaveBeenCalledTimes(2);
 		expect(request).toHaveBeenLastCalledWith("https://spdx.org/licenses/MIT.json", {
-			redirect: "error",
+			redirect: "manual",
 			cache: "no-store",
 			headers: { Accept: "application/json" },
 		});
+	});
+	it("fails closed on a redirect", async () => {
+		const request = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { Location: "/" } }));
+		await expect(osiApproved("MIT", request)).rejects.toThrow();
 	});
 	it("fails closed on malformed JSON", async () => {
 		const request = vi.fn().mockResolvedValue(new Response("not json"));

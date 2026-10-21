@@ -12,6 +12,7 @@ import {
 	held,
 	openPullRequests,
 	pullsFrom,
+	remoteBranches,
 	questBranch,
 	repositoryPath,
 	upstream,
@@ -169,14 +170,17 @@ export async function releaseQuest(
 ): Promise<Released> {
 	const branch = questBranch(path);
 	const up = await upstream(root, remote, deps);
-	const tip = gitOutput(root, ["ls-remote", remote, `refs/heads/${branch}`]).split("\t")[0];
+	const tip = remoteBranches(root, up.push).get(branch);
 	if (!tip) throw new Error(`${remote} has no branch ${branch} to release`);
-	ensure(root, remote, tip);
+	ensure(root, up.push, tip);
+	const base = remoteHead(root, up.git);
 	const parents = gitOutput(root, ["rev-list", "--parents", "-n", "1", tip]).split(" ").slice(1);
-	const empty =
+	// Only the claim itself: one empty commit straight on the default branch, not one following pushed work.
+	const claim =
 		parents.length === 1 &&
-		gitOutput(root, ["rev-parse", `${tip}^{tree}`]) === gitOutput(root, ["rev-parse", `${parents[0]}^{tree}`]);
-	if (!empty) {
+		gitOutput(root, ["rev-parse", `${tip}^{tree}`]) === gitOutput(root, ["rev-parse", `${parents[0]}^{tree}`]) &&
+		succeeds(root, ["merge-base", "--is-ancestor", parents[0], base]);
+	if (!claim) {
 		throw new Refusal(
 			`${branch} on ${remote} has work beyond its empty claim commit; close its PR yourself to abandon that work`,
 		);

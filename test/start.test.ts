@@ -135,7 +135,7 @@ class FakeGitHub {
 
 	deps(): GitHubDependencies {
 		return {
-			fetch: async (url, init) => this.handle(url, init),
+			fetch: async (input, init) => this.handle(new URL(String(input)), init ?? {}),
 			now: () => this.clock,
 			sleep: async () => undefined,
 			token: "token",
@@ -400,6 +400,12 @@ describe("start on GitHub", () => {
 		);
 		expect(tip(bare)).toBe(git(work, "rev-parse", "HEAD"));
 		expect(github.pulls[0].state).toBe("open");
+
+		// An empty commit after the work, such as a CI retrigger, is not a claim either.
+		git(work, "commit", "-q", "--allow-empty", "-m", "retrigger");
+		git(work, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
+		await expect(releaseQuest(work, ONE, "origin", deps(github))).rejects.toThrow(Refusal);
+		expect(tip(bare)).toBe(git(work, "rev-parse", "HEAD"));
 	});
 });
 
@@ -501,8 +507,42 @@ test("claims reports the earliest open PR on each branch", async () => {
 	github.open("example/project", BRANCH, "b/project");
 	github.open("example/project", "feature", "example/project");
 	const held = await claims(work, "origin", [BRANCH, "quest/m0/epic/two"], deps(github));
-	expect(held).toEqual([
-		{ branch: BRANCH, url: first.html_url, pull: expect.objectContaining({ number: 1 }), sha: null },
+	expect(held).toEqual([{ branch: BRANCH, url: first.html_url, pull: expect.objectContaining({ number: 1 }) }]);
+});
+
+test("claims from a fork count the parent's branches and PRs, and the fork's own", async () => {
+	const bare = upstream();
+	const forkBare = tempDir();
+	git(forkBare, "init", "-q", "--bare", "-b", "main");
+	const github = new FakeGitHub();
+	github.repo("me/project", {
+		fork: true,
+		default_branch: "main",
+		parent: {
+			owner: { login: "example" },
+			name: "project",
+			clone_url: UPSTREAM,
+			ssh_url: "git@github.com:example/project.git",
+			default_branch: "main",
+		},
+	});
+	const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: bare });
+	git(bare, "branch", "quest/m0/a", "main");
+	git(work, "push", "-q", "origin", "HEAD:refs/heads/quest/m0/b");
+	const pull = github.open("example/project", "quest/m0/c", "someone/project");
+	const own = github.open("me/project", "quest/m0/d", "me/project");
+
+	const held = await claims(
+		work,
+		"origin",
+		["quest/m0/a", "quest/m0/b", "quest/m0/c", "quest/m0/d", "quest/m0/e"],
+		deps(github),
+	);
+	expect(held.map((claim) => [claim.branch, claim.url])).toEqual([
+		["quest/m0/a", null],
+		["quest/m0/b", null],
+		["quest/m0/c", pull.html_url],
+		["quest/m0/d", own.html_url],
 	]);
 });
 

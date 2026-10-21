@@ -43,8 +43,6 @@ export interface Claim {
 	/** The PR holding the claim: the earliest open one. */
 	url: string | null;
 	pull: OpenPull | null;
-	/** The branch tip upstream; `null` when only a PR, such as one from a fork, holds it. */
-	sha: string | null;
 }
 
 export interface ClaimDependencies {
@@ -57,6 +55,8 @@ export interface ClaimDependencies {
 export interface Upstream {
 	/** The remote's name, or the parent's URL for a fork; git reads upstream branches from it. */
 	git: string;
+	/** The URL the remote pushes to, where a claim branch is pushed. */
+	push: string;
 	github: {
 		client: GitHub;
 		/** Where PRs open and claims are checked. */
@@ -75,19 +75,20 @@ export interface Upstream {
 export async function upstream(root: string, remote: string, deps: ClaimDependencies): Promise<Upstream> {
 	// The configured URL first, so a URL rewrite (`insteadOf`) still names the GitHub repository.
 	const configured = gitOutput(root, ["config", "--get", `remote.${remote}.url`]);
-	const url = remoteUrl(root, remote);
-	const source = githubRepository(configured) ? configured : url;
+	const source = githubRepository(configured) ? configured : remoteUrl(root, remote);
 	const named = githubRepository(source);
-	if (named === null) return { git: remote, github: null };
+	const push = gitOutput(root, ["remote", "get-url", "--push", remote]);
+	if (named === null) return { git: remote, push, github: null };
 
 	const client = new GitHub(deps.github());
 	const info = object(await (await client.request(repositoryPath(named))).json());
 	const self = { owner: string(object(info.owner).login), repo: string(info.name) };
-	if (info.fork === true && info.parent !== undefined) {
+	if (info.fork === true && info.parent !== undefined && info.parent !== null) {
 		const parent = object(info.parent);
 		return {
 			// Reach the parent the way the remote is reached, so the same credentials work.
 			git: string(/^https:/.test(source) ? parent.clone_url : parent.ssh_url),
+			push,
 			github: {
 				client,
 				repository: { owner: string(object(parent.owner).login), repo: string(parent.name) },
@@ -98,6 +99,7 @@ export async function upstream(root: string, remote: string, deps: ClaimDependen
 	}
 	return {
 		git: remote,
+		push,
 		github: { client, repository: self, head: self, defaultBranch: string(info.default_branch) },
 	};
 }
@@ -123,7 +125,7 @@ export async function openPullRequests(github: GitHub, repository: Repository): 
 	const rows = await github.all(`${repositoryPath(repository)}/pulls?state=open&per_page=100`);
 	return rows.map((row) => {
 		const head = object(row.head);
-		const repo = head.repo === null ? null : object(head.repo);
+		const repo = head.repo === null || head.repo === undefined ? null : object(head.repo);
 		return {
 			number: Number(row.number),
 			url: string(row.html_url),
@@ -143,9 +145,9 @@ export function pullsFrom(pulls: OpenPull[], branch: string): OpenPull[] {
 }
 
 /**
- * Which of `branches` someone holds: pushed upstream, or the head of an open
- * PR there. Without the remote it warns and checks nothing; off GitHub it
- * checks branches only.
+ * Which of `branches` someone holds: pushed to `remote` or its upstream, or the
+ * head of an open PR in either. A GitHub fork's upstream is its parent. Without
+ * the remote it warns and checks nothing; off GitHub it checks branches only.
  */
 export async function claims(
 	root: string,
@@ -164,16 +166,25 @@ export async function claims(
 	return held(root, up, branches);
 }
 
-/** Which of `branches` someone holds upstream, sorted by branch. */
+/**
+ * Which of `branches` someone holds, sorted by branch. A fork's own branches
+ * and PRs count too, so a claim pushed there is seen before its PR opens.
+ */
 export async function held(root: string, up: Upstream, branches: string[]): Promise<Claim[]> {
-	const wanted = new Set(branches);
-	const tips = remoteBranches(root, up.git);
-	const pulls = up.github ? await openPullRequests(up.github.client, up.github.repository) : [];
+	const pushed = new Set(remoteBranches(root, up.git).keys());
+	const pulls: OpenPull[] = [];
+	if (up.github) {
+		pulls.push(...(await openPullRequests(up.github.client, up.github.repository)));
+		const { head, repository } = up.github;
+		if (head.owner !== repository.owner || head.repo !== repository.repo) {
+			for (const branch of remoteBranches(root, up.push).keys()) pushed.add(branch);
+			pulls.push(...(await openPullRequests(up.github.client, head)));
+		}
+	}
 	const result: Claim[] = [];
-	for (const branch of [...wanted].sort()) {
+	for (const branch of [...new Set(branches)].sort()) {
 		const pull = pullsFrom(pulls, branch)[0] ?? null;
-		const sha = tips.get(branch) ?? null;
-		if (pull !== null || sha !== null) result.push({ branch, url: pull?.url ?? null, pull, sha });
+		if (pull !== null || pushed.has(branch)) result.push({ branch, url: pull?.url ?? null, pull });
 	}
 	return result;
 }
