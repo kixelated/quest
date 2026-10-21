@@ -48,5 +48,4 @@ work, stealing a live lock, or deleting scratch a running process still uses.
 
 ## Related
 
-- [Gate contention measurements](/quest/m0/local-gate.md) - independent CPU and memory admission
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - native agents and workflow adoption
