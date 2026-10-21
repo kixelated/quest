@@ -37,12 +37,13 @@ burst of 8 took 104 s gated versus 19 s ungated.
   window, and each admission deletes the older ones. Headroom needs several
   admissions per window, records kept for a minute, and a count-then-claim
   step that is atomic across processes, or a burst that all reads "0 recent"
-  is admitted together. This replaces `Host.claim(window)`. Record first, then
-  count, as today's claim does: each caller creates its own record, counts
-  every unexpired record including its own, and withdraws its record when the
-  count leaves no room. The last admitted caller then sees every admitted
-  record, so a burst cannot over-admit, and no lock can go stale. Derive the
-  count from the unexpired records, not from a slot number, since expired
+  is admitted together. It must also elect a winner: if every caller in an
+  over-capacity burst records, sees no room, and withdraws, waiters that wake
+  together can repeat that forever. This replaces `Host.claim(window)`. For
+  example, prune, count, and record under a short host-wide lock that a caller
+  reclaims once its owner process has exited, like the worktree registry lock
+  in [kixelated/quest#178](https://github.com/kixelated/quest/pull/178). Count
+  the unexpired records rather than reading a slot number, since expired
   slots leave holes.
 - **`SETTLE_MS` apart, not two windows.** Today a claim is refused while the
   previous window's claim exists, and every waiter wakes at the next boundary,
