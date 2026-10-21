@@ -47,12 +47,16 @@ Recommended shape, open for review:
   alternative is to rely on the command's legibility alone. Replay the
   2026-10-20 commands against each option before choosing.
 - The spawn skill's launcher prose shrinks to calling the command.
+- The command does no load or CPU admission. The skill keeps holding launches
+  as it does for sub-agents, until agent lifecycle integration removes those
+  rules; the gate admits expensive phases inside each agent, not agent
+  lifetimes.
 - Validate with a multi-agent `api` spawn in a repository with no `autoMode`
   settings: no classifier blocks, and exhausted keys hand off without the
   coordinator writing a script.
 
 ## Related
 
-- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the load-average rules this command would otherwise carry
-- [Expensive command gate](/quest/m0/local-gate.md) - admission the command should use instead of polling load
+- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the skill's load-average launch rules, so neither the skill nor the command polls load
+- [Expensive command gate](/quest/m0/local-gate.md) - admits expensive phases inside each agent, so the command needs no load polling
 - [Runner](/quest/m0/kix/runner.md) - the kix runner's headless Claude Code path; share the adapter
