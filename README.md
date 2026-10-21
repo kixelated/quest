@@ -215,14 +215,14 @@ quest gate cargo build --release
 ```
 
 Admission is sized from the host, with no configuration. Every platform waits
-while the 1-minute load average exceeds the usable core count (honoring CPU
-affinity), or while available memory is below one command's budget: 4 GiB, or a
-quarter of RAM on smaller hosts, where RAM is capped by any container memory
-limit. On Linux, available memory includes reclaimable host cache and is bounded
+while the host-wide 1-minute load average exceeds the host's CPU count, or while
+available memory is below one command's budget: 4 GiB, or a quarter of RAM on
+smaller hosts, where RAM is capped by any container memory limit. On Linux,
+available memory includes reclaimable host and cgroup file cache and is bounded
 by the remaining budget of each enclosing memory cgroup. Load and memory count
-work from every session and user. The load
-average lags new work, so the gate admits at most one waiting command every 5
-seconds rather than releasing every waiter at once. Windows reports no load
+work from every session and user. The load average lags new work, so the gate
+admits at most one waiting command every 5 seconds per host rather than
+releasing every waiter at once. Windows reports no load
 average and macOS counts reclaimable cache as used memory, so those signals are
 skipped there.
 

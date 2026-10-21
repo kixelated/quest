@@ -57,7 +57,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("gate")
 		.summary("Run an expensive command once the host has room for it")
 		.description(
-			"Wait while the 1-minute load average exceeds the core count or available memory is below " +
+			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
 				"min(4 GiB, RAM/4), admitting one waiting command every 5 seconds. On Linux with a systemd " +
 				"user manager, the command also takes one of min(cores, RAM/4 GiB) slots in a user scope until " +
 				"its last descendant exits. Nested calls run immediately. Limits come from the host; there is " +

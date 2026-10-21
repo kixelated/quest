@@ -13,6 +13,7 @@ import { expect, test } from "vitest";
 import {
 	admit,
 	COMMAND_MEMORY,
+	claimDirectory,
 	DirectGate,
 	fileHost,
 	type GateBackend,
@@ -30,12 +31,15 @@ const GiB = 2 ** 30;
 
 test("limits derive from the host's cores and memory", () => {
 	// A slot per command's memory, capped at the cores; load at one per core.
-	expect(hostLimits(24, 64 * GiB)).toEqual({ jobs: 16, load: 24, memory: COMMAND_MEMORY });
-	expect(hostLimits(8, 16 * GiB)).toEqual({ jobs: 4, load: 8, memory: COMMAND_MEMORY });
-	expect(hostLimits(2, 64 * GiB)).toMatchObject({ jobs: 2, load: 2 });
+	expect(hostLimits(24, 64 * GiB, 24)).toEqual({ jobs: 16, load: 24, memory: COMMAND_MEMORY });
+	expect(hostLimits(8, 16 * GiB, 8)).toEqual({ jobs: 4, load: 8, memory: COMMAND_MEMORY });
+	// The host-wide load average is compared with every host CPU, not the
+	// process's affinity subset, so an idle assigned CPU is not held back.
+	expect(hostLimits(2, 64 * GiB, 32)).toMatchObject({ jobs: 2, load: 32 });
 	// A small host still runs one command, and reserves a quarter of its RAM.
-	expect(hostLimits(4, 2 * GiB)).toEqual({ jobs: 1, load: 4, memory: GiB / 2 });
+	expect(hostLimits(4, 2 * GiB, 4)).toEqual({ jobs: 1, load: 4, memory: GiB / 2 });
 	expect(hostLimits().jobs).toBeGreaterThanOrEqual(1);
+	expect(hostLimits().load).toBeGreaterThanOrEqual(hostLimits().jobs);
 });
 
 test("admission checks slots before waiting and preserves exact exit codes", async () => {
@@ -149,6 +153,7 @@ test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s con
 	mkdirSync(child, { recursive: true });
 	const limit = unified ? "memory.max" : "memory.limit_in_bytes";
 	const usage = unified ? "memory.current" : "memory.usage_in_bytes";
+	const cache = unified ? "inactive_file" : "total_inactive_file";
 	writeFileSync(join(child, limit), unified ? "max" : String(128 * GiB));
 	writeFileSync(join(child, usage), String(GiB));
 	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
@@ -156,8 +161,21 @@ test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s con
 	writeFileSync(join(container, limit), String(8 * GiB));
 	writeFileSync(join(container, usage), String(8 * GiB - GiB / 4));
 	expect(linuxMemory(proc, cgroups)).toEqual({ total: 8 * GiB, available: GiB / 4 });
+	// Inactive file cache inside the budget is reclaimable, so it counts as available.
+	writeFileSync(join(container, "memory.stat"), `active_file 1\n${cache} ${6 * GiB}\nanon 2\n`);
+	expect(linuxMemory(proc, cgroups)).toEqual({ total: 8 * GiB, available: 6 * GiB + GiB / 4 });
+	writeFileSync(join(container, "memory.stat"), `${cache} 0\n`);
 	writeFileSync(join(container, usage), String(9 * GiB));
 	expect(linuxMemory(proc, cgroups).available).toBe(0);
+});
+
+test("admission claims stay on this host", () => {
+	expect(claimDirectory({ XDG_RUNTIME_DIR: "/run/user/1000" }, "/home/u", "a")).toBe(
+		join("/run/user/1000", "quest", "gate"),
+	);
+	// A home directory shared between machines keeps each host's claims apart.
+	expect(claimDirectory({}, "/home/u", "a")).toBe(join("/home/u", ".cache", "quest", "gate", "a"));
+	expect(claimDirectory({}, "/home/u", "b")).not.toBe(claimDirectory({}, "/home/u", "a"));
 });
 
 test("a scope path reused before handshake acknowledgment cannot acquire cancellation ownership", () => {

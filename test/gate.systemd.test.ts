@@ -226,6 +226,24 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 		}
 	});
 
+	test("waiting on a live occupant resolves once its scope is removed", async () => {
+		const release = join(tempDir(), "release");
+		const first = child(runner, [JSON.stringify(["bun", "-e", hold(release)])]);
+		try {
+			await line(first.process, "ready");
+			// A live transient scope reports its own fragment; that is not a blocking unit file.
+			let resolved = false;
+			const waiting = new SystemdGate().wait(0, signal()).then(() => (resolved = true));
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			expect(resolved).toBe(false);
+			writeFileSync(release, "");
+			await waiting;
+		} finally {
+			writeFileSync(release, "");
+			await first.closed;
+		}
+	});
+
 	test("waiting on a slot that was already collected returns to admission", async () => {
 		// The occupying scope can exit between a lost claim and the wait.
 		await expect(new SystemdGate().wait(999, signal())).resolves.toBeUndefined();
@@ -241,23 +259,39 @@ describe.skipIf(!enabled)("real systemd scope ownership", () => {
 	});
 
 	test("a dead handshake cannot acquire ownership of a successor in its reused slot", async () => {
-		const original = spawn(
-			"systemd-run",
-			[
-				"--user",
-				"--scope",
-				"--quiet",
-				"--collect",
-				"--expand-environment=no",
-				"--unit=quest-gate-0.scope",
-				"/bin/sh",
-				"-c",
-				scopeHandshake + "exit 0",
-			],
-			{ stdio: ["ignore", "ignore", "pipe", "ignore", "pipe", "pipe"] },
-		);
-		const closed = once(original, "close");
-		const [record] = await once(original.stdio[4]!, "data");
+		// Claim slot 0 like admission does: an earlier test's emptied scope may
+		// still await collection, so a lost claim waits on the slot and retries.
+		const handshake = () => {
+			const original = spawn(
+				"systemd-run",
+				[
+					"--user",
+					"--scope",
+					"--quiet",
+					"--collect",
+					"--expand-environment=no",
+					"--unit=quest-gate-0.scope",
+					"/bin/sh",
+					"-c",
+					scopeHandshake + "exit 0",
+				],
+				{ stdio: ["ignore", "ignore", "pipe", "ignore", "pipe", "pipe"] },
+			);
+			const closed = once(original, "close");
+			const record = Promise.race([
+				once(original.stdio[4]!, "data").then(([data]) => String(data)),
+				closed.then(() => null),
+			]);
+			return { closed, record };
+		};
+		let claim = handshake();
+		let record = await claim.record;
+		while (record === null) {
+			await new SystemdGate().wait(0, signal());
+			claim = handshake();
+			record = await claim.record;
+		}
+		const { closed } = claim;
 		const [path, inode] = String(record).trim().split("\t");
 		// Hold the buffered record without acknowledging it. Kill and collect
 		// the original scope, exactly the pre-admission interleaving in review.

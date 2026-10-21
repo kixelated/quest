@@ -16,7 +16,7 @@ import {
 	watch,
 	writeSync,
 } from "node:fs";
-import { availableParallelism, constants, homedir, loadavg, totalmem } from "node:os";
+import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -70,16 +70,33 @@ function usableMemory(): number {
 }
 
 /**
- * Derive the limits from the host: no configuration. The load limit is one
- * runnable thread per usable core; each slot and each admission reserves one
- * command's memory, though never more than a quarter of a small host's RAM.
+ * Derive the limits from the host: no configuration. Slots never exceed the
+ * cores this process may use. The load average counts runnable threads on every
+ * CPU, including ones outside this process's affinity, so its limit is one per
+ * host CPU. Each slot and each admission reserves one command's memory, though
+ * never more than a quarter of a small host's RAM.
  */
-export function hostLimits(cores = availableParallelism(), memory = usableMemory()): Limits {
+export function hostLimits(
+	cores = availableParallelism(),
+	memory = usableMemory(),
+	processors = Math.max(cores, cpus().length),
+): Limits {
 	return {
 		jobs: Math.max(1, Math.min(cores, Math.floor(memory / COMMAND_MEMORY))),
-		load: cores,
+		load: processors,
 		memory: Math.min(COMMAND_MEMORY, memory / 4),
 	};
+}
+
+/** A memory.stat counter, or 0 where the file or key is absent. */
+function cgroupStat(group: string, key: string): number {
+	try {
+		const stat = readFileSync(join(group, "memory.stat"), "utf8");
+		return Number(stat.match(new RegExp(`^${key} (\\d+)$`, "m"))?.[1] ?? 0);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+		throw error;
+	}
 }
 
 /** Count reclaimable host cache and the headroom of every enclosing memory cgroup. */
@@ -99,6 +116,9 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 		if (!unified && !controllers?.split(",").includes("memory")) continue;
 		const root = unified ? cgroups : join(cgroups, "memory");
 		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
+		// Usage includes inactive file cache, which the kernel reclaims without
+		// swapping; subtract it, as container runtimes do for their working set.
+		const cache = unified ? "inactive_file" : "total_inactive_file";
 		const limits = unified
 			? ["memory.max", "memory.high"]
 			: ["memory.limit_in_bytes", "memory.soft_limit_in_bytes"];
@@ -111,8 +131,9 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 					const current = Number(readFileSync(join(group, usage), "utf8").trim());
 					if (!Number.isFinite(current) || current < 0)
 						throw new Error("gate cannot read Linux cgroup memory usage");
+					const used = Math.max(0, current - cgroupStat(group, cache));
 					total = Math.min(total, limit);
-					available = Math.min(available, Math.max(0, limit - current));
+					available = Math.min(available, Math.max(0, limit - used));
 				} catch (error) {
 					// The memory controller may not be enabled in every ancestor.
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -124,7 +145,18 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 	return { total, available };
 }
 
-/** Claims are empty files, named by window, in one per-user directory. */
+/**
+ * Claims belong to this host, since a home directory may be shared between
+ * machines: the user's runtime directory where one exists, otherwise a
+ * per-host cache directory.
+ */
+export function claimDirectory(env = process.env, home = homedir(), host = hostname()): string {
+	return env.XDG_RUNTIME_DIR
+		? join(env.XDG_RUNTIME_DIR, "quest", "gate")
+		: join(home, ".cache", "quest", "gate", host);
+}
+
+/** Claims are empty files, named by window, in one per-user, per-host directory. */
 export function fileHost(directory: string, now = Date.now): Host {
 	return {
 		load: () => loadavg()[0],
@@ -401,7 +433,14 @@ export class SystemdGate implements GateBackend {
 	async wait(slot: number, signal: AbortSignal): Promise<void> {
 		const result = await execute(
 			"systemctl",
-			["--user", "show", "--property=FragmentPath", "--property=ControlGroup", unit(slot)],
+			[
+				"--user",
+				"show",
+				"--property=FragmentPath",
+				"--property=Transient",
+				"--property=ControlGroup",
+				unit(slot),
+			],
 			signal,
 		);
 		signal.throwIfAborted();
@@ -412,8 +451,9 @@ export class SystemdGate implements GateBackend {
 				.split("\n")
 				.map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
 		);
-		// A unit file would make every transient claim on this slot fail.
-		if (properties.get("FragmentPath"))
+		// A persistent unit file would make every transient claim on this slot
+		// fail. A live occupant's own transient unit also reports a fragment.
+		if (properties.get("FragmentPath") && properties.get("Transient") !== "yes")
 			throw new Error(`gate slot is blocked by ${properties.get("FragmentPath")}; remove that unit file`);
 		// The occupant already exited (or awaits collection): retry admission.
 		const cgroup = properties.get("ControlGroup");
@@ -427,22 +467,30 @@ export class SystemdGate implements GateBackend {
 				else resolve();
 			};
 			const aborted = () => finish(signal.reason);
+			const path = join("/sys/fs/cgroup", cgroup, "cgroup.events");
+			// The kernel notifies when the last process leaves, but not when the
+			// cgroup is removed. An empty scope still awaiting systemd collection
+			// makes the next claim lose, so admission waits here again.
+			const vacated = () => {
+				try {
+					if (/^populated 0$/m.test(readFileSync(path, "utf8"))) finish();
+				} catch (error) {
+					// ENODEV: the cgroup was removed between open and read.
+					const code = (error as NodeJS.ErrnoException).code;
+					if (code === "ENOENT" || code === "ENODEV") finish();
+					else finish(error);
+				}
+			};
 			try {
-				const path = join("/sys/fs/cgroup", cgroup, "cgroup.events");
-				watcher = watch(path, (event) => {
-					// Wait for the kernel cgroup to be removed, not merely empty:
-					// an empty scope may still be awaiting systemd collection.
-					if (event === "rename") finish();
-				});
+				watcher = watch(path, vacated);
 				watcher.on("error", finish);
 				signal.addEventListener("abort", aborted, { once: true });
 				if (signal.aborted) aborted();
-				// Registration precedes the read, covering deletion during setup.
-				readFileSync(path);
 			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code === "ENOENT") finish();
-				else finish(error);
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") return finish(error);
 			}
+			// Registration precedes the read, covering an exit during setup.
+			vacated();
 		});
 	}
 }
@@ -514,7 +562,7 @@ export async function gate(command: string[]): Promise<number> {
 			command,
 			hostLimits(),
 			backend,
-			fileHost(join(homedir(), ".cache", "quest", "gate")),
+			fileHost(claimDirectory()),
 			controller.signal,
 			(reason) => {
 				if (shown.has(reason)) return;

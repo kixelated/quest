@@ -33,14 +33,17 @@ before claiming a responsiveness improvement.
   callers, claimed by exclusively creating a per-window file. The load average
   lags new work and is sampled every 5 seconds, so waiters that all see it fall
   must not start together. Nothing is held across the command, so a crash
-  leaves no stale lock.
+  leaves no stale lock. Claims live in `$XDG_RUNTIME_DIR`, or a per-hostname
+  cache directory, because a home directory may be shared between hosts.
 - Decided 2026-10-15 (user): limits come from host specs, with no configuration
-  file. The load limit is the usable core count (`availableParallelism`, which
-  honors CPU affinity): one runnable thread per core. Each
+  file. The load limit is the host's CPU count, because the load average counts
+  every CPU, including ones outside this process's affinity (revised
+  2026-10-21 from the usable core count). Each
   command is budgeted 4 GiB, a typical build or test stack, so Linux gets
-  `min(cores, RAM / 4 GiB)` slots (at least one), with RAM capped by a cgroup
+  `min(usable cores, RAM / 4 GiB)` slots (at least one), with RAM capped by a cgroup
   memory limit. Admission also waits while available memory is below
-  `min(4 GiB, RAM / 4)`, so a small host still runs one command. macOS counts
+  `min(4 GiB, RAM / 4)`, so a small host still runs one command. Cgroup
+  headroom subtracts inactive file cache from usage, since it is reclaimable. macOS counts
   reclaimable cache as used memory, so only its load is gated; Windows reports
   no load average, so only its memory is.
 - Nested gated calls run immediately: the kernel scope identifies them on Linux,
