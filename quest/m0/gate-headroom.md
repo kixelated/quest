@@ -70,11 +70,13 @@ burst of 8 took 104 s gated versus 19 s ungated.
   - `performance.now()` differing per process, and `CLOCK_MONOTONIC`
     restarting at boot while the fallback claim directory persists.
 - **Stable claim directory.** Callers with and without `XDG_RUNTIME_DIR` use
-  different claim directories today. Use `/run/user/<uid>/quest/gate` when
-  `/run/user/<uid>` exists, otherwise `~/.cache/quest/gate/<hostname>` for
-  shared home directories, so the choice depends only on the host, never on
-  the caller's environment.
-  `gate-bench.sh overhead` needs another way to get a fresh directory.
+  different claim directories today. Every caller of one user on one host
+  must use the same claim location, one that never switches with the
+  caller's environment or with login sessions, and that stays per-host when
+  home directories are shared. `gate-bench.sh overhead` needs another way to
+  get a fresh directory. Hazards to test: callers with and without
+  `XDG_RUNTIME_DIR`, and `/run/user/<uid>` appearing or disappearing as logind
+  sessions start and end while background callers keep running.
 - **Ctrl-C once.** In both `quest gate` and `quest worktree run`
   (`src/cli/supervise.ts`), a terminal Ctrl-C reaches the child directly and
   again through the forwarder. Share one fix between them. On Unix, while
