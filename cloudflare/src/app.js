@@ -24,6 +24,20 @@ function key(base64url) {
 	return Uint8Array.from(text, (c) => c.charCodeAt(0));
 }
 
+// The browser's subscription, dropping one made for an earlier key pair: it
+// cannot receive pushes signed with the current key, and it blocks subscribing
+// with the new one.
+async function current(publicKey) {
+	const subscription = await (await registration).pushManager.getSubscription();
+	const made = subscription?.options.applicationServerKey;
+	const want = key(publicKey);
+	if (!made || (made.byteLength === want.length && new Uint8Array(made).every((b, i) => b === want[i])))
+		return subscription;
+	await post("/push/unsubscribe", { endpoint: subscription.endpoint }).catch(() => {});
+	await subscription.unsubscribe();
+	return null;
+}
+
 // Whether the server notifies this browser's subscription for whoever is
 // signed in. It forgets one when a session signs out, and never hands one to
 // another user, so the browser's own subscription is not enough to show "on".
@@ -31,7 +45,7 @@ const controls = document.querySelectorAll("[data-push]");
 let stored = false;
 const checked = (async () => {
 	if (!supported || !controls.length || Notification.permission !== "granted") return;
-	const subscription = await (await registration).pushManager.getSubscription();
+	const subscription = await current(controls[0].dataset.push);
 	if (subscription) stored = (await post("/push/check", { endpoint: subscription.endpoint })).stored === true;
 })();
 
@@ -74,6 +88,7 @@ for (const control of controls) {
 	enable.addEventListener("click", () =>
 		run(enable, async () => {
 			if ((await Notification.requestPermission()) !== "granted") return undefined;
+			await current(control.dataset.push);
 			const subscription = await (
 				await registration
 			).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(control.dataset.push) });

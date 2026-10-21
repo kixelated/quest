@@ -165,22 +165,34 @@ subscriptions.post("/push/subscribe", async (c) => {
 	const p256dh = key(body?.keys?.p256dh, 65);
 	const auth = key(body?.keys?.auth, 16);
 	if (!found || !p256dh || !auth) return c.json({ error: "Invalid push subscription" }, 400);
-	const statements = [
+	// A browser that rotated its subscription names the one it replaces. The new
+	// one takes its place only if the signed-in user turned that one on, so a
+	// rotation never opts in whoever is signed in now.
+	const replaces = body?.replaces === undefined ? null : endpoint(body.replaces);
+	if (body?.replaces !== undefined && !replaces) return c.json({ error: "Invalid push subscription" }, 400);
+	const [stored] = await c.env.DB.batch([
 		c.env.DB.prepare(
-			`INSERT INTO push_subscriptions(endpoint,user,session,p256dh,auth,createdAt) VALUES(?,?,?,?,?,?)
+			`INSERT INTO push_subscriptions(endpoint,user,session,p256dh,auth,createdAt)
+			SELECT ?,?,?,?,?,? WHERE ? IS NULL OR EXISTS(SELECT 1 FROM push_subscriptions WHERE endpoint=? AND user=?)
 			ON CONFLICT(endpoint) DO UPDATE SET user=excluded.user,session=excluded.session,p256dh=excluded.p256dh,auth=excluded.auth,createdAt=excluded.createdAt`,
-		).bind(found, session.user.id, session.session.id, p256dh, auth, Date.now()),
-	];
-	// A browser that rotated its subscription names the one it replaces.
-	const replaced = endpoint(body?.replaces);
-	if (replaced && replaced !== found)
-		statements.push(
-			c.env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND user=?").bind(
-				replaced,
-				session.user.id,
-			),
-		);
-	await c.env.DB.batch(statements);
+		).bind(
+			found,
+			session.user.id,
+			session.session.id,
+			p256dh,
+			auth,
+			Date.now(),
+			replaces,
+			replaces,
+			session.user.id,
+		),
+		c.env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND endpoint<>? AND user=?").bind(
+			replaces,
+			found,
+			session.user.id,
+		),
+	]);
+	if (!stored!.meta.changes) return c.json({ error: "Notifications are not on for this device" }, 403);
 	return c.body(null, 204);
 });
 // Whether the server still notifies the browser's subscription for this user.

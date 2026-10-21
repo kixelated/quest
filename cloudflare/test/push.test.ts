@@ -180,6 +180,14 @@ describe("decision notifications", () => {
 		const rotated = await browser();
 		expect((await post("/push/subscribe", { ...rotated.json, replaces: device.endpoint })).status).toBe(204);
 		expect(await subscriptions()).toEqual([{ endpoint: rotated.endpoint, user }]);
+		// A rotation while someone else is signed in does not opt them in.
+		const other = (await oauth(identity("github"))).session!;
+		const again = await browser();
+		const theirs = { ...again.json, replaces: rotated.endpoint };
+		expect((await post("/push/subscribe", theirs, { Cookie: other, Origin: origin })).status).toBe(403);
+		const unknown = { ...again.json, replaces: `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}` };
+		expect((await post("/push/subscribe", unknown)).status).toBe(403);
+		expect(await subscriptions()).toEqual([{ endpoint: rotated.endpoint, user }]);
 		expect((await post("/push/unsubscribe", { endpoint: rotated.endpoint })).status).toBe(204);
 		expect(await subscriptions()).toEqual([]);
 	});

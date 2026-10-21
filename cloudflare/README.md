@@ -211,7 +211,9 @@ user and session. Subscriptions must name a known push service. Signing out
 deletes the session's subscriptions, and a push service reporting one gone
 (404 or 410) deletes it. The switch shows a device as notified only while the
 server stores its subscription for the signed-in user, so whoever signs in
-next on that browser turns notifications on with their own click. Each push
+next on that browser turns notifications on with their own click. A rotated
+subscription replaces the old one only for the user who enabled it, and the
+switch drops a browser subscription made for an earlier VAPID key pair. Each push
 rechecks that its recipient still maintains the project, as the inbox does.
 
 Only decisions push (`src/push/notify.ts`): an agent's question, a
