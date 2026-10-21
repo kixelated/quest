@@ -188,8 +188,9 @@ the actor field and its details URL. Results count as `quest status` counts
 them, so neutral and skipped results pass.
 Requiredness comes from the base branch's protection and rulesets, readable
 with read access; optional checks never wake the wait, unless the base branch
-requires none, in which case every check is required. A ruleset that requires
-workflows counts as requiring checks. A required check that has not started
+requires none, in which case every check is required. A workflow a ruleset
+requires passes as a whole: each of its jobs is required, and its run holds
+back `checks:passed` until it finishes. A required check that has not started
 yet, such as a job that waits on others, holds back `checks:passed`; when the
 requirement names an app, only that app's check starts it. A result counts when it was reached at or after the starting
 point, so a wait started after CI finished still reports it; a push starts over

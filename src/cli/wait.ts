@@ -44,7 +44,7 @@ const CHECKS = `query($owner: String!, $repo: String!, $number: Int!, $after: St
 						__typename
 						... on CheckRun {
 							name status conclusion completedAt detailsUrl isRequired(pullRequestNumber: $number)
-							checkSuite { app { databaseId } }
+							checkSuite { status app { databaseId } workflowRun { file { path } } }
 						}
 						... on StatusContext { context state createdAt targetUrl isRequired(pullRequestNumber: $number) }
 					}
@@ -103,6 +103,8 @@ interface Check {
 	url: string | null;
 	/** The GitHub App that reported a check run; commit statuses have none. */
 	app?: number;
+	/** The workflow file a GitHub Actions job runs in, and whether that workflow run has finished. */
+	workflow?: { path: string; done: boolean };
 	result?: { outcome: "passed" | "failed"; point: string; time: number };
 }
 
@@ -110,8 +112,8 @@ interface Check {
 interface Requirements {
 	/** Required checks by name, and the app that must report each when one is set. */
 	checks: { context: string; app?: number }[];
-	/** A required workflow names no checks, but still means the base requires some. */
-	workflows: boolean;
+	/** Workflow files that must pass as a whole, whatever jobs they create. */
+	workflows: string[];
 }
 
 /** Wait until activity, returning plain output lines. Network and time are injected. */
@@ -366,7 +368,10 @@ async function watch(
 					.flatMap((rule) => array(object(rule.parameters).required_status_checks))
 					.map((row) => requirement(row.context, row.integration_id)),
 			],
-			workflows: rules.some((rule) => rule.type === "workflows"),
+			workflows: rules
+				.filter((rule) => rule.type === "workflows")
+				.flatMap((rule) => array(object(rule.parameters).workflows))
+				.map((row) => string(row.path)),
 		};
 		requirements.set(branch, found);
 		return found;
@@ -490,12 +495,14 @@ function timelineActivities(row: ObjectValue, prUrl: string): Activity[] {
 function check(row: ObjectValue): Check {
 	const run = row.__typename === "CheckRun";
 	const { check: classified, outcome } = classifyCheck(row);
-	const app = run && row.checkSuite ? object(row.checkSuite).app : null;
+	const suite = run && row.checkSuite ? object(row.checkSuite) : undefined;
+	const file = suite?.workflowRun ? object(suite.workflowRun).file : null;
 	const found: Check = {
 		name: classified.name,
 		required: classified.required,
 		url: classified.url,
-		...(app ? { app: Number(object(app).databaseId) } : {}),
+		...(suite?.app ? { app: Number(object(suite.app).databaseId) } : {}),
+		...(file ? { workflow: { path: string(object(file).path), done: suite!.status === "COMPLETED" } } : {}),
 	};
 	if (outcome === "pending") return found;
 	const point = string(run ? row.completedAt : row.createdAt);
@@ -514,16 +521,24 @@ function checkActivities(
 	state: Cursor["checks"],
 	prUrl: string,
 ): Activity[] {
-	const required = needs.checks.length || needs.workflows ? all.filter((entry) => entry.required) : all;
+	const inWorkflow = (entry: Check) => entry.workflow !== undefined && needs.workflows.includes(entry.workflow.path);
+	const required =
+		needs.checks.length || needs.workflows.length
+			? all.filter((entry) => entry.required || inWorkflow(entry))
+			: all;
 	// GitHub lists a check only once it starts, so a required one created late is still to come.
-	// A check from another app does not stand in for one bound to an app.
-	const started = needs.checks.every((need) =>
-		all.some(
-			(entry) =>
-				entry.name === need.context &&
-				(need.app === undefined || entry.app === undefined || entry.app === need.app),
-		),
-	);
+	// A check from another app does not stand in for one bound to an app. A required workflow
+	// passes as a whole, so it holds back checks:passed until its run finishes.
+	const started =
+		needs.checks.every((need) =>
+			all.some(
+				(entry) =>
+					entry.name === need.context &&
+					(need.app === undefined || entry.app === undefined || entry.app === need.app),
+			),
+		) &&
+		needs.workflows.every((path) => all.some((entry) => entry.workflow?.path === path)) &&
+		all.every((entry) => !inWorkflow(entry) || entry.workflow!.done);
 	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
 		const id = `${head}:${outcome}`;
 		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
