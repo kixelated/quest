@@ -33,19 +33,22 @@ async function input(c: Context): Promise<{ body: Record<string, unknown>; form:
 	const body = Object.fromEntries(Object.entries(form).filter(([, v]) => typeof v === "string" && v !== ""));
 	return { body, form };
 }
-/** Answer the JSON API, or return a form to the decision it acted on. */
-function reply(
-	c: Context,
-	form: Form | null,
-	item: { repository: number; target: string },
-	body: unknown,
-	status: 200 | 201 = 200,
-) {
-	if (form) return c.redirect(inboxURL(item.repository, item.target), 303);
+/** Answer the JSON API, or move a form on to the next decision. */
+function reply(c: Context, form: Form | null, done: Done, body: unknown, status: 200 | 201 = 200) {
+	if (form) return c.redirect(nextURL(done), 303);
 	return body === null ? c.body(null, 204) : c.json(body, status);
 }
 export function inboxURL(repository: number, target: string) {
 	return `/inbox?${new URLSearchParams({ project: String(repository), item: target })}`;
+}
+/** What an inbox form just recorded, which the next decision's page notes. */
+export type Done = "answer" | "start" | "stop" | "skip" | "merge";
+/**
+ * The inbox's next active decision, or its empty state, after a form recorded
+ * one. The item acted on stays reachable from its list, with its earlier answers.
+ */
+export function nextURL(done: Done) {
+	return `/inbox?${new URLSearchParams({ done })}`;
 }
 
 /** The default branch has no flake for the job's devShell; a bootstrap job can add one. */
@@ -252,7 +255,7 @@ jobs.post(base, async (c) => {
 		Date.now(),
 	);
 	await hub(c.env, user).dispatch(user);
-	return reply(c, form, { repository: repo.id, target: job.target }, created, created.created ? 201 : 200);
+	return reply(c, form, "start", created, created.created ? 201 : 200);
 });
 
 jobs.post(`${base}/:job/answer`, async (c) => {
@@ -276,7 +279,7 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 	);
 	// Jobs run on their requester's runners, whoever answers.
 	await hub(c.env, job.actor).dispatch(job.actor);
-	return reply(c, form, job, null);
+	return reply(c, form, "answer", null);
 });
 
 /** The longest reply to a publication decision, in characters as the inbox form counts them. */
@@ -306,7 +309,7 @@ jobs.post(`${base}/:job/cancel`, async (c) => {
 	const { user, job } = await owned(c);
 	await store.cancel(c.env.DB, job.id, user, Date.now());
 	await hub(c.env, job.actor).dispatch(job.actor);
-	return reply(c, fromForm(c) ? {} : null, job, null);
+	return reply(c, fromForm(c) ? {} : null, "stop", null);
 });
 
 // Raw output stays behind a per-request maintainer check; summaries are the default view.
