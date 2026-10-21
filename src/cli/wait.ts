@@ -21,6 +21,26 @@ const REACTIONS = `query($owner: String!, $repo: String!, $number: Int!, $after:
 	}
 }
 fragment reaction on Reaction { id content createdAt user { login } }`;
+/** The head's check runs and commit statuses, with whether the base branch requires each. */
+const CHECKS = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+	repository(owner: $owner, name: $repo) {
+		pullRequest(number: $number) {
+			headRefOid
+			commits(last: 1) { nodes { commit { oid statusCheckRollup {
+				contexts(first: 100, after: $after) {
+					pageInfo { hasNextPage endCursor }
+					nodes {
+						__typename
+						... on CheckRun { name status conclusion completedAt detailsUrl isRequired(pullRequestNumber: $number) }
+						... on StatusContext { context state createdAt targetUrl isRequired(pullRequestNumber: $number) }
+					}
+				}
+			} } } }
+		}
+	}
+}`;
+/** Branch protection and rulesets treat these as passing. */
+const PASSING = ["SUCCESS", "NEUTRAL", "SKIPPED"];
 
 export interface PullRequest {
 	owner: string;
@@ -77,6 +97,16 @@ interface Cursor {
 	commits: string[];
 	/** Force pushes at or before the starting point, at their repository-activity time. */
 	pushes: { sha: string; time: number }[];
+	/** Check results reached at or after `since` are reported once per head, as `<sha>:<outcome>`. */
+	checks: { since: number; reported: string[] };
+}
+
+/** One check run or commit status on the head, with its result once it has one. */
+interface Check {
+	name: string;
+	required: boolean;
+	url?: string;
+	result?: { outcome: "passed" | "failed"; point: string; time: number };
 }
 
 /** Accept a GitHub PR URL, or a number in the origin repository. */
@@ -291,6 +321,7 @@ async function watch(
 			pushes: forced
 				.filter((row) => !after(row))
 				.map((row) => ({ sha: string(row.after), time: timestamp(string(row.timestamp)) })),
+			checks: { since, reported: [] },
 		};
 		const plain = pushed.filter((row) => string(row.activity_type) !== "force_push" && after(row));
 		// A push racing setup is reported once, as a push, not again as a new commit.
@@ -344,24 +375,27 @@ async function watch(
 			}
 		};
 	};
+	const graphql = async (query: string, after: string | null): Promise<ObjectValue> => {
+		const response = await request("/graphql", undefined, {
+			query,
+			variables: { owner: pr.owner, repo: pr.repo, number: pr.number, after },
+		});
+		const body = object(await response.json());
+		if (body.errors !== undefined)
+			throw new Error(
+				`GitHub GraphQL error: ${array(body.errors)
+					.map((error) => String(error.message))
+					.join("; ")}`,
+			);
+		return object(body.data);
+	};
 	/** REST has no endpoint for reactions on reviews, and GraphQL also names the waiter. */
 	const reactions = async (): Promise<{ viewer: string; events: Activity[] }> => {
 		const events: Activity[] = [];
 		let viewer: string;
 		let after: string | null = null;
 		do {
-			const response = await request("/graphql", undefined, {
-				query: REACTIONS,
-				variables: { owner: pr.owner, repo: pr.repo, number: pr.number, after },
-			});
-			const body = object(await response.json());
-			if (body.errors !== undefined)
-				throw new Error(
-					`GitHub GraphQL error: ${array(body.errors)
-						.map((error) => String(error.message))
-						.join("; ")}`,
-				);
-			const data = object(body.data);
+			const data = await graphql(REACTIONS, after);
 			viewer = string(object(data.viewer).login);
 			const pull = object(object(data.repository).pullRequest);
 			const reviews = object(pull.reviews);
@@ -373,6 +407,26 @@ async function watch(
 			after = page.hasNextPage === true ? string(page.endCursor) : null;
 		} while (after !== null);
 		return { viewer, events };
+	};
+	/** GraphQL says which checks the base branch requires, through branch protection or rulesets. */
+	const checks = async (): Promise<{ head: string; checks: Check[] } | undefined> => {
+		const result: Check[] = [];
+		let head: string | undefined;
+		let after: string | null = null;
+		do {
+			const pull = object(object((await graphql(CHECKS, after)).repository).pullRequest);
+			const commit = object(array(object(pull.commits).nodes)[0]?.commit);
+			// A push racing these pages is read whole on the next poll.
+			if (commit.oid !== pull.headRefOid || (head !== undefined && commit.oid !== head)) return undefined;
+			head = string(commit.oid);
+			if (!fullSha(head)) throw new Error("invalid GitHub head SHA");
+			if (commit.statusCheckRollup === null) break;
+			const contexts = object(object(commit.statusCheckRollup).contexts);
+			result.push(...array(contexts.nodes).map(check));
+			const page = object(contexts.pageInfo);
+			after = page.hasNextPage === true ? string(page.endCursor) : null;
+		} while (after !== null);
+		return { head: head!, checks: result };
 	};
 
 	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=100`);
@@ -426,8 +480,11 @@ async function watch(
 			if (event.actor !== viewer && fresh("replies", event)) found.replies.push(event);
 		}
 		found.reactions.push(...events.filter((event) => event.actor !== viewer && fresh("reactions", event)));
+		// Check results are state rather than a log, so each poll reads them afresh.
+		const head = await checks();
+		const reached = head ? checkActivities(head.head, head.checks, cursor.checks, prUrl) : [];
 
-		if (SOURCES.some((source) => found[source].length)) {
+		if (reached.length || SOURCES.some((source) => found[source].length)) {
 			const marks = Object.fromEntries(
 				SOURCES.map((source) => {
 					const mark = cursor.marks[source];
@@ -444,8 +501,16 @@ async function watch(
 				marks,
 				commits: [...seenCommits],
 				pushes: cursor.pushes.filter((push) => push.time + TIMELINE_LAG >= marks.timeline.time),
+				checks: {
+					since: cursor.checks.since,
+					// A new head starts over, so only the current head's reports are kept.
+					reported: [
+						...cursor.checks.reported.filter((id) => !head || id.startsWith(`${head.head}:`)),
+						...reached.map((event) => event.id),
+					],
+				},
 			});
-			const all = SOURCES.flatMap((source) => found[source]).sort((a, b) => a.time - b.time);
+			const all = [...SOURCES.flatMap((source) => found[source]), ...reached].sort((a, b) => a.time - b.time);
 			const unique = [...new Map(all.map((event) => [event.id, event])).values()];
 			return unique.map(
 				(event, index) =>
@@ -474,6 +539,53 @@ function timelineActivities(row: ObjectValue, prUrl: string): Activity[] {
 	}
 	if (!WAKES.includes(type)) return [];
 	return [timedActivity(row, type, type === "reviewed" ? "submitted_at" : "created_at", prUrl)];
+}
+
+/** A check run or commit status; neutral and skipped results pass, as branch protection treats them. */
+function check(row: ObjectValue): Check {
+	const run = row.__typename === "CheckRun";
+	if (!run && row.__typename !== "StatusContext") throw new Error("invalid GitHub check");
+	const link = run ? row.detailsUrl : row.targetUrl;
+	const found: Check = {
+		name: string(run ? row.name : row.context),
+		required: row.isRequired === true,
+		url: typeof link === "string" ? link : undefined,
+	};
+	const state = run ? (row.status === "COMPLETED" ? string(row.conclusion) : undefined) : string(row.state);
+	if (state === undefined || state === "PENDING" || state === "EXPECTED") return found;
+	const point = string(run ? row.completedAt : row.createdAt);
+	found.result = { outcome: PASSING.includes(state) ? "passed" : "failed", point, time: timestamp(point) };
+	return found;
+}
+
+/**
+ * The head's first required failure, and every required check passing, each reported once per head
+ * when reached at or after the starting point. A repository that requires no checks requires them all.
+ */
+function checkActivities(head: string, all: Check[], state: Cursor["checks"], prUrl: string): Activity[] {
+	const required = all.some((entry) => entry.required) ? all.filter((entry) => entry.required) : all;
+	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
+		const id = `${head}:${outcome}`;
+		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
+		return [
+			{
+				point: entry.result.point,
+				time: entry.result.time,
+				type: `checks:${outcome}`,
+				actor: entry.name.replace(/\s/g, "_"),
+				url: entry.url ?? `${prUrl}/checks`,
+				id,
+			},
+		];
+	};
+	const settled = required.flatMap((entry) => (entry.result ? [{ ...entry, result: entry.result }] : []));
+	settled.sort((a, b) => a.result.time - b.result.time);
+	const failed = settled.find((entry) => entry.result.outcome === "failed" && entry.result.time >= state.since);
+	const passed =
+		settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
+			? settled.at(-1)
+			: undefined;
+	return [...reached("failed", failed), ...reached("passed", passed)];
 }
 
 function timedActivity(row: ObjectValue, type: string, timeField: string, fallback: string): Activity {
@@ -561,6 +673,7 @@ function decodeCursor(value: string, pr: string): Cursor {
 	try {
 		const parsed = object(JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8")));
 		const marks = object(parsed.marks);
+		const checks = object(parsed.checks);
 		if (
 			parsed.pr !== pr ||
 			!SOURCES.every((source) => {
@@ -575,7 +688,10 @@ function decodeCursor(value: string, pr: string): Cursor {
 			!Array.isArray(parsed.commits) ||
 			!parsed.commits.every(fullSha) ||
 			!Array.isArray(parsed.pushes) ||
-			!parsed.pushes.every((push: ObjectValue | null) => fullSha(push?.sha) && Number.isFinite(push?.time))
+			!parsed.pushes.every((push: ObjectValue | null) => fullSha(push?.sha) && Number.isFinite(push?.time)) ||
+			!Number.isFinite(checks.since) ||
+			!Array.isArray(checks.reported) ||
+			!checks.reported.every((id) => typeof id === "string")
 		)
 			throw new Error();
 		return parsed as unknown as Cursor;

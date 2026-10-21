@@ -147,7 +147,7 @@ local readiness as `ready`; verify claims and outside conditions before starting
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
 reply, reaction to the PR or one of its reviews, push, merge, close, removal
-from the merge queue, or disabled auto-merge:
+from the merge queue, disabled auto-merge, or required CI result:
 
 ```sh
 quest wait 101
@@ -175,8 +175,21 @@ timeline, excluding the one that created the starting head. A merge through
 the queue prints `removed_from_merge_queue` about a second before `merged`, so a
 poll can catch the removal alone; check the PR's state before treating it as a
 failed merge. Actors are printed without deciding
-whose review counts. Check runs and edits to existing comments or reviews are
-outside this command's scope.
+whose review counts. Edits to existing comments or reviews are outside this
+command's scope.
+
+CI results are read for the current head. The first required check to fail
+prints `checks:failed`, and every required check passing prints
+`checks:passed`, each once per head, with the check's name (spaces as `_`) in
+the actor field and its details URL. Neutral and skipped results pass.
+Requiredness comes from the base branch's protection and rulesets, readable
+with read access; optional checks never wake the wait, unless the base branch
+requires none, in which case every check is required. A result counts when it
+was reached at or after the starting point, so a wait started after CI finished
+still reports it; a push starts over for the new head, and the cursor records
+what was reported, so resuming never replays it. GitHub lists only checks that
+have started, so a required check created late, such as a job that waits on
+others, can start after `checks:passed` prints.
 
 Review-thread replies and reactions never reach the PR timeline, so they are
 read separately. A reply prints as `replied`; a thread's first comment is part
@@ -192,8 +205,8 @@ visible after a newer reaction is still reported.
 
 Each poll makes one conditional timeline request and one conditional
 review-comment request every five minutes once it has read the existing pages,
-following a new page when the current one fills, plus one GraphQL query for
-reactions. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
+following a new page when the current one fills, plus one GraphQL query each
+for reactions and checks. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
