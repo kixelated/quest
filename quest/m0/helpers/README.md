@@ -5,7 +5,8 @@
 Agents stop hand-writing `gh`, `jq`, and `sed` loops for routine quest
 workflow steps, because `quest` commands cover them and the skills point at
 those commands: CI results while waiting, a one-shot PR status, claiming
-quests and PRs, moving and deleting quests, and unattended triage.
+quests and PRs, moving and deleting quests, and unattended work. Skill
+rules that remove the maintainer's repeated steering belong here too.
 
 Only generic helpers belong here. Non-goals: the kix.quest UI, a daemon, and
 deciding whose review or which result counts; the agent still decides.
@@ -46,15 +47,25 @@ commands from Sep-Oct. Session counts in each child come from that window.
   without that section.
 - Decided (user): this epic ranks after the worktree and gate quests and
   before the Kix decision UI. Children rank by sessions affected.
+- Decided 2026-10-21 (user), from a month of moq maintainer transcripts:
+  quests that remove the maintainer's repeated steering join this epic.
+  `/quest-afk` and the guide rules rank first, since they save the most
+  maintainer time and change only prose. The complete loop ranks right after
+  the PR state commands, which also rewrite `complete`. Findings that fit an
+  existing child went into it: ready at hand-back into
+  [quest start](/quest/m0/helpers/start.md), and the merge method and the
+  merged-PR refusal into [PR state commands](/quest/m0/helpers/pr-states.md).
 
 ## Required
 
+- [Unattended work](/quest/m0/helpers/afk.md) - `/quest-afk` skips every decision and keeps starting agreed work; every skill ends with a summary
+- [Guide rules](/quest/m0/helpers/guide-rules.md) - pushing, briefs, follow-ups, whose review counts, and user-owned choices
 - [PR status](/quest/m0/helpers/status.md) - one call for head, checks, merge state, reviews by head, and unresolved threads
 - [Move and delete quests](/quest/m0/helpers/move.md) - `quest mv` and `quest rm` keep every root-absolute link valid
 - [CI checks in wait](/quest/m0/helpers/wait-checks.md) - `quest wait` wakes on required check results for the head
 - [quest start](/quest/m0/helpers/start.md) - claim a quest with a draft PR, the `## Decisions needed` hand-back, `quest unblocked --unclaimed`, and CI on ready PRs only
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
-- [Unattended triage](/quest/m0/helpers/afk.md) - an `afk` argument that only asks about merges and deletes
+- [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 
 ## Related

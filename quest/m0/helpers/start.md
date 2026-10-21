@@ -47,6 +47,13 @@ each other"); none came from two quests touching the same files.
     idle and waits on the maintainer;
   - the [PR state commands](/quest/m0/helpers/pr-states.md) label a PR
     whenever another session takes it.
+- Decided 2026-10-21 (user), from a month of moq maintainer transcripts
+  where "should I mark it ready?" came up in about 18 sessions: a complete
+  quest is marked ready even if the agent made choices without asking. It
+  lists those choices in the PR body for review. Only a decision left for the
+  maintainer keeps it a draft. Drop the `start` skill's "the user has settled
+  every decision, including choices you made without asking" gate, which
+  already disagrees with the guide's Execution section.
 - A draft without the heading that looks stale is offered to the user for
   takeover, showing how long ago its last push or comment was. The user
   judges; there is no fixed timeout.

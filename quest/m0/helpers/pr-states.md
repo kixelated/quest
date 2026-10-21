@@ -50,11 +50,15 @@ repositories ("those are in another repo?").
   PR is queued or auto-merging, until it merges. If it leaves the queue
   unmerged, the command that notices removes the label, and the PR is idle
   and waits on the maintainer's pick again.
-- Decided (user): a repository with its own queue, such as moq-dev/moq.pro's
-  `merge` label from
-  [moq-dev/moq.pro#2510](https://github.com/moq-dev/moq.pro/pull/2510), says
-  how to land in its root instructions. The skill follows those instead of
-  `--land`; the label still means "on its way in".
+- Decided 2026-10-21 (user), replacing a carve-out for moq-dev/moq.pro's
+  `merge` label queue, which the user means to remove: `--land` makes a merge
+  commit by default (`gh pr merge --merge`), through GitHub's merge queue
+  when the base has one. A repository's root instructions may name another
+  method or queue per base, and `--land` follows them. The merge skill named
+  no method, so an agent squashed a PR into moq-dev/moq's `release`, which
+  needs a merge commit.
+- Every command refuses a merged or closed PR, because a push after the merge
+  brings the deleted branch back.
 - A merge pick covers the fixes its own agent pushes for conflicts, CI, and
   review findings. A head moved by anyone else, a design change, or the merge
   skill's design checkpoint asks the user again, as `complete` already says.
@@ -67,8 +71,8 @@ repositories ("those are in another repo?").
 - Test a refused draft its starter still holds, a race for one PR, two
   sessions taking the same state, a release
   with a stale token, a refused swap, landing on a moved head, a PR
-  leaving the queue, and a repository whose root instructions override
-  landing.
+  leaving the queue, a refused merged PR, the default merge commit, and a
+  repository whose root instructions name another method.
 
 ## Required
 
