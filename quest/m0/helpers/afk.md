@@ -20,11 +20,14 @@ Decided 2026-10-21 (user), replacing the 2026-10-19 `afk` argument on
 `/quest-complete` and `/quest-spawn`, from an audit of a month of moq
 maintainer transcripts:
 
-- A skill of its own, `/quest-afk`, not an argument on two skills. The old
-  global `/afk` (kixelated/dotfiles), kixelated/skills' `afk`, and the
-  `/recommended` links in moq-dev/moq and moq-dev/moq.pro were deleted the
-  same day, ahead of this quest, so the user types those instructions by hand
-  until it lands.
+- A skill of its own, `/quest-afk`, not an argument on two skills. At the
+  user's request the old skills were removed the same day, ahead of this
+  quest, so the user types those instructions by hand until it lands: the
+  global `/afk` link in kixelated/dotfiles, the `afk` skill in
+  [kixelated/skills#8](https://github.com/kixelated/skills/pull/8), and the
+  `/recommended` links in
+  [moq-dev/moq#6200](https://github.com/moq-dev/moq/pull/6200) and
+  moq-dev/moq.pro.
 - It makes no decisions. Every question a quest skill would ask is skipped,
   not answered with its recommendation: the PR stays a draft listing the
   decision with a recommendation, a quest that would need asking is left
