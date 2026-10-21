@@ -7,11 +7,13 @@ import { Command, CommanderError, InvalidArgumentError, Option } from "commander
 
 import { description, version } from "../../package.json";
 import { blockers, check, formatFinding, label, lookup, ready, renderBlocker, unblocked } from "../core";
+import { githubDependencies } from "./github";
+import { type Report, moveQuest, removeQuest } from "./move";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
-import { pullRequest, waitDependencies, waitForActivity, WaitInputError, WaitTimeout } from "./wait";
+import { pullRequest, waitForActivity, WaitInputError, WaitTimeout } from "./wait";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
@@ -154,7 +156,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--timeout <seconds>", "Maximum wait in seconds", positiveSeconds)
 		.action((value: string, options: { since?: string; timeout?: number }) => {
 			const pr = pullRequest(value, root());
-			const deps = waitDependencies();
+			const deps = githubDependencies();
 			deps.warn = warn;
 			pending = waitForActivity(pr, options, deps).then(
 				(lines) => {
@@ -167,6 +169,57 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return error instanceof WaitTimeout ? 3 : error instanceof WaitInputError ? 2 : 1;
 				},
 			);
+		});
+
+	/** Changes on stdout; mentions and check findings on stderr, which fail the command. */
+	const report = (result: Report): number => {
+		for (const line of result.changes) print(line);
+		for (const line of result.warnings) warn(line);
+		for (const line of result.findings) warn(line);
+		return result.findings.length > 0 ? 1 : 0;
+	};
+
+	program
+		.command("mv")
+		.summary("Move a quest or epic and rewrite the links to it")
+		.description(
+			"Move a quest, or an epic directory and everything under it, with git mv, and rewrite every " +
+				"root-absolute link to it under quest/. The change is staged.\n\n" +
+				"Refuses outside a git work tree, when the destination exists, and while a moved quest has a claim " +
+				"branch on origin or an open PR on GitHub, since the old branch would no longer name it. Moving a " +
+				"quest into or out of an epic changes which epic lists it; the check afterwards reports what to fix.\n\n" +
+				"Prints R for the move and M for each edited document. Mentions of the old path that are not links, " +
+				"or are outside quest/, are reported on stderr and left alone. Runs quest check on the result and " +
+				"exits 1 if it fails.",
+		)
+		.argument("<from>", "Quest file or epic directory, as /quest/..., quest/..., or a filesystem path")
+		.argument("<to>", "Its new path, which must not exist")
+		.action((from: string, to: string) => {
+			pending = moveQuest(root(), from, to, { github: githubDependencies, warn }).then(
+				report,
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				},
+			);
+		});
+
+	program
+		.command("rm")
+		.summary("Delete a quest or epic and drop the links to it")
+		.description(
+			"Delete a quest, or an epic and the quests under it, with git rm, and drop every Required, Related, " +
+				"or Closes entry that links to it, with any heading left empty. The change is staged.\n\n" +
+				"Refuses outside a git work tree. An epic is its directory or README; removing one that holds other " +
+				"quests requires -r. The root epic and milestones are permanent.\n\n" +
+				"Prints D for each deleted quest and M for each edited document. Mentions that are not list entries, " +
+				"or are outside quest/, are reported on stderr and left alone. Runs quest check on the result and " +
+				"exits 1 if it fails.",
+		)
+		.argument("<path>", "Quest file, or epic directory or README")
+		.option("-r, --recursive", "Remove an epic with the quests under it")
+		.action((path: string, options: { recursive?: boolean }) => {
+			code = report(removeQuest(root(), path, options.recursive ?? false));
 		});
 
 	program

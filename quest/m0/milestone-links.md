@@ -47,13 +47,14 @@ Decided 2026-10-19 (user):
   `Required`, so the bump trips nothing. Four moq quests require
   `/quest/m1/README.md` (the release cut, the API-diff check, the API shape
   review, and the feature review); the PR that finishes m1 removes those links.
-- `quest rm` ([move and delete quests](/quest/m0/helpers/move.md)) drops these
-  links as well; whichever of the two quests lands second wires that up.
+- `quest rm` drops these links as well: every `Required` link to a finished
+  milestone, whether this `rm` emptied it or the link was already stale. The
+  root's own listing stays, as in the check. It repeats until nothing changes,
+  so `rm` never leaves a tree that fails the check. `quest rm` landed first,
+  so this quest wires that into `remove` in `src/core/edit.ts`.
 
 Tests: a quest requiring a finished milestone is flagged; one requiring a
 milestone with only non-child blockers left is not; the root's milestone
-listing is not; and a fixed tree passes.
-
-## Related
-
-- [Move and delete quests](/quest/m0/helpers/move.md) - `quest rm` drops links to milestones it leaves finished
+listing is not; and a fixed tree passes. `quest rm` of a milestone's last
+child drops another quest's link to that milestone, while the root still
+lists it.

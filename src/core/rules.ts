@@ -27,7 +27,7 @@ const SIZES = ["XS", "S", "M", "L", "XL"];
  * last entry was removed is a bug: an empty `Required` blocks its quest
  * forever.
  */
-const LIST_SECTIONS = ["Required", "Closes", "Related"];
+export const LIST_SECTIONS = ["Required", "Closes", "Related"];
 
 /** The permanent root epic; the one document nothing has to list. */
 export const ROOT = "quest/README.md";

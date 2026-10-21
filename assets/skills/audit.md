@@ -17,4 +17,4 @@ Split the reading across parallel sub-agents, each given a slice of the scope an
 
 Apply factual corrections and changes the user has already decided. Use `/quest-plan` only for unresolved scope, priority, API, or other consequential choices; recommendations are not decisions. Once those choices are settled, apply them without another approval round.
 
-Update every reference and dependency affected by a move or deletion, run `quest check`, and follow the repository's PR workflow within the user's authorized scope. Report the changes with their evidence and any decisions still open. An explicit read-only audit request leaves the tree unchanged.
+Move and delete quests with `quest mv` and `quest rm`, which update the links to them; edit any mentions they report, run `quest check`, and follow the repository's PR workflow within the user's authorized scope. Report the changes with their evidence and any decisions still open. An explicit read-only audit request leaves the tree unchanged.
