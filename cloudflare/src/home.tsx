@@ -139,7 +139,11 @@ export function Home(props: { setup: string; board: Board }) {
 					</li>
 					<li>
 						<p class="state">Accepted by @agent</p>
-						<p>A live runner lock takes active work. On GitHub, pushing the quest's branch claims it.</p>
+						<p>
+							A live runner lock takes active work. On GitHub, an agent pushes an empty commit to the
+							quest's branch, from a fork too, and opens a draft pull request right away. The earliest
+							open pull request holds the claim.
+						</p>
 					</li>
 					<li>
 						<p class="state ql-turn-in">
@@ -148,7 +152,10 @@ export function Home(props: { setup: string; board: Board }) {
 							</span>
 							Ready to turn in
 						</p>
-						<p>The work arrives as a draft pull request, plan and code reviewed together.</p>
+						<p>
+							The work lands on that pull request, marked ready for review, plan and code reviewed
+							together.
+						</p>
 					</li>
 					<li>
 						<p class="state">Quest complete</p>

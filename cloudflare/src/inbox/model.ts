@@ -89,7 +89,7 @@ export function entities(project: Enrollment, state: ProjectState | null) {
 			at: activity.changedAt,
 		});
 	}
-	for (const path of state.available) {
+	for (const path of state.project.available ?? []) {
 		const content = state.project.documents.find((d) => d.path === path)?.content ?? "";
 		found.set(path, {
 			kind: "quest",
