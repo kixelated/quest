@@ -76,8 +76,8 @@ function clone(url: string, routes: Record<string, string> = {}): string {
 	const dir = tempDir();
 	cpSync(templates().clone, dir, { recursive: true });
 	git(dir, "remote", "set-url", "origin", url);
-	const rewrites = Object.entries(routes).map(([from, to]) => `[url "${to}"]\n\tinsteadOf = ${from}\n`);
-	appendFileSync(join(dir, ".git", "config"), rewrites.join(""));
+	// git config escapes Windows paths, which a hand-written section would not.
+	for (const [from, to] of Object.entries(routes)) git(dir, "config", `url.${to}.insteadOf`, from);
 	return dir;
 }
 
