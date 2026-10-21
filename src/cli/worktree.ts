@@ -16,7 +16,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 export interface WorktreeRecord {
 	id: string;
@@ -113,6 +113,17 @@ function ignored(root: string, paths: string[]): Set<string> {
 		if ((error as { status?: number }).status === 1) return new Set();
 		throw error;
 	}
+}
+
+/** The first linked worktree of any repository, marked by a `.git` file, at or under `path`; symlinks are never followed. */
+function linkedWorktree(path: string): string | undefined {
+	if (!entry(path)?.isDirectory()) return undefined;
+	if (entry(join(path, ".git"))?.isFile()) return path;
+	for (const child of readdirSync(path)) {
+		const found = child === ".git" ? undefined : linkedWorktree(join(path, child));
+		if (found) return found;
+	}
+	return undefined;
 }
 
 /**
@@ -309,6 +320,17 @@ export class Worktrees {
 				const matched = ignored(root, paths);
 				const unignored = paths.filter((path) => !matched.has(path));
 				if (unignored.length) throw new Error(`scratch must be ignored by Git: ${unignored.join(", ")}`);
+				// Another checkout, such as one created inside this one, is work rather than scratch.
+				const registered = checkouts(record.repository)
+					.map((checkout) => checkout.path)
+					.filter((path) => path !== root);
+				for (const path of paths) {
+					const target = canonical(join(root, path));
+					const nested =
+						registered.find((checkout) => checkout === target || checkout.startsWith(target + sep)) ??
+						linkedWorktree(join(root, path));
+					if (nested) throw new Error(`scratch contains a Git worktree: ${path} holds ${nested}`);
+				}
 				// Removal unlinks symlinks rather than following them; force skips paths an overlapping parent removed.
 				for (const path of paths) rmSync(join(root, path), { recursive: true, force: true });
 			}

@@ -190,6 +190,21 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		expect(() => worktrees.release(record.id, [])).toThrow("ownership/lock changed");
 		expect(() => worktrees.restore(record.id)).toThrow("ownership/lock changed");
 	});
+	it("refuses scratch that contains another Git worktree", () => {
+		const { root, repo, worktrees } = fixture();
+		const outer = worktrees.create(repo, "outer", 10_000_000);
+		// Created from inside the outer checkout, so it lands in the outer checkout's ignored .worktrees/.
+		const inner = worktrees.create(outer.path, "inner", 10_000_000);
+		expect(inner.path).toBe(join(outer.path, ".worktrees", "inner"));
+		expect(() => worktrees.release(outer.id, [".worktrees"])).toThrow("scratch contains a Git worktree");
+		expect(existsSync(join(inner.path, "file"))).toBe(true);
+		// A linked worktree of an unrelated repository, such as an agent's checkout under an ignored directory.
+		const foreign = repository(join(root, "foreign"));
+		git(foreign, "worktree", "add", "--detach", join(outer.path, "cache", "agent"));
+		expect(() => worktrees.release(outer.id, ["cache"])).toThrow("scratch contains a Git worktree: cache");
+		expect(existsSync(join(outer.path, "cache", "agent", "file"))).toBe(true);
+		expect(worktrees.status().records.map((record) => record.phase)).toEqual(["active", "active"]);
+	});
 	it.skipIf(process.platform === "win32")("refuses a root replaced by a link to another checkout", () => {
 		const { repo, worktrees } = fixture();
 		const replaced = worktrees.create(repo, "first", 10_000_000);

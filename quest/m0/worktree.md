@@ -16,8 +16,9 @@ work, stealing a live lock, or deleting scratch a running process still uses.
   checkouts" documents it as experimental and tells users to stop all work
   before releasing.
 - Decided (user, 2026-10-21): prune in place. Release deletes only declared
-  scratch that Git ignores, that holds no tracked files, and that is not reached
-  through a symlink; it never removes the checkout or its Git state.
+  scratch that Git ignores, that holds no tracked files or other Git worktree,
+  and that is not reached through a symlink; it never removes the checkout or
+  its Git state.
   Checkout-independent recovery is out of scope: four review rounds of the
   checkpoint-and-remove design kept finding data-loss edge cases, while the
   disk cost is scratch (2026-10-15 on this repository: 1.6 MB fresh source,

@@ -307,8 +307,9 @@ quest worktree restore example
 
 Creation prints JSON with the ID and the detached, locked checkout path under
 `.worktrees/`. Release deletes only its `--scratch` paths, and refuses one that
-Git does not ignore, that holds tracked files, or that is reached through a
-symbolic link; links inside scratch are removed, never followed. Missing paths
+Git does not ignore, that holds tracked files or another Git worktree, or that
+is reached through a symbolic link; links inside scratch are removed, never
+followed. Missing paths
 are skipped, so release can be rerun. The checkout, its Git state, and
 untracked files stay in place, and `status` charges what remains. Restore
 reserves the checkout's disk again; then reinstall or rebuild its scratch, for
