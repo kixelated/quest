@@ -18,6 +18,7 @@ import { purge, retain } from "./jobs/output";
 import { BootstrapRequired, fromForm, jobs, resume, stop } from "./jobs/routes";
 import { JobError } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
+import * as push from "./push/notify";
 
 export const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
@@ -28,6 +29,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // Short link for the one-line setup paste.
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+app.route("/", push.subscriptions);
 
 // The page a visitor is on, still percent-encoded, to return to after signing in.
 function here(c: Context): string {
@@ -38,15 +40,16 @@ function here(c: Context): string {
 // Every HTML page renders in the shared layout, with the visitor's session in the nav.
 async function page(
 	c: Context<{ Bindings: Env }>,
-	props: Omit<Page, "origin" | "path" | "user">,
+	props: Omit<Page, "origin" | "path" | "user" | "unread">,
 	body: Child | ((user: User | null) => Child),
 	status: ContentfulStatusCode = 200,
 ) {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	const user = session?.user ?? null;
+	const unread = user ? await inbox.unread(c.env, user.id) : 0;
 	c.header("Cache-Control", "no-store");
 	return c.html(
-		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={here(c)} user={user}>
+		<Layout {...props} origin={new URL(c.env.AUTH_URL).origin} path={here(c)} user={user} unread={unread}>
 			{typeof body === "function" ? body(user) : body}
 		</Layout>,
 		status,
@@ -244,8 +247,7 @@ app.get("/inbox", async (c) => {
 	const target = c.req.query("item");
 	const chosen = target ? items.find((i) => String(i.project.id) === project && i.target === target) : undefined;
 	const active = chosen ?? decisions[0] ?? null;
-	if (active?.need) await inbox.markSeen(c.env.DB, user, active);
-	return page(
+	const response = await page(
 		c,
 		{ title: "Decisions", description: "Your decision inbox: questions, issues, pull requests, and ready quests." },
 		<InboxPage
@@ -257,8 +259,12 @@ app.get("/inbox", async (c) => {
 			working={working}
 			skipped={skipped}
 			runners={runners}
+			notifications={push.keys(c.env)?.publicKey ?? null}
 		/>,
 	);
+	// Seen once shown, so the nav's count agrees with the page that shows it.
+	if (active?.need) await inbox.markSeen(c.env.DB, user, active);
+	return response;
 });
 app.get("/projects/github/:owner/:repository/board", async (c) => {
 	const state = await liveProject(c);
@@ -451,11 +457,15 @@ app.post("/sign-in", async (c) => {
 	);
 });
 app.post("/sign-out", async (c) => {
-	const response = await createAuth(c.env).api.signOut({
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	const response = await auth.api.signOut({
 		headers: c.req.raw.headers,
 		asResponse: true,
 	});
 	if (!response.ok) return response;
+	// This device stops notifying once it signs out.
+	if (session) await push.forget(c.env.DB, session.session.id);
 	return redirect(response, "/");
 });
 
@@ -463,10 +473,12 @@ app.post("/sign-out", async (c) => {
 app.get("/account", async (c) => {
 	const auth = createAuth(c.env);
 	const headers = c.req.raw.headers;
-	if (!(await auth.api.getSession({ headers }))) return c.redirect("/sign-in?next=/account", 303);
-	const [accounts, passkeys] = await Promise.all([
+	const session = await auth.api.getSession({ headers });
+	if (!session) return c.redirect("/sign-in?next=/account", 303);
+	const [accounts, passkeys, devices] = await Promise.all([
 		auth.api.listUserAccounts({ headers }),
 		auth.api.listPasskeys({ headers }),
+		push.count(c.env.DB, session.user.id),
 	]);
 	const linked = providers(c.env).filter((p) => accounts.some((account) => account.providerId === p));
 	return page(c, { title: "Account", description: "Your Quest sign-in methods and passkeys." }, (user) => (
@@ -475,6 +487,8 @@ app.get("/account", async (c) => {
 			linked={linked}
 			providers={providers(c.env)}
 			passkeys={passkeys}
+			notifications={push.keys(c.env)?.publicKey ?? null}
+			devices={devices}
 			error={c.req.query("error")}
 		/>
 	));

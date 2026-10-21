@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
+import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
 import type { ProjectState, Pull } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
@@ -106,10 +107,13 @@ jobs.post("/api/runner/publish", async (c) => {
 	const length = Number(c.req.header("Content-Length"));
 	if (!Number.isSafeInteger(length) || length > LIMITS.request)
 		return c.json({ error: `A Content-Length of at most ${LIMITS.request} bytes is required` }, 413);
-	const result = await publish(c.env, runner, parsePublication(await json(c)));
+	const input = parsePublication(await json(c));
+	const result = await publish(c.env, runner, input);
 	if (!("decision" in result)) return c.json(result);
 	await hub(c.env, runner.owner).dispatch(runner.owner);
-	return c.json(result, 202);
+	if (result.asked && !result.cancel) c.executionCtx.waitUntil(push.job(c.env, input.job, "publication"));
+	const { decision, cancel } = result;
+	return c.json({ decision, cancel }, 202);
 });
 
 // A signed-in user registers their own machines and sees their presence.

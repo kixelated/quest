@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { arrived } from "../push/notify";
 
 export function positiveId(value: unknown): value is number {
 	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -168,5 +169,7 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 	}
 	// Observations never approve or launch work. Trusted consumers reconcile
 	// current GitHub state rather than treating delayed webhook bodies as facts.
+	// A new decision item still notifies, once, from the first delivery.
+	if (observed.has(event)) c.executionCtx.waitUntil(arrived(c.env, repository, installation, event, payload));
 	return c.json({ status: "accepted" }, 202);
 });

@@ -25,6 +25,10 @@ export default defineConfig({
 					GITHUB_WEBHOOK_SECRET: "test-webhook-secret",
 					GITHUB_APP_PRIVATE_KEY: "test-key-injected-by-service-tests",
 					GITHUB_FORK_OWNER: "quest-bot-forks",
+					// A test-only key pair from scripts/vapid.ts.
+					VAPID_PUBLIC_KEY:
+						"BFh5yJqSEBLDPtwYUindkvfE7r9Hm6c8xTT3EZnAo6EfvJLAWHX-HKbq2h83IbBtOvzzDbYp2DwDyqqO-_Uoq_k",
+					VAPID_PRIVATE_KEY: "JEYbUlDOII0-TzHqoZrz-7lCBGijto6dcqOFWnLs09o",
 					TEST_MIGRATIONS: await readD1Migrations("./migrations"),
 				},
 			},

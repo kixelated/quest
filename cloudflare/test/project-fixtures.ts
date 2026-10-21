@@ -1,5 +1,6 @@
 // A signed-in maintainer of an enrolled project with complete observations,
 // and a mocked GitHub that answers the requests authority checks make.
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { vi } from "vitest";
 import { app } from "../src/index";
@@ -140,7 +141,9 @@ export async function delivery(
 	);
 	const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
 	const signature = "sha256=" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-	return app.request(
+	// Background work, such as notifications, finishes before the test goes on.
+	const ctx = createExecutionContext();
+	const response = await app.request(
 		"http://localhost:8787/webhooks/github",
 		{
 			method: "POST",
@@ -148,5 +151,8 @@ export async function delivery(
 			body,
 		},
 		env,
+		ctx,
 	);
+	await waitOnExecutionContext(ctx);
+	return response;
 }

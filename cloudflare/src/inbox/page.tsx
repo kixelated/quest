@@ -1,7 +1,7 @@
 import type { Pull } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
-import { Marker } from "../layout";
+import { Marker, Notifications } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
 
@@ -19,6 +19,8 @@ export type InboxProps = {
 	working: Item[];
 	skipped: Item[];
 	runners: Map<string, Runners>;
+	/** The VAPID public key, or null where notifications are not configured. */
+	notifications: string | null;
 };
 
 const kinds = { pull: "Pull request", issue: "Issue", quest: "Ready quest", plan: "Plan", devshell: "Bootstrap" };
@@ -455,6 +457,7 @@ export function InboxPage(props: InboxProps) {
 					? `${props.decisions.length} waiting on you${unread ? `, ${unread} new` : ""}.`
 					: "Nothing needs a decision right now."}
 			</p>
+			<Notifications publicKey={props.notifications} compact />
 			{props.missing && (
 				<p class="note" role="status">
 					That decision is no longer open. It may have been answered or changed on GitHub.

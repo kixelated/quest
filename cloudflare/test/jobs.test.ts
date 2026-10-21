@@ -341,7 +341,7 @@ describe("job coordination", () => {
 		await run({ [home.id]: 1 }, 0);
 		const input = { summary: "Need a decision", session: "session-1", prompt: { question: "A or B?" } };
 		const { question } = await store.ask(db, home, id, 1, input, 1);
-		expect(await store.ask(db, home, id, 1, input, 2)).toEqual({ question, cancel: false });
+		expect(await store.ask(db, home, id, 1, input, 2)).toEqual({ question, cancel: false, asked: false });
 		await expect(store.ask(db, home, id, 1, { ...input, prompt: { question: "C?" } }, 2)).rejects.toThrow(
 			"no longer current",
 		);
@@ -466,6 +466,52 @@ describe("runner connections", () => {
 		expect((await request(null)).status).toBe(401);
 		expect((await request("x".repeat(43))).status).toBe(401);
 		expect((await request(machine.token, false)).status).toBe(426);
+	});
+
+	it("notifies the project's maintainer when a job asks a question or fails, once each", async () => {
+		const pair = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+			"deriveBits",
+		])) as CryptoKeyPair;
+		const p256dh = Buffer.from((await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer).toString(
+			"base64url",
+		);
+		await db
+			.prepare(
+				"INSERT INTO push_subscriptions(endpoint,user,session,p256dh,auth,createdAt) VALUES('https://fcm.googleapis.com/fcm/send/owner','owner','s',?,'AAAAAAAAAAAAAAAAAAAAAA',0)",
+			)
+			.bind(p256dh)
+			.run();
+		const sent: string[] = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+			sent.push(String(input));
+			return new Response(null, { status: 201 });
+		});
+		const machine = await runner("owner", "machine");
+		const live = await connect(machine.token);
+		live.send(status(1, "main", [], 2));
+		await live.next();
+		const asking = await job(10, "owner", {}, Date.now());
+		const failing = await job(10, "owner", { target: "quest/second.md", branch: "quest/second" }, Date.now());
+		await hub().dispatch("owner");
+		await live.next();
+		await live.next();
+		const attempts = [asking, failing].map((id) => ({ job: id, attempt: 1 }));
+		live.send(status(9, "main", attempts, 0));
+		expect(await live.next()).toMatchObject({ type: "reply", id: 9 });
+		const prompt = { questions: [{ question: "Which?", options: [{ label: "A" }, { label: "B" }] }] };
+		const question = { id: 2, type: "question", job: asking, attempt: 1, summary: "Asked", session: "s", prompt };
+		live.send(question);
+		expect(await live.next()).toMatchObject({ type: "reply", id: 2, cancel: false });
+		// A retried question is the same decision, so it does not notify again.
+		live.send(question);
+		expect(await live.next()).toMatchObject({ type: "reply", id: 2, cancel: false });
+		live.send({ id: 3, type: "result", job: failing, attempt: 1, outcome: "failed", summary: "Broke" });
+		expect(await live.next()).toEqual({ type: "reply", id: 3 });
+		await vi.waitFor(() => expect(sent).toHaveLength(2));
+		expect(sent).toEqual([
+			"https://fcm.googleapis.com/fcm/send/owner",
+			"https://fcm.googleapis.com/fcm/send/owner",
+		]);
 	});
 
 	it("pushes assignments and cancellation and fences progress over the live connection", async () => {
