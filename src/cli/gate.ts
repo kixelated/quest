@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /** The machine-wide inputs to load admission, replaceable in tests. */
@@ -100,7 +100,8 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 		// exist below the mount, but the container's limit still applies there.
 		const start = resolve(root, `.${path}`);
 		// A cgroup namespace shows a cgroup outside it as `/..`, which is not mounted.
-		if (/^\.\.(\/|$)/.test(relative(root, start))) continue;
+		const inside = relative(root, start);
+		if (inside === ".." || inside.startsWith(`..${sep}`)) continue;
 		for (let group = start; ; group = dirname(group)) {
 			for (const file of limits) {
 				try {
@@ -117,7 +118,7 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 				}
 			}
-			if (group === root) break;
+			if (group === root || group === dirname(group)) break;
 		}
 	}
 	return { total, available };
