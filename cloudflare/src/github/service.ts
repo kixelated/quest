@@ -48,6 +48,8 @@ export class GitHubError extends Error {
 	constructor(
 		message: string,
 		readonly status?: number,
+		/** GitHub's own words for a refusal, read only where a request asks for them. */
+		readonly reason: string | null = null,
 	) {
 		super(message);
 	}
@@ -118,6 +120,20 @@ function sha(value: string) {
 export function refName(name: string) {
 	return !/[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{|\/\/|(^|\/)\.|\.lock($|\/)|[/.]$|^\/|^@$/.test(name);
 }
+/** The `message` GitHub gives for a refused request, as one bounded line of display text. */
+async function refusal(response: Response) {
+	try {
+		const { message } = (await response.json()) as { message?: unknown };
+		if (typeof message === "string")
+			return (
+				message
+					.replace(/[\x00-\x1f\x7f]+/g, " ")
+					.trim()
+					.slice(0, 300) || null
+			);
+	} catch {}
+	return null;
+}
 function pullNumber(target: string) {
 	const match = target.match(/^pulls\/(\d{1,15})$/);
 	if (!match) throw new GitHubError("Invalid pull request target");
@@ -145,7 +161,8 @@ export class GitHubService {
 		return `${body}.${sign("RSA-SHA256", Buffer.from(body), createPrivateKey(this.#env.GITHUB_APP_PRIVATE_KEY)).toString("base64url")}`;
 	}
 
-	async #api<T>(token: string, path: string, method = "GET", body?: unknown): Promise<T> {
+	/** `explain` keeps GitHub's one-line `message` from a refusal, for a maintainer to read. */
+	async #api<T>(token: string, path: string, method = "GET", body?: unknown, explain = false): Promise<T> {
 		const response = await this.#fetch(`https://api.github.com${path}`, {
 			method,
 			redirect: "error",
@@ -159,7 +176,12 @@ export class GitHubService {
 			body: body === undefined ? undefined : JSON.stringify(body),
 		});
 		// Never include provider response bodies, request headers, or secrets in errors.
-		if (!response.ok) throw new GitHubError(`GitHub request failed (${response.status})`, response.status);
+		if (!response.ok)
+			throw new GitHubError(
+				`GitHub request failed (${response.status})`,
+				response.status,
+				explain ? await refusal(response) : null,
+			);
 		return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 	}
 
@@ -454,7 +476,7 @@ export class GitHubService {
 		const state = await this.#state(repo, installation);
 		await this.#gate(installation);
 		if (state === null) throw new GitHubError("Project enrollment changed");
-		if (result && state !== "enabled") result.available = [];
+		if (result && state !== "enabled") result.project.available = [];
 		return result;
 	}
 
@@ -480,17 +502,18 @@ export class GitHubService {
 					.bind(repo.id)
 					.first<{ revision: number; scan: string | null; invalidated: number; epoch: string }>();
 				const previous: Scan | null = row?.scan ? JSON.parse(row.scan) : null;
-				const scan: Scan =
-					previous && !previous.complete && row?.invalidated !== 1
-						? previous
-						: {
-								id: crypto.randomUUID(),
-								issues: null,
-								pulls: null,
-								refs: null,
-								claims: [],
-								complete: false,
-							};
+				// History resumes through any webhook; only occupancy, which is
+				// small, restarts to observe a possibly opened, closed, or claimed quest.
+				const scan: Scan = {
+					history:
+						previous && !previous.history.complete
+							? previous.history
+							: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
+					occupancy:
+						previous && !previous.occupancy.complete && row!.invalidated !== 1
+							? previous.occupancy
+							: { open: null, refs: null, pulls: [], claims: [], complete: false },
+				};
 				const snapshot = await this.#snapshot(token, repo, current);
 				const response = await this.#api<{ data?: { repository: ActivityPage | null }; errors?: unknown[] }>(
 					token,
@@ -501,9 +524,10 @@ export class GitHubService {
 						variables: {
 							owner: repo.owner,
 							name: repo.name,
-							issues: scan.issues || null,
-							pulls: scan.pulls || null,
-							refs: scan.refs || null,
+							issues: scan.history.issues || null,
+							pulls: scan.history.pulls || null,
+							open: scan.occupancy.open || null,
+							refs: scan.occupancy.refs || null,
 						},
 					},
 				);
@@ -535,23 +559,38 @@ export class GitHubService {
 	}
 
 	/**
-	 * What a new job may start from: `resolve` picks it from complete
-	 * observations, then this checks whether its revision has a flake for the
+	 * What a new job may start from: `resolve` picks it from current
+	 * observations, then this checks that its issue or pull request is still
+	 * open at the observed head, and whether its revision has a flake for the
 	 * runner's devShell.
 	 */
-	jobSource<T extends { revision: string }>(
+	jobSource<T extends { target: string; revision: string }>(
 		repo: GitHubRepository,
 		userId: string,
 		resolve: (state: ProjectState) => T,
 	) {
-		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
+		const permissions = { contents: "read", issues: "read", pull_requests: "read" } as const;
+		return this.#authorized(repo, userId, permissions, async (token, current, installation) => {
 			this.#public(current);
 			const enrolled = await this.#state(repo, installation);
 			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
 			const state = await this.#observations(repo, installation);
-			if (!state?.complete) throw new GitHubError("Refresh project activity before starting work");
+			// Pending availability means a webhook or an unfinished pass left open PRs and claims unread.
+			if (!state || state.project.available === null)
+				throw new GitHubError("Refresh project activity before starting work");
 			// Check the revision the job will run, such as a pull request's head.
 			const job = resolve(state);
+			// Only history rereads an issue or PR, so its activity row can still say
+			// open after it closed; read the target itself before binding a job to it.
+			const [, kind, target] = job.target.match(/^(issues|pulls)\/(\d+)$/) ?? [];
+			if (kind) {
+				const live = await this.#api<{ state: string; head?: { sha: string } }>(
+					token,
+					`${repositoryPath(repo)}/${kind}/${number(Number(target))}`,
+				);
+				if (live.state !== "open" || (kind === "pulls" && live.head?.sha !== job.revision))
+					throw new GitHubError("This changed on GitHub since it was read; refresh and review it again");
+			}
 			let flake = true;
 			try {
 				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
@@ -914,10 +953,10 @@ export class GitHubService {
 	/**
 	 * Merge exactly `expectedHead` with the first method the repository
 	 * allows: squash, then a merge commit, then rebase. GitHub enforces branch
-	 * rules, reviews, and checks.
+	 * rules, reviews, and checks; a refusal says why and is never retried.
 	 */
 	mergePullRequest(repo: GitHubRepository, userId: string, pull: number, expectedHead: string) {
-		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, (token, current) => {
+		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, async (token, current) => {
 			const method = current.allow_squash_merge
 				? "squash"
 				: current.allow_merge_commit
@@ -926,10 +965,30 @@ export class GitHubService {
 						? "rebase"
 						: null;
 			if (!method) throw new GitHubError("The repository allows no merge method");
-			return this.#api(token, `${repositoryPath(repo)}/pulls/${number(pull)}/merge`, "PUT", {
-				sha: sha(expectedHead),
-				merge_method: method,
-			});
+			let merged: { sha: string };
+			try {
+				merged = await this.#api<{ sha: string }>(
+					token,
+					`${repositoryPath(repo)}/pulls/${number(pull)}/merge`,
+					"PUT",
+					{ sha: sha(expectedHead), merge_method: method },
+					true,
+				);
+			} catch (error) {
+				if (!(error instanceof GitHubError)) throw error;
+				if (error.status === 409)
+					throw new GitHubError("The pull request's head moved since you looked; review it again", 409);
+				if (error.reason && [403, 405, 422].includes(error.status!))
+					throw new GitHubError(`GitHub refused the merge: ${error.reason}`, error.status);
+				throw error;
+			}
+			// As a webhook would, mark observations stale so the inbox stops offering the merged pull request.
+			await this.#env.DB.prepare(
+				"UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=?",
+			)
+				.bind(repo.id)
+				.run();
+			return { sha: merged.sha };
 		});
 	}
 }

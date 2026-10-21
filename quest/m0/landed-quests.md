@@ -23,7 +23,7 @@ Non-goals: judging whether a rewrite is a faithful remainder (the agent and
 reviewers still do), and PRs not on a quest branch, such as a contributor's
 fork branch that implements a quest; those skip the guard. Merges that
 bypass the merge skill, such as a maintainer's click on GitHub or in the
-[decision inbox](/quest/m0/kix/merge.md), are guarded only where the
+kix decision inbox, are guarded only where the
 repository runs the guard as a required check; the hosted service has no
 checkout to diff.
 
@@ -75,4 +75,3 @@ the base; and `--branch` overriding the current branch.
 ## Related
 
 - [Move and delete quests](/quest/m0/helpers/move.md) - `quest rm` deletes a quest and every link to it
-- [Finished milestone links](/quest/m0/milestone-links.md) - the same "a finishing PR removes what depended on it" rule for milestones

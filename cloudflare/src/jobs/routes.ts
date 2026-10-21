@@ -179,7 +179,7 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState): Plan 
 				item.data?.state === "OPEN",
 		);
 	if (workflow === "start") {
-		if (typeof target !== "string" || !state.available.includes(target))
+		if (typeof target !== "string" || !state.project.available?.includes(target))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
 		const branch = target.replace(/(\/README)?\.md$/, "");
 		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");
