@@ -534,11 +534,18 @@ export async function settle(db: D1Database, job: string, commit: string, landed
 		.run();
 }
 
-/** The job's answered agent questions, oldest first, for its pull request's decision record. */
+/**
+ * The answered agent questions behind the job's pull request, oldest first,
+ * for its decision record: the job's own, and those of any earlier job on its
+ * target that delivered the same pull request, which a retry continues.
+ */
 export async function decisions(db: D1Database, job: string) {
 	const { results } = await db
 		.prepare(
-			"SELECT prompt,answer FROM job_questions WHERE job=? AND kind='agent' AND answer IS NOT NULL ORDER BY askedAt,rowid",
+			`SELECT q.prompt,q.answer FROM jobs c
+ JOIN jobs j ON j.id=c.id OR (j.repository=c.repository AND j.target=c.target AND j.pull=c.pull)
+ JOIN job_questions q ON q.job=j.id
+ WHERE c.id=? AND q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
 		)
 		.bind(job)
 		.all<{ prompt: string; answer: string }>();

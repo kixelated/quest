@@ -789,6 +789,32 @@ describe("runner publication", () => {
 		expect(github.pulls).toHaveLength(1);
 	});
 
+	it("keeps a failed planning job's decisions in the pull request its retry continues", async () => {
+		const target = { workflow: "plan" as const, target: "issues/1", branch: "plan/issue-1" };
+		const decide = async (id: string, question: string, choice: string) => {
+			const prompt = { kind: "decision", questions: [{ question, options: [{ label: choice }] }] };
+			const asked = await store.ask(db, machine, id, 1, { summary: "?", session: "s", prompt }, 1);
+			await store.answer(db, id, asked.question, user, { answers: [{ choices: [choice] }] }, 1);
+			await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+		};
+		const failed = await running(target);
+		await decide(failed, "First?", "A");
+		const pull = { title: "Plan", body: "Plan" };
+		const changes = [file("quest/a.md", "# A\n")];
+		const first = await publish({ job: failed, attempt: 2, head: null, message: "m", changes, pull });
+		const { head } = (await first.json()) as { head: string };
+		await store.finish(db, machine, failed, 2, { outcome: "failed", summary: "Failed", result: undefined }, 2);
+
+		const retry = await running(target, 1000);
+		await decide(retry, "Second?", "B");
+		const response = await publish({ job: retry, attempt: 2, head, pull });
+		expect(response.status).toBe(200);
+		expect(github.pulls).toHaveLength(1);
+		const body: string = github.pulls[0].body;
+		expect(body).toContain("### Round 1\n\n- ` First? `\n  - ✅ ` A `");
+		expect(body).toContain("### Round 2\n\n- ` Second? `\n  - ✅ ` B `");
+	});
+
 	it("starts a retried job fresh when its failed job published nothing", async () => {
 		await fail(await running());
 		const id = await running({}, 1000);

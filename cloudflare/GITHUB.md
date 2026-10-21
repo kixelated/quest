@@ -131,8 +131,9 @@ branches. Pull requests use `maintainer_can_modify: false`, because an
 upstream-scoped token cannot grant edits on the fork branch.
 
 A planning pull request's body ends with a decision section the service
-writes from the job's answered `decision` questions (`src/jobs/trail.ts`):
-each round's questions, every option with ✅ on each choice, and the
+writes from the job's answered `decision` questions, after those of a failed
+job whose pull request a retry continues (`src/jobs/trail.ts`): each round's
+questions, every option with ✅ on each choice, and the
 maintainer's own words. Permission requests and the service's `account` and
 `publication` questions stay out, since they can name runners and accounts.
 Prompts and answers are untrusted, so each appears only as a code span with its
