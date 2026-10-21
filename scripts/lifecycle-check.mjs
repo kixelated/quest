@@ -98,10 +98,10 @@ try {
 			"# [S] Two\r\n\r\n## Goal\r\n\r\nSecond.\r\n\r\n## Required\r\n\r\n- [One](/quest/m0/one.md)\r\n",
 		);
 		run(root, "check");
-		assert.equal(run(root, "ready"), "quest/m0/one.md\n");
-		assert.equal(run(root, "ready", join(root, "quest", "m0", "one.md")), "");
-		assert.equal(run(root, "ready", join("quest", "m0", "one.md")), "");
-		assert.match(run(root, "ready", "quest/m0/two.md"), /quest\/m0\/one.md/);
+		assert.equal(run(root, "unblocked"), "1\tquest/m0/one.md\n");
+		assert.equal(run(root, "unblocked", join(root, "quest", "m0", "one.md")), "");
+		assert.equal(run(root, "unblocked", join("quest", "m0", "one.md")), "");
+		assert.match(run(root, "unblocked", "quest/m0/two.md"), /quest\/m0\/one.md/);
 		const plan = read(root, "quest/m0/one.md");
 		const edited = `${read(root, ".claude/skills/quest-plan/SKILL.md")}\nUser customization.\n`;
 		write(root, ".claude/skills/quest-plan/SKILL.md", edited);

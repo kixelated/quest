@@ -62,8 +62,8 @@ finished plan stays in Git history, beside the code that completed it.
 Work is taken through a live runner lock or an open change on the forge.
 kix.quest records each active job in its database and reassigns a job whose
 runner goes offline. On GitHub, a draft PR
-opened from the quest's branch, including from a fork, claims the work. These
-states stay out of the plan file.
+opened from the quest's branch, including from a fork, claims the work;
+`quest start` opens one. These states stay out of the plan file.
 
 ## Try it
 
@@ -90,17 +90,16 @@ quest tree. From this checkout:
 $ quest --root examples/export check
 The quest log is in order: 4 documents checked.
 
-$ quest --root examples/export ready
-1 quest ready
-! [S] Add a CSV export endpoint  quest/m0/export.md
+$ quest --root examples/export unblocked
+1	quest/m0/export.md
 
-$ quest --root examples/export ready quest/m0/download.md
+$ quest --root examples/export unblocked quest/m0/download.md
 ! [S] Add a download button        quest/m0/download.md
   Required:
     [S] Add a CSV export endpoint  quest/m0/export.md
 ```
 
-With no path, `ready` lists every ready quest. Given a path, it shows what
+With no path, `unblocked` ranks every ready quest. Given a path, it shows what
 blocks that quest. On a terminal, a yellow `!` marks a ready quest and a grey
 `!` a blocked one, and each size label takes its colour, like loot rarity: XS
 grey, S green, M blue, L purple, and XL orange (your terminal's yellow). Set
@@ -109,19 +108,13 @@ grey, S green, M blue, L purple, and XL orange (your terminal's yellow). Set
 Scripts and agents read the piped form, which is plain text:
 
 ```console
-$ quest --root examples/export ready | cat
-quest/m0/export.md
-
-$ quest --root examples/export ready quest/m0/download.md | cat
+$ quest --root examples/export unblocked quest/m0/download.md | cat
 quest/m0/export.md
 ```
 
-Piped, `ready` prints one path per line. Given a path, it prints that quest's
-blockers, with an explanation on stderr; no blockers means no stdout.
-It exits zero for both ready and blocked quests; a nonzero exit means the
-command failed. Run `check` first to catch malformed plans. `ready` reads
-dependencies in the quest tree; it does not inspect live runner locks, open changes, or GitHub branch
-claims. Check those before you start work someone else may already be on.
+Piped, a path prints that quest's blockers, with an explanation on stderr; no
+blockers means no stdout. It exits zero for both ready and blocked quests; a
+nonzero exit means the command failed.
 
 ## Prioritize ready work
 
@@ -143,9 +136,51 @@ $ quest --root examples/export unblocked --json --limit 1
 Each plain output line contains the count, a tab, and the path. On a terminal,
 a heading explains the count. `--json` prints an ordered array, including `[]`
 when no quests are ready; `--limit <count>` requires a positive integer.
-Invalid trees fail with diagnostics and no ranking. This command uses the same
-local readiness as `ready`; verify claims and outside conditions before starting.
+Invalid trees fail with diagnostics and no ranking.
 `quest-spawn` uses the ranking unless you explicitly select work in another order.
+
+`--unclaimed` drops quests someone already holds: the quest's branch on the
+upstream repository, or an open PR from that branch in any repository, forks
+included. It lists each one it skips on stderr with its PR and how long ago
+that PR was last active, so you can decide whether a stale claim should be
+taken over. In a fork's clone, the upstream is the fork's parent, and the
+fork's own branches and PRs count too; `--remote` picks a remote other than
+`origin`. Off GitHub, only branches are checked.
+Neither form inspects kix.quest runner locks or outside conditions.
+
+## Claim a quest
+
+`quest start` claims a ready quest so every claim is visible on GitHub:
+
+```sh
+quest start quest/m0/export.md
+quest start --release quest/m0/export.md
+```
+
+It pushes an empty claim commit, built on the upstream default branch, to the
+quest's branch (its path without `.md`) without forcing, then opens a draft PR
+from it right away and prints the PR's URL. It switches your checkout to the
+claim on a new local branch, or fast-forwards that branch if it is already
+checked out. A fork pushes to itself and opens the PR on its parent. It fails
+on a tree `quest check` rejects, which can hide a blocker, and refuses a
+blocked quest and one someone else holds; a rejected push means
+another claimer got there first, and when two PRs race, the earliest open one
+keeps the claim and the later one is closed. Off GitHub, it pushes the branch
+without a PR.
+
+`--release` deletes the branch, with a lease on its tip, and closes its PR, but
+only while the tip is still an empty commit. Once work is on the branch, hand
+the draft back instead: a `## Decisions needed` section in its body marks it as
+waiting on the maintainer.
+
+`quest start` exits 0 when done, 3 when it refuses (blocked, held, or work on
+the branch), 2 for invalid arguments, and 1 for other failures. On GitHub it
+uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
+
+Draft claims are placeholders, so CI can skip them. This repository runs its
+checks only on PRs ready for review: the `pull_request` trigger lists
+`ready_for_review`, and each job has the condition
+`github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
 
 ## Check a quest's PR
 

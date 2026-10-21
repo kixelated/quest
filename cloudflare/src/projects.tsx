@@ -230,9 +230,10 @@ export function ProjectStatePage(props: { owner: string; repository: string; sta
 				</button>
 			</form>
 			<p class="muted">
-				GitHub issues and pull requests are source material. Refreshing observes activity and does not start
-				work or approve a merge.
+				GitHub issues and pull requests are source material. Webhooks reread the project in the background;
+				refreshing does the same by hand. Neither starts work or approves a merge.
 			</p>
+			{state?.failure && <p role="alert">The last background read failed: {state.failure}</p>}
 			{state ? (
 				<>
 					<p>

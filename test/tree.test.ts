@@ -42,7 +42,7 @@ describe("retired claims", () => {
 			t.rejects("unknown '## Claim'");
 			expect(t.ready()).toEqual(["quest/m0/epic/one.md"]);
 			expect(t.blockers("quest/m0/epic/one.md")).toEqual([]);
-			expect(t.run("ready", "quest/m0/epic/one.md")).toEqual({ code: 0, stdout: "", stderr: "" });
+			expect(t.run("unblocked", "quest/m0/epic/one.md")).toEqual({ code: 0, stdout: "", stderr: "" });
 		},
 	);
 
@@ -555,7 +555,7 @@ describe("Required", () => {
 	});
 });
 
-// Readiness: what `quest ready` reports about the same fixture. A blocker list
+// Readiness: what `quest unblocked <path>` reports about the same fixture. A blocker list
 // is the machine-readable result, so the cases that must come back EMPTY carry
 // as much weight as the ones that must not.
 describe("ready", () => {
