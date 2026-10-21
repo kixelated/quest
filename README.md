@@ -60,8 +60,9 @@ finished plan stays in Git history, beside the code that completed it.
 
 Work is taken through a live runner lock or an open change on the forge.
 kix.quest records each active job in its database and reassigns a job whose
-runner goes offline. On GitHub, a pushed quest
-branch claims the work. These states stay out of the plan file.
+runner goes offline. On GitHub, a draft PR
+opened from the quest's branch, including from a fork, claims the work. These
+states stay out of the plan file.
 
 ## Try it
 
