@@ -56,7 +56,8 @@ function git(root: string, ...args: string[]): string {
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 }
-function save(path: string, value: unknown): void {
+/** Write `value` as JSON, user-only, replacing `path` atomically. */
+export function save(path: string, value: unknown): void {
 	const temporary = `${path}.${randomUUID()}.tmp`;
 	writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);

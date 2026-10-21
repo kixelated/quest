@@ -17,6 +17,7 @@ import {
 	renderBlocker,
 	unblocked,
 } from "../core";
+import { AgentInputError, HARNESSES, type Launch, processDependencies, runAgent, stopAgent, stopAll } from "./agent";
 import { claims, questBranch } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
@@ -421,6 +422,90 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("restore <id>")
 		.description("Reserve a released checkout's disk again before rebuilding its scratch")
 		.action((id: string) => record(state().restore(id)));
+
+	const agent = program
+		.command("agent")
+		// Options come before <worktree>, so a prompt or answer starting with "-" is never read as one.
+		.enablePositionalOptions()
+		.summary("Start, resume, and stop headless agents billed to API keys")
+		.description(
+			"Run one headless agent turn per call in the foreground, billed to one of the keys in QUEST_API_KEYS, " +
+				"so a spawn launches every agent with one legible command.\n\n" +
+				"QUEST_API_KEYS lists keys separated by whitespace; --key names one by its 1-based position. An " +
+				"entry may be a 1Password op:// reference: the first launch resolves every reference in one " +
+				"`op inject` and keeps the keys in a user-only store under $XDG_RUNTIME_DIR (or the temporary " +
+				"directory) shared by the repository's worktrees, until `quest agent stop --all`.\n\n" +
+				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
+				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_API_KEYS, and QUEST_GATE_ADMITTED variable, plus " +
+				"its one key as " +
+				"ANTHROPIC_API_KEY (claude -p) or CODEX_API_KEY (codex exec). It never prints a key; any the agent " +
+				"repeats is shown as <key N>.\n\n" +
+				"Prints `session <id>` as soon as the id is known, then `cost <dollars>` when the agent reports it, " +
+				"`outcome finished|failed|exhausted|stopped`, a blank line, and the agent's final reply. Exits 0 " +
+				"when the agent finished, 3 when the provider refused the key for lack of credit, 2 for invalid " +
+				"arguments, 128 plus the signal number when interrupted, and 1 otherwise.",
+		);
+	const launchOptions = (command: Command) =>
+		command
+			.addOption(new Option("--harness <name>", "Agent CLI to run").choices(HARNESSES).makeOptionMandatory())
+			.requiredOption("--key <position>", "1-based position of the key in QUEST_API_KEYS", positiveInteger("key"))
+			.requiredOption("--model <model>", "Model the agent runs")
+			.requiredOption("--effort <level>", "Reasoning effort the agent runs at")
+			.requiredOption(
+				"--permission-mode <mode>",
+				"Claude Code's --permission-mode, or Codex's sandbox mode; the agent cannot prompt",
+			);
+	type LaunchOptions = Omit<Launch, "worktree">;
+	const launch = (worktree: string, prompt: string, session: string | undefined, options: LaunchOptions) => {
+		pending = runAgent({ ...options, worktree }, prompt, session, agentDependencies()).catch(agentFailure);
+	};
+	const agentDependencies = () => processDependencies({ stdout: out.stdout, stderr: out.stderr });
+	const agentFailure = (error: unknown) => {
+		if (error instanceof AgentInputError) {
+			out.stderr(`error: ${error.message}\n`);
+			return 2;
+		}
+		warn(error instanceof Error ? error.message : String(error));
+		return 1;
+	};
+	launchOptions(
+		agent
+			.command("start")
+			.description("Start a new agent session in a worktree with a prompt")
+			.argument("<worktree>", "Checkout the agent works in")
+			.argument("<prompt>", "The agent's instructions")
+			.passThroughOptions(),
+	).action((worktree: string, prompt: string, options: LaunchOptions) =>
+		launch(worktree, prompt, undefined, options),
+	);
+	launchOptions(
+		agent
+			.command("resume")
+			.description("Resume an agent's session in its worktree with a message")
+			.argument("<worktree>", "Checkout the session ran in")
+			.argument("<session>", "Session id printed by start")
+			.argument("<message>", "The next message, such as an answer to its decisions")
+			.passThroughOptions(),
+	).action((worktree: string, session: string, message: string, options: LaunchOptions) =>
+		launch(worktree, message, session, options),
+	);
+	agent
+		.command("stop")
+		.summary("Stop the agent in a worktree, or end the spawn with --all")
+		.description(
+			"Stop the agent running in a worktree and wait until its start or resume has reported. With --all, " +
+				"end the spawn: stop every agent in this repository's worktrees and delete the resolved keys.",
+		)
+		.argument("[worktree]", "Checkout whose agent to stop")
+		.option("--all", "Stop every agent and delete the resolved keys")
+		.action((worktree: string | undefined, options: { all?: boolean }) => {
+			if ((worktree === undefined) === !options.all) throw new UsageError("give a worktree or --all");
+			const deps = agentDependencies();
+			pending = (worktree === undefined ? stopAll(root(), deps) : stopAgent(worktree, deps)).then(
+				() => 0,
+				agentFailure,
+			);
+		});
 
 	/** Changes on stdout; mentions and check findings on stderr, which fail the command. */
 	const report = (result: Report): number => {
