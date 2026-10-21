@@ -3,7 +3,7 @@
 // github.com remote name reach a local bare repository.
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -200,7 +200,7 @@ describe("start on GitHub", () => {
 		const pull = github.open("example/project", BRANCH, "someone/project");
 		const start = () => startQuest(work, ONE, "[S] One", "origin", deps(github));
 
-		await expect(start()).rejects.toThrow(`${ONE} is held by ${pull.html_url} (draft, last active 0 minutes ago)`);
+		await expect(start()).rejects.toThrow(`${ONE} is held by ${pull.html_url} (draft, last active just now)`);
 		pull.body = "Work so far.\n\n## Decisions needed\n\n1. Which name?\n";
 		await expect(start()).rejects.toThrow(`held by ${pull.html_url} (draft, decisions needed,`);
 		pull.draft = false;
@@ -349,6 +349,24 @@ describe("start on another forge", () => {
 		expect(second.stderr).toContain(`quest: ${ONE} is held by branch ${BRANCH}, with no open PR\n`);
 	});
 
+	test("claims a quest whose tree is below the repository root", async () => {
+		const bare = tempDir();
+		git(bare, "init", "-q", "--bare", "-b", "main");
+		const work = tempDir();
+		setup(work);
+		mkdirSync(join(work, "sub"));
+		cpSync(join(Tree.baseline().path, "quest"), join(work, "sub", "quest"), { recursive: true });
+		git(work, "add", ".");
+		git(work, "commit", "-q", "-m", "seed");
+		git(work, "remote", "add", "origin", bare);
+		git(work, "push", "-q", "origin", "HEAD:refs/heads/main");
+
+		const out = await cli("--root", join(work, "sub"), "start", ONE);
+		expect(out.code, out.stderr).toBe(0);
+		expect(out.stdout).toBe(`${BRANCH}\n`);
+		expect(tip(bare)).not.toBe("");
+	});
+
 	test("refuses a blocked quest with exit 3", async () => {
 		const { bare, work } = plain();
 		const out = await cli("--root", work, "start", "quest/m0/epic/two.md");
@@ -404,6 +422,7 @@ test("claims reports the earliest open PR on each branch", async () => {
 
 test("ago rounds to minutes, hours, then days", () => {
 	const now = Date.parse("2026-10-21T12:00:00Z");
+	expect(ago(now, now - 10_000)).toBe("just now");
 	expect(ago(now, now - 60_000)).toBe("1 minute ago");
 	expect(ago(now, now - 3 * 3_600_000)).toBe("3 hours ago");
 	expect(ago(now, now - 3 * 86_400_000)).toBe("3 days ago");

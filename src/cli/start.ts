@@ -44,7 +44,8 @@ export async function startQuest(
 
 	// Build the claim on the upstream default branch, which must still have the quest.
 	const base = remoteHead(root, up.git);
-	if (!succeeds(root, ["cat-file", "-e", `${base}:${path}`])) {
+	const prefix = gitOutput(root, ["rev-parse", "--show-prefix"]);
+	if (!succeeds(root, ["cat-file", "-e", `${base}:${prefix}${path}`])) {
 		throw new Refusal(`${path} is not on the upstream default branch; update your checkout`);
 	}
 	// A nonce keeps two claimers on the same base, identity, and second from building the same commit.
@@ -170,9 +171,10 @@ export async function releaseQuest(
 	return { branch, closed: pulls.map((pull) => pull.url) };
 }
 
-/** How long ago `time` was, roughly: minutes, hours, then days. */
+/** How long ago `time` was, roughly: just now, minutes, hours, then days. */
 export function ago(now: number, time: number): string {
 	const minutes = Math.max(0, Math.round((now - time) / 60_000));
+	if (minutes === 0) return "just now";
 	const [count, unit] =
 		minutes < 60
 			? [minutes, "minute"]

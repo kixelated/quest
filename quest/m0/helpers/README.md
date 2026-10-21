@@ -52,7 +52,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [PR status](/quest/m0/helpers/status.md) - one call for head, checks, merge state, reviews by head, and unresolved threads
 - [Move and delete quests](/quest/m0/helpers/move.md) - `quest mv` and `quest rm` keep every root-absolute link valid
 - [CI checks in wait](/quest/m0/helpers/wait-checks.md) - `quest wait` wakes on required check results for the head
-- [quest start](/quest/m0/helpers/start.md) - claim a quest with a draft PR, the `## Decisions needed` hand-back, `quest unblocked --unclaimed`, and CI on ready PRs only
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
 - [Unattended triage](/quest/m0/helpers/afk.md) - an `afk` argument that only asks about merges and deletes
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
