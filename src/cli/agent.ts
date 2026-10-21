@@ -10,6 +10,8 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	chmodSync,
+	existsSync,
+	linkSync,
 	mkdirSync,
 	readFileSync,
 	readdirSync,
@@ -62,9 +64,15 @@ interface Harness {
 	/** Argv for a new session, given a session id to assign where the CLI accepts one. */
 	start(launch: Launch, session: string): string[];
 	resume(launch: Launch, session: string): string[];
-	/** The session id announced by one line of output, if any. */
-	announced(line: string): string | undefined;
-	parse(stdout: string, stderr: string): Result;
+	/** A reader for one run's stdout, fed line by line so a long run is never held in memory. */
+	reader(): Reader;
+}
+
+interface Reader {
+	/** Read one line of stdout, returning the session id if the line announces it. */
+	line(line: string): string | undefined;
+	/** The run's result, given the tail of its stderr. */
+	result(stderr: string): Result;
 }
 
 /** Provider messages for a key whose balance cannot pay for the request. */
@@ -86,22 +94,26 @@ const claude: Harness = {
 	keyVariable: "ANTHROPIC_API_KEY",
 	start: (launch, session) => [...claudeFlags(launch), "--session-id", session],
 	resume: (launch, session) => [...claudeFlags(launch), "--resume", session],
-	// The session id is assigned at start, so it is known before any output.
-	announced: () => undefined,
-	parse(stdout, stderr) {
-		const result = stdout
-			.split("\n")
-			.map(json)
-			.filter((value) => value?.type === "result")
-			.pop();
-		const reply = text(result?.result);
-		const cost = result?.total_cost_usd;
+	reader() {
+		let result: Record<string, unknown> | undefined;
 		return {
-			session: text(result?.session_id),
-			reply,
-			cost: typeof cost === "number" ? cost : undefined,
-			exhausted: EXHAUSTED.test(`${reply ?? ""}\n${stderr}`),
-			failed: result === undefined || result.is_error === true,
+			// The session id is assigned at start, so it is known before any output.
+			line(line) {
+				const value = json(line);
+				if (value?.type === "result") result = value;
+				return undefined;
+			},
+			result(stderr) {
+				const reply = text(result?.result);
+				const cost = result?.total_cost_usd;
+				return {
+					session: text(result?.session_id),
+					reply,
+					cost: typeof cost === "number" ? cost : undefined,
+					exhausted: EXHAUSTED.test(`${reply ?? ""}\n${stderr}`),
+					failed: result === undefined || result.is_error === true,
+				};
+			},
 		};
 	},
 };
@@ -126,32 +138,33 @@ const codex: Harness = {
 	keyVariable: "CODEX_API_KEY",
 	start: (launch) => ["codex", "exec", "--json", ...codexFlags(launch), "-"],
 	resume: (launch, session) => ["codex", "exec", "resume", "--json", ...codexFlags(launch), session, "-"],
-	announced(line) {
-		const event = json(line);
-		return event?.type === "thread.started" ? text(event.thread_id) : undefined;
-	},
-	parse(stdout, stderr) {
+	reader() {
 		let session: string | undefined;
 		let reply: string | undefined;
-		const errors: string[] = [];
-		let failed = false;
-		for (const event of stdout.split("\n").map(json)) {
-			if (event === undefined) continue;
-			if (event.type === "thread.started") session = text(event.thread_id) ?? session;
-			const item = event.item as Record<string, unknown> | undefined;
-			if (event.type === "item.completed" && item?.type === "agent_message") reply = text(item.text) ?? reply;
-			if (event.type === "turn.failed" || event.type === "error") {
-				failed = true;
-				const error = event.error as Record<string, unknown> | undefined;
-				errors.push(text(error?.message) ?? text(event.message) ?? "");
-			}
-		}
+		let error: string | undefined;
+		let exhausted = false;
 		return {
-			session,
-			// A turn that failed before replying reports why, as `claude -p` does.
-			reply: reply ?? errors.at(-1),
-			exhausted: EXHAUSTED.test(`${errors.join("\n")}\n${stderr}`),
-			failed: failed || reply === undefined,
+			line(line) {
+				const event = json(line);
+				if (event === undefined) return undefined;
+				const item = event.item as Record<string, unknown> | undefined;
+				if (event.type === "item.completed" && item?.type === "agent_message") reply = text(item.text) ?? reply;
+				if (event.type === "turn.failed" || event.type === "error") {
+					const failure = event.error as Record<string, unknown> | undefined;
+					error = text(failure?.message) ?? text(event.message) ?? "";
+					exhausted ||= EXHAUSTED.test(error);
+				}
+				if (event.type !== "thread.started") return undefined;
+				session = text(event.thread_id) ?? session;
+				return session;
+			},
+			result: (stderr) => ({
+				session,
+				// A turn that failed before replying reports why, as `claude -p` does.
+				reply: reply ?? error,
+				exhausted: exhausted || EXHAUSTED.test(stderr),
+				failed: error !== undefined || reply === undefined,
+			}),
 		};
 	},
 };
@@ -320,65 +333,97 @@ export async function spawnKeys(dir: string, env: NodeJS.ProcessEnv, resolve: Re
 	for (;;) {
 		const stored = load<KeyStore>(file);
 		if (stored?.fingerprint === fingerprint) return stored.keys;
+		if (!(await lockWithPid(lock))) continue;
 		try {
-			mkdirSync(lock, { mode: 0o700 });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			// Another launch is resolving; its secret-manager prompt may take a while.
-			const owner = Number(load<number>(join(lock, "pid")));
-			if (owner > 0 && !alive(owner)) rmSync(lock, { recursive: true, force: true });
-			else await sleep(250);
-			continue;
-		}
-		try {
-			writeFileSync(join(lock, "pid"), String(process.pid));
 			const references = entries.filter((entry) => entry.startsWith("op://"));
 			const resolved = references.length > 0 ? resolve(references, env) : [];
 			const keys = entries.map((entry) => (entry.startsWith("op://") ? resolved.shift()! : entry));
 			save(file, { fingerprint, keys } satisfies KeyStore);
 			return keys;
 		} finally {
-			rmSync(lock, { recursive: true, force: true });
+			rmSync(lock, { force: true });
 		}
 	}
+}
+
+/**
+ * Take `lock`, a file holding its owner's pid. Linking a staged file creates
+ * it with that pid in one step, so no lock ever lacks an owner. Returns false
+ * after waiting on a live owner or clearing a dead one's lock, to recheck.
+ * Clearing is not atomic: at worst two launches both resolve, and each writes
+ * the same keys.
+ */
+async function lockWithPid(lock: string): Promise<boolean> {
+	const staged = `${lock}.${randomUUID()}.tmp`;
+	writeFileSync(staged, String(process.pid), { mode: 0o600 });
+	try {
+		linkSync(staged, lock);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	} finally {
+		rmSync(staged, { force: true });
+	}
+	// Another launch is resolving; its secret-manager prompt may take a while.
+	const owner = load<number>(lock);
+	if (owner !== undefined && !alive(owner)) rmSync(lock, { force: true });
+	else if (owner !== undefined) await sleep(250);
+	return false;
 }
 
 /** A live agent, recorded so `stop` can find it by worktree. */
 interface Running {
 	/** The `quest agent` process that reports the agent's result. */
 	pid: number;
-	/** The agent CLI process; unset only when it failed to spawn. */
+	/** The agent CLI process; unset until it spawns. */
 	child?: number;
 	worktree: string;
 	session?: string;
-	/** Set by `stop` before it signals the agent, so the result reads as stopped. */
-	stopping?: boolean;
 }
 
-const recordPath = (dir: string, worktree: string) => join(dir, "agents", `${digest(worktree)}.json`);
+/**
+ * Each launch writes only its own record, named for its worktree and run, so
+ * no two processes update one file. `stop` asks a run to report itself stopped
+ * by creating the record's stop file.
+ */
+const stopPath = (record: string) => record.replace(/\.json$/, ".stop");
+
+/** The records in `dir`, or only those for `worktree`. */
+function records(dir: string, worktree?: string): string[] {
+	const agents = join(dir, "agents");
+	const prefix = worktree === undefined ? "" : `${digest(worktree)}.`;
+	try {
+		return readdirSync(agents)
+			.filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
+			.map((name) => join(agents, name));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+}
+
+/** Whether `record` belongs to a live launch; a dead launch's record and stop file are removed. */
+function live(record: string): Running | undefined {
+	const running = load<Running>(record);
+	if (running !== undefined && alive(running.pid)) return running;
+	rmSync(stopPath(record), { force: true });
+	rmSync(record, { force: true });
+	return undefined;
+}
 
 /**
- * Claim `worktree` for this process by creating its record exclusively, so two
- * concurrent launches cannot both run there. A record left by a `quest agent`
- * that died is replaced.
+ * Claim `worktree` for this launch. It records itself before looking for
+ * other launches, so of two concurrent launches at least one sees the other
+ * and refuses; neither ever runs alongside the other.
  */
-function claim(record: string, worktree: string): void {
-	for (;;) {
-		try {
-			writeFileSync(record, `${JSON.stringify({ pid: process.pid, worktree } satisfies Running)}\n`, {
-				flag: "wx",
-				mode: 0o600,
-			});
-			return;
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-		}
-		const previous = load<Running>(record);
-		if (previous && alive(previous.pid)) {
-			throw new Error(`an agent is already running in ${worktree}; stop it with \`quest agent stop\``);
-		}
+function claim(dir: string, worktree: string): string {
+	const record = join(dir, "agents", `${digest(worktree)}.${randomUUID()}.json`);
+	save(record, { pid: process.pid, worktree } satisfies Running);
+	if (records(dir, worktree).some((other) => other !== record && live(other) !== undefined)) {
 		rmSync(record, { force: true });
+		throw new Error(`an agent is already running in ${worktree}; stop it with \`quest agent stop\``);
 	}
+	return record;
 }
 
 export interface AgentDependencies {
@@ -396,6 +441,10 @@ export const processDependencies = (out: Pick<AgentDependencies, "stdout" | "std
 	resolve: onePassword,
 	...out,
 });
+
+/** How much of an agent's output is kept for diagnostics; the rest is read as it streams. */
+const TAIL = 64 * 1024;
+const tail = (value: string) => (value.length > TAIL ? value.slice(-TAIL) : value);
 
 /**
  * Run one agent turn in the foreground: a new session with `prompt`, or
@@ -427,19 +476,18 @@ export async function runAgent(
 		keys.reduce((result, k, index) => result.replaceAll(k, `<key ${index + 1}>`), value);
 
 	const harness = HARNESS[launch.harness];
+	const reader = harness.reader();
 	const id = session ?? randomUUID();
 	const argv = session === undefined ? harness.start(launch, id) : harness.resume(launch, id);
 	// Claude Code takes the id this command assigns; Codex announces its own.
 	const known = launch.harness === "claude" ? id : session;
-	const record = recordPath(dir, worktree);
-	claim(record, worktree);
+	const record = claim(dir, worktree);
+	const state: Running = { pid: process.pid, worktree };
 
-	let announced: string | undefined;
 	const announce = (value: string | undefined) => {
-		if (value === undefined || value === announced) return;
-		announced = value;
-		// Merge, keeping a `stopping` mark that `stop` may have added.
-		save(record, { ...load<Running>(record)!, session: value });
+		if (value === undefined || value === state.session) return;
+		state.session = value;
+		save(record, state);
 		deps.stdout(`session ${value}\n`);
 	};
 
@@ -461,8 +509,8 @@ export async function runAgent(
 					stdio: ["pipe", "pipe", "pipe"],
 				});
 				child = agent;
-				// `stop` waits for the agent's pid before it marks the record, so this write loses nothing.
-				save(record, { pid: process.pid, child: agent.pid, worktree } satisfies Running);
+				state.child = agent.pid;
+				save(record, state);
 				announce(known);
 				let out = "";
 				let err = "";
@@ -471,13 +519,14 @@ export async function runAgent(
 				// one split across chunks is still redacted.
 				let partial = "";
 				agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-					out += chunk;
+					out = tail(out + chunk);
 					const lines = (line + chunk).split("\n");
 					line = lines.pop()!;
-					for (const complete of lines) announce(harness.announced(complete));
+					for (const complete of lines) announce(reader.line(complete));
 				});
+				agent.stdout.once("end", () => announce(reader.line(line)));
 				agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-					err += chunk;
+					err = tail(err + chunk);
 					const buffered = partial + chunk;
 					const end = buffered.lastIndexOf("\n") + 1;
 					partial = buffered.slice(end);
@@ -500,10 +549,10 @@ export async function runAgent(
 				);
 			},
 		);
-		const result = harness.parse(stdout, stderr);
+		const result = reader.result(stderr);
 		announce(result.session);
 		const outcome: Outcome =
-			interrupted || load<Running>(record)?.stopping
+			interrupted || existsSync(stopPath(record))
 				? "stopped"
 				: result.exhausted
 					? "exhausted"
@@ -511,7 +560,7 @@ export async function runAgent(
 						? "finished"
 						: "failed";
 		if (outcome === "failed" && result.reply === undefined && stdout.trim() !== "") {
-			deps.stderr(`quest: ${argv[0]} printed no result; its output was:\n${redact(stdout)}\n`);
+			deps.stderr(`quest: ${argv[0]} printed no result; its output ended with:\n${redact(stdout)}\n`);
 		}
 		if (result.cost !== undefined) deps.stdout(`cost ${result.cost}\n`);
 		deps.stdout(`outcome ${outcome}\n`);
@@ -519,6 +568,7 @@ export async function runAgent(
 		return interrupted || EXIT[outcome];
 	} finally {
 		for (const [name, handler] of handlers) process.off(name, handler);
+		rmSync(stopPath(record), { force: true });
 		rmSync(record, { force: true });
 	}
 }
@@ -534,29 +584,29 @@ export async function stopAgent(worktree: string, deps: AgentDependencies): Prom
 	} catch {
 		throw new AgentInputError(`${worktree} is not a directory`);
 	}
-	const dir = spawnDirectory(deps.base, path);
-	await stopRecord(recordPath(dir, path), deps);
+	let stopped = false;
+	for (const record of records(spawnDirectory(deps.base, path), path))
+		stopped = (await stopRecord(record, deps)) || stopped;
+	if (!stopped) deps.stdout("no agent running\n");
 }
 
-async function stopRecord(record: string, deps: AgentDependencies): Promise<void> {
-	let running = load<Running>(record);
+/** Stop the launch that wrote `record`, returning false if it is no longer running. */
+async function stopRecord(record: string, deps: AgentDependencies): Promise<boolean> {
+	let running = live(record);
 	// A launch records its agent's pid just after claiming the worktree.
-	while (running !== undefined && running.child === undefined && alive(running.pid)) {
+	while (running !== undefined && running.child === undefined) {
 		await sleep(100);
-		running = load<Running>(record);
+		running = live(record);
 	}
-	if (running === undefined || !alive(running.pid)) {
-		rmSync(record, { force: true });
-		deps.stdout(`no agent running${running ? ` in ${running.worktree}` : ""}\n`);
-		return;
-	}
-	save(record, { ...running, stopping: true });
-	const { pid, child, worktree } = running;
+	if (running?.child === undefined) return false;
+	writeFileSync(stopPath(record), "");
+	const { pid, worktree } = running;
+	const child = running.child;
 	// Signal the agent CLI, never the reporting process, which then prints the
-	// stopped outcome and removes the record.
+	// stopped outcome and removes its record.
 	const signal = (name: NodeJS.Signals) => {
 		try {
-			if (child !== undefined) process.kill(child, name);
+			process.kill(child, name);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
 		}
@@ -565,32 +615,23 @@ async function stopRecord(record: string, deps: AgentDependencies): Promise<void
 	const deadline = Date.now() + STOP_GRACE_MS;
 	let killed = false;
 	let session = running.session;
-	for (let current = running; alive(pid);) {
+	for (let current: Running | undefined = running; current !== undefined && alive(pid); current = load(record)) {
 		session = current.session ?? session;
 		if (!killed && Date.now() > deadline) {
 			signal("SIGKILL");
 			killed = true;
 		}
 		await sleep(100);
-		const next = load<Running>(record);
-		if (next === undefined) break;
-		current = next;
 	}
-	rmSync(record, { force: true });
+	live(record);
 	deps.stdout(`stopped ${worktree}${session ? ` session ${session}` : ""}\n`);
+	return true;
 }
 
 /** End the spawn for the repository holding `root`: stop every agent, then delete the resolved keys. */
 export async function stopAll(root: string, deps: AgentDependencies): Promise<void> {
 	const dir = spawnDirectory(deps.base, root);
-	const agents = join(dir, "agents");
-	let names: string[] = [];
-	try {
-		names = readdirSync(agents).filter((name) => name.endsWith(".json"));
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-	}
-	for (const name of names) await stopRecord(join(agents, name), deps);
+	for (const record of records(dir)) await stopRecord(record, deps);
 	rmSync(dir, { recursive: true, force: true });
 	deps.stdout("deleted the resolved keys\n");
 }

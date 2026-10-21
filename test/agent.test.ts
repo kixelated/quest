@@ -1,5 +1,15 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	realpathSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -239,14 +249,23 @@ fakes("keys resolve once per spawn into a user-only store, and stop --all delete
 	expect(existsSync(dir)).toBe(false);
 });
 
-fakes("a resolver that died leaves no lock that blocks the next launch", async () => {
+fakes("a launch that died leaves no lock or record that blocks the next launch", async () => {
 	const s = setup();
-	const lock = join(spawnDirectory(join(s.runtime, "quest", "agent"), s.worktree), "resolving");
-	mkdirSync(lock, { recursive: true });
+	const dir = spawnDirectory(join(s.runtime, "quest", "agent"), s.worktree);
+	mkdirSync(join(dir, "agents"), { recursive: true });
 	const dead = spawnSync(process.execPath, ["-e", ""]).pid!;
-	writeFileSync(join(lock, "pid"), String(dead));
+	const lock = join(dir, "resolving");
+	writeFileSync(lock, String(dead));
+	// A record named as a launch names it: the worktree's digest, then the run.
+	const records = join(dir, "agents");
+	const worktree = createHash("sha256").update(realpathSync(s.worktree)).digest("hex").slice(0, 16);
+	writeFileSync(
+		join(records, `${worktree}.stale.json`),
+		JSON.stringify({ pid: dead, child: dead, worktree: s.worktree }),
+	);
 	expect((await quest("agent", "start", ...launch("claude", "2"), s.worktree, "go")).code).toBe(0);
 	expect(existsSync(lock)).toBe(false);
+	expect(readdirSync(records)).toEqual([]);
 });
 
 fakes("a key with no credit exits 3 so the spawn resumes on the next key", async () => {
@@ -341,11 +360,13 @@ fakes("concurrent launches in one worktree run only one agent", async () => {
 	vi.stubEnv("FAKE_MODE", "sleep");
 	const first = quest("agent", "start", ...launch("claude", "1"), s.worktree, "one");
 	const second = quest("agent", "start", ...launch("claude", "2"), s.worktree, "two");
+	// The refused launch returns first; the other runs until stopped.
+	const refused = await Promise.race([first, second]);
+	expect(refused.code).toBe(1);
+	expect(refused.stderr).toContain("an agent is already running");
 	await vi.waitFor(() => expect(s.calls()).toHaveLength(1));
 	expect((await quest("agent", "stop", s.worktree)).code).toBe(0);
 	const results = await Promise.all([first, second]);
-	expect(results.map((result) => result.code)).toEqual([1, 1]);
-	expect(results.filter((result) => result.stderr.includes("an agent is already running"))).toHaveLength(1);
 	expect(results.filter((result) => result.stdout.endsWith("outcome stopped\n"))).toHaveLength(1);
 	expect(s.calls().filter((call) => "argv" in call)).toHaveLength(1);
 });
