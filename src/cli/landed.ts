@@ -38,10 +38,15 @@ export function landed(root: string, base: string, branch?: string): Finding[] {
 	];
 }
 
-/** The quest file `branch` names, if it existed at `commit`: `<path>.md`, or an epic's `<path>/README.md`. */
+/**
+ * The quest file `branch` names, if it existed at `commit`: `<path>.md`, or an
+ * epic's `<path>/README.md`. A `README.md` is its directory's epic, so a branch
+ * ending in `/README` names only a nested epic called `README`.
+ */
 function questAt(root: string, commit: string, branch: string): string | null {
 	if (!branch.startsWith("quest/") || branch.endsWith("/")) return null;
-	for (const path of [`${branch}.md`, `${branch}/README.md`]) {
+	const epic = `${branch}/README.md`;
+	for (const path of branch.endsWith("/README") ? [epic] : [`${branch}.md`, epic]) {
 		if (git(root, ["cat-file", "-e", `${commit}:./${path}`]).status === 0) return path;
 	}
 	return null;

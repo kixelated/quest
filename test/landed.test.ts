@@ -8,9 +8,10 @@ import { Tree } from "./fixture";
 
 const FINDING = "neither deletes nor edits its quest since main";
 
-/** The baseline tree committed on `main`, then checked out on `branch`. */
-function repo(branch: string): Tree {
+/** The baseline tree, after `setup`, committed on `main`, then checked out on `branch`. */
+function repo(branch: string, setup?: (tree: Tree) => void): Tree {
 	const tree = Tree.baseline();
+	setup?.(tree);
 	git(tree, "init", "--quiet", "--initial-branch=main");
 	commit(tree, "baseline");
 	git(tree, "switch", "--quiet", "-c", branch);
@@ -85,6 +86,20 @@ test("an epic's branch is checked against its README", () => {
 		`quest/m0/epic/README.md: branch quest/m0/epic ${FINDING}`,
 	);
 	tree.append("quest/m0/epic/README.md", "\nMore.\n");
+	expect(tree.run("check", "--base", "main").code).toBe(0);
+});
+
+test("an epic named README is checked against its own README, not its parent's", () => {
+	const tree = repo("quest/m0/epic/README", (tree) =>
+		tree
+			.write("quest/m0/epic/README/README.md", "# [S] Nested\n\n## Goal\n\nAn epic named README.\n")
+			.append("quest/m0/epic/README.md", "- [Nested](/quest/m0/epic/README/README.md)\n"),
+	);
+	tree.append("quest/m0/epic/README.md", "\nParent.\n");
+	expect(tree.run("check", "--base", "main").stderr).toContain(
+		`quest/m0/epic/README/README.md: branch quest/m0/epic/README ${FINDING}`,
+	);
+	tree.append("quest/m0/epic/README/README.md", "\nMore.\n");
 	expect(tree.run("check", "--base", "main").code).toBe(0);
 });
 
