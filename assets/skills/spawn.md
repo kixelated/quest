@@ -51,6 +51,14 @@ Run selected `/quest-plan` sessions in the foreground.
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
 
+## Unattended
+
+With an `afk` argument, the user has stepped away: your recommendation stands in for their pick of `/quest-start`, skip, `/quest-ready`, or `/quest-iterate`, so act on it without asking.
+Still ask about each `/quest-merge` and `/quest-delete` you recommend, as one simple question with your recommendation first.
+Skip a quest or PR whose decision is not simple, noting why in the summary instead of asking.
+Hold `/quest-plan` sessions, including deprioritizing and suggested follow-ups, for the summary, since planning is an interview.
+The rest of the argument still filters the quests in scope.
+
 ## API keys
 
 With an `api` argument, bill agents to API keys instead of this session's account: run each as a headless agent CLI process rather than a sub-agent.
