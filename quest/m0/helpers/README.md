@@ -5,7 +5,8 @@
 Agents stop hand-writing `gh`, `jq`, and `sed` loops for routine quest
 workflow steps, because `quest` commands cover them and the skills point at
 those commands: CI results while waiting, a one-shot PR status, claiming
-quests and PRs, moving and deleting quests, and unattended triage.
+quests and PRs, moving and deleting quests, and unattended work. Skill
+rules that remove the maintainer's repeated steering belong here too.
 
 Only generic helpers belong here. Non-goals: the kix.quest UI, a daemon, and
 deciding whose review or which result counts; the agent still decides.
@@ -45,13 +46,24 @@ commands from Sep-Oct. Session counts in each child come from that window.
   without that section.
 - Decided (user): this epic ranks after the worktree and gate quests and
   before the Kix decision UI. Children rank by sessions affected.
+- Decided 2026-10-21 (user), from a month of moq maintainer transcripts:
+  quests that remove the maintainer's repeated steering join this epic.
+  `/quest-afk` and the guide rules rank first, since they save the most
+  maintainer time and change only prose. The complete loop ranks right after
+  the PR state commands, which also rewrite `complete`. Findings that fit an
+  existing child went into it: the merge method and the merged-PR refusal
+  into [PR state commands](/quest/m0/helpers/pr-states.md). Ready at
+  hand-back went into [Guide rules](/quest/m0/helpers/guide-rules.md), since
+  quest start landed without it.
 
 ## Required
 
+- [Unattended work](/quest/m0/helpers/afk.md) - `/quest-afk` replaces the `afk` argument: it skips every decision and keeps starting agreed work; every skill ends with a summary
+- [Guide rules](/quest/m0/helpers/guide-rules.md) - pushing, briefs, ready at hand-back, follow-ups, whose review counts, and user-owned choices
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
+- [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 
 ## Related
 
-- [Expensive command gate](/quest/m0/local-gate.md) - CPU admission for the checks these helpers wrap
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the agent-level load-average rules

@@ -381,8 +381,9 @@ smaller hosts, where RAM is capped by any container memory limit. On Linux,
 available memory includes reclaimable host and cgroup file cache and is bounded
 by the remaining budget of each enclosing memory cgroup. Load and memory count
 work from every session and user. The load average lags new work, so the gate
-admits at most one waiting command every 5 seconds per host rather than
-releasing every waiter at once. Windows reports no load
+admits at most one waiting command per 5-second window per host, never in
+consecutive windows, rather than releasing every waiter at once: a burst of
+waiters starts about 10 seconds apart. Windows reports no load
 average and macOS counts reclaimable cache as used memory, so those signals are
 skipped there.
 
