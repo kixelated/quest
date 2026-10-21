@@ -15,3 +15,4 @@ additional login providers. This milestone does not gate the first release.
 - [Donor isolation](/quest/m1/donor-isolation.md) - stronger boundaries for untrusted shared jobs
 - [ChatGPT hosted runs](/quest/m1/chatgpt-hosted.md) - conditional on provider approval and current terms
 - [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - resolve hosted-use approval before implementation
+- [Batched inbox reads](/quest/m1/inbox-reads.md) - a fixed number of D1 queries per project on each inbox load

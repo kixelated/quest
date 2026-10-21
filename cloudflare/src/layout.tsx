@@ -53,6 +53,7 @@ export function Layout(props: Page & { children: Child }) {
 							<img src="/theme/logo.svg" alt="" width="32" height="32" />
 							Quest
 						</a>
+						{props.user && <a href="/inbox">Decisions</a>}
 						<a href="/repos/quest">Quests</a>
 						<a href="/projects">Projects</a>
 						<a href="/docs">Docs</a>

@@ -12,9 +12,14 @@ import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
+import * as inbox from "./inbox/model";
+import { InboxPage } from "./inbox/page";
+import { purge, retain } from "./jobs/output";
+import { BootstrapRequired, fromForm, jobs, resume, stop } from "./jobs/routes";
+import { JobError } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 // Browsers send `Origin: null` on form posts under the default "no-referrer"
 // policy, which would fail the origin check on /sign-in and /sign-out.
 app.use(secureHeaders({ referrerPolicy: "same-origin" }));
@@ -78,6 +83,7 @@ app.use("/projects/*", async (c, next) => {
 		return c.json({ error: "Invalid origin" }, 403);
 	await next();
 });
+app.route("/", jobs);
 app.get("/projects", async (c) => {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	if (!session) return c.redirect("/sign-in?next=/projects", 303);
@@ -154,11 +160,14 @@ app.post("/projects/github/:owner/:repository", async (c) => {
 	)
 		return c.json({ error: "Invalid project choice" }, 400);
 	try {
-		await new GitHubService(c.env).setContributions(
+		const stopped = await new GitHubService(c.env).setContributions(
 			{ id: Number(id), owner: c.req.param("owner"), name: c.req.param("repository") },
 			session.user.id,
 			state,
 		);
+		if (state === "enabled") await resume(c.env, Number(id));
+		await stop(c.env, stopped);
+		if (state === "disconnected") await purge(c.env);
 		return c.redirect(
 			state === "disconnected" ? "/projects" : projectURL(c.req.param("owner"), c.req.param("repository")),
 			303,
@@ -204,7 +213,52 @@ app.get("/projects/github/:owner/:repository/data", async (c) => {
 });
 app.post("/projects/github/:owner/:repository/refresh", async (c) => {
 	await liveProject(c, true);
+	if ((await c.req.parseBody()).next === "inbox") return c.redirect("/inbox", 303);
 	return c.redirect(`${projectURL(c.req.param("owner"), c.req.param("repository"))}/state`, 303);
+});
+// Skipping is the maintainer's own triage, never a decision on the project.
+app.post("/projects/github/:owner/:repository/skip", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) throw new GitHubError("Sign in required");
+	const repo = await new GitHubService(c.env).enrolledProject(
+		c.req.param("owner"),
+		c.req.param("repository"),
+		session.user.id,
+	);
+	if (!repo) throw new GitHubError("Project is not enrolled");
+	const { item, version } = await c.req.parseBody();
+	if (typeof item !== "string" || typeof version !== "string" || item.length > 300 || version.length > 100)
+		return c.json({ error: "Item and version required" }, 400);
+	await inbox.skip(c.env.DB, session.user.id, repo.id, item, version);
+	return c.redirect("/inbox", 303);
+});
+
+// The signed-in home: one decision at a time across the maintainer's projects.
+app.get("/inbox", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.redirect("/sign-in?next=/inbox", 303);
+	const user = session.user.id;
+	const { projects, items, runners } = await inbox.load(c.env, user);
+	const { decisions, working, skipped } = inbox.arrange(items);
+	const project = c.req.query("project");
+	const target = c.req.query("item");
+	const chosen = target ? items.find((i) => String(i.project.id) === project && i.target === target) : undefined;
+	const active = chosen ?? decisions[0] ?? null;
+	if (active?.need) await inbox.markSeen(c.env.DB, user, active);
+	return page(
+		c,
+		{ title: "Decisions", description: "Your decision inbox: questions, issues, pull requests, and ready quests." },
+		<InboxPage
+			user={user}
+			projects={projects}
+			active={active}
+			missing={!!target && !chosen}
+			decisions={decisions}
+			working={working}
+			skipped={skipped}
+			runners={runners}
+		/>,
+	);
 });
 app.get("/projects/github/:owner/:repository/board", async (c) => {
 	const state = await liveProject(c);
@@ -303,6 +357,29 @@ app.notFound((c) =>
 	),
 );
 
+function refused(c: Context<{ Bindings: Env }>, message: string, bootstrap: boolean, status: 403 | 409) {
+	return page(
+		c,
+		{ title: "Not recorded", description: "The decision was not recorded." },
+		<section class="wrap docs">
+			<h1>Not recorded</h1>
+			<p role="alert">{message}</p>
+			{bootstrap && (
+				<form method="post" action={c.req.path}>
+					<input type="hidden" name="workflow" value="bootstrap" />
+					<p>
+						<button class="button primary">Start a bootstrap job</button>
+					</p>
+				</form>
+			)}
+			<p>
+				<a href="/inbox">Return to your decisions</a>.
+			</p>
+		</section>,
+		status,
+	);
+}
+
 // The server API bypasses Better Auth's HTTP middleware. Guard form routes
 // before calling it; the /api/auth/* handler enforces its own Origin/CSRF checks.
 for (const path of ["/sign-in", "/sign-out", "/link", "/passkeys/delete"]) {
@@ -354,7 +431,7 @@ app.get("/sign-in", (c) => {
 		{ title: "Sign in", description: "Sign in to Quest with GitHub, Google, or a passkey." },
 		<SignInPage
 			providers={providers(c.env)}
-			next={next && local(next) ? next : "/"}
+			next={next && local(next) ? next : "/inbox"}
 			error={c.req.query("error")}
 		/>,
 	);
@@ -362,7 +439,7 @@ app.get("/sign-in", (c) => {
 app.post("/sign-in", async (c) => {
 	// Return to the page that signed in, if it names a path on this site.
 	const body = await c.req.parseBody();
-	const callbackURL = typeof body.next === "string" && local(body.next) ? body.next : "/";
+	const callbackURL = typeof body.next === "string" && local(body.next) ? body.next : "/inbox";
 	const chosen = body.provider === undefined ? "github" : provider(c, body.provider);
 	if (!chosen) return c.json({ error: "Sign-in method unavailable" }, 400);
 	return oauth(
@@ -426,8 +503,18 @@ app.post("/passkeys/delete", async (c) => {
 	return redirect(response, "/account");
 });
 app.onError((error, c) => {
-	if (error instanceof GitHubError) return c.json({ error: error.message }, 403);
+	const status = error instanceof GitHubError ? 403 : error instanceof JobError ? 409 : null;
+	// A refused inbox form explains itself and leads back, rather than showing JSON.
+	if (status && fromForm(c)) return refused(c, error.message, error instanceof BootstrapRequired, status);
+	if (error instanceof BootstrapRequired) return c.json({ error: error.message, bootstrap: true }, 409);
+	if (status) return c.json({ error: error.message }, status);
 	console.error({ event: "request_failed", path: c.req.path, name: error.name });
 	return c.json({ error: "Request failed" }, 500);
 });
-export default app;
+export default {
+	fetch: app.fetch,
+	async scheduled(_controller, env) {
+		await retain(env, Date.now());
+	},
+} satisfies ExportedHandler<Env>;
+export { RunnerHub } from "./jobs/hub";

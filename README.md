@@ -53,13 +53,16 @@ own quest, and it becomes ready once its children have merged. The top folders
 (`m0`, `m1`, ...) are **milestones** that give the work a delivery horizon.
 
 When a quest is complete, its PR removes the plan and the links that depended
-on it, so the quests that required it can become ready. The finished plan stays
-in Git history, beside the code that completed it.
+on it, so the quests that required it can become ready. Milestones are never
+deleted, so a PR that finishes one (its README has no `Required` left) removes
+the links to that milestone too; `quest check` flags any it misses. The
+finished plan stays in Git history, beside the code that completed it.
 
 Work is taken through a live runner lock or an open change on the forge.
-Quest on Cloudflare uses MoQ announcements to lock active work; crashed
-sessions clear their announcements automatically. On GitHub, a pushed quest
-branch claims the work. These states stay out of the plan file.
+kix.quest records each active job in its database and reassigns a job whose
+runner goes offline. On GitHub, a draft PR
+opened from the quest's branch, including from a fork, claims the work. These
+states stay out of the plan file.
 
 ## Try it
 
@@ -196,7 +199,10 @@ following a new page when the current one fills, plus one GraphQL query for
 reactions. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
-with Ctrl-C to stop waiting.
+with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
+a cursor, or the given `--since` (else the head SHA) if setup had not finished.
+Retry with it, not the original command, so activity that landed during the
+first wait is still reported.
 
 ## Gate expensive commands
 
@@ -249,6 +255,7 @@ the version you pin decides what your agents follow:
 | Skill | What it does |
 | --- | --- |
 | `quest-plan` | Ask the questions that turn an idea into scoped quests. |
+| `quest-recurring` | Plan a quest whose finishing PR creates its next occurrence, and what gates it. |
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
@@ -263,6 +270,17 @@ the version you pin decides what your agents follow:
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
 a separate invocation, so you review every change.
+
+To bill spawned agents to API keys instead of your agent's account, export
+`QUEST_API_KEYS` with one or more whitespace-separated keys and run
+`/quest-spawn api`. Entries may be secret references such as 1Password `op://`
+URIs, resolved in one `op inject` when the spawn starts; a 1Password service
+account token (`OP_SERVICE_ACCOUNT_TOKEN`) avoids even that prompt. Each quest
+runs as a headless `claude -p` or `codex exec` process on one key; a key whose
+credit runs out is dropped, and spawning stops once every key is exhausted.
+Disable auto-reload or set a spend limit in each provider console so draining a
+key cannot charge a card. Agents run as your user, so they are not isolated from
+the other keys.
 
 To use Quest in your own repository, paste this into your agent:
 

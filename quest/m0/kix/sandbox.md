@@ -23,6 +23,9 @@ Decided 2026-10-15, from Codex's review of kixelated/quest#121:
 - Keep the agent CLI's login outside what sandboxed commands can read. For
   opencode under sandbox-runtime, verify how much of its account home the
   wrapped process exposes, and deny reads of every other account home.
+- Job coordination marks every `iterate` job untrusted and routes it only to
+  Linux runners that register with `vm: true`. Classify PR heads whose commits
+  all come from maintainers or kix jobs as trusted here.
 - Trusted revisions (the default branch, kix job branches, and maintainer
   commits) build their devShell through the host Nix daemon before entering
   the sandbox. Verify whether sandboxed commands such as `nix flake check`

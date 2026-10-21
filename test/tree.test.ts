@@ -346,6 +346,60 @@ describe("index", () => {
 	});
 });
 
+// Milestones are permanent, so a link to one keeps resolving after it
+// finishes. Check forces its removal; readiness stays a grep for the heading.
+describe("finished milestones", () => {
+	const EMPTY_M0 = "# M0\n\n## Goal\n\nA milestone.\n";
+	const GATE = "# [S] Gate\n\n## Goal\n\nRuns once m0 finishes.\n\n## Required\n\n- [M0](/quest/m0/README.md)\n";
+
+	/** The baseline plus m1, whose gate requires m0. */
+	const gated = () =>
+		tree()
+			.append("quest/README.md", "- [M1](/quest/m1/README.md)\n")
+			.write(
+				"quest/m1/README.md",
+				"# M1\n\n## Goal\n\nThe next milestone.\n\n## Required\n\n- [Gate](/quest/m1/gate.md)\n",
+			)
+			.write("quest/m1/gate.md", GATE);
+
+	test("a link to an open milestone blocks", () => {
+		const t = gated();
+		t.accepts();
+		expect(t.blockers("quest/m1/gate.md")[0]).toBe("quest/m0/README.md");
+	});
+
+	test("a link to a finished milestone", () => {
+		const t = gated().write("quest/m0/README.md", EMPTY_M0).remove("quest/m0/epic");
+		expect(t.findings()).toEqual([
+			"quest/m1/gate.md:9: requires /quest/m0/README.md, a finished milestone; remove the link, and the '## Required' heading with its last entry",
+		]);
+		expect(t.ready()).toEqual([]);
+	});
+
+	// moq-dev/moq's m1 lists m0 quests: those blockers keep it open.
+	test("a milestone with only non-child blockers left is open", () => {
+		gated()
+			.write("quest/m0/README.md", `${EMPTY_M0}\n## Required\n\n- [Other](/quest/m1/other.md)\n`)
+			.remove("quest/m0/epic")
+			.write("quest/m1/other.md", "# [S] Other\n\n## Goal\n\nOpen work m0 waits on.\n")
+			.append("quest/m1/README.md", "- [Other](/quest/m1/other.md)\n")
+			.accepts();
+	});
+
+	test("the root's listing of a finished milestone is membership", () => {
+		tree().write("quest/m0/README.md", EMPTY_M0).remove("quest/m0/epic").accepts();
+	});
+
+	test("removing the link readies the quest", () => {
+		const t = gated()
+			.write("quest/m0/README.md", EMPTY_M0)
+			.remove("quest/m0/epic")
+			.write("quest/m1/gate.md", "# [S] Gate\n\n## Goal\n\nRuns once m0 finishes.\n");
+		t.accepts();
+		expect(t.ready()).toEqual(["quest/m1/gate.md"]);
+	});
+});
+
 describe("Required", () => {
 	test("a direct cycle", () => {
 		tree()

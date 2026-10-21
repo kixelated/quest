@@ -65,6 +65,9 @@ Run it after creating or updating quests.
 
 ## Questions
 
+Make every reference you show the user clickable: link issues, PRs, and commits by full URL, as in `[owner/repo#123](https://github.com/owner/repo/pull/123)`, never a bare `#123`.
+Sub-agents report those URLs so the parent can link them.
+
 Block on user decisions.
 Explain the quest or PR, the decision, and your recommendation, then ask synchronously with a blocking interactive question tool when available and allowed in the current mode.
 Do not use asynchronous question tools.
@@ -98,15 +101,23 @@ Start only ready quests.
 `quest ready [<path>]` prints what blocks a quest, or every ready quest.
 
 Work is taken when it has a live runner lock or an open change on the forge.
-On Quest on Cloudflare, active runners announce their locks over MoQ; a crashed
-session's announcement clears itself. Check those locks and open changes before
+kix.quest records each active job in its database and reassigns a job whose
+runner goes offline. Check those locks and open changes before
 starting. These states stay out of the quest file.
 
-On GitHub, if you have push access, make an empty commit and push a branch to
-the remote.
-The remote branch claims the quest so other agents skip it.
-Check for its branch and any open PR before starting.
-If a branch looks stale (old, with no open PR), offer the user to take it over.
+On GitHub, a quest is claimed by an open PR whose head branch is the quest's
+branch, from the upstream repository or a fork
+(`gh pr list --repo <upstream> --head <quest-branch>`), or by that branch
+upstream while its PR is being opened.
+Check both against the upstream repository; in a fork's clone, `origin` is
+usually the fork.
+To claim a quest, push an empty commit to its branch, upstream if you have push
+access and otherwise on your fork, then open a draft PR from it right away.
+That PR becomes the quest's PR.
+Then recheck: the earliest open PR holds the claim, and a later one closes and
+stops.
+If an upstream branch looks stale (old, with no open PR), offer the user to take
+it over.
 
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
@@ -114,8 +125,8 @@ For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 Push claims and updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
 
-When a quest is complete with no open decisions, open its PR ready for review.
-Otherwise open a draft and list its open decisions, or what remains unfinished, in the body.
+When a quest is complete with no open decisions, mark its PR ready for review.
+Otherwise keep it a draft and list its open decisions, or what remains unfinished, in the body.
 A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.
 Add a closing keyword for every issue under `Closes`.

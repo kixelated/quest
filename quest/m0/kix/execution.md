@@ -9,6 +9,36 @@ requested iteration, in the same decision UI.
 
 ## Plan
 
+Decided 2026-10-20 (user) from the transcript audit recorded in
+[quest start](/quest/m0/helpers/start.md). Locally the user runs
+`/quest-spawn next 16` or `next 32` twice a day per repository, only ever
+asks for more parallelism, and accepts the recommended option 73% of the
+time:
+
+- Decided (user): start ready work as `/quest-spawn` does. Whenever a runner
+  slot frees, take the next unclaimed ready quest in `quest unblocked`
+  order, optionally scoped to milestones per project. The job's first step
+  checks the quest is worth starting now; a doubtful one becomes a decision
+  (start, skip, deprioritize, delete) instead of running.
+- Decided (user): parallelism has no user-facing limit. Free runner slots
+  and account quota cap it. Conflicts are prevented by ownership only: one
+  owner per quest and per PR, recorded on GitHub. Overlapping files are left
+  to the merge step, with no path declarations or overlap prediction.
+- A start job claims through the bot exactly as `quest start` does: a draft
+  PR. kix treats PRs that local sessions hold as owned, shows that owner on
+  the card, and never acts on them: a `quest:*` label, or a draft with no
+  `## Decisions needed` section. A stale one is offered to the maintainer for
+  takeover.
+- A PR with no `quest:*` label that is ready, or a draft with
+  `## Decisions needed`, is a decision item offering the
+  `/quest-complete` actions, one decision per PR: mark ready, merge (the
+  [merge job](/quest/m0/kix/merge-job.md)), iterate, skip, or delete. Owned
+  PRs never push a notification.
+- Each job's suggested follow-ups become a "plan these?" decision feeding
+  [web planning](/quest/m0/kix/planning.md).
+
+Earlier guidance:
+
 - Use the same runners, prompt contract, and publisher as planning instead
   of a separate agent orchestration stack.
 - Apply quest-spawn selection/readiness behavior, including the

@@ -51,9 +51,10 @@ quest ready
 Review the plan before setting out. `/quest-start` claims one quest and opens a
 pull request; `/quest-spawn` sends several agents out in parallel when
 your session supports them. Use `$quest-start` and `$quest-spawn` in Codex.
-Check the forge for a live runner lock or an open change before starting. Quest
-on Cloudflare locks active work with MoQ announcements that clear when a session
-ends. On GitHub, check the quest's remote branch and open PRs. `quest ready`
+Check the forge for a live runner lock or an open change before starting.
+kix.quest records each active job in its database and reassigns a job whose
+runner goes offline. On GitHub, check the upstream repository for the quest's
+branch and for open PRs from it, including PRs from forks. `quest ready`
 reads dependencies in the quest tree; it does not look for these live states.
 
 You review each change: `/quest-ready` takes a draft to review, and
