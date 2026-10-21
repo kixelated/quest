@@ -47,9 +47,9 @@ each other"); none came from two quests touching the same files.
     idle and waits on the maintainer;
   - the [PR state commands](/quest/m0/helpers/pr-states.md) label a PR
     whenever another session takes it.
-- A draft without the heading that looks stale (no pushes since it was
-  opened or last pushed) is offered to the user for takeover. No fixed
-  timeout.
+- A draft without the heading that looks stale is offered to the user for
+  takeover, showing how long ago its last push or comment was. The user
+  judges; there is no fixed timeout.
 - `quest start --release <quest>` closes the draft PR and deletes the claim
   branch only while its tip is still the empty claim commit, using a lease on
   that SHA; otherwise it refuses and says why.

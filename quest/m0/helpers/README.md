@@ -41,7 +41,9 @@ commands from Sep-Oct. Session counts in each child come from that window.
   starter until its body has a `## Decisions needed` section, which the guide
   defines as the hand-back marker. Commands read only whether it is present.
   This narrows the 2026-10-19 decision above: `quest status` still does not
-  parse the decisions listed in a PR body.
+  parse the decisions listed in a PR body. It also amends the 2026-10-20
+  decision: a PR is owned while it carries a `quest:*` label or is a draft
+  without that section.
 - Decided (user): this epic ranks after the worktree and gate quests and
   before the Kix decision UI. Children rank by sessions affected.
 
