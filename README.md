@@ -259,6 +259,9 @@ Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
 a separate invocation, so you review every change.
 
+Before stepping away, add `afk` to `/quest-spawn` or `/quest-complete`: the
+agent acts on its own recommendations and asks only before merging or deleting.
+
 To bill spawned agents to API keys instead of your agent's account, export
 `QUEST_API_KEYS` with one or more whitespace-separated keys and run
 `/quest-spawn api`. Entries may be secret references such as 1Password `op://`
