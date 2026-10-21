@@ -36,7 +36,7 @@ ownership-manifest design:
 ## Required
 
 - [Gate headroom](/quest/m0/gate-headroom.md) - gated commands start at once while the host has room
-- [Worktree process ownership](/quest/m0/worktree.md) - supervise checkout commands and release checkouts automatically
+- [Worktree removal](/quest/m0/worktree.md) - remove finished checkouts without losing work
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
 
