@@ -266,13 +266,16 @@ function AccountForm(props: { item: Item; runners: Runners }) {
 function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
 	const state = view?.state;
-	if (!state?.project.available) return "GitHub reported changes. Refresh to start new work from current state.";
+	// Webhooks reread the project in the background; a failed read says why.
+	const failed = state?.failure ? `The background read failed: ${state.failure}. ` : "";
+	if (!state?.project.available)
+		return `${failed || "GitHub reported changes. "}Refresh to start new work from current state.`;
 	// A retry continues its failed job's pull request, so that claim does not block it.
 	const retry = item.need === "retry" ? (item.job?.pull ?? null) : null;
 	if (item.kind === "quest" && !startable(state, item.target, retry))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
-		return "Refresh to read this from GitHub.";
+		return `${failed}Refresh to read this from GitHub.`;
 	return null;
 }
 
@@ -455,6 +458,7 @@ function Project(props: { view: ProjectView }) {
 					<>
 						<span>{project.state === "enabled" ? "Contributions enabled" : "Contributions paused"}</span>
 						{!state?.project.available && <span>Refresh needed</span>}
+						{state?.failure && <span role="alert">Background read failed: {state.failure}</span>}
 						<a href={`${base}/board`}>Quest board</a>
 						<a href={`${base}/state`}>Activity</a>
 					</>
