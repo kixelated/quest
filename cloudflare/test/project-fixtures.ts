@@ -55,7 +55,7 @@ export const issue = {
  * `mock` reinstalls it after another sign-in replaces it.
  */
 export async function maintainerOf() {
-	const github = { flake: true, pullFlake: true, role: "maintain" };
+	const github = { flake: true, pullFlake: true, role: "maintain", issue: "open", pull: "open", head };
 	const who = identity("github");
 	const cookie = (await oauth(who)).session!;
 	const user = (await db
@@ -88,7 +88,7 @@ export async function maintainerOf() {
 				id: 5,
 				app_id: 123,
 				suspended_at: null,
-				permissions: { metadata: "read", contents: "read" },
+				permissions: { metadata: "read", contents: "read", issues: "read", pull_requests: "read" },
 			});
 		if (path.endsWith("/access_tokens")) return Response.json({ token: "installation-token" });
 		if (path === "/installation/token") return new Response(null, { status: 204 });
@@ -115,6 +115,10 @@ export async function maintainerOf() {
 					? { user: { id: Number(who.id) }, permission: "write", role_name: github.role }
 					: { user: { id: Number(permission[1]) }, permission: "read", role_name: "read" },
 			);
+		// The live issue and pull request that a job binds, which observations can lag.
+		if (path === "/repos/upstream/project/issues/1") return Response.json({ state: github.issue });
+		if (path === "/repos/upstream/project/pulls/2")
+			return Response.json({ state: github.pull, head: { sha: github.head } });
 		const ref = url.searchParams.get("ref");
 		if (path === "/repos/upstream/project/contents/flake.nix" && (ref === commit || ref === head))
 			return (ref === commit ? github.flake : github.pullFlake)

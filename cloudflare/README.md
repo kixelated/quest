@@ -76,7 +76,9 @@ A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
 `bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
 create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
 every request rechecks current GitHub authority. `start` takes only quests that
-observations show ready and unclaimed. `iterate` jobs are untrusted and route
+observations show ready and unclaimed. A job on an issue or pull request
+rereads it from GitHub, refusing one that closed or whose head moved since
+observations read it. `iterate` jobs are untrusted and route
 only to Linux runners that declare VM builds. Without a `flake.nix`, the route
 offers a `bootstrap` job instead. A paused project gets no new jobs and none are
 claimed; resuming it dispatches the jobs that waited. Disconnecting a project

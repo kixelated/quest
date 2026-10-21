@@ -908,6 +908,22 @@ describe("job routes", () => {
 		expect(await stale.json()).toMatchObject({ error: "Refresh project activity before starting work" });
 	});
 
+	it("refuses an issue or pull request that closed or moved since it was read", async () => {
+		// Closing or commenting leaves availability known, and history has not reread the target.
+		const changed = "This changed on GitHub since it was read; refresh and review it again";
+		github.issue = "closed";
+		const closed = await post("", { workflow: "plan", target: "issues/1" });
+		expect(closed.status).toBe(403);
+		expect(await closed.json()).toEqual({ error: changed });
+		github.pull = "closed";
+		expect(await (await post("", { workflow: "iterate", target: "pulls/2" })).json()).toEqual({ error: changed });
+		github.pull = "open";
+		github.head = "e".repeat(40);
+		expect(await (await post("", { workflow: "iterate", target: "pulls/2" })).json()).toEqual({ error: changed });
+		// Work that targets no issue or pull request still starts.
+		expect((await post("", { workflow: "start", target: "quest/first.md" })).status).toBe(201);
+	});
+
 	it("offers a devShell bootstrap job instead of starting without a flake", async () => {
 		github.flake = false;
 		const refused = await post("", { workflow: "start", target: "quest/first.md" });

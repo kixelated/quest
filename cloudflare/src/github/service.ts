@@ -538,15 +538,17 @@ export class GitHubService {
 
 	/**
 	 * What a new job may start from: `resolve` picks it from current
-	 * observations, then this checks whether its revision has a flake for the
+	 * observations, then this checks that its issue or pull request is still
+	 * open at the observed head, and whether its revision has a flake for the
 	 * runner's devShell.
 	 */
-	jobSource<T extends { revision: string }>(
+	jobSource<T extends { target: string; revision: string }>(
 		repo: GitHubRepository,
 		userId: string,
 		resolve: (state: ProjectState) => T,
 	) {
-		return this.#authorized(repo, userId, { contents: "read" }, async (token, current, installation) => {
+		const permissions = { contents: "read", issues: "read", pull_requests: "read" } as const;
+		return this.#authorized(repo, userId, permissions, async (token, current, installation) => {
 			this.#public(current);
 			const enrolled = await this.#state(repo, installation);
 			if (enrolled === null) throw new GitHubError("Project is not enrolled for this installation");
@@ -556,6 +558,17 @@ export class GitHubService {
 				throw new GitHubError("Refresh project activity before starting work");
 			// Check the revision the job will run, such as a pull request's head.
 			const job = resolve(state);
+			// Only history rereads an issue or PR, so its activity row can still say
+			// open after it closed; read the target itself before binding a job to it.
+			const [, kind, target] = job.target.match(/^(issues|pulls)\/(\d+)$/) ?? [];
+			if (kind) {
+				const live = await this.#api<{ state: string; head?: { sha: string } }>(
+					token,
+					`${repositoryPath(repo)}/${kind}/${number(Number(target))}`,
+				);
+				if (live.state !== "open" || (kind === "pulls" && live.head?.sha !== job.revision))
+					throw new GitHubError("This changed on GitHub since it was read; refresh and review it again");
+			}
 			let flake = true;
 			try {
 				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
