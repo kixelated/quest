@@ -1,5 +1,6 @@
 // The seeded local server's data must load on the current schema and routes,
 // and show every inbox state it exists to check.
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
 import { fakeGitHub } from "../dev/github";
@@ -21,7 +22,13 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 	]);
 	const data = world();
 	vi.spyOn(globalThis, "fetch").mockImplementation(fakeGitHub(data));
-	const request = (path: string, init?: RequestInit) => app.request(`${origin}${path}`, init, testEnv);
+	// Webhooks read in the background, so each request finishes its `waitUntil` work.
+	const request = async (path: string, init?: RequestInit) => {
+		const ctx = createExecutionContext();
+		const response = await app.request(`${origin}${path}`, init, testEnv, ctx);
+		await waitOnExecutionContext(ctx);
+		return response;
+	};
 	const { cookie } = await seed({
 		fetch: request,
 		db,
@@ -45,7 +52,8 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 		"Build the landing page hero",
 		"Bump dependencies",
 		"Add a dark mode toggle",
-		"Issue #9",
+		// Read by number after its webhook.
+		"Sync stops after the laptop sleeps",
 		"Export a project as a ZIP archive",
 		"Settings page loses unsaved changes when the session expires",
 		"Keep working offline",
