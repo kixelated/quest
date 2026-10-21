@@ -551,7 +551,7 @@ export class GitHubService {
 		const snapshot = await this.#snapshot(token, repo, current);
 		const response = await this.#api<{
 			data?: { repository: ActivityPage | null };
-			errors?: { type?: string; path?: unknown[] }[];
+			errors?: { path?: unknown[] }[];
 		}>(token, "/graphql", "POST", {
 			query: activityQuery(scan, stale),
 			variables: {
@@ -563,13 +563,13 @@ export class GitHubService {
 				refs: scan.occupancy.refs || null,
 			},
 		});
-		// Only an entity read by number may be missing; any other error is a partial result.
+		// An entity read by number may be gone, such as a deleted issue (GitHub
+		// reports NOT_FOUND at its alias). Any other error is a partial result.
+		// Accepting any error at the alias keeps one unreadable entity from
+		// blocking every later read.
 		const partial = response.errors?.some(
 			(error) =>
-				error.type !== "NOT_FOUND" ||
-				error.path?.length !== 2 ||
-				error.path[0] !== "repository" ||
-				!/^s\d+$/.test(String(error.path[1])),
+				error.path?.length !== 2 || error.path[0] !== "repository" || !/^s\d+$/.test(String(error.path[1])),
 		);
 		if (partial || !response.data?.repository) throw new GitHubError("Project activity unavailable");
 		// A rename, transfer, visibility change, or revocation during the read
