@@ -103,7 +103,6 @@ operator-paid-hosting decisions:
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Webhook reconcile](/quest/m0/kix/reconcile.md) - new issues and PRs arrive in the inbox ready to act on, without a manual refresh
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
-- [Co-maintainer inbox](/quest/m0/kix/members.md) - every current maintainer sees enrolled projects in their inbox
 - [Decision paper trail](/quest/m0/kix/paper-trail.md) - planning PRs carry the recorded questions and answers, rendered by the service
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Mobile web app](/quest/m0/kix/mobile.md) - an installable PWA with Web Push for decisions
