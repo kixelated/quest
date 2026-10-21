@@ -42,9 +42,8 @@ burst of 8 took 104 s gated versus 19 s ungated.
   together can repeat that forever. This replaces `Host.claim(window)`. For
   example, prune, count, and record under a short host-wide lock that a caller
   reclaims once its owner process has exited, like the worktree registry lock
-  in [kixelated/quest#178](https://github.com/kixelated/quest/pull/178). Count
-  the unexpired records rather than reading a slot number, since expired
-  slots leave holes.
+  (`acquire()` in `src/cli/worktree.ts`). Count the unexpired records rather
+  than reading a slot number, since expired slots leave holes.
 - **`SETTLE_MS` apart, not two windows.** Today a claim is refused while the
   previous window's claim exists, and every waiter wakes at the next boundary,
   so queued commands start about 10 s apart. Keep the full-`SETTLE_MS`
@@ -66,17 +65,16 @@ burst of 8 took 104 s gated versus 19 s ungated.
   directory persists. A record dated in the future means the clock stepped
   back: rewrite its time to now, so it still counts and spaces admissions
   however far the clock stepped, then expires a minute later.
-- **Ctrl-C once.** A terminal Ctrl-C reaches the child directly and again
-  through the forwarder. On Unix, while Quest is in the terminal's foreground
-  process group, skip forwarding SIGINT and SIGHUP, which the terminal also
-  delivers to the child; always forward SIGTERM, which a terminal never sends.
+- **Ctrl-C once.** In both `quest gate` and `quest worktree run`
+  (`src/cli/supervise.ts`), a terminal Ctrl-C reaches the child directly and
+  again through the forwarder. Share one fix between them. On Unix, while
+  Quest is in the terminal's foreground process group, skip forwarding SIGINT
+  and SIGHUP, which the terminal also delivers to the child; always forward
+  SIGTERM, which a terminal never sends.
   A SIGINT sent with `kill` to Quest alone is then not forwarded. On Windows,
   Ctrl-C reaches every process on the console and Node's `child.kill()`
-  terminates the child forcefully, so wait for the child instead of
-  forwarding. If
-  [kixelated/quest#178](https://github.com/kixelated/quest/pull/178) has
-  landed, share the fix with `quest worktree run`, which has the same double
-  delivery; otherwise fix `quest gate` alone.
+  terminates the child forcefully, so `quest gate` waits for the child
+  instead of forwarding; `quest worktree run` is Linux-only.
 - Re-run `scripts/gate-bench.sh` for the idle-burst and 8× cases and record
   both results in the PR. Expect the pinned 8× case to look ungated: it
   confines 16 suites to two CPUs with `taskset`, while headroom is measured
@@ -86,5 +84,4 @@ burst of 8 took 104 s gated versus 19 s ungated.
 
 ## Related
 
-- [Worktree process ownership](/quest/m0/worktree.md) - [kixelated/quest#178](https://github.com/kixelated/quest/pull/178) adds `quest worktree run`, which can share the Ctrl-C fix
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes agent-count throttles once resource control is in place
