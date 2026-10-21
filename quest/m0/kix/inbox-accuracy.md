@@ -18,8 +18,10 @@ Decided 2026-10-21 from the follow-ups of
   starter, and a draft with that section as waiting on the maintainer, as the
   guide defines. Today a draft without the section can show as Accepted.
 - **Unknown merge state.** GitHub reports `mergeStateStatus` `UNKNOWN` while it
-  computes mergeability. Treat it as not yet known: keep the item's previous
-  state and do not mark it unread until a definite state arrives.
+  computes mergeability. On an already-recorded PR, treat it as not yet known:
+  keep the item's previous state and do not mark it unread until a definite
+  state arrives. A newly seen PR still surfaces as unread, since GitHub may
+  send no further event once the computation finishes.
 - **Retention (user).** Page every activity read (`readState` in
   `cloudflare/src/github/state.ts` reads every row on each `/board`, `/state`,
   `/data`, and inbox view), and prune a closed entity's activity rows once it
