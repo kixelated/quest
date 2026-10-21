@@ -22,7 +22,7 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 	]);
 	const data = world();
 	vi.spyOn(globalThis, "fetch").mockImplementation(fakeGitHub(data));
-	// Background work, such as a webhook's notification, finishes before the next step.
+	// Webhooks read and notify in the background, so each request finishes its `waitUntil` work.
 	const request = async (path: string, init?: RequestInit) => {
 		const ctx = createExecutionContext();
 		const response = await app.request(`${origin}${path}`, init, testEnv, ctx);
@@ -52,7 +52,8 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 		"Build the landing page hero",
 		"Bump dependencies",
 		"Add a dark mode toggle",
-		"Issue #9",
+		// Read by number after its webhook.
+		"Sync stops after the laptop sleeps",
 		"Export a project as a ZIP archive",
 		"Settings page loses unsaved changes when the session expires",
 		"Keep working offline",
