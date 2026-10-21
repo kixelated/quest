@@ -534,6 +534,20 @@ export async function settle(db: D1Database, job: string, commit: string, landed
 		.run();
 }
 
+/** The job's answered agent questions, oldest first, for its pull request's decision record. */
+export async function decisions(db: D1Database, job: string) {
+	const { results } = await db
+		.prepare(
+			"SELECT prompt,answer FROM job_questions WHERE job=? AND kind='agent' AND answer IS NOT NULL ORDER BY askedAt,rowid",
+		)
+		.bind(job)
+		.all<{ prompt: string; answer: string }>();
+	return results.map((row) => ({
+		prompt: JSON.parse(row.prompt) as unknown,
+		answer: JSON.parse(row.answer) as unknown,
+	}));
+}
+
 /** Remember the pull request a job delivered, so later deliveries update it. */
 export async function delivered(db: D1Database, job: string, pull: number) {
 	await db.prepare("UPDATE jobs SET pull=? WHERE id=?").bind(pull, job).run();
