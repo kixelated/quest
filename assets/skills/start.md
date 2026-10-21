@@ -10,10 +10,10 @@ The argument is the quest to work on.
 If you are unsure on the best course of action, ask the user for direction.
 
 Update your checkout, run `quest ready`, then confirm the quest is still ready and unclaimed.
-Check the forge for a live runner lock or an open change; on GitHub, check the quest's remote branch and open PRs.
+Check the forge for a live runner lock or an open change; on GitHub, check the quest's upstream branch and open PRs from any fork.
 Confirm you can write in your worktree; if you cannot, stop and report without claiming.
 Claim it as `quest guide` describes.
-Release work you cannot finish; on GitHub, delete its branch claim and your isolated worktree.
+Release work you cannot finish; on GitHub, delete its branch claim, close any claim PR, and remove your isolated worktree.
 
 Implement the quest until it is complete, or some blocker is hit, then create a PR.
 Never write to or clean up a directory other agents share, such as a session scratchpad.

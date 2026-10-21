@@ -10,7 +10,7 @@ Run `quest unblocked --json` for ready candidates in milestone priority, descend
 The count is distinct transitive dependents; other prerequisites may still remain.
 Use that order when dispatching, and recompute after the quest tree changes.
 An explicit argument takes precedence: filter to the selected quests/epics and honor their requested order.
-Ranking does not establish that work is unclaimed: verify live locks, open changes, and remote branch claims before starting.
+Ranking does not establish that work is unclaimed: verify live locks, open changes (including PRs from forks), and remote branch claims before starting.
 For a quest waiting on an outside condition, check whether it has cleared before recommending.
 
 Start every quest you would recommend starting, without asking: well planned, with no blockers or conflicts with quests already started.

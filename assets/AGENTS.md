@@ -105,10 +105,14 @@ kix.quest records each active job in its database and reassigns a job whose
 runner goes offline. Check those locks and open changes before
 starting. These states stay out of the quest file.
 
-On GitHub, if you have push access, make an empty commit and push a branch to
-the remote.
-The remote branch claims the quest so other agents skip it.
-Check for its branch and any open PR before starting.
+On GitHub, a quest is claimed by its branch on the upstream repository or by any
+open PR whose head branch has that name, including PRs from forks
+(`gh pr list --head <quest-branch>`).
+Check both before starting; in a fork's clone, `origin` is usually the fork.
+To claim a quest, make an empty commit on its branch.
+With push access, push it upstream.
+Without, push it to your fork and open a draft PR from it right away; that PR
+becomes the quest's PR.
 If a branch looks stale (old, with no open PR), offer the user to take it over.
 
 A quest's branch is its path without `.md`.

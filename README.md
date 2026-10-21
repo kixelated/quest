@@ -59,7 +59,8 @@ in Git history, beside the code that completed it.
 Work is taken through a live runner lock or an open change on the forge.
 kix.quest records each active job in its database and reassigns a job whose
 runner goes offline. On GitHub, a pushed quest
-branch claims the work. These states stay out of the plan file.
+branch or an open PR from one, including from a fork, claims the work. These
+states stay out of the plan file.
 
 ## Try it
 
