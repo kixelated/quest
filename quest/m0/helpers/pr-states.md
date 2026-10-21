@@ -53,10 +53,11 @@ repositories ("those are in another repo?").
 - Decided 2026-10-21 (user), replacing a carve-out for moq-dev/moq.pro's
   `merge` label queue, which the user means to remove: `--land` makes a merge
   commit by default (`gh pr merge --merge`), through GitHub's merge queue
-  when the base has one. A repository's root instructions may name another
-  method or queue per base, and `--land` follows them. The merge skill named
-  no method, so an agent squashed a PR into moq-dev/moq's `release`, which
-  needs a merge commit.
+  when the base has one. `--squash` or `--rebase` selects another method;
+  the command never reads prose, so the merge skill picks the flag from the
+  method a repository's root instructions name for that base. The merge
+  skill named no method, so an agent squashed a PR into moq-dev/moq's
+  `release`, which needs a merge commit.
 - Every command refuses a merged or closed PR, because a push after the merge
   brings the deleted branch back.
 - A merge pick covers the fixes its own agent pushes for conflicts, CI, and
@@ -71,8 +72,8 @@ repositories ("those are in another repo?").
 - Test a refused draft its starter still holds, a race for one PR, two
   sessions taking the same state, a release
   with a stale token, a refused swap, landing on a moved head, a PR
-  leaving the queue, a refused merged PR, the default merge commit, and a
-  repository whose root instructions name another method.
+  leaving the queue, a refused merged PR, the default merge commit, and
+  `--squash` and `--rebase`.
 
 ## Required
 
