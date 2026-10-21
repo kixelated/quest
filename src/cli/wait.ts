@@ -44,7 +44,7 @@ const CHECKS = `query($owner: String!, $repo: String!, $number: Int!, $after: St
 						__typename
 						... on CheckRun {
 							name status conclusion completedAt detailsUrl isRequired(pullRequestNumber: $number)
-							checkSuite { status app { databaseId } workflowRun { file { path } } }
+							checkSuite { status workflowRun { databaseId } }
 						}
 						... on StatusContext { context state createdAt targetUrl isRequired(pullRequestNumber: $number) }
 					}
@@ -101,19 +101,17 @@ interface Check {
 	name: string;
 	required: boolean;
 	url: string | null;
-	/** The GitHub App that reported a check run; commit statuses have none. */
-	app?: number;
-	/** The workflow file a GitHub Actions job runs in, and whether that workflow run has finished. */
-	workflow?: { path: string; done: boolean };
+	/** A GitHub Actions job whose workflow run has not finished, so it may still create jobs. */
+	running: boolean;
 	result?: { outcome: "passed" | "failed"; point: string; time: number };
 }
 
 /** What the base branch requires, read from branch protection and rulesets. */
 interface Requirements {
-	/** Required checks by name, and the app that must report each when one is set. */
-	checks: { context: string; app?: number }[];
-	/** Workflow files that must pass as a whole, whatever jobs they create. */
-	workflows: string[];
+	/** Required check names. */
+	names: Set<string>;
+	/** A required workflow names no checks, but still means the base requires some. */
+	workflows: boolean;
 }
 
 /** Wait until activity, returning plain output lines. Network and time are injected. */
@@ -153,11 +151,6 @@ async function watch(
 	const prUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`;
 	const deadline = options.timeout === undefined ? Infinity : started + options.timeout * 1000;
 	const github = new GitHub(deps, deadline);
-	const list = async (path: string): Promise<{ rows: ObjectValue[]; response: Response }> => {
-		const response = await github.request(path);
-		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
-		return { rows: array(await response.json()), response };
-	};
 
 	let cursor: Cursor;
 	let historical: Activity[] = [];
@@ -177,7 +170,7 @@ async function watch(
 		let commitsPath: string | undefined = `${base}/pulls/${pr.number}/commits?per_page=100`;
 		let listedHead: string | undefined;
 		while (commitsPath) {
-			const { rows, response } = await list(commitsPath);
+			const { rows, response } = await github.list(commitsPath);
 			for (const commit of rows) {
 				listedHead = string(commit.sha);
 				if (!fullSha(listedHead)) throw new Error("invalid GitHub commit SHA");
@@ -201,7 +194,7 @@ async function watch(
 			let path: string | undefined =
 				`/repos/${fullName}/activity?ref=${encodeURIComponent(string(head.ref))}&per_page=100`;
 			while (path) {
-				const { rows, response } = await list(path);
+				const { rows, response } = await github.list(path);
 				activities.push(...rows);
 				if (
 					shaPoint
@@ -347,31 +340,16 @@ async function watch(
 			object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {},
 		);
 		const legacy = object(protection.required_status_checks ?? { checks: [] });
-		const rules: ObjectValue[] = [];
-		for (let path: string | undefined = `${base}/rules/branches/${ref}?per_page=100`; path;) {
-			const page = await list(path);
-			rules.push(...page.rows);
-			path = link(page.response, "next");
-		}
-		// Branch protection allows any app with -1 or null, and a ruleset by omitting the app.
-		const requirement = (context: unknown, app: unknown) => ({
-			context: string(context),
-			...(typeof app === "number" && app > 0 ? { app } : {}),
-		});
+		const rules = await github.all(`${base}/rules/branches/${ref}?per_page=100`);
 		const found: Requirements = {
-			checks: [
-				...(legacy.enforcement_level === "off"
-					? []
-					: array(legacy.checks).map((row) => requirement(row.context, row.app_id))),
+			names: new Set([
+				...(legacy.enforcement_level === "off" ? [] : array(legacy.checks).map((row) => string(row.context))),
 				...rules
 					.filter((rule) => rule.type === "required_status_checks")
 					.flatMap((rule) => array(object(rule.parameters).required_status_checks))
-					.map((row) => requirement(row.context, row.integration_id)),
-			],
-			workflows: rules
-				.filter((rule) => rule.type === "workflows")
-				.flatMap((rule) => array(object(rule.parameters).workflows))
-				.map((row) => string(row.path)),
+					.map((row) => string(row.context)),
+			]),
+			workflows: rules.some((rule) => rule.type === "workflows"),
 		};
 		requirements.set(branch, found);
 		return found;
@@ -496,13 +474,11 @@ function check(row: ObjectValue): Check {
 	const run = row.__typename === "CheckRun";
 	const { check: classified, outcome } = classifyCheck(row);
 	const suite = run && row.checkSuite ? object(row.checkSuite) : undefined;
-	const file = suite?.workflowRun ? object(suite.workflowRun).file : null;
 	const found: Check = {
 		name: classified.name,
 		required: classified.required,
 		url: classified.url,
-		...(suite?.app ? { app: Number(object(suite.app).databaseId) } : {}),
-		...(file ? { workflow: { path: string(object(file).path), done: suite!.status === "COMPLETED" } } : {}),
+		running: suite?.workflowRun ? suite.status !== "COMPLETED" : false,
 	};
 	if (outcome === "pending") return found;
 	const point = string(run ? row.completedAt : row.createdAt);
@@ -521,24 +497,7 @@ function checkActivities(
 	state: Cursor["checks"],
 	prUrl: string,
 ): Activity[] {
-	const inWorkflow = (entry: Check) => entry.workflow !== undefined && needs.workflows.includes(entry.workflow.path);
-	const required =
-		needs.checks.length || needs.workflows.length
-			? all.filter((entry) => entry.required || inWorkflow(entry))
-			: all;
-	// GitHub lists a check only once it starts, so a required one created late is still to come.
-	// A check from another app does not stand in for one bound to an app. A required workflow
-	// passes as a whole, so it holds back checks:passed until its run finishes.
-	const started =
-		needs.checks.every((need) =>
-			all.some(
-				(entry) =>
-					entry.name === need.context &&
-					(need.app === undefined || entry.app === undefined || entry.app === need.app),
-			),
-		) &&
-		needs.workflows.every((path) => all.some((entry) => entry.workflow?.path === path)) &&
-		all.every((entry) => !inWorkflow(entry) || entry.workflow!.done);
+	const required = needs.names.size || needs.workflows ? all.filter((entry) => entry.required) : all;
 	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
 		const id = `${head}:${outcome}`;
 		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
@@ -556,8 +515,13 @@ function checkActivities(
 	const settled = required.flatMap((entry) => (entry.result ? [{ ...entry, result: entry.result }] : []));
 	settled.sort((a, b) => a.result.time - b.result.time);
 	const failed = settled.find((entry) => entry.result.outcome === "failed" && entry.result.time >= state.since);
+	// GitHub lists a check only once it starts, so a pass waits until nothing on the head is still
+	// going: no pending check, no workflow run that may yet create a job, and every required name present.
+	const idle =
+		all.every((entry) => entry.result && !entry.running) &&
+		[...needs.names].every((name) => all.some((entry) => entry.name === name));
 	const passed =
-		started && settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
+		idle && settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
 			? settled.at(-1)
 			: undefined;
 	return [...reached("failed", failed), ...reached("passed", passed)];

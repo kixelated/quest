@@ -7,11 +7,12 @@ import { Command, CommanderError, InvalidArgumentError, Option } from "commander
 
 import { description, version } from "../../package.json";
 import { blockers, check, formatFinding, label, lookup, ready, renderBlocker, unblocked } from "../core";
+import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
+import { type Report, moveQuest, removeQuest } from "./move";
 import { init, uninstall } from "./setup";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
-import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
 import { pullRequestStatus, statusLines } from "./status";
 import { waitForActivity, WaitTimeout } from "./wait";
 
@@ -147,7 +148,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
 				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
 				"each once per head, with the check's name as the actor and its details URL. " +
-				"Results count as quest status counts them, so neutral and skipped results pass; a required check not yet started holds back checks:passed. " +
+				"Results count as quest status counts them, so neutral and skipped results pass. " +
+				"checks:passed waits until no check is pending, no GitHub Actions run is unfinished, and every check the base branch names is present. " +
 				"Optional checks never wake the wait, unless the base branch requires none, which requires them all. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
 				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
@@ -203,6 +205,60 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return 1;
 				},
 			);
+		});
+
+	/** Changes on stdout; mentions and check findings on stderr, which fail the command. */
+	const report = (result: Report): number => {
+		for (const line of result.changes) print(line);
+		for (const line of result.warnings) warn(line);
+		for (const line of result.findings) warn(line);
+		return result.findings.length > 0 ? 1 : 0;
+	};
+
+	program
+		.command("mv")
+		.summary("Move a quest or epic and rewrite the links to it")
+		.description(
+			"Move a quest, or an epic directory and everything under it, with git mv, and rewrite every " +
+				"root-absolute link to it under quest/. The change is staged.\n\n" +
+				"Refuses the root epic and milestones, which are permanent. Refuses outside a git work tree, when " +
+				"the destination exists, and while a moved quest has a claim branch or open PR on origin, or on " +
+				"the repository a GitHub fork came from, since the old branch would no longer name it. Moving a " +
+				"quest into or out of an epic changes which epic lists it; the check afterwards reports what to fix.\n\n" +
+				"Prints R for the move and M for each edited document. Mentions of the old path that are not links, " +
+				"or are outside quest/, are reported on stderr and left alone. Runs quest check on the result and " +
+				"exits 1 if it fails.",
+		)
+		.argument("<from>", "Quest file or epic directory, as /quest/..., quest/..., or a filesystem path")
+		.argument("<to>", "Its new path, which must not exist")
+		.action((from: string, to: string) => {
+			pending = moveQuest(root(), from, to, { github: () => gitHubDependencies(warn), warn }).then(
+				report,
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				},
+			);
+		});
+
+	program
+		.command("rm")
+		.summary("Delete a quest or epic and drop the links to it")
+		.description(
+			"Delete a quest, or an epic and the quests under it, with git rm, and drop every Required, Related, " +
+				"or Closes entry that links to it, with any heading left empty. It also drops every Required link to a " +
+				"finished milestone, one whose README has no Required left, except the root's own listing. The change " +
+				"is staged.\n\n" +
+				"Refuses outside a git work tree. An epic is its directory or README; removing one that holds other " +
+				"quests requires -r. The root epic and milestones are permanent.\n\n" +
+				"Prints D for each deleted quest and M for each edited document. Mentions that are not list entries, " +
+				"or are outside quest/, are reported on stderr and left alone. Runs quest check on the result and " +
+				"exits 1 if it fails.",
+		)
+		.argument("<path>", "Quest file, or epic directory or README")
+		.option("-r, --recursive", "Remove an epic with the quests under it")
+		.action((path: string, options: { recursive?: boolean }) => {
+			code = report(removeQuest(root(), path, options.recursive ?? false));
 		});
 
 	program

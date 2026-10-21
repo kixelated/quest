@@ -79,10 +79,7 @@ interface CheckFixture {
 	result?: string;
 	time?: string;
 	status?: boolean;
-	/** The GitHub App reporting a check run; GitHub Actions by default. */
-	app?: number;
-	/** The workflow file a job runs in, and whether its run is still going after this job. */
-	workflow?: string;
+	/** A finished job whose workflow run is still going, so it may yet create jobs. */
 	running?: boolean;
 }
 
@@ -113,8 +110,7 @@ function checks(
 					isRequired: entry.required ?? false,
 					checkSuite: {
 						status: entry.result && !entry.running ? "COMPLETED" : "IN_PROGRESS",
-						app: { databaseId: entry.app ?? ACTIONS },
-						workflowRun: entry.workflow ? { file: { path: entry.workflow } } : null,
+						workflowRun: { databaseId: 1 },
 					},
 				};
 	return response({
@@ -759,25 +755,35 @@ test("a required failure wakes the wait, naming the check and linking its detail
 	expect(fixture.checkCalls[0].body).toMatchObject({ variables: { owner: "example", repo: "project", number: 1 } });
 });
 
-test("an optional failure never wakes the wait, and every required check passing does", async () => {
-	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
-		checks: [
-			checks([
-				{ name: "lint", result: "FAILURE", time: LATER },
-				{ name: "check", required: true, result: "SUCCESS", time: LATER },
-				{ name: "test", required: true },
-			]),
-			checks([
-				{ name: "lint", result: "FAILURE", time: LATER },
-				{ name: "check", required: true, result: "SUCCESS", time: LATER },
-				{ name: "test", required: true, result: "SKIPPED", time: LATEST },
-				{ name: "slow" },
-			]),
-		],
-		ruled: ["check", "test"],
-	});
+test("an optional failure never wakes the wait, and checks:passed waits for every check to finish", async () => {
+	const fixture = setup(
+		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
+		[A],
+		{
+			checks: [
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "test", required: true },
+				]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "test", required: true, result: "SKIPPED", time: LATEST },
+					{ name: "slow" },
+				]),
+				checks([
+					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "check", required: true, result: "SUCCESS", time: LATER },
+					{ name: "test", required: true, result: "SKIPPED", time: LATEST },
+					{ name: "slow", result: "SUCCESS", time: LATER },
+				]),
+			],
+			ruled: ["check", "test"],
+		},
+	);
 	const lines = await waitForActivity(pr, {}, fixture.deps);
-	expect(fixture.sleeps).toEqual([300_000]);
+	expect(fixture.sleeps).toEqual([300_000, 300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(
 		/^2026-10-07T12:08:00Z checks:passed test https:\/\/github.com\/example\/project\/actions\/runs\/1\/job\/4 q1\./,
@@ -816,39 +822,25 @@ test("optional checks never stand in for required checks that have not started",
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
 });
 
-test("required rules on a later page, and app-bound checks, hold back checks:passed", async () => {
-	const fixture = setup(
-		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
-		[A],
-		{
-			checks: [
-				checks([
-					{ name: "check", required: true, result: "SUCCESS", time: LATER },
-					// Another app's check of the same name does not start the required one.
-					{ name: "deploy", result: "SUCCESS", time: LATER, app: 7 },
-				]),
-				checks([
-					{ name: "check", required: true, result: "SUCCESS", time: LATER },
-					{ name: "deploy", result: "SUCCESS", time: LATER, app: 7 },
-					{ name: "deploy", required: true, app: 42 },
-				]),
-				checks([
-					{ name: "check", required: true, result: "SUCCESS", time: LATER },
-					{ name: "deploy", result: "SUCCESS", time: LATER, app: 7 },
-					{ name: "deploy", required: true, result: "SUCCESS", time: LATEST, app: 42 },
-				]),
-			],
-			ruled: ["check"],
-			rules: [
-				{
-					type: "required_status_checks",
-					parameters: { required_status_checks: [{ context: "deploy", integration_id: 42 }] },
-				},
-			],
-		},
-	);
+test("a required check named on a later page of rules holds back checks:passed", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }]),
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "deploy", required: true, result: "SUCCESS", time: LATEST },
+			]),
+		],
+		ruled: ["check"],
+		rules: [
+			{
+				type: "required_status_checks",
+				parameters: { required_status_checks: [{ context: "deploy", integration_id: 42 }] },
+			},
+		],
+	});
 	const lines = await waitForActivity(pr, {}, fixture.deps);
-	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed deploy /);
 	expect(fixture.ruleCalls.map((call) => call.path)).toEqual([
@@ -858,10 +850,7 @@ test("required rules on a later page, and app-bound checks, hold back checks:pas
 	]);
 });
 
-const CI = ".github/workflows/ci.yml";
-const workflowRule = { type: "workflows", parameters: { workflows: [{ path: CI, repository_id: 1 }] } };
-
-test("a required workflow passes as a whole, and keeps optional checks optional", async () => {
+test("a required workflow keeps optional checks optional, and its unfinished run holds back checks:passed", async () => {
 	const fixture = setup(
 		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
 		[A],
@@ -871,15 +860,15 @@ test("a required workflow passes as a whole, and keeps optional checks optional"
 				// The run's next job has not been created yet.
 				checks([
 					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI, running: true },
+					{ name: "build", required: true, result: "SUCCESS", time: LATER, running: true },
 				]),
 				checks([
 					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI },
-					{ name: "gate", result: "SUCCESS", time: LATEST, workflow: CI },
+					{ name: "build", required: true, result: "SUCCESS", time: LATER },
+					{ name: "gate", required: true, result: "SUCCESS", time: LATEST },
 				]),
 			],
-			rules: [workflowRule],
+			rules: [{ type: "workflows", parameters: { workflows: [{ path: ".github/workflows/ci.yml" }] } }],
 		},
 	);
 	const lines = await waitForActivity(pr, {}, fixture.deps);
@@ -888,19 +877,20 @@ test("a required workflow passes as a whole, and keeps optional checks optional"
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
 });
 
-test("a failing job in a required workflow wakes the wait", async () => {
-	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+test("with no required checks, an unfinished workflow run holds back checks:passed", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
 		checks: [
+			checks([{ name: "build", result: "SUCCESS", time: LATER, running: true }]),
 			checks([
-				{ name: "lint", result: "SUCCESS", time: LATER },
-				{ name: "build", result: "FAILURE", time: LATEST, workflow: CI, running: true },
+				{ name: "build", result: "SUCCESS", time: LATER },
+				{ name: "gate", result: "SUCCESS", time: LATEST },
 			]),
 		],
-		rules: [workflowRule],
 	});
 	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
-	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed build /);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
 });
 
 test("a repository with no required checks requires every check, commit statuses included", async () => {

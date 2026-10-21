@@ -1,13 +1,17 @@
-// The GitHub client shared by the PR commands, outside the repository-independent core.
+// The GitHub client shared by the commands that talk to GitHub, outside the repository-independent core.
 import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const API = "https://api.github.com";
 const MAX_SLEEP = 2_147_483_647;
 
-export interface PullRequest {
+/** A repository on github.com. */
+export interface Repository {
 	owner: string;
 	repo: string;
+}
+
+export interface PullRequest extends Repository {
 	number: number;
 }
 
@@ -34,20 +38,28 @@ export type ObjectValue = Record<string, unknown>;
 /** Accept a GitHub PR URL, or a number in the origin repository. */
 export function pullRequest(value: string, root: string): PullRequest {
 	if (/^[1-9]\d*$/.test(value)) {
-		const origin = execFileSync("git", ["-C", root, "remote", "get-url", "origin"], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		const match =
-			/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?$/.exec(
-				origin,
-			);
-		if (!match) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
-		return { owner: match[1], repo: match[2], number: Number(value) };
+		const repository = githubRepository(remoteUrl(root, "origin"));
+		if (!repository) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
+		return { ...repository, number: Number(value) };
 	}
 	const match = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value);
 	if (!match) throw new GitHubInputError("expected a GitHub pull request URL or a PR number in origin");
 	return { owner: match[1], repo: match[2], number: Number(match[3]) };
+}
+
+/** The URL a git remote fetches from. */
+export function remoteUrl(root: string, remote: string): string {
+	return execFileSync("git", ["-C", root, "remote", "get-url", remote], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	}).trim();
+}
+
+/** The github.com repository a remote URL names, or `null` for any other host. */
+export function githubRepository(url: string): Repository | null {
+	const match =
+		/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?$/.exec(url);
+	return match ? { owner: match[1], repo: match[2] } : null;
 }
 
 export function gitHubDependencies(warn: (message: string) => void): GitHubDependencies {
@@ -134,6 +146,24 @@ export class GitHub {
 			this.deps.warn(`GitHub rate limited this request; waiting ${Math.ceil(delay / 1000)} seconds`);
 			await this.pause(delay);
 		}
+	}
+
+	/** One page of a REST listing, and its response for the next link. */
+	async list(path: string): Promise<{ rows: ObjectValue[]; response: Response }> {
+		const response = await this.request(path);
+		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
+		return { rows: array(await response.json()), response };
+	}
+
+	/** Every page of a REST listing. */
+	async all(path: string): Promise<ObjectValue[]> {
+		const rows: ObjectValue[] = [];
+		for (let next: string | undefined = path; next;) {
+			const page = await this.list(next);
+			rows.push(...page.rows);
+			next = link(page.response, "next");
+		}
+		return rows;
 	}
 
 	/** Run a GraphQL query and return its data, failing on any reported error. */
