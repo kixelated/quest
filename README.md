@@ -151,9 +151,9 @@ local readiness as `ready`; verify claims and outside conditions before starting
 
 A PR from a quest's branch must leave that quest accurate. `quest check --base
 <ref>` runs the usual check, then compares the working tree with its merge base
-with `<ref>`. When the branch is `quest/<path>`, naming `quest/<path>.md` or an
-epic's `quest/<path>/README.md` at the merge base, the diff must delete or edit
-that file. Any other branch passes. The branch defaults to the current one;
+with `<ref>`. When the branch is a quest's path without `.md` (an epic's is
+`quest/<path>/README`) and that quest exists at the merge base, the diff must
+delete or edit it. Any other branch passes. The branch defaults to the current one;
 `--branch <name>` names the PR's head branch instead:
 
 ```sh

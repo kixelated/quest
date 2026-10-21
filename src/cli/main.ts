@@ -62,8 +62,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Report every structural mistake in the tree; exit non-zero if any.\n\n" +
 				"With --base, also check that a PR from a quest's branch leaves that quest accurate. When the branch " +
-				"is quest/<path>, naming quest/<path>.md or an epic's quest/<path>/README.md at the merge base with " +
-				"<ref>, the working tree must delete or edit that file; a PR that finishes the quest deletes it, and " +
+				"is a quest's path without .md (an epic's is quest/<path>/README) and that quest exists at the merge " +
+				"base with <ref>, the working tree must delete or edit it; a PR that finishes the quest deletes it, and " +
 				"one that leaves work rewrites it to what remains. Any other branch adds no finding. Fetch <ref> " +
 				"first: a stale base can predate the quest and skip it.",
 		)

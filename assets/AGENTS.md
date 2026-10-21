@@ -119,8 +119,8 @@ stops.
 If an upstream branch looks stale (old, with no open PR), offer the user to take
 it over.
 
-A quest's branch is its path without `.md`, and an epic's is its directory.
-For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`, and `quest/m1/foo/README.md` is `quest/m1/foo`.
+A quest's branch is its path without `.md`.
+For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 
 Push claims and updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.

@@ -8,10 +8,9 @@ import { Tree } from "./fixture";
 
 const FINDING = "neither deletes nor edits its quest since main";
 
-/** The baseline tree, after `setup`, committed on `main`, then checked out on `branch`. */
-function repo(branch: string, setup?: (tree: Tree) => void): Tree {
+/** The baseline tree committed on `main`, then checked out on `branch`. */
+function repo(branch: string): Tree {
 	const tree = Tree.baseline();
-	setup?.(tree);
 	git(tree, "init", "--quiet", "--initial-branch=main");
 	commit(tree, "baseline");
 	git(tree, "switch", "--quiet", "-c", branch);
@@ -80,27 +79,17 @@ test("the working tree counts, before it is committed", () => {
 	expect(tree.run("check", "--base", "main").code).toBe(0);
 });
 
-test("an epic's branch is checked against its README", () => {
-	const tree = repo("quest/m0/epic");
+test("an epic's branch, its README's path without .md, is checked against its README", () => {
+	const tree = repo("quest/m0/epic/README");
 	expect(tree.run("check", "--base", "main").stderr).toContain(
-		`quest/m0/epic/README.md: branch quest/m0/epic ${FINDING}`,
+		`quest/m0/epic/README.md: branch quest/m0/epic/README ${FINDING}`,
 	);
 	tree.append("quest/m0/epic/README.md", "\nMore.\n");
 	expect(tree.run("check", "--base", "main").code).toBe(0);
 });
 
-test("an epic named README is checked against its own README, not its parent's", () => {
-	const tree = repo("quest/m0/epic/README", (tree) =>
-		tree
-			.write("quest/m0/epic/README/README.md", "# [S] Nested\n\n## Goal\n\nAn epic named README.\n")
-			.append("quest/m0/epic/README.md", "- [Nested](/quest/m0/epic/README/README.md)\n"),
-	);
-	tree.append("quest/m0/epic/README.md", "\nParent.\n");
-	expect(tree.run("check", "--base", "main").stderr).toContain(
-		`quest/m0/epic/README/README.md: branch quest/m0/epic/README ${FINDING}`,
-	);
-	tree.append("quest/m0/epic/README/README.md", "\nMore.\n");
-	expect(tree.run("check", "--base", "main").code).toBe(0);
+test("an epic's directory is not its branch", () => {
+	expect(repo("quest/m0/epic").run("check", "--base", "main").code).toBe(0);
 });
 
 test("a branch that is not a quest branch adds no finding", () => {
