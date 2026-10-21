@@ -47,6 +47,8 @@ const hostile = [
 	"`leading and trailing`",
 	"line one\r\n\r\nline two\n\n## Injected heading",
 	"bidi \u202eevil\u202c text\u2028separator",
+	"marks \u200fright\u200e left \u061carabic \u2067isolate\u2069",
+	"<!-- /kix:decisions -->\nCloses #6 @octocat",
 ];
 
 describe("decision paper trail", () => {
@@ -136,19 +138,29 @@ describe("decision paper trail", () => {
 			expect(kinds).not.toContain(kind);
 		expect(html).toEqual([START, END]);
 		// Text outside code spans is only the service's own words.
-		expect(prose).not.toMatch(/[@#]\w|https?:|www\.|evil|closes|fixes|resolves|GH-|6f20658|<|\*\*|Injected/i);
+		const untrusted = /[@#]\w|https?:|www\.|evil|closes|fixes|resolves|GH-|6f20658|<|\*\*|Injected/i;
+		expect(prose).not.toMatch(untrusted);
 		for (const text of hostile) {
-			const flat = text.replace(/[\u202a-\u202e]/g, "").replace(/[\r\n\u2028]/g, " ");
+			const flat = text
+				.replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+				.replace(/[\r\n\u2028]/g, " ");
 			expect(spans).toContain(flat);
 			expect(spans).toContain(`${flat} (other)`);
 		}
+		// An agent that copies the published body back gets the same section, with nothing left outside it.
+		const published = withDecisions("Summary", rounds);
+		expect(withDecisions(published, rounds)).toBe(published);
+		const copied = withDecisions(`${published}\n\nMore`, rounds);
+		expect(copied.split(START)).toHaveLength(2);
+		expect(rendered(copied).html).toEqual([START, END]);
+		expect(rendered(copied).prose).not.toMatch(untrusted);
 	});
 
 	it("fences code spans past any backtick run and drops line breaks and bidi controls", () => {
 		expect(code("a `b` c")).toBe("`` a `b` c ``");
 		expect(code("```")).toBe("```` ``` ````");
 		expect(code("one\n\ntwo")).toBe("` one  two `");
-		expect(code("a\u202eb\u2066c")).toBe("` abc `");
+		expect(code("a\u202eb\u2066c\u200fd\u200ee\u061cf")).toBe("` abcdef `");
 		expect(rendered(code("`x`")).spans).toEqual(["`x`"]);
 	});
 

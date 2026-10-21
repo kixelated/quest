@@ -21,12 +21,14 @@ export function instructions(workflow: Workflow): string | null {
 
 /**
  * Untrusted text as one inline code span. Line breaks and control characters
- * become spaces, so the span cannot end its paragraph; bidirectional controls
- * are dropped so the text reads as stored. The fence is longer than any
- * backtick run inside, so the text cannot close it.
+ * become spaces, so the span cannot end its paragraph or start a line;
+ * bidirectional controls are dropped so the text reads as stored. The fence is
+ * longer than any backtick run inside, so the text cannot close it.
  */
 export function code(value: string): string {
-	const flat = value.replace(/[\u202a-\u202e\u2066-\u2069]/g, "").replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, " ");
+	const flat = value
+		.replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+		.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, " ");
 	const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length));
 	const fence = "`".repeat(longest + 1);
 	// One space on each side is stripped when rendering, so a leading or trailing backtick stays literal.
@@ -84,11 +86,13 @@ export function render(questions: { prompt: unknown; answer: unknown }[], budget
 
 /**
  * The agent's pull request body with the service's decision section: any
- * section the agent wrote is removed, and the rendered one is appended.
+ * section the agent wrote is removed, and the rendered one is appended. A
+ * section ends only at an end marker on its own line, which untrusted text
+ * inside a code span can never start, or else at the end of the body.
  */
 export function withDecisions(body: string, questions: { prompt: unknown; answer: unknown }[]): string {
 	const own = body
-		.replace(/<!-- kix:decisions -->[\s\S]*?(<!-- \/kix:decisions -->|$)/g, "")
+		.replace(/<!-- kix:decisions -->[\s\S]*?(?:^<!-- \/kix:decisions -->$|(?![\s\S]))/gm, "")
 		.replaceAll(END, "")
 		.trimEnd();
 	const section = render(questions, BODY_LIMIT - own.length - 2);
