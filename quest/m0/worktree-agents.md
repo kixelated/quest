@@ -37,10 +37,6 @@ merge.
   [Claude removal hooks](https://code.claude.com/docs/en/hooks#worktreeremove),
   [Codex worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees).
 
-## Required
-
-- [Expensive command gate](/quest/m0/local-gate.md) - resource control before removing agent-count throttles
-
 ## Related
 
 - [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; `quest worktree run` already supervises jobs and releases scratch

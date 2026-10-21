@@ -5,6 +5,7 @@
 `quest worktree remove` deletes a finished checkout that `quest worktree` created
 and drops its record, without losing work: it refuses while supervised runs are
 live and refuses a checkout that still holds anything not already preserved.
+`quest worktree stop` ends a crashed supervisor's leftover processes.
 
 ## Plan
 
@@ -30,6 +31,14 @@ live and refuses a checkout that still holds anything not already preserved.
   reaches. Treat a squash-merged branch as finished only with exact PR-head
   evidence from the forge, behind an interface that keeps the core
   forge-independent.
+- Remaining (from this quest's first slice): `quest worktree stop <id>` ends a
+  crashed supervisor's leftover processes through its recorded scopes, without
+  calling `systemctl --user stop` directly. A stale inspection-failure reason
+  on a checkout is cleared by the next successful inspection, rather than
+  lingering until the next successful release.
+- Out of scope: terminal Ctrl-C reaches the command twice (once from the
+  terminal, once forwarded by the supervisor). It is shared with `quest gate`
+  and planned in a separate gate/signal quest.
 - Measured 2026-10-21 on this repository: a fresh checkout is 2.9 MB, 394 MB
   after installing dependencies and building, and 2.9 MB once `run` released
   it. A suspended job keeps the same released footprint until it is restored.
@@ -37,5 +46,4 @@ live and refuses a checkout that still holds anything not already preserved.
 
 ## Related
 
-- [Gate contention measurements](/quest/m0/local-gate.md) - independent CPU and memory admission
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - native agents and workflow adoption

@@ -35,7 +35,6 @@ ownership-manifest design:
 
 ## Required
 
-- [Gate contention measurements](/quest/m0/local-gate.md) - evidence that gated checks stay responsive under shared load
 - [Worktree removal](/quest/m0/worktree.md) - remove finished checkouts without losing work
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
