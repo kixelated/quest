@@ -48,7 +48,8 @@ Leave the worktree you are running in and any holding uncommitted work; list tho
 ## Unattended
 
 With an `afk` argument, the user has stepped away: your recommendation stands in for their pick of skip, `/quest-ready`, or `/quest-iterate`, so dispatch it without asking.
+It also answers each simple decision a sub-agent reports.
 Still ask about each `/quest-merge` and `/quest-delete` you recommend, as one simple question with your recommendation first.
-Skip a PR whose decision is not simple, noting why in the summary instead of asking.
+Skip a PR or reported decision that is not simple, noting why in the summary instead of asking.
 Hold suggested `/quest-plan` follow-ups for the summary, since planning is an interview.
 The rest of the argument still filters the PRs in scope.
