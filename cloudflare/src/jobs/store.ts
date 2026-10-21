@@ -631,6 +631,16 @@ export async function listJobs(db: D1Database, repository: number) {
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
+/** Whether a job on `target` is queued, running, or waiting, and so may still push to it. */
+export async function active(db: D1Database, repository: number, target: string) {
+	return !!(await db
+		.prepare(
+			"SELECT 1 FROM jobs WHERE repository=? AND target=? AND state IN ('queued','running','waiting') LIMIT 1",
+		)
+		.bind(repository, target)
+		.first());
+}
+
 /**
  * The inbox's jobs, newest first: each target's latest job, however old, when
  * it awaits a decision (queued, running, waiting, or failed) or its target is

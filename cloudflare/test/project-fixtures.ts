@@ -36,6 +36,7 @@ export const pull = {
 	comments: { totalCount: 0 },
 	isDraft: false,
 	reviewDecision: null,
+	mergeStateStatus: "CLEAN",
 	commits: { nodes: [{ commit: { oid: head, statusCheckRollup: { state: "SUCCESS" } } }] },
 	headRefName: "contributor/fix",
 	headRefOid: head,
@@ -53,10 +54,22 @@ export const issue = {
 /**
  * Sign in a GitHub user, enroll project 10 for them with an open issue #1 and
  * pull request #2, and mock GitHub. `github` changes what the mock reports, and
- * `mock` reinstalls it after another sign-in replaces it.
+ * `mock` reinstalls it after another sign-in replaces it. Merges of #2 record
+ * their request in `merged`, and land only at `head`; `refuse` makes GitHub
+ * refuse them with that message.
  */
 export async function maintainerOf() {
-	const github = { flake: true, pullFlake: true, role: "maintain", issue: "open", pull: "open", head };
+	const github = {
+		flake: true,
+		pullFlake: true,
+		role: "maintain",
+		issue: "open",
+		pull: "open",
+		head,
+		methods: ["squash", "merge", "rebase"],
+		refuse: null as string | null,
+		merged: [] as unknown[],
+	};
 	const who = identity("github");
 	const cookie = (await oauth(who)).session!;
 	const user = (await db
@@ -81,7 +94,7 @@ export async function maintainerOf() {
 			)
 			.bind(JSON.stringify(pull), JSON.stringify(issue)),
 	]);
-	const mock = async (input: RequestInfo | URL) => {
+	const mock = async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = new URL(String(input));
 		const path = url.pathname;
 		if (path.endsWith("/installation"))
@@ -89,7 +102,7 @@ export async function maintainerOf() {
 				id: 5,
 				app_id: 123,
 				suspended_at: null,
-				permissions: { metadata: "read", contents: "read", issues: "read", pull_requests: "read" },
+				permissions: { metadata: "read", contents: "write", issues: "read", pull_requests: "write" },
 			});
 		if (path.endsWith("/access_tokens")) return Response.json({ token: "installation-token" });
 		if (path === "/installation/token") return new Response(null, { status: 204 });
@@ -103,7 +116,17 @@ export async function maintainerOf() {
 				default_branch: "trunk",
 				archived: false,
 				disabled: false,
+				allow_squash_merge: github.methods.includes("squash"),
+				allow_merge_commit: github.methods.includes("merge"),
+				allow_rebase_merge: github.methods.includes("rebase"),
 			});
+		if (path === "/repos/upstream/project/pulls/2/merge" && init?.method === "PUT") {
+			const body = JSON.parse(String(init.body));
+			github.merged.push(body);
+			if (body.sha !== head) return Response.json({ message: "Head branch was modified." }, { status: 409 });
+			if (github.refuse) return Response.json({ message: github.refuse }, { status: 405 });
+			return Response.json({ sha: "e".repeat(40), merged: true, message: "Pull Request successfully merged" });
+		}
 		if (path.startsWith("/user/")) {
 			const id = path.split("/").at(-1)!;
 			return Response.json({ id: Number(id), login: `person${id}` });

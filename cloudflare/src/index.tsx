@@ -16,7 +16,7 @@ import * as inbox from "./inbox/model";
 import { InboxPage } from "./inbox/page";
 import { purge, retain } from "./jobs/output";
 import { BootstrapRequired, fromForm, jobs, resume, stop } from "./jobs/routes";
-import { JobError } from "./jobs/store";
+import { JobError, active } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 import * as push from "./push/notify";
 
@@ -233,6 +233,26 @@ app.post("/projects/github/:owner/:repository/skip", async (c) => {
 	if (typeof item !== "string" || typeof version !== "string" || item.length > 300 || version.length > 100)
 		return c.json({ error: "Item and version required" }, 400);
 	await inbox.skip(c.env.DB, session.user.id, repo.id, item, version);
+	return c.redirect("/inbox", 303);
+});
+// A merge is the maintainer's own click on the head they saw; GitHub's rules decide whether it lands.
+app.post("/projects/github/:owner/:repository/pulls/:number/merge", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) throw new GitHubError("Sign in required");
+	const github = new GitHubService(c.env);
+	const repo = await github.enrolledProject(c.req.param("owner"), c.req.param("repository"), session.user.id);
+	if (!repo) throw new GitHubError("Project is not enrolled");
+	const number = c.req.param("number");
+	const { head, version } = await c.req.parseBody();
+	if (!/^[1-9]\d{0,14}$/.test(number) || typeof head !== "string")
+		return c.json({ error: "Pull request and head required" }, 400);
+	const target = `pulls/${number}`;
+	// A job may still push to the pull request, so it never merges under one.
+	if (await active(c.env.DB, repo.id, target)) throw new JobError("Stop this pull request's job before merging it");
+	await github.mergePullRequest(repo, session.user.id, Number(number), head);
+	// The merged item is finished for this maintainer until GitHub's next observation drops it.
+	if (typeof version === "string" && version.length <= 100)
+		await inbox.skip(c.env.DB, session.user.id, repo.id, target, version);
 	return c.redirect("/inbox", 303);
 });
 
