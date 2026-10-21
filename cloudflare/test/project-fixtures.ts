@@ -60,13 +60,14 @@ export const issue = {
  * `mock` reinstalls it after another sign-in replaces it. Merges of #2 record
  * their request in `merged`, and land only at `head`; `refuse` makes GitHub
  * refuse them with that message. Other GitHub IDs in `maintainers` hold the
- * maintain role too, and `limited` rate-limits every role check.
+ * maintain role too, and `limited` rate-limits every role check. A `role` of
+ * null removes the signed-in user from the repository, so GitHub answers 404.
  */
 export async function maintainerOf() {
 	const github = {
 		flake: true,
 		pullFlake: true,
-		role: "maintain",
+		role: "maintain" as string | null,
 		issue: "open",
 		pull: "open",
 		head,
@@ -140,6 +141,8 @@ export async function maintainerOf() {
 		// Only the signed-in maintainer and `maintainers` hold the maintain role; anyone else may read.
 		const permission = path.match(/\/collaborators\/person(\d+)\/permission$/);
 		if (permission && github.limited) return Response.json({ message: "API rate limit exceeded" }, { status: 429 });
+		if (permission?.[1] === who.id && github.role === null)
+			return Response.json({ message: "Not Found" }, { status: 404 });
 		if (permission)
 			return Response.json(
 				permission[1] === who.id

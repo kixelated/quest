@@ -313,10 +313,16 @@ export class GitHubService {
 		const user = await this.#api<{ id: number; login: string }>(token, `/user/${account.accountId}`);
 		if (String(user.id) !== account.accountId || !name(user.login))
 			throw new GitHubError("GitHub identity changed");
+		// Every caller has already read the repository with this token, and the
+		// user resolved above, so a 404 here means the user is no collaborator.
 		const permission = await this.#api<{ permission: string; role_name: string; user: { id: number } }>(
 			token,
 			`${repositoryPath(repo)}/collaborators/${user.login}/permission`,
-		);
+		).catch((error: unknown) => {
+			if (error instanceof GitHubError && error.status === 404)
+				throw new NotMaintainer("Current GitHub maintainer authority required");
+			throw error;
+		});
 		// GitHub maps maintain to legacy permission=write. Do not accidentally
 		// grant maintainer authority to ordinary writers or custom roles.
 		if (

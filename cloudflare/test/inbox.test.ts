@@ -551,6 +551,19 @@ describe("decision inbox", () => {
 		expect(html).not.toContain("Skipped and finished");
 	});
 
+	it("drops a maintainer removed from the repository", async () => {
+		await submit("/projects/github/upstream/project/skip", [
+			["item", "issues/1"],
+			["version", "0"],
+		]);
+		github.role = null;
+		const html = await inbox();
+		expect(html).not.toContain("Unavailable");
+		expect(html).toContain("No enrolled projects yet");
+		expect(await members()).toEqual([]);
+		expect(await reads()).toBe(0);
+	});
+
 	it("keeps membership when a maintainer check cannot complete", async () => {
 		await submit("/projects/github/upstream/project/skip", [
 			["item", "issues/1"],
