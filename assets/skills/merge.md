@@ -39,7 +39,8 @@ run each wait in the foreground instead, bounded by the shell's own time limit,
 and re-run it with `--since` until it returns activity.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
-Before enabling auto-merge, fetch the PR's base branch and head, check out the head, and run `quest check --base <remote>/<base> --branch <head-branch>`.
+Before enabling auto-merge, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
+Run a `quest` the PR cannot modify, such as an installed release or a build from the base, not one from the head.
 A stale local base can predate the quest and skip the check.
 On a finding, fix the branch: delete the finished quest and its links, or rewrite it to the remainder the PR body names.
 Then push, re-check, and continue; ask the user only when what remains is unclear.
