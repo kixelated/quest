@@ -317,6 +317,48 @@ same facts as one object with the fields `url`, `state`, `draft`, `head`,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
+## Prunable local checkouts
+
+The experimental `quest worktree` commands share one disk budget across this
+user's repositories and release a checkout's disk by deleting its declared
+scratch in place. They only operate on Git worktrees they create; use the
+owning application for Codex, Claude, or other managed checkouts. Process
+supervision remains unfinished: stop agents and commands in a checkout before
+releasing it.
+
+Set a shared capacity and an explicit reservation in bytes, covering the
+checkout and its expected build output. Measure representative jobs before
+choosing the budget. Reservations serialize creators and account for concurrent
+expected growth. They do not enforce filesystem quotas against arbitrary
+writers, and Git objects stored in the shared repository are not charged.
+
+```sh
+quest worktree capacity 20000000000
+quest worktree create example --reserve 3000000000 --ref HEAD
+quest worktree status
+quest worktree release example --scratch node_modules dist
+quest worktree restore example
+```
+
+Creation prints JSON with the ID and the detached, locked checkout path under
+`.worktrees/`. Release deletes only its `--scratch` paths, and refuses one that
+Git does not ignore, that holds tracked files or another Git worktree, or that
+is reached through a symbolic link; links inside scratch are removed, never
+followed. Missing paths
+are skipped, so release can be rerun. The checkout, its Git state, and
+untracked files stay in place, and `status` charges what remains. Restore
+reserves the checkout's disk again; then reinstall or rebuild its scratch, for
+example with `just install`.
+
+Quest never removes a checkout. Once one is finished, remove it with
+`git worktree unlock` and `git worktree remove`, which refuses modified or
+untracked files but deletes ignored ones; `release` then drops its record. A
+failed creation stays charged until `release` drops it. Records live in
+`$QUEST_WORKTREE_HOME`, or `$XDG_STATE_HOME/quest/worktrees` (default
+`~/.local/state/quest/worktrees`). No live lock is stolen: after a crash,
+confirm the registry lock's owner has exited before removing it. This initial
+interface refuses unknown or changed checkout ownership.
+
 ## Work with your agents
 
 Open this repository in Claude Code or Codex. The binary carries the skills;

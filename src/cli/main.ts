@@ -27,6 +27,7 @@ import { type Terminal, Theme } from "./theme";
 import { collect, exists, load, under } from "./tree";
 import { pullRequestStatus, statusLines } from "./status";
 import { waitForActivity, WaitTimeout } from "./wait";
+import { Worktrees } from "./worktree";
 
 /** Where the command writes; the process streams, or a buffer under test. */
 export interface Output {
@@ -153,7 +154,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.argument("[path]", "Quest to explain instead of ranking every ready quest")
 		.option("--json", "Print a deterministic JSON array")
-		.option("--limit <count>", "Maximum number of ready quests to print", positiveInteger)
+		.option("--limit <count>", "Maximum number of ready quests to print", positiveInteger("limit"))
 		.option("--unclaimed", "Skip quests with a claim branch or open PR, listing them on stderr")
 		.option("--remote <name>", "Remote whose upstream holds the claims", "origin")
 		.action(
@@ -312,6 +313,39 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
+	const worktree = program
+		.command("worktree")
+		.description("Reserve disk for Git checkouts and release it by pruning their scratch in place");
+	const state = () => new Worktrees();
+	const record = (value: unknown) => print(JSON.stringify(value));
+	worktree
+		.command("capacity <bytes>")
+		.description("Set this user's shared disk budget in bytes")
+		.action((bytes: string) => {
+			state().configure(positiveInteger("bytes")(bytes));
+		});
+	worktree
+		.command("status")
+		.description("Print the capacity, allocated bytes, and checkouts as JSON")
+		.action(() => record(state().status()));
+	worktree
+		.command("create <name>")
+		.description("Create an exclusively owned detached Git worktree under .worktrees/")
+		.requiredOption("--reserve <bytes>", "Checkout and expected build growth in bytes", positiveInteger("bytes"))
+		.option("--ref <ref>", "Initial Git revision", "HEAD")
+		.action((name: string, options: { reserve: number; ref: string }) =>
+			record(state().create(root(), name, options.reserve, options.ref)),
+		);
+	worktree
+		.command("release <id>")
+		.description("Delete declared scratch and keep the checkout; drop the record of a removed checkout")
+		.option("--scratch <path...>", "Ignored paths without tracked files, such as dependencies and build output", [])
+		.action((id: string, options: { scratch: string[] }) => record(state().release(id, options.scratch)));
+	worktree
+		.command("restore <id>")
+		.description("Reserve a released checkout's disk again before rebuilding its scratch")
+		.action((id: string) => record(state().restore(id)));
+
 	/** Changes on stdout; mentions and check findings on stderr, which fail the command. */
 	const report = (result: Report): number => {
 		for (const line of result.changes) print(line);
@@ -454,11 +488,13 @@ function positiveSeconds(value: string): number {
 	return seconds;
 }
 
-/** A result limit must be a positive, safe integer. */
-function positiveInteger(value: string): number {
-	const count = Number(value);
-	if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count <= 0) {
-		throw new InvalidArgumentError("limit must be a positive safe integer");
-	}
-	return count;
+/** Parses a positive, safe integer option named `name`. */
+function positiveInteger(name: string): (value: string) => number {
+	return (value) => {
+		const count = Number(value);
+		if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count <= 0) {
+			throw new InvalidArgumentError(`${name} must be a positive safe integer`);
+		}
+		return count;
+	};
 }
