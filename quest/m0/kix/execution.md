@@ -25,12 +25,14 @@ time:
   owner per quest and per PR, recorded on GitHub. Overlapping files are left
   to the merge step, with no path declarations or overlap prediction.
 - A start job claims through the bot exactly as `quest start` does: a draft
-  PR labeled `quest:start`. kix treats PRs that local sessions label with a
-  `quest:*` state as owned, shows that owner on the card, and never acts on
-  them. A stale label is offered to the maintainer for takeover.
-- A PR with no `quest:*` label is a decision item offering the
+  PR. kix treats PRs that local sessions hold as owned, shows that owner on
+  the card, and never acts on them: a `quest:*` label, or a draft with no
+  `## Decisions needed` section. A stale one is offered to the maintainer for
+  takeover.
+- A PR with no `quest:*` label that is ready, or a draft with
+  `## Decisions needed`, is a decision item offering the
   `/quest-complete` actions, one decision per PR: mark ready, merge (the
-  [merge job](/quest/m0/kix/merge-job.md)), iterate, skip, or delete. Labeled
+  [merge job](/quest/m0/kix/merge-job.md)), iterate, skip, or delete. Owned
   PRs never push a notification.
 - Each job's suggested follow-ups become a "plan these?" decision feeding
   [web planning](/quest/m0/kix/planning.md).

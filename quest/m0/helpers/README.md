@@ -37,6 +37,13 @@ commands from Sep-Oct. Session counts in each child come from that window.
   [moq-dev/moq.pro#2510](https://github.com/moq-dev/moq.pro/pull/2510)
   replaced with a label queue, and PR ownership covers the remaining
   collisions.
+- Decided 2026-10-21 (user): no `quest:start` label; a draft belongs to its
+  starter until its body has a `## Decisions needed` section, which the guide
+  defines as the hand-back marker. Commands read only whether it is present.
+  This narrows the 2026-10-19 decision above: `quest status` still does not
+  parse the decisions listed in a PR body. It also amends the 2026-10-20
+  decision: a PR is owned while it carries a `quest:*` label or is a draft
+  without that section.
 - Decided (user): this epic ranks after the worktree and gate quests and
   before the Kix decision UI. Children rank by sessions affected.
 
@@ -45,7 +52,7 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [PR status](/quest/m0/helpers/status.md) - one call for head, checks, merge state, reviews by head, and unresolved threads
 - [Move and delete quests](/quest/m0/helpers/move.md) - `quest mv` and `quest rm` keep every root-absolute link valid
 - [CI checks in wait](/quest/m0/helpers/wait-checks.md) - `quest wait` wakes on required check results for the head
-- [quest start](/quest/m0/helpers/start.md) - claim a quest with a labeled draft PR, `quest unblocked --unclaimed`, and CI on ready PRs only
+- [quest start](/quest/m0/helpers/start.md) - claim a quest with a draft PR, the `## Decisions needed` hand-back, `quest unblocked --unclaimed`, and CI on ready PRs only
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
 - [Unattended triage](/quest/m0/helpers/afk.md) - an `afk` argument that only asks about merges and deletes
 
