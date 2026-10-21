@@ -146,6 +146,35 @@ Invalid trees fail with diagnostics and no ranking. This command uses the same
 local readiness as `ready`; verify claims and outside conditions before starting.
 `quest-spawn` uses the ranking unless you explicitly select work in another order.
 
+## Move and delete quests
+
+`quest mv` and `quest rm` move or delete a quest or an epic with `git mv` and
+`git rm`, then fix the links so the tree still passes `quest check`:
+
+```sh
+quest mv quest/m0/export.md quest/m1/export.md
+quest mv quest/m0/drain quest/m1/drain
+quest rm quest/m0/download.md
+quest rm -r quest/m1/drain
+```
+
+`mv` rewrites every root-absolute link to the moved path, and to everything
+under a moved epic. `rm` drops each `Required`, `Related`, or `Closes` entry
+that links to what it deleted, and the heading if that was the last entry.
+It also drops every `Required` link to a finished milestone, including one it
+just finished, but keeps the root's listing of the milestone.
+Both stage the change, print one line per file (`R from -> to`, `D path`, or
+`M path`), and report on stderr any other mention of the path, such as prose
+or files outside `quest/`, without editing it. They run `quest check` on the
+result and exit 1 if it fails, for example when a quest moved out of its epic.
+
+An epic is its directory or README; removing one that holds other quests needs
+`-r`. The root and milestones are never moved or removed. `mv` refuses a
+destination that exists, and refuses to move a quest while it has a claim
+branch or open PR on `origin`, or on the repository a GitHub fork came from,
+since the branch would no longer name it.
+Neither command touches branches or PRs.
+
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
