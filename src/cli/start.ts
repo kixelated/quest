@@ -69,11 +69,34 @@ export async function startQuest(
 		url = await openDraft(root, up, remote, path, title, branch, sha);
 	}
 
-	// A local branch to build on, unless one already exists.
-	if (!succeeds(root, ["update-ref", `refs/heads/${branch}`, sha, ""])) {
-		deps.warn(`local branch ${branch} already exists; the claim commit is ${sha}`);
-	}
+	checkout(root, branch, sha, deps.warn);
 	return { branch, sha, url };
+}
+
+/**
+ * Put the checkout on the claim, so work lands on the quest's branch. The claim
+ * changes no files, so this carries uncommitted changes along. Whatever cannot
+ * be done safely is left as a warning saying what to run.
+ */
+function checkout(root: string, branch: string, sha: string, warn: (message: string) => void): void {
+	const ref = `refs/heads/${branch}`;
+	let current = "";
+	try {
+		current = gitOutput(root, ["symbolic-ref", "-q", "HEAD"]);
+	} catch {
+		// Detached HEAD.
+	}
+	if (current === ref) {
+		// Already on the quest's branch, as after `git worktree add -b`: catch it up to the claim.
+		if (!succeeds(root, ["merge", "--ff-only", "--quiet", sha])) {
+			warn(`${branch} has diverged from the claim commit; merge ${sha} into it before pushing`);
+		}
+	} else if (succeeds(root, ["rev-parse", "--verify", "--quiet", ref])) {
+		warn(`local branch ${branch} already exists; merge the claim commit ${sha} into it before pushing`);
+	} else if (!succeeds(root, ["switch", "--quiet", "-c", branch, sha])) {
+		gitOutput(root, ["update-ref", ref, sha, ""]);
+		warn(`created ${branch} but could not switch to it; run git switch ${branch}`);
+	}
 }
 
 /** Open the draft PR, then keep it only if it is the earliest open PR on the branch. */

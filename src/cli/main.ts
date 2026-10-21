@@ -87,6 +87,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		return doc;
 	};
 
+	/** Whether the tree passes `quest check`; otherwise report its findings and fail. */
+	const valid = (docs: Doc[]): boolean => {
+		const findings = check(docs, (path) => exists(root(), path));
+		for (const finding of findings) warn(formatFinding(finding));
+		if (findings.length > 0) code = 1;
+		return findings.length === 0;
+	};
+
 	/** Print what blocks `doc`: the themed log on a terminal, else the blocker list with advice on stderr. */
 	const explain = (docs: Doc[], doc: Doc, path: string) => {
 		const found = blockers(docs, doc);
@@ -159,12 +167,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					explain(docs, find(docs, path), path);
 					return;
 				}
-				const findings = check(docs, (path) => exists(root(), path));
-				if (findings.length > 0) {
-					for (const finding of findings) warn(formatFinding(finding));
-					code = 1;
-					return;
-				}
+				if (!valid(docs)) return;
 				const ranked = unblocked(docs);
 				const show = (quests: RankedQuest[]) => {
 					const shown = quests.slice(0, options.limit);
@@ -198,8 +201,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Claim a ready quest with a draft PR, or release that claim")
 		.description(
 			"Claim a ready quest: push an empty claim commit, built on the upstream default branch, to the quest's " +
-				"branch (its path without .md) without forcing, then open a draft PR from it right away. Creates the " +
-				"local branch when that name is free, and prints the PR URL, or the branch off GitHub.\n\n" +
+				"branch (its path without .md) without forcing, then open a draft PR from it right away. Switches the " +
+				"checkout to the claim on a new local branch, or fast-forwards that branch when it is checked out, " +
+				"and prints the PR URL, or the branch off GitHub.\n\n" +
+				"Fails on a tree quest check rejects, which can hide a blocker. " +
 				"Refuses a blocked quest, one missing from the upstream default branch, and one already held: a " +
 				"branch upstream or an open PR from that branch in any repository. A rejected push means someone " +
 				"else pushed the branch first. When two PRs race, as from forks, the earliest open PR keeps the " +
@@ -225,6 +230,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				});
 				return;
 			}
+			// A malformed tree can hide a blocker, as a misspelled `## Required` does.
+			if (!valid(docs)) return;
 			if (blockers(docs, doc).length > 0) {
 				explain(docs, doc, path);
 				code = 3;

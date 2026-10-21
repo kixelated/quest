@@ -76,7 +76,8 @@ export async function upstream(root: string, remote: string, deps: ClaimDependen
 	// The configured URL first, so a URL rewrite (`insteadOf`) still names the GitHub repository.
 	const configured = gitOutput(root, ["config", "--get", `remote.${remote}.url`]);
 	const url = remoteUrl(root, remote);
-	const named = githubRepository(configured) ?? githubRepository(url);
+	const source = githubRepository(configured) ? configured : url;
+	const named = githubRepository(source);
 	if (named === null) return { git: remote, github: null };
 
 	const client = new GitHub(deps.github());
@@ -85,7 +86,8 @@ export async function upstream(root: string, remote: string, deps: ClaimDependen
 	if (info.fork === true && info.parent !== undefined) {
 		const parent = object(info.parent);
 		return {
-			git: string(/^https:/.test(configured || url) ? parent.clone_url : parent.ssh_url),
+			// Reach the parent the way the remote is reached, so the same credentials work.
+			git: string(/^https:/.test(source) ? parent.clone_url : parent.ssh_url),
 			github: {
 				client,
 				repository: { owner: string(object(parent.owner).login), repo: string(parent.name) },

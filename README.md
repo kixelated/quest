@@ -157,9 +157,11 @@ quest start --release quest/m0/export.md
 
 It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`) without forcing, then opens a draft PR
-from it right away and prints the PR's URL. It also creates the local branch
-when that name is free. A fork pushes to itself and opens the PR on its parent.
-It refuses a blocked quest and one someone else holds; a rejected push means
+from it right away and prints the PR's URL. It switches your checkout to the
+claim on a new local branch, or fast-forwards that branch if it is already
+checked out. A fork pushes to itself and opens the PR on its parent. It fails
+on a tree `quest check` rejects, which can hide a blocker, and refuses a
+blocked quest and one someone else holds; a rejected push means
 another claimer got there first, and when two PRs race, the earliest open one
 keeps the claim and the later one is closed. Off GitHub, it pushes the branch
 without a PR.

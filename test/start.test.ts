@@ -12,7 +12,7 @@ import { claims } from "../src/cli/claims";
 import { type GitHubDependencies, type ObjectValue } from "../src/cli/github";
 import { type Output, main } from "../src/cli/main";
 import { Refusal, ago, releaseQuest, startQuest } from "../src/cli/start";
-import { Tree, tempDir } from "./fixture";
+import { TWO, Tree, tempDir } from "./fixture";
 
 const ONE = "quest/m0/epic/one.md";
 const BRANCH = "quest/m0/epic/one";
@@ -35,19 +35,28 @@ function upstream(): string {
 	return bare;
 }
 
-/** Identity and no signing, so commits work under any user configuration. */
+/** A new repository on main. */
 function setup(dir: string): void {
 	git(dir, "init", "-q", "-b", "main");
+	identity(dir);
+}
+
+/** Identity and no signing, so commits work under any user configuration. */
+function identity(dir: string): void {
 	git(dir, "config", "user.name", "Test");
 	git(dir, "config", "user.email", "test@example.com");
 	git(dir, "config", "commit.gpgsign", "false");
 }
 
-/** A clone whose origin is `url`, rewritten to the bare repositories in `routes`. */
-function clone(url: string, routes: Record<string, string>): string {
-	const dir = Tree.baseline().path;
-	setup(dir);
-	git(dir, "remote", "add", "origin", url);
+/**
+ * A clone of the upstream bare repository whose origin is `url`, rewritten to
+ * the bare repositories in `routes`. Without routes, origin is the bare path.
+ */
+function clone(url: string, routes: Record<string, string> = {}): string {
+	const dir = tempDir();
+	git(dir, "clone", "-q", routes[UPSTREAM] ?? url, ".");
+	identity(dir);
+	git(dir, "remote", "set-url", "origin", url);
 	for (const [from, to] of Object.entries(routes)) git(dir, "config", `url.${to}.insteadOf`, from);
 	return dir;
 }
@@ -177,11 +186,62 @@ describe("start on GitHub", () => {
 		expect(git(bare, "log", "-1", "--format=%B", started.sha)).toMatch(
 			/^chore\(quest\): claim quest\/m0\/epic\/one\.md\n\nQuest-Claim: [0-9a-f]{16}$/,
 		);
-		expect(git(work, "rev-parse", `refs/heads/${BRANCH}`)).toBe(started.sha);
+		expect(git(work, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+		expect(git(work, "rev-parse", "HEAD")).toBe(started.sha);
 		expect(github.pulls).toMatchObject([
 			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "example/project" } }, draft: true },
 		]);
 		expect(github.pulls[0].body).toContain(ONE);
+	});
+
+	test("fast-forwards the quest branch a worktree already has checked out", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		git(work, "switch", "-q", "-c", BRANCH);
+		const warnings: string[] = [];
+		const started = await startQuest(work, ONE, "[S] One", "origin", deps(new FakeGitHub(), warnings));
+		expect(warnings).toEqual([]);
+		expect(git(work, "rev-parse", "HEAD")).toBe(started.sha);
+	});
+
+	test("warns rather than moving a diverged local branch", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		git(work, "branch", BRANCH);
+		const warnings: string[] = [];
+		const started = await startQuest(work, ONE, "[S] One", "origin", deps(new FakeGitHub(), warnings));
+		expect(warnings).toEqual([
+			`local branch ${BRANCH} already exists; merge the claim commit ${started.sha} into it before pushing`,
+		]);
+		expect(git(work, "symbolic-ref", "HEAD")).toBe("refs/heads/main");
+	});
+
+	test("reaches a fork's parent with the scheme a URL alias resolves to", async () => {
+		const bare = upstream();
+		const forkBare = tempDir();
+		git(forkBare, "init", "-q", "--bare", "-b", "main");
+		const github = new FakeGitHub();
+		github.repo("me/project", {
+			fork: true,
+			default_branch: "main",
+			parent: {
+				owner: { login: "example" },
+				name: "project",
+				clone_url: UPSTREAM,
+				ssh_url: "git@github.com:example/project.git",
+				default_branch: "main",
+			},
+		});
+		// `corp:me/project` expands to the fork's HTTPS URL, so the parent is read over HTTPS too.
+		// The SSH form leads nowhere, so choosing it fails fast; pushes go to the fork's bare repository.
+		const work = clone("corp:me/project.git", {
+			[UPSTREAM]: bare,
+			"git@github.com:example/project.git": join(tempDir(), "missing"),
+		});
+		git(work, "config", "url.https://github.com/.insteadOf", "corp:");
+		git(work, "config", "remote.origin.pushurl", forkBare);
+		const started = await startQuest(work, ONE, "[S] One", "origin", deps(github));
+		expect(tip(forkBare)).toBe(started.sha);
 	});
 
 	test("refuses a quest whose branch is already upstream", async () => {
@@ -309,7 +369,6 @@ describe("start on GitHub", () => {
 		const github = new FakeGitHub();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		await startQuest(work, ONE, "[S] One", "origin", deps(github));
-		git(work, "checkout", "-q", "-f", BRANCH);
 		appendFileSync(join(work, ONE), "\nWork in progress.\n");
 		git(work, "commit", "-q", "-m", "work", "--", ONE);
 		git(work, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
@@ -328,10 +387,7 @@ describe("start on another forge", () => {
 	/** A clone whose origin is a plain bare repository path. */
 	function plain(): { bare: string; work: string } {
 		const bare = upstream();
-		const work = Tree.baseline().path;
-		setup(work);
-		git(work, "remote", "add", "origin", bare);
-		return { bare, work };
+		return { bare, work: clone(bare) };
 	}
 
 	test("pushes the claim branch without a PR, then refuses a second claim", async () => {
@@ -365,6 +421,16 @@ describe("start on another forge", () => {
 		expect(out.code, out.stderr).toBe(0);
 		expect(out.stdout).toBe(`${BRANCH}\n`);
 		expect(tip(bare)).not.toBe("");
+	});
+
+	test("fails on a malformed tree before touching the remote", async () => {
+		const { bare, work } = plain();
+		// A misspelled `## Required` hides the blocker from the readiness check.
+		writeFileSync(join(work, "quest/m0/epic/two.md"), TWO.replace("## Required", "## Requires"));
+		const out = await cli("--root", work, "start", "quest/m0/epic/two.md");
+		expect(out.code).toBe(1);
+		expect(out.stderr).toContain("unknown '## Requires'");
+		expect(tip(bare, "quest/m0/epic/two")).toBe("");
 	});
 
 	test("refuses a blocked quest with exit 3", async () => {
