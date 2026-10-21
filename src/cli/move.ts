@@ -152,7 +152,8 @@ function modified(texts: Map<string, string>): string[] {
 }
 
 /**
- * Every tracked line that still names `path`, or a path under it, which no
+ * Every line in a tracked or unignored untracked file that still names
+ * `path`, or a path under it, which no
  * edit could safely change. A longer sibling name, such as `drain.md` or
  * `drain-2` for `drain`, is not a mention; a trailing full stop is.
  */
@@ -160,10 +161,14 @@ function mentions(root: string, path: string): string[] {
 	const pattern = `${path.replace(/[.[\]()*+?{}|^$\\]/g, "\\$&")}\\.*([^A-Za-z0-9_.-]|$)`;
 	let out: string;
 	try {
-		out = execFileSync("git", ["-C", root, "grep", "-n", "-I", "-E", "-e", pattern], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		out = execFileSync(
+			"git",
+			["-C", root, "grep", "--untracked", "--exclude-standard", "-n", "-I", "-E", "-e", pattern],
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
 	} catch (error) {
 		// git grep exits 1 when nothing matches.
 		if ((error as { status?: number }).status === 1) return [];

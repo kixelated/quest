@@ -39,10 +39,10 @@ async function inbox(query: Record<string, string> = {}) {
 function thread(html: string) {
 	return html.match(/<article class="ql-panel decision"[\s\S]*?<\/article>/)?.[0] ?? "";
 }
-function submit(path: string, fields: [string, string][]) {
+function submit(path: string, fields: [string, string][], headers: Record<string, string> = {}) {
 	return app.request(
 		`${origin}${path}`,
-		{ method: "POST", headers: { Cookie: cookie, Origin: origin }, body: new URLSearchParams(fields) },
+		{ method: "POST", headers: { Cookie: cookie, Origin: origin, ...headers }, body: new URLSearchParams(fields) },
 		testEnv,
 	);
 }
@@ -135,7 +135,7 @@ describe("decision inbox", () => {
 			["revision", head],
 		]);
 		expect(started.status).toBe(303);
-		expect(started.headers.get("Location")).toBe("/inbox?project=10&item=pulls%2F2");
+		expect(started.headers.get("Location")).toBe("/inbox?done=start");
 		const html = await inbox({ project: "10", item: "pulls/2" });
 		expect(html.match(/<h2>In progress<\/h2>[\s\S]*?<\/ol>/)![0]).toContain("Fix");
 		expect(thread(html)).toContain("none of your runners are online");
@@ -143,9 +143,79 @@ describe("decision inbox", () => {
 		const [job] = await store.listJobs(db, 10);
 		const stopped = await submit(`${jobs}/${job!.id}/cancel`, []);
 		expect(stopped.status).toBe(303);
+		expect(stopped.headers.get("Location")).toBe("/inbox?done=stop");
 		expect((await store.readJob(db, job!.id))!.state).toBe("cancelled");
 		// A stopped job sets its item aside until the pull request changes.
 		expect(await inbox()).toMatch(/Skipped and finished \(1\)[\s\S]*Fix/);
+	});
+
+	it("merges a clean pull request at the head on screen, or says why GitHub refused", async () => {
+		const merge = "/projects/github/upstream/project/pulls/2/merge";
+		const active = thread(await inbox());
+		expect(active).toContain(`action="${merge}"`);
+		expect(active).toContain(`name="head" value="${head}"`);
+		expect(active).toContain('<button class="button quiet">Iterate on this PR');
+		const moved = await submit(merge, [["head", "b".repeat(40)]]);
+		expect(moved.status).toBe(403);
+		expect(await moved.text()).toContain("head moved since you looked; review it again");
+		github.refuse = "At least 1 approving review is required by reviewers with write access.";
+		const refused = await submit(merge, [["head", head]], {
+			Referer: `${origin}/inbox?project=10&item=pulls%2F2`,
+		});
+		expect(refused.status).toBe(403);
+		// Any refused action reads neutrally, says why, and leads back to its item.
+		const explained = await refused.text();
+		expect(explained).toContain("<h1>Couldn&#39;t do that</h1>");
+		expect(explained).not.toContain("Not recorded");
+		expect(explained).toContain(
+			"GitHub refused the merge: At least 1 approving review is required by reviewers with write access.",
+		);
+		expect(explained).toContain('<a href="/inbox?project=10&amp;item=pulls%2F2">Return to the item</a>');
+		// Each click is one request bound to its head; a refusal is never retried.
+		expect(github.merged).toHaveLength(2);
+		github.refuse = null;
+		github.methods = ["squash"];
+		const merged = await submit(merge, [
+			["head", head],
+			["version", "0"],
+		]);
+		expect(merged.status).toBe(303);
+		expect(merged.headers.get("Location")).toBe("/inbox?done=merge");
+		expect(github.merged.at(-1)).toEqual({ sha: head, merge_method: "squash" });
+		// The merged item is finished, and no new work starts before GitHub is read again.
+		const html = await inbox();
+		expect(html).toMatch(/Skipped and finished \(1\)[\s\S]*Fix/);
+		expect(thread(html)).toContain("GitHub reported changes");
+	});
+
+	it("offers merge only on a clean pull request no job holds, to current maintainers", async () => {
+		const merge = "/projects/github/upstream/project/pulls/2/merge";
+		await db
+			.prepare(
+				"UPDATE github_project_activity SET data=json_set(data,'$.mergeStateStatus','BLOCKED') WHERE id='21'",
+			)
+			.run();
+		let active = thread(await inbox());
+		expect(active).not.toContain(merge);
+		expect(active).toContain("Review on GitHub");
+		expect(active).toContain('<button class="button primary">Iterate on this PR');
+		await db
+			.prepare(
+				"UPDATE github_project_activity SET data=json_set(data,'$.mergeStateStatus','CLEAN') WHERE id='21'",
+			)
+			.run();
+		await running("iterate", "pulls/2");
+		active = thread(await inbox({ project: "10", item: "pulls/2" }));
+		expect(active).not.toContain(merge);
+		const held = await submit(merge, [["head", head]]);
+		expect(held.status).toBe(409);
+		expect(await held.text()).toContain("job before merging it");
+		await db.prepare("DELETE FROM jobs").run();
+		github.role = "write";
+		const outsider = await submit(merge, [["head", head]]);
+		expect(outsider.status).toBe(403);
+		expect(await outsider.text()).toContain("Current GitHub maintainer authority required");
+		expect(github.merged).toHaveLength(0);
 	});
 
 	it("offers a bootstrap job when the default branch has no flake", async () => {
@@ -206,6 +276,12 @@ describe("decision inbox", () => {
 		).toBe(409);
 		const answered = await submit(`${jobs}/${id}/answer`, answer);
 		expect(answered.status).toBe(303);
+		// The inbox moves on to the next decision and notes the answer there.
+		expect(answered.headers.get("Location")).toBe("/inbox?done=answer");
+		const next = await inbox({ done: "answer" });
+		expect(next).toContain('<p class="note" role="status">Answer recorded.</p>');
+		expect(thread(next)).toContain("Fix");
+		expect(next.match(/<h2>In progress<\/h2>[\s\S]*?<\/ol>/)![0]).toContain("First");
 		const job = (await store.readJob(db, id))!;
 		expect(job.state).toBe("queued");
 		expect(job.questions[0]!.answer).toEqual({
@@ -390,6 +466,7 @@ describe("decision inbox", () => {
 			["version", "0"],
 		]);
 		expect(skipped.status).toBe(303);
+		expect(skipped.headers.get("Location")).toBe("/inbox?done=skip");
 		let html = await inbox();
 		expect(html.match(/<h2>Up next<\/h2>[\s\S]*?<\/ol>/)![0]).not.toContain("Idea");
 		expect(html).toMatch(/Skipped and finished \(1\)[\s\S]*Idea/);
@@ -400,10 +477,13 @@ describe("decision inbox", () => {
 
 	it("reports a project without current authority and hides its items", async () => {
 		github.role = "write";
-		const html = await inbox();
+		const html = await inbox({ done: "answer" });
 		expect(html).toContain("Unavailable: Current GitHub maintainer authority required");
 		expect(html).not.toContain("Idea");
+		// With no decision left, the notice shows on the empty state.
+		expect(html).toContain("Answer recorded.");
 		expect(html).toContain("Nothing needs a decision right now.");
+		expect(await inbox({ done: "constructor" })).not.toContain('<p class="note" role="status">');
 	});
 
 	it("keeps paused projects' questions but offers no new work", async () => {

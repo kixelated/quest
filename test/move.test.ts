@@ -202,6 +202,17 @@ describe("quest mv", () => {
 		);
 	});
 
+	test("reports mentions in untracked files but not ignored ones", async () => {
+		const tree = committed(Tree.baseline().write(".gitignore", "ignored.md\n"));
+		tree.write("draft.md", "See quest/m0/epic/one.md.\n").write("ignored.md", "See quest/m0/epic/one.md.\n");
+		const out = await quest(tree, "mv", "quest/m0/epic/one.md", "quest/m0/epic/first.md");
+		expect(out.code).toBe(0);
+		expect(out.stderr).toBe(
+			"quest: no origin remote, so claims were not checked\n" +
+				"quest: draft.md:1: mentions quest/m0/epic/one.md; update it by hand\n",
+		);
+	});
+
 	test("reports mentions of a moved epic's directory but not of its siblings", async () => {
 		const tree = Tree.baseline().write(
 			"notes.md",
@@ -342,7 +353,8 @@ test("open pull requests come from every page, by head branch", async () => {
 		now: () => 0,
 		sleep: async () => undefined,
 		warn: () => undefined,
-		fetch: async (url) => {
+		fetch: async (input) => {
+			const url = new URL(String(input));
 			requested.push(url.pathname + url.search);
 			const page = url.searchParams.get("page");
 			const head = (ref: string, n: number) => ({
@@ -382,7 +394,7 @@ test("a fork's parent repository and its quest branches come from GitHub", async
 		now: () => 0,
 		sleep: async () => undefined,
 		warn: () => undefined,
-		fetch: async (url) => new Response(JSON.stringify(responses[url.pathname])),
+		fetch: async (url) => new Response(JSON.stringify(responses[new URL(String(url)).pathname])),
 	});
 	const parent = { owner: "example", repo: "project" };
 	expect(await forkParent(github, { owner: "me", repo: "project" })).toEqual(parent);

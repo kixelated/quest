@@ -23,7 +23,7 @@ Non-goals: judging whether a rewrite is a faithful remainder (the agent and
 reviewers still do), and PRs not on a quest branch, such as a contributor's
 fork branch that implements a quest; those skip the guard. Merges that
 bypass the merge skill, such as a maintainer's click on GitHub or in the
-[decision inbox](/quest/m0/kix/merge.md), are guarded only where the
+kix decision inbox, are guarded only where the
 repository runs the guard as a required check; the hosted service has no
 checkout to diff.
 

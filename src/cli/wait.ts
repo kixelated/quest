@@ -1,14 +1,14 @@
 // GitHub-specific PR activity waiting stays outside the repository-independent core.
 import {
-	type GitHubDependencies,
-	type ObjectValue,
-	GitHub,
+	actor,
 	array,
-	githubRepository,
+	GitHub,
+	type GitHubDependencies,
+	GitHubInputError,
 	link,
 	object,
-	remoteUrl,
-	seconds,
+	type ObjectValue,
+	type PullRequest,
 	string,
 } from "./github";
 
@@ -31,21 +31,11 @@ const REACTIONS = `query($owner: String!, $repo: String!, $number: Int!, $after:
 }
 fragment reaction on Reaction { id content createdAt user { login } }`;
 
-export interface PullRequest {
-	owner: string;
-	repo: string;
-	number: number;
-}
-
 export interface WaitOptions {
 	since?: string;
 	/** Seconds; omitted means no deadline. */
 	timeout?: number;
 }
-
-export type WaitDependencies = GitHubDependencies;
-
-export class WaitInputError extends Error {}
 
 export class WaitTimeout extends Error {
 	/** Where to resume, when the wait got far enough to know. */
@@ -81,23 +71,11 @@ interface Cursor {
 	pushes: { sha: string; time: number }[];
 }
 
-/** Accept a GitHub PR URL, or a number in the origin repository. */
-export function pullRequest(value: string, root: string): PullRequest {
-	if (/^[1-9]\d*$/.test(value)) {
-		const repository = githubRepository(remoteUrl(root, "origin"));
-		if (!repository) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
-		return { ...repository, number: Number(value) };
-	}
-	const match = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value);
-	if (!match) throw new WaitInputError("expected a GitHub pull request URL or a PR number in origin");
-	return { owner: match[1], repo: match[2], number: Number(match[3]) };
-}
-
 /** Wait until activity, returning plain output lines. Network and time are injected. */
 export async function waitForActivity(
 	pr: PullRequest,
 	options: WaitOptions,
-	deps: WaitDependencies,
+	deps: GitHubDependencies,
 ): Promise<string[]> {
 	const started = deps.now();
 	const progress = { resume: options.since };
@@ -114,7 +92,7 @@ export async function waitForActivity(
 async function watch(
 	pr: PullRequest,
 	options: WaitOptions,
-	deps: WaitDependencies,
+	deps: GitHubDependencies,
 	started: number,
 	progress: { resume?: string },
 ): Promise<string[]> {
@@ -122,34 +100,14 @@ async function watch(
 		try {
 			timestamp(options.since);
 		} catch (error) {
-			throw new WaitInputError((error as Error).message);
+			throw new GitHubInputError((error as Error).message);
 		}
 	}
 	const name = `${pr.owner}/${pr.repo}#${pr.number}`;
 	const base = `/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}`;
 	const prUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`;
 	const deadline = options.timeout === undefined ? Infinity : started + options.timeout * 1000;
-	const pause = async (milliseconds: number) => {
-		const remaining = deadline - deps.now();
-		if (remaining <= 0) throw new WaitTimeout();
-		await deps.sleep(Math.min(milliseconds, remaining, 2_147_483_647));
-		if (deps.now() >= deadline) throw new WaitTimeout();
-	};
-	let pollInterval = POLL;
-	// Any failure past the deadline, the client's included, becomes a WaitTimeout in waitForActivity.
-	const github = new GitHub(
-		{
-			...deps,
-			fetch: async (url, init) => {
-				const response = await deps.fetch(url, init);
-				pollInterval = Math.max(pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
-				return response;
-			},
-		},
-		deadline,
-	);
-	const request = (path: string, etag?: string, body?: unknown) => github.request(path, { etag, body });
-	const list = (path: string) => github.list(path);
+	const github = new GitHub(deps, deadline);
 
 	let cursor: Cursor;
 	let historical: Activity[] = [];
@@ -158,7 +116,7 @@ async function watch(
 	if (options.since?.startsWith("q1.")) {
 		cursor = decodeCursor(options.since, name);
 	} else {
-		const pullResponse = await request(`${base}/pulls/${pr.number}`);
+		const pullResponse = await github.request(`${base}/pulls/${pr.number}`);
 		const pull = object(await pullResponse.json());
 		const head = object(pull.head);
 		const currentSha = string(head.sha);
@@ -169,7 +127,7 @@ async function watch(
 		let commitsPath: string | undefined = `${base}/pulls/${pr.number}/commits?per_page=100`;
 		let listedHead: string | undefined;
 		while (commitsPath) {
-			const { rows, response } = await list(commitsPath);
+			const { rows, response } = await github.list(commitsPath);
 			for (const commit of rows) {
 				listedHead = string(commit.sha);
 				if (!fullSha(listedHead)) throw new Error("invalid GitHub commit SHA");
@@ -193,7 +151,7 @@ async function watch(
 			let path: string | undefined =
 				`/repos/${fullName}/activity?ref=${encodeURIComponent(string(head.ref))}&per_page=100`;
 			while (path) {
-				const { rows, response } = await list(path);
+				const { rows, response } = await github.list(path);
 				activities.push(...rows);
 				if (
 					shaPoint
@@ -267,7 +225,7 @@ async function watch(
 		return async (): Promise<ObjectValue[]> => {
 			const rows: ObjectValue[] = [];
 			for (;;) {
-				const response = await request(path, etag);
+				const response = await github.request(path, etag);
 				if (response.status === 304) {
 					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
 					return rows;
@@ -289,18 +247,7 @@ async function watch(
 		let viewer: string;
 		let after: string | null = null;
 		do {
-			const response = await request("/graphql", undefined, {
-				query: REACTIONS,
-				variables: { owner: pr.owner, repo: pr.repo, number: pr.number, after },
-			});
-			const body = object(await response.json());
-			if (body.errors !== undefined)
-				throw new Error(
-					`GitHub GraphQL error: ${array(body.errors)
-						.map((error) => String(error.message))
-						.join("; ")}`,
-				);
-			const data = object(body.data);
+			const data = await github.graphql(REACTIONS, { owner: pr.owner, repo: pr.repo, number: pr.number, after });
 			viewer = string(object(data.viewer).login);
 			const pull = object(object(data.repository).pullRequest);
 			const reviews = object(pull.reviews);
@@ -322,7 +269,7 @@ async function watch(
 	);
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
 	for (;;) {
-		pollInterval = POLL;
+		github.pollInterval = POLL;
 		for (const row of await timeline()) {
 			const type = string(row.event);
 			if (type === "committed") {
@@ -391,7 +338,7 @@ async function watch(
 					`${event.point} ${event.type} ${event.actor} ${event.url}${index === unique.length - 1 ? ` ${nextCursor}` : ""}`,
 			);
 		}
-		await pause(pollInterval);
+		await github.pause(github.pollInterval);
 	}
 }
 
@@ -441,16 +388,6 @@ function reaction(row: ObjectValue, url: string): Activity {
 	};
 }
 
-function actor(value: unknown): string {
-	if (value === null || value === undefined) return "-";
-	const record = object(value);
-	return typeof record.login === "string"
-		? record.login
-		: typeof record.name === "string"
-			? record.name.replace(/\s/g, "_")
-			: "-";
-}
-
 function timestamp(value: string): number {
 	const result = Date.parse(value);
 	if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(result))
@@ -489,6 +426,6 @@ function decodeCursor(value: string, pr: string): Cursor {
 			throw new Error();
 		return parsed as unknown as Cursor;
 	} catch {
-		throw new WaitInputError("invalid --since cursor, or cursor belongs to another pull request");
+		throw new GitHubInputError("invalid --since cursor, or cursor belongs to another pull request");
 	}
 }

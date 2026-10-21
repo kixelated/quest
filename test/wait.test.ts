@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
-import { pullRequest, waitForActivity, WaitTimeout, type WaitDependencies } from "../src/cli/wait";
+import { type GitHubDependencies, pullRequest } from "../src/cli/github";
+import { waitForActivity, WaitTimeout } from "../src/cli/wait";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -76,7 +77,7 @@ function setup(responses: Response[], baseline = [A], side: { comments?: Respons
 	const sideCalls: { path: string; headers: Headers; body?: unknown }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
-	const deps: WaitDependencies = {
+	const deps: GitHubDependencies = {
 		token: "test-token",
 		now: () => now,
 		sleep: async (ms) => {
