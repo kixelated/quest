@@ -29,7 +29,6 @@ Start each quest in a background sub-agent with its own isolated worktree, since
 
 Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
-Other sessions share this machine: hold new agents while the load average exceeds the core count.
 
 When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
 Its report lists every open decision and suggested follow-up with a recommendation.

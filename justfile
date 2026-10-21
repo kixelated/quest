@@ -8,8 +8,14 @@ default:
 install:
     bun install --frozen-lockfile
 
+# Expensive recipes wait for host room through `quest gate`; nested calls run at once.
+gate := "bun run --silent quest gate just"
+
 # Check code, repository tooling, and the quest tree.
 check:
+    {{gate}} _check
+
+_check:
     bun run check
     bun run --silent quest check
     bun run --silent quest --root examples/export check
@@ -21,6 +27,9 @@ check:
 
 # Run tests, including the shell hooks and the lifecycle of both builds.
 test:
+    {{gate}} _test
+
+_test:
     bun run test
     bash .claude/hooks/direnv.test.sh
     bash scripts/install-check.test.sh
@@ -52,10 +61,16 @@ run *args:
 
 # Check generated binding types, TypeScript, formatting, and deployment bundle.
 worker-check:
+    {{gate}} _worker-check
+
+_worker-check:
     bun run --cwd cloudflare check
 
 # Run Worker integration tests in the Cloudflare runtime.
 worker-test:
+    {{gate}} _worker-test
+
+_worker-test:
     bun run --cwd cloudflare test
 
 # Serve the Worker on localhost with seeded data and a fake GitHub, for checking UI.

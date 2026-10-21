@@ -18,6 +18,7 @@ import {
 	unblocked,
 } from "../core";
 import { claims, questBranch } from "./claims";
+import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
@@ -68,6 +69,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.exitOverride();
 	const root = () => program.opts<{ root: string }>().root;
+
+	program
+		.command("gate")
+		.summary("Run an expensive command once the host has room for it")
+		.description(
+			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
+				"min(4 GiB, RAM/4), admitting one waiting command every 5 seconds. Nested calls run immediately. " +
+				"Limits come from the host; there is no configuration.",
+		)
+		.argument("<command>", "Executable to run")
+		.argument("[args...]", "Arguments forwarded verbatim")
+		.action((command: string, args: string[]) => {
+			pending = gate([command, ...args]).catch((error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			});
+		});
 
 	program
 		.command("check")
@@ -458,7 +476,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	try {
-		program.parse(argv, { from: "user" });
+		program.parse(gateBoundary(argv), { from: "user" });
 		return pending ?? code;
 	} catch (error) {
 		if (error instanceof CommanderError) {
@@ -501,6 +519,24 @@ function positiveSeconds(value: string): number {
 		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
 	}
 	return seconds;
+}
+
+/**
+ * Stop option parsing before a gated executable, keeping its own flags intact.
+ * Quest's global options still apply on either side of `gate`.
+ */
+export function gateBoundary(argv: string[]): string[] {
+	const skipRoot = (index: number) => {
+		while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
+			index += argv[index] === "--root" ? 2 : 1;
+		}
+		return index;
+	};
+	const index = skipRoot(0);
+	if (argv[index] !== "gate") return argv;
+	const command = skipRoot(index + 1);
+	if (!argv[command] || ["--", "-h", "--help", "-V", "--version"].includes(argv[command])) return argv;
+	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }
 
 /** Parses a positive, safe integer option named `name`. */

@@ -347,6 +347,40 @@ same facts as one object with the fields `url`, `state`, `draft`, `head`,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
+## Gate expensive commands
+
+`quest gate <command> [args...]` holds an expensive command until the host has
+room for it, across all of a user's repositories and worktrees:
+
+```sh
+quest gate bun run test
+quest gate cargo build --release
+```
+
+Admission is sized from the host, with no configuration. Every platform waits
+while the host-wide 1-minute load average exceeds the host's CPU count, or while
+available memory is below one command's budget: 4 GiB, or a quarter of RAM on
+smaller hosts, where RAM is capped by any container memory limit. On Linux,
+available memory includes reclaimable host and cgroup file cache and is bounded
+by the remaining budget of each enclosing memory cgroup. Load and memory count
+work from every session and user. The load average lags new work, so the gate
+admits at most one waiting command every 5 seconds per host rather than
+releasing every waiter at once. Windows reports no load
+average and macOS counts reclaimable cache as used memory, so those signals are
+skipped there.
+
+Admission is the gate's only job: it holds no slot or lock while the command
+runs and does not track the command's descendants. A nested invocation runs
+immediately inside the admitted command. Internal compiler or test worker
+parallelism remains the command's responsibility.
+
+This repository's `just check`, `just test`, `just worker-check`, and
+`just worker-test` run through the gate.
+
+Arguments, working directory, environment and terminal streams pass through to
+the executable, and waiting happens before it starts. There is no fairness
+guarantee or timeout: a command waits as long as the host stays busy.
+
 ## Prunable local checkouts
 
 The experimental `quest worktree` commands share one disk budget across this
