@@ -5,7 +5,7 @@ import { questHref } from "../src/inbox/model";
 import * as store from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
-import { commit, delivery, head, maintainerOf, project } from "./project-fixtures";
+import { commit, delivery, head, maintainerOf, project, pull } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const db = env.DB;
@@ -452,6 +452,35 @@ describe("decision inbox", () => {
 		const active = thread(await inbox({ project: "10", item: "quest/gone.md" }));
 		expect(active).toContain("This quest is no longer ready to start");
 		expect(active).not.toContain("Try again");
+	});
+
+	it("retries a failed quest whose own pull request claims it, but no other claim", async () => {
+		// Pull request #2 now claims quest/first.md from its quest branch.
+		await db
+			.prepare("UPDATE github_project_activity SET data=? WHERE id='21'")
+			.bind(JSON.stringify({ ...pull, headRefName: "quest/first" }))
+			.run();
+		const { id, runner } = await running("start", "quest/first.md");
+		await store.delivered(db, id, 3);
+		await store.finish(db, runner, id, 1, { outcome: "failed", summary: "Broke.", result: null }, 3);
+		const retry = () =>
+			submit(jobs, [
+				["workflow", "start"],
+				["target", "quest/first.md"],
+				["revision", commit],
+			]);
+		// Another job's pull request is still someone else's claim.
+		expect(thread(await inbox({ project: "10", item: "quest/first.md" }))).toContain(
+			"This quest is no longer ready to start",
+		);
+		expect((await retry()).status).toBe(409);
+		// The failed job's own pull request is what the retry continues.
+		await store.delivered(db, id, 2);
+		expect(thread(await inbox({ project: "10", item: "quest/first.md" }))).toContain("Try again");
+		expect((await retry()).status).toBe(303);
+		const [latest] = await store.listJobs(db, 10);
+		expect(latest).toMatchObject({ target: "quest/first.md", state: "queued", pull: 2 });
+		expect(latest!.id).not.toBe(id);
 	});
 
 	it("encodes quest paths in board links", () => {

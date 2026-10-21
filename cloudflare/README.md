@@ -76,7 +76,8 @@ A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
 `bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
 create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
 every request rechecks current GitHub authority. `start` takes only quests that
-observations show ready and unclaimed. A job on an issue or pull request
+observations show ready and unclaimed, except that retrying a failed job does
+not count that job's own open pull request as a claim. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
 observations read it. `iterate` jobs are untrusted and route
 only to Linux runners that declare VM builds. Without a `flake.nix`, the route
@@ -126,8 +127,9 @@ saw, and is refused once observations moved past it.
 The current attempt publishes its work over HTTPS at `POST /api/runner/publish`,
 not over its connection, so slow GitHub writes never hold up the hub. It sends
 file changes as data; the Worker commits them as the GitHub App to the job's
-one branch, which a reassigned attempt continues from, and opens or updates
-the job's pull request. Each job records its branch's `head` and its `pull`.
+one branch, which a reassigned attempt or a retried failed job continues from,
+and opens or updates the job's pull request. Each job records its branch's
+`head` and its `pull`.
 Changes a workflow may not publish pause the job with a `publication`
 decision. [GITHUB.md](GITHUB.md#publication) describes the request, its
 validation, and how interrupted publications are reconciled.
