@@ -271,7 +271,7 @@ async function watch(
 		return async (): Promise<ObjectValue[]> => {
 			const rows: ObjectValue[] = [];
 			for (;;) {
-				const response = await github.request(path, etag);
+				const response = await github.request(path, { etag });
 				if (response.status === 304) {
 					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
 					return rows;
@@ -341,11 +341,16 @@ async function watch(
 		const protection = object(
 			object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {},
 		);
-		const legacy = object(protection.required_status_checks ?? { checks: [] });
+		const legacy = object(protection.required_status_checks ?? {});
+		// Classic protection may list only `contexts`, without the newer `checks`.
+		const contexts =
+			legacy.checks === undefined
+				? (Array.isArray(legacy.contexts) ? legacy.contexts : []).map(string)
+				: array(legacy.checks).map((row) => string(row.context));
 		const rules = await github.all(`${base}/rules/branches/${ref}?per_page=100`);
 		const found: Requirements = {
 			names: new Set([
-				...(legacy.enforcement_level === "off" ? [] : array(legacy.checks).map((row) => string(row.context))),
+				...(legacy.enforcement_level === "off" ? [] : contexts),
 				...rules
 					.filter((rule) => rule.type === "required_status_checks")
 					.flatMap((rule) => array(object(rule.parameters).required_status_checks))

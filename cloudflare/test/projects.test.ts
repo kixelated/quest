@@ -34,6 +34,8 @@ function github(
 	options: {
 		role?: string;
 		activity?: ActivityPage;
+		/** What a read by number finds, by number; otherwise the activity page's entity with it. */
+		entities?: Record<number, unknown>;
 		onActivity?: () => Promise<void>;
 		activityErrors?: boolean;
 		repositoryName?: string;
@@ -182,10 +184,21 @@ function github(
 			const query = JSON.parse(String(init?.body)).query as string;
 			if (!query.includes("object(oid:")) {
 				await options.onActivity?.();
-				return Response.json({
-					data: { repository: options.activity ?? activity() },
-					errors: options.activityErrors ? [{ message: "partial" }] : undefined,
-				});
+				const page = options.activity ?? activity();
+				const repository: Record<string, unknown> = { ...page };
+				const errors: unknown[] = options.activityErrors ? [{ message: "partial" }] : [];
+				for (const [, alias, field, number] of query.matchAll(/(s\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
+					const nodes = (field === "issue" ? [page.issues] : [page.pullRequests, page.open]).flatMap(
+						(c) => c?.nodes ?? [],
+					);
+					const found =
+						options.entities && Number(number) in options.entities
+							? options.entities[Number(number)]
+							: (nodes.find((node) => node.number === Number(number)) ?? null);
+					repository[alias!] = found;
+					if (!found) errors.push({ type: "NOT_FOUND", path: ["repository", alias] });
+				}
+				return Response.json({ data: { repository }, errors: errors.length ? errors : undefined });
 			}
 
 			const body = calls.at(-1)!.body;
@@ -495,6 +508,8 @@ describe("project setup routes", () => {
 		expect(await env.DB.prepare("SELECT name FROM github_projects WHERE id=10").first()).toEqual({
 			name: options.repositoryName,
 		});
+		// Passing the maintainer check joins the project's inbox even when its preview fails.
+		expect(await github().service.projects(account!.userId)).toEqual([expect.objectContaining({ id: 10 })]);
 		for (const next of ["paused", "disconnected"]) {
 			const stopped = await app.request(
 				route,
@@ -508,6 +523,8 @@ describe("project setup routes", () => {
 			expect(stopped.status).toBe(303);
 		}
 		expect(await state()).toBeNull();
+		// Disconnecting removes every maintainer's membership with the project.
+		expect(await env.DB.prepare("SELECT count(*) AS n FROM github_project_members").first()).toEqual({ n: 0 });
 	});
 
 	it("keeps stop controls after transfer without inheriting opt-in for the new installation", async () => {
@@ -688,7 +705,7 @@ function issue(id = 100, number = 1) {
 }
 function pull(branch = "quest/first", id = 200) {
 	return {
-		...issue(id, 2),
+		...issue(id, id - 198),
 		headRefName: branch,
 		headRefOid: commit,
 		isDraft: false,
@@ -809,8 +826,8 @@ describe("enrolled project observations", () => {
 			["status", {}],
 			["issues", { action: "opened", issue: { id: 102, number: 5 } }],
 			["issue_comment", { action: "created", issue: { id: 100, number: 1 } }],
-			["pull_request", { action: "edited", pull_request: { id: 201, number: 2 } }],
-			["pull_request_review", { action: "submitted", pull_request: { id: 201, number: 2 } }],
+			["pull_request", { action: "edited", pull_request: { id: 201, number: 3 } }],
+			["pull_request_review", { action: "submitted", pull_request: { id: 201, number: 3 } }],
 			["push", { ref: "refs/heads/human-branch" }],
 			["push", { ref: "refs/heads/quest/first", created: false, deleted: false }],
 		] as const;
@@ -948,6 +965,249 @@ describe("enrolled project observations", () => {
 		expect(readBoard(paused!.project).counts.available).toBe(0);
 		await github().service.setContributions(repo, "enrollment-test", "disconnected");
 		expect((await env.DB.prepare("SELECT * FROM github_project_activity").all()).results).toEqual([]);
+		expect(await env.DB.prepare("SELECT * FROM github_project_state").first()).toBeNull();
+	});
+});
+
+describe("webhook reconciliation", () => {
+	// The webhook route reads GitHub through the global fetch.
+	function mocked(options: Parameters<typeof github>[0] = {}) {
+		const mock = github(options);
+		vi.spyOn(globalThis, "fetch").mockImplementation(mock.request as typeof fetch);
+		return mock;
+	}
+	const reads = (calls: ReturnType<typeof github>["calls"]) =>
+		calls.filter((call) => call.path === "/graphql" && !call.body.query.includes("object(oid:"));
+	const opened = (id: number, number: number, id_ = crypto.randomUUID()) =>
+		delivery("issues", { ...event, action: "opened", issue: { id, number } }, id_, {}, testEnv);
+	async function row(id: string) {
+		return env.DB.prepare("SELECT data,stale,missing FROM github_project_activity WHERE repository=10 AND id=?")
+			.bind(id)
+			.first<{ data: string | null; stale: number; missing: number }>();
+	}
+	async function enrolled() {
+		await github().service.setContributions(repo, "enrollment-test", "enabled");
+		await github().service.projectState(repo, "enrollment-test", true);
+	}
+
+	it("reads a new issue by number with the App's read-only token and no maintainer check", async () => {
+		await enrolled();
+		const { calls } = mocked({ entities: { 5: { ...issue(102, 5), title: "New idea" } } });
+		expect((await opened(102, 5)).status).toBe(202);
+		expect(reads(calls)).toHaveLength(1);
+		expect(reads(calls)[0]!.body.query).toContain("s0:issue(number:5)");
+		expect(calls.some((call) => call.path.endsWith("/permission"))).toBe(false);
+		expect(calls.find((call) => call.path.endsWith("/access_tokens"))!.body.permissions).toEqual({
+			metadata: "read",
+			contents: "read",
+			issues: "read",
+			pull_requests: "read",
+			checks: "read",
+			statuses: "read",
+		});
+		expect(calls.at(-1)?.method).toBe("DELETE");
+		expect(await row("102")).toMatchObject({ stale: 0, missing: 0 });
+		const state = await github().service.projectState(repo, "enrollment-test");
+		expect(state!.project.issues).toContainEqual({ path: "issues/5", title: "New idea" });
+		expect(state!.failure).toBeNull();
+	});
+
+	it("reads once for a duplicate delivery and skips webhooks that change nothing shown", async () => {
+		await enrolled();
+		const { calls } = mocked({ entities: { 5: issue(102, 5) } });
+		const id = crypto.randomUUID();
+		await opened(102, 5, id);
+		expect(await (await opened(102, 5, id)).json()).toEqual({ status: "duplicate" });
+		for (const [name, payload] of [
+			["check_run", {}],
+			["status", {}],
+			["push", { ref: "refs/heads/human-branch" }],
+		] as const)
+			await delivery(name, { ...event, ...payload }, undefined, {}, testEnv);
+		expect(reads(calls)).toHaveLength(1);
+	});
+
+	it("coalesces a burst of deliveries into one more read", async () => {
+		await enrolled();
+		let started!: () => void;
+		const reading = new Promise<void>((resolve) => (started = resolve));
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const { calls } = mocked({
+			entities: { 5: issue(102, 5), 6: issue(103, 6), 7: issue(104, 7) },
+			onActivity: async () => {
+				started();
+				await gate;
+			},
+		});
+		const first = opened(102, 5);
+		await reading;
+		// Another update to the entity being read, and new ones, while the read is in progress.
+		for (const [id, number] of [
+			[102, 5],
+			[103, 6],
+			[104, 7],
+			[103, 6],
+		])
+			expect((await opened(id!, number!)).status).toBe(202);
+		release();
+		await first;
+		expect(reads(calls)).toHaveLength(2);
+		expect(reads(calls)[1]!.body.query).toContain("issue(number:5)");
+		for (const id of ["102", "103", "104"]) expect(await row(id)).toMatchObject({ stale: 0 });
+	});
+
+	it("reads again when a webhook during a read fails its revision check", async () => {
+		await enrolled();
+		let started!: () => void;
+		const reading = new Promise<void>((resolve) => (started = resolve));
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		let first = true;
+		const { calls } = mocked({
+			entities: { 5: issue(102, 5) },
+			onActivity: async () => {
+				if (!first) return;
+				first = false;
+				started();
+				await gate;
+			},
+		});
+		const pending = opened(102, 5);
+		await reading;
+		// A new PR head bumps the revision the read in progress publishes against.
+		const synchronized = { ...event, action: "synchronize", pull_request: { id: 200, number: 2 } };
+		expect((await delivery("pull_request", synchronized, undefined, {}, testEnv)).status).toBe(202);
+		release();
+		await pending;
+		expect(reads(calls)).toHaveLength(2);
+		expect(await row("102")).toMatchObject({ stale: 0 });
+		expect((await github().service.projectState(repo, "enrollment-test"))!.failure).toBeNull();
+	});
+
+	it("reads again when a refresh that started first publishes first", async () => {
+		await enrolled();
+		const gate = () => {
+			let started!: () => void;
+			let release!: () => void;
+			const reading = new Promise<void>((resolve) => (started = resolve));
+			const held = new Promise<void>((resolve) => (release = resolve));
+			return { reading, release, hold: async () => (started(), await held) };
+		};
+		// The refresh lists stale entities before the webhook arrives.
+		const refresh = gate();
+		const refreshing = github({ onActivity: refresh.hold }).service.projectState(repo, "enrollment-test", true);
+		await refresh.reading;
+		const observer = gate();
+		let first = true;
+		const { calls } = mocked({
+			entities: { 5: issue(102, 5) },
+			onActivity: async () => {
+				if (!first) return;
+				first = false;
+				await observer.hold();
+			},
+		});
+		const pending = opened(102, 5);
+		await observer.reading;
+		refresh.release();
+		await refreshing;
+		observer.release();
+		await pending;
+		expect(reads(calls)).toHaveLength(2);
+		expect(await row("102")).toMatchObject({ stale: 0 });
+		expect((await github().service.projectState(repo, "enrollment-test"))!.failure).toBeNull();
+	});
+
+	it("rereads a PR by number after a comment on it", async () => {
+		await enrolled();
+		const { calls } = mocked({ entities: { 2: { ...pull(), comments: { totalCount: 3 } } } });
+		const comment = { ...event, action: "created", issue: { id: 999, number: 2, pull_request: {} } };
+		expect((await delivery("issue_comment", comment, undefined, {}, testEnv)).status).toBe(202);
+		expect(reads(calls)).toHaveLength(1);
+		expect(reads(calls)[0]!.body.query).toContain("s0:pullRequest(number:2)");
+		const read = await row("200");
+		expect(read).toMatchObject({ stale: 0 });
+		expect(JSON.parse(read!.data!).comments).toEqual({ totalCount: 3 });
+		expect(await row("999")).toBeNull();
+	});
+
+	it("records a failed read without retrying, and a later webhook reads again", async () => {
+		await enrolled();
+		const failed = mocked({ activityErrors: true });
+		await opened(102, 5);
+		expect(reads(failed.calls)).toHaveLength(1);
+		expect(await row("102")).toMatchObject({ data: null, stale: 1 });
+		const state = await github().service.projectState(repo, "enrollment-test");
+		expect(state!.failure).toBe("Project activity unavailable");
+		const { calls } = mocked({ entities: { 5: issue(102, 5) } });
+		await opened(102, 5);
+		expect(reads(calls)).toHaveLength(1);
+		expect(await row("102")).toMatchObject({ stale: 0 });
+		expect((await github().service.projectState(repo, "enrollment-test"))!.failure).toBeNull();
+	});
+
+	it("shows why a background read failed next to the refresh fallback", async () => {
+		const who = identity("github");
+		const login = await oauth(who);
+		const user = await env.DB.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
+			.bind(who.id)
+			.first<{ userId: string }>();
+		const { service } = github({ account: Number(who.id) });
+		await service.setContributions(repo, user!.userId, "enabled");
+		await service.projectState(repo, user!.userId, true);
+		mocked({ account: Number(who.id), activityErrors: true });
+		await opened(102, 5);
+		const page = await app.request(
+			`${origin}/projects/github/upstream/project/state`,
+			{ headers: { Cookie: login.session! } },
+			testEnv,
+		);
+		expect(await page.text()).toContain("The last background read failed: Project activity unavailable");
+	});
+
+	it("rereads a closed issue and marks a deleted one missing", async () => {
+		await enrolled();
+		mocked({ entities: { 1: { ...issue(), state: "CLOSED" } } });
+		await delivery("issues", { ...event, action: "closed", issue: { id: 100, number: 1 } }, undefined, {}, testEnv);
+		expect((await github().service.projectState(repo, "enrollment-test"))!.project.issues).toEqual([]);
+		mocked({ entities: { 1: null } });
+		await delivery(
+			"issues",
+			{ ...event, action: "deleted", issue: { id: 100, number: 1 } },
+			undefined,
+			{},
+			testEnv,
+		);
+		expect(await row("100")).toMatchObject({ stale: 0, missing: 1 });
+	});
+
+	it("rereads availability after a webhook that can claim a quest", async () => {
+		await enrolled();
+		const quiet = {
+			issues: connection([]),
+			pullRequests: connection([]),
+			open: connection([]),
+			refs: connection([]),
+		};
+		await github({ activity: quiet }).service.projectState(repo, "enrollment-test", true);
+		mocked({ activity: { ...quiet, refs: connection([{ name: "first", prefix: "refs/heads/quest/" }]) } });
+		await delivery("push", { ...event, ref: "refs/heads/quest/first", created: true }, undefined, {}, testEnv);
+		const state = await github().service.projectState(repo, "enrollment-test");
+		expect(state!.claims).toEqual(["quest/first.md"]);
+		expect(state!.project.available).toEqual([]);
+	});
+
+	it("does not read a paused or disconnected project", async () => {
+		await enrolled();
+		await github().service.setContributions(repo, "enrollment-test", "paused");
+		const paused = mocked();
+		expect((await opened(102, 5)).status).toBe(202);
+		expect(paused.calls).toEqual([]);
+		await github().service.setContributions(repo, "enrollment-test", "disconnected");
+		const disconnected = mocked();
+		expect((await opened(103, 6)).status).toBe(202);
+		expect(disconnected.calls).toEqual([]);
 		expect(await env.DB.prepare("SELECT * FROM github_project_state").first()).toBeNull();
 	});
 });

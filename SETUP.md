@@ -65,6 +65,15 @@ Read the root instructions with the new line in place:
 - If `quest/README.md` was just created, ask the user what the project is
   working toward and write that as its Goal.
 
+`quest start` claims each quest with a draft PR that holds only an empty
+commit. If the repository's CI runs on pull requests, recommend skipping
+drafts, since agents run the checks locally until a PR is ready for review. In
+GitHub Actions, add `ready_for_review` to the `pull_request` trigger's `types`
+(alongside the defaults `opened`, `synchronize`, and `reopened`) and give each
+job the condition
+`github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
+Change workflows only if the user agrees.
+
 Run `quest check`, then suggest next steps: restart the agent session so it
 loads the new skills, then `/quest-plan` (`$quest-plan` in Codex) to plan
 work or `/quest-import` to bring in open GitHub issues.

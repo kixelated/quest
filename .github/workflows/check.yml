@@ -3,7 +3,9 @@ name: Check
 on:
   push:
     branches: [main]
+  # Drafts are claims with local checks; CI starts once a PR is ready for review.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -15,6 +17,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,6 +38,7 @@ jobs:
 
   lifecycle:
     name: lifecycle (${{ matrix.runner }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +60,7 @@ jobs:
 
   windows:
     name: native Windows (${{ matrix.runner }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:

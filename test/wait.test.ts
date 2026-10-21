@@ -151,6 +151,8 @@ function setup(
 		graphql?: Response[];
 		checks?: Response[];
 		protected?: string[];
+		/** Classic protection that lists only `contexts`, without `checks`. */
+		contextsOnly?: boolean;
 		ruled?: string[];
 		rules?: unknown[];
 	} = {},
@@ -188,11 +190,15 @@ function setup(
 			}
 			if (parsed.pathname === `${base}/branches/main`) {
 				ruleCalls.push(call);
-				const checks = (side.protected ?? []).map((context) => ({ context, app_id: null }));
+				const contexts = side.protected ?? [];
+				const checks = contexts.map((context) => ({ context, app_id: null }));
+				const level = contexts.length ? "everyone" : "off";
 				return response({
 					protection: {
-						enabled: checks.length > 0,
-						required_status_checks: { enforcement_level: checks.length ? "everyone" : "off", checks },
+						enabled: contexts.length > 0,
+						required_status_checks: side.contextsOnly
+							? { enforcement_level: level, contexts }
+							: { enforcement_level: level, checks },
 					},
 				});
 			}
@@ -794,6 +800,24 @@ test("an optional failure never wakes the wait, and checks:passed waits for ever
 		`${base}/branches/main`,
 		`${base}/rules/branches/main?per_page=100`,
 	]);
+});
+
+test("classic protection that lists only contexts still names required checks", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }]),
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "gate", required: true, result: "SUCCESS", time: LATEST },
+			]),
+		],
+		protected: ["check", "gate"],
+		contextsOnly: true,
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
 });
 
 test("optional checks never stand in for required checks that have not started", async () => {
