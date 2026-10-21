@@ -240,7 +240,7 @@ hangs, such as sandboxed agent environments. After applying the checked-in
 migrations, `dev/seed.ts` signs in a maintainer and enrolls and observes their
 projects through the Worker's own routes: ready, claimed, and blocked quests,
 issues (one known only from a webhook, one with a long title), pull requests
-with checks and reviews, and a paused second project. It then adds runners and
+with checks and reviews (one clean to merge), and a paused second project. It then adds runners and
 jobs that are queued, running, failed, or waiting on an agent's questions, a
 tool permission, or an account limit.
 

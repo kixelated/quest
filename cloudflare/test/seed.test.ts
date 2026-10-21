@@ -61,4 +61,19 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 	const items = [...html.matchAll(/href="(\/inbox\?project=[^"]+)"/g)].map((m) => m[1]!.replaceAll("&amp;", "&"));
 	expect(items.length).toBeGreaterThan(5);
 	for (const href of new Set(items)) expect((await request(href, { headers: { Cookie: cookie } })).status).toBe(200);
+
+	// The clean pull request merges through the fake GitHub.
+	const pull = await request("/inbox?project=9101&item=pulls/12", { headers: { Cookie: cookie } });
+	const head = (await pull.text()).match(
+		/action="([^"]+\/pulls\/12\/merge)"[\s\S]*?name="head" value="([0-9a-f]{40})"/,
+	);
+	expect(head).not.toBeNull();
+	const merged = await request(head![1]!, {
+		method: "POST",
+		redirect: "manual",
+		headers: { Cookie: cookie, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
+		body: new URLSearchParams({ head: head![2]! }).toString(),
+	});
+	expect(merged.status).toBe(303);
+	expect(data.repos[0]!.pulls.find((p) => p.number === 12)!.closed).toBe(true);
 });

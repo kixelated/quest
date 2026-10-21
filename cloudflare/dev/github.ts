@@ -12,6 +12,8 @@ export type Pull = Issue & {
 	review: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
 	reviews?: { state: string; author: string }[];
 	draft?: boolean;
+	/** GitHub's mergeStateStatus; only CLEAN merges. Defaults to BLOCKED, or DRAFT for a draft. */
+	merge?: "CLEAN" | "BLOCKED" | "DIRTY" | "UNSTABLE";
 };
 export type Repo = {
 	id: number;
@@ -61,6 +63,7 @@ function pullNode(repo: Repo, pull: Pull) {
 		headRefOid: oid,
 		isDraft: !!pull.draft,
 		reviewDecision: pull.review,
+		mergeStateStatus: pull.merge ?? (pull.draft ? "DRAFT" : "BLOCKED"),
 		reviews: { totalCount: reviews.length },
 		latestReviews: {
 			nodes: reviews.map((r) => ({ state: r.state, author: { login: r.author }, commit: { oid } })),
@@ -180,6 +183,7 @@ export function fakeGitHub(world: World) {
 				archived: false,
 				disabled: false,
 				license: { spdx_id: "MIT" },
+				allow_squash_merge: true,
 			});
 		if (rest === "/installation")
 			return json({ id: world.installation, app_id: world.app.id, suspended_at: null, permissions: all });
@@ -203,6 +207,16 @@ export function fakeGitHub(world: World) {
 			if (!found) return json({ message: "Not Found" }, 404);
 			const head = item[1] === "pulls" ? { head: { sha: headOf(repo, found as Pull) } } : {};
 			return json({ number: found.number, title: found.title, state: found.closed ? "closed" : "open", ...head });
+		}
+		const merge = rest.match(/^\/pulls\/(\d+)\/merge$/);
+		if (merge && method === "PUT") {
+			const pull = repo.pulls.find((p) => String(p.number) === merge[1] && !p.closed);
+			if (!pull) return json({ message: "Not Found" }, 404);
+			const { sha } = JSON.parse(await body()) as { sha: string };
+			if (sha !== headOf(repo, pull)) return json({ message: "Head branch was modified" }, 409);
+			if (pull.merge !== "CLEAN") return json({ message: "Pull Request is not mergeable" }, 405);
+			pull.closed = true;
+			return json({ sha: commitOf(repo), merged: true, message: "Pull Request successfully merged" });
 		}
 		if (rest.startsWith("/contents/")) {
 			const file = repo.files.find((f) => f.path === decodeURIComponent(rest.slice("/contents/".length)));

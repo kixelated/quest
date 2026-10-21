@@ -81,6 +81,7 @@ export function world(): World {
 				review: "APPROVED",
 				reviews: [{ state: "APPROVED", author: "reviewer" }],
 				comments: 3,
+				merge: "CLEAN",
 			},
 			{
 				number: 14,
