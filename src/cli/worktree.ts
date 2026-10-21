@@ -133,7 +133,8 @@ function lockReason(path: string): string | undefined {
 export function diskUsage(path: string): number {
 	const stat = entry(path);
 	if (!stat) return 0;
-	let bytes = Math.max(stat.blocks * 512, stat.size);
+	// Allocated blocks, not logical length, so sparse files are not overcharged.
+	let bytes = Number.isFinite(stat.blocks) ? stat.blocks * 512 : stat.size;
 	if (stat.isDirectory()) for (const child of readdirSync(path)) bytes += diskUsage(join(path, child));
 	return bytes;
 }

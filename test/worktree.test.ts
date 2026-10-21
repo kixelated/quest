@@ -2,11 +2,13 @@ import { execFileSync, spawn } from "node:child_process";
 import {
 	existsSync,
 	linkSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
 	symlinkSync,
+	truncateSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,10 +109,15 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		expect(existsSync(join(record.path, ".env"))).toBe(false);
 		expect(readFileSync(join(outside, "cache", "keep"), "utf8")).toBe("outside");
 	});
-	it.skipIf(process.platform === "win32")("counts dangling symlinks", () => {
+	it.skipIf(process.platform === "win32")("charges allocated blocks of dangling symlinks and sparse files", () => {
 		const { root } = fixture();
-		symlinkSync("missing", join(root, "dangling"));
-		expect(diskUsage(join(root, "dangling"))).toBeGreaterThan(0);
+		const dangling = join(root, "dangling");
+		symlinkSync("missing", dangling);
+		expect(diskUsage(dangling)).toBe(lstatSync(dangling).blocks * 512);
+		const sparse = join(root, "sparse");
+		writeFileSync(sparse, "");
+		truncateSync(sparse, 1 << 30);
+		expect(diskUsage(sparse)).toBeLessThan(1 << 20);
 	});
 	it("charges active reservations and the footprint released checkouts keep", () => {
 		const { repo, worktrees } = fixture();
