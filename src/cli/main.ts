@@ -387,6 +387,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	const agent = program
 		.command("agent")
+		// Options come before <worktree>, so a prompt or answer starting with "-" is never read as one.
+		.enablePositionalOptions()
 		.summary("Start, resume, and stop headless agents billed to API keys")
 		.description(
 			"Run one headless agent turn per call in the foreground, billed to one of the keys in QUEST_API_KEYS, " +
@@ -395,15 +397,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"entry may be a 1Password op:// reference: the first launch resolves every reference in one " +
 				"`op inject` and keeps the keys in a user-only store under $XDG_RUNTIME_DIR (or the temporary " +
 				"directory) shared by the repository's worktrees, until `quest agent stop --all`.\n\n" +
-				"The agent runs in <worktree> with the user's environment minus every CLAUDE*, ANTHROPIC*, CODEX_* " +
-				"(except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_API_KEYS, and QUEST_GATE_ADMITTED variable, plus " +
+				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
+				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_API_KEYS, and QUEST_GATE_ADMITTED variable, plus " +
 				"its one key as " +
 				"ANTHROPIC_API_KEY (claude -p) or CODEX_API_KEY (codex exec). It never prints a key; any the agent " +
 				"repeats is shown as <key N>.\n\n" +
 				"Prints `session <id>` as soon as the id is known, then `cost <dollars>` when the agent reports it, " +
 				"`outcome finished|failed|exhausted|stopped`, a blank line, and the agent's final reply. Exits 0 " +
 				"when the agent finished, 3 when the provider refused the key for lack of credit, 2 for invalid " +
-				"arguments, and 1 otherwise.",
+				"arguments, 128 plus the signal number when interrupted, and 1 otherwise.",
 		);
 	const launchOptions = (command: Command) =>
 		command
@@ -433,7 +435,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			.command("start")
 			.description("Start a new agent session in a worktree with a prompt")
 			.argument("<worktree>", "Checkout the agent works in")
-			.argument("<prompt>", "The agent's instructions"),
+			.argument("<prompt>", "The agent's instructions")
+			.passThroughOptions(),
 	).action((worktree: string, prompt: string, options: LaunchOptions) =>
 		launch(worktree, prompt, undefined, options),
 	);
@@ -443,7 +446,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			.description("Resume an agent's session in its worktree with a message")
 			.argument("<worktree>", "Checkout the session ran in")
 			.argument("<session>", "Session id printed by start")
-			.argument("<message>", "The next message, such as an answer to its decisions"),
+			.argument("<message>", "The next message, such as an answer to its decisions")
+			.passThroughOptions(),
 	).action((worktree: string, session: string, message: string, options: LaunchOptions) =>
 		launch(worktree, message, session, options),
 	);

@@ -412,21 +412,24 @@ quest agent stop .worktrees/foo
 quest agent stop --all
 ```
 
-`--key` names a key by its 1-based position. The first launch resolves every
-1Password `op://` entry in one `op inject` and keeps the keys in a user-only
+Options go before the worktree, and the prompt or message follows it, so text
+starting with `-` is never read as an option. `--key` names a key by its
+1-based position. The first launch resolves every 1Password `op://` entry in
+one `op inject` and keeps the keys in a user-only
 store under `$XDG_RUNTIME_DIR` (or the temporary directory), shared by the
 repository's worktrees until `quest agent stop --all` deletes it. The agent
 runs in the worktree with the user's environment minus the coordinating
-session's harness variables, other keys, secret-manager tokens, and any
-`quest gate` admission, plus its one key. `--permission-mode` is Claude Code's permission mode, or Codex's sandbox
+session's harness variables (keeping `CLAUDE_CONFIG_DIR` and `CODEX_HOME`),
+other keys, secret-manager tokens, and any `quest gate` admission, plus its one
+key. `--permission-mode` is Claude Code's permission mode, or Codex's sandbox
 mode; the agent cannot prompt.
 
 It prints `session <id>` as soon as the id is known, then `cost <dollars>` when
 the agent reports it, `outcome finished|failed|exhausted|stopped`, a blank line,
 and the agent's final reply. It never prints a key. It exits 0 when the agent
 finished, 3 when the provider refused the key for lack of credit, 2 for invalid
-arguments, and 1 otherwise. `stop` signals the agent and waits until its `start`
-or `resume` has reported.
+arguments, 128 plus the signal number when interrupted, and 1 otherwise. `stop`
+signals the agent and waits until its `start` or `resume` has reported.
 
 ## Prunable local checkouts
 

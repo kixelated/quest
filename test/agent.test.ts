@@ -8,6 +8,7 @@ import {
 	readdirSync,
 	realpathSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -41,7 +42,13 @@ if (process.env.FAKE_MODE === "exhausted") {
 	result({ is_error: true, result: "Credit balance is too low" });
 	process.exit(1);
 }
-if (process.env.FAKE_MODE === "leak") {
+if (process.env.FAKE_MODE === "quota-reply") {
+	result({ is_error: false, result: "fixed the insufficient_quota check" });
+} else if (process.env.FAKE_MODE === "noisy") {
+	// No result, and a key just before the last 64 KiB of output.
+	process.stdout.write("x".repeat(1000) + key + "y".repeat(64 * 1024 - 5) + "\\n");
+	process.exitCode = 1;
+} else if (process.env.FAKE_MODE === "leak") {
 	// The key arrives on stderr in two separate writes.
 	process.stderr.write("using " + key.slice(0, 4));
 	setTimeout(() => {
@@ -73,6 +80,7 @@ if (process.env.FAKE_MODE === "exhausted") {
 	event({ type: "turn.failed", error: { message: "insufficient_quota" } });
 	process.exit(1);
 }
+if (process.env.FAKE_MODE === "reconnect") event({ type: "error", message: "Reconnecting... 1/5" });
 event({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: "first" } });
 event({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "final reply" } });
 event({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
@@ -181,6 +189,7 @@ test("the agent environment holds only its own key", () => {
 			OPENAI_API_KEY: "o",
 			CODEX_SANDBOX: "seatbelt",
 			CODEX_HOME: "/home/me/.codex",
+			CLAUDE_CONFIG_DIR: "/home/me/.claude-work",
 		},
 		"ANTHROPIC_API_KEY",
 		"sk-agent",
@@ -189,6 +198,7 @@ test("the agent environment holds only its own key", () => {
 		PATH: "/bin",
 		HOME: "/home/me",
 		CODEX_HOME: "/home/me/.codex",
+		CLAUDE_CONFIG_DIR: "/home/me/.claude-work",
 		ANTHROPIC_API_KEY: "sk-agent",
 	});
 });
@@ -369,6 +379,59 @@ fakes("concurrent launches in one worktree run only one agent", async () => {
 	const results = await Promise.all([first, second]);
 	expect(results.filter((result) => result.stdout.endsWith("outcome stopped\n"))).toHaveLength(1);
 	expect(s.calls().filter((call) => "argv" in call)).toHaveLength(1);
+});
+
+fakes("a finished turn whose reply mentions credit is not an exhausted key", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "quota-reply");
+	const result = await quest("agent", "start", ...launch("claude", "1"), s.worktree, "go");
+	expect(result.code).toBe(0);
+	expect(result.stdout).toContain("outcome finished\n");
+});
+
+fakes("a retried codex stream error does not fail a completed turn", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "reconnect");
+	const result = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+	expect(result).toEqual({ code: 0, stdout: "session thread-1\noutcome finished\n\nfinal reply\n", stderr: "" });
+});
+
+fakes("the no-result diagnostic never shows part of a key", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "noisy");
+	const result = await quest("agent", "start", ...launch("claude", "2"), s.worktree, "go");
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("printed no result");
+	// The kept tail starts inside the key; no fragment of it may precede the filler.
+	for (let length = 2; length <= "resolved-second".length; length++) {
+		expect(result.stderr).not.toContain(`${"resolved-second".slice(-length)}y`);
+	}
+});
+
+fakes("a prompt starting with a dash is the prompt, not an option", async () => {
+	const s = setup();
+	const result = await quest("agent", "start", ...launch("claude", "1"), s.worktree, "- A: yes");
+	expect(result.code).toBe(0);
+	expect(s.calls()[0].stdin).toBe("- A: yes");
+});
+
+fakes("every command refuses a state directory that is a symlink", async () => {
+	const s = setup();
+	const elsewhere = join(s.runtime, "elsewhere");
+	mkdirSync(elsewhere, { mode: 0o700 });
+	mkdirSync(join(s.runtime, "quest"));
+	symlinkSync(elsewhere, join(s.runtime, "quest", "agent"));
+	for (const args of [
+		["agent", "start", ...launch("claude", "1"), s.worktree, "go"],
+		["agent", "stop", s.worktree],
+		["--root", s.worktree, "agent", "stop", "--all"],
+	]) {
+		const result = await quest(...args);
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("is a symlink or not a directory");
+	}
+	expect(s.calls()).toEqual([]);
+	expect(readdirSync(elsewhere)).toEqual([]);
 });
 
 test("missing keys, positions past the list, and unknown references are usage errors", async () => {

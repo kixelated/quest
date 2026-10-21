@@ -12,11 +12,11 @@ import {
 	chmodSync,
 	existsSync,
 	linkSync,
+	lstatSync,
 	mkdirSync,
 	readFileSync,
 	readdirSync,
 	realpathSync,
-	renameSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -24,6 +24,8 @@ import {
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+
+import { save } from "./worktree";
 
 export const HARNESSES = ["claude", "codex"] as const;
 export type HarnessName = (typeof HARNESSES)[number];
@@ -142,6 +144,7 @@ const codex: Harness = {
 		let session: string | undefined;
 		let reply: string | undefined;
 		let error: string | undefined;
+		let turnFailed = false;
 		let exhausted = false;
 		return {
 			line(line) {
@@ -149,10 +152,13 @@ const codex: Harness = {
 				if (event === undefined) return undefined;
 				const item = event.item as Record<string, unknown> | undefined;
 				if (event.type === "item.completed" && item?.type === "agent_message") reply = text(item.text) ?? reply;
+				// Codex also reports retryable stream errors, such as reconnects, as `error`
+				// events and keeps the turn going, so only `turn.failed` fails it.
 				if (event.type === "turn.failed" || event.type === "error") {
 					const failure = event.error as Record<string, unknown> | undefined;
 					error = text(failure?.message) ?? text(event.message) ?? "";
 					exhausted ||= EXHAUSTED.test(error);
+					turnFailed ||= event.type === "turn.failed";
 				}
 				if (event.type !== "thread.started") return undefined;
 				session = text(event.thread_id) ?? session;
@@ -163,7 +169,7 @@ const codex: Harness = {
 				// A turn that failed before replying reports why, as `claude -p` does.
 				reply: reply ?? error,
 				exhausted: exhausted || EXHAUSTED.test(stderr),
-				failed: error !== undefined || reply === undefined,
+				failed: turnFailed || reply === undefined,
 			}),
 		};
 	},
@@ -199,10 +205,11 @@ export class AgentInputError extends Error {}
  * state and credentials, other keys, and secret-manager tokens. Without them
  * the agent neither reuses the session's account nor acts as its sub-session.
  * A launch from inside a `quest gate` command does not admit the agent's own
- * expensive commands, so the gate's mark is dropped too.
+ * expensive commands, so the gate's mark is dropped too. Each CLI keeps the
+ * user's configuration directory.
  */
 const STRIPPED = [
-	/^CLAUDE/,
+	/^CLAUDE(?!_CONFIG_DIR$)/,
 	/^ANTHROPIC/,
 	/^CODEX_(?!HOME$)/,
 	/^OPENAI_API_KEY$/,
@@ -228,12 +235,16 @@ export function agentDirectory(env = process.env): string {
 	return join(tmpdir(), uid === undefined ? "quest-agent" : `quest-agent-${uid}`);
 }
 
-/** Create `dir` readable only by this user, refusing one someone else could read or replace. */
+/**
+ * Create `dir` readable only by this user, refusing a symlink or a directory
+ * someone else owns, either of which another user could control.
+ */
 function privateDirectory(dir: string): string {
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const stat = lstatSync(dir);
+	if (!stat.isDirectory()) throw new Error(`${dir} is a symlink or not a directory`);
 	const uid = process.getuid?.();
 	if (uid !== undefined) {
-		const stat = statSync(dir);
 		if (stat.uid !== uid) throw new Error(`${dir} belongs to another user`);
 		if ((stat.mode & 0o077) !== 0) chmodSync(dir, 0o700);
 	}
@@ -242,7 +253,11 @@ function privateDirectory(dir: string): string {
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
 
-/** One spawn's state: every worktree of a repository shares its key store and agent records. */
+/**
+ * One spawn's state: every worktree of a repository shares its key store and
+ * agent records. Every command reaches it through here, so each one checks
+ * that the state is private before trusting the records in it.
+ */
 export function spawnDirectory(base: string, worktree: string): string {
 	let common: string;
 	try {
@@ -253,13 +268,9 @@ export function spawnDirectory(base: string, worktree: string): string {
 	} catch {
 		throw new AgentInputError(`${worktree} is not inside a Git repository`);
 	}
-	return join(base, digest(realpathSync(common)));
-}
-
-function save(path: string, value: unknown): void {
-	const temporary = `${path}.${randomUUID()}.tmp`;
-	writeFileSync(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });
-	renameSync(temporary, path);
+	const dir = privateDirectory(join(privateDirectory(base), digest(realpathSync(common))));
+	privateDirectory(join(dir, "agents"));
+	return dir;
 }
 
 function load<T>(path: string): T | undefined {
@@ -464,8 +475,7 @@ export async function runAgent(
 	} catch {
 		throw new AgentInputError(`${launch.worktree} is not a directory`);
 	}
-	const dir = spawnDirectory(privateDirectory(deps.base), worktree);
-	privateDirectory(join(dir, "agents"));
+	const dir = spawnDirectory(deps.base, worktree);
 	const keys = await spawnKeys(dir, deps.env, deps.resolve);
 	const key = keys[launch.key - 1];
 	if (key === undefined) {
@@ -512,6 +522,7 @@ export async function runAgent(
 				state.child = agent.pid;
 				save(record, state);
 				announce(known);
+				// The kept tails are redacted before they are cut, so a cut never splits a key.
 				let out = "";
 				let err = "";
 				let line = "";
@@ -519,14 +530,14 @@ export async function runAgent(
 				// one split across chunks is still redacted.
 				let partial = "";
 				agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-					out = tail(out + chunk);
+					out = tail(redact(out + chunk));
 					const lines = (line + chunk).split("\n");
 					line = lines.pop()!;
 					for (const complete of lines) announce(reader.line(complete));
 				});
 				agent.stdout.once("end", () => announce(reader.line(line)));
 				agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-					err = tail(err + chunk);
+					err = tail(redact(err + chunk));
 					const buffered = partial + chunk;
 					const end = buffered.lastIndexOf("\n") + 1;
 					partial = buffered.slice(end);
@@ -551,16 +562,17 @@ export async function runAgent(
 		);
 		const result = reader.result(stderr);
 		announce(result.session);
+		// A finished turn is never exhausted, even if its reply mentions credit.
 		const outcome: Outcome =
 			interrupted || existsSync(stopPath(record))
 				? "stopped"
-				: result.exhausted
-					? "exhausted"
-					: code === 0 && !result.failed
-						? "finished"
+				: code === 0 && !result.failed
+					? "finished"
+					: result.exhausted
+						? "exhausted"
 						: "failed";
 		if (outcome === "failed" && result.reply === undefined && stdout.trim() !== "") {
-			deps.stderr(`quest: ${argv[0]} printed no result; its output ended with:\n${redact(stdout)}\n`);
+			deps.stderr(`quest: ${argv[0]} printed no result; its output ended with:\n${stdout}\n`);
 		}
 		if (result.cost !== undefined) deps.stdout(`cost ${result.cost}\n`);
 		deps.stdout(`outcome ${outcome}\n`);
