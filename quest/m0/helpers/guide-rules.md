@@ -18,8 +18,10 @@ the skill text on `main` that day. The user asked for these guide and skill
 edits through this plan; follow `PROMPTING.md` (goals over prescriptions).
 
 - Pushing (guide): never rebase or force-push a branch another session may
-  hold, and confirm the PR is still open before every push, because a push
-  after the merge brings the deleted branch back.
+  hold. Before every push to a branch that already has a PR, confirm the PR
+  is still open, because a push after the merge brings the deleted branch
+  back. The first claim push, which comes before its draft PR exists, is
+  exempt.
 - Briefs (`spawn`, `complete`): a sub-agent's brief carries the quest or PR,
   the user's picks, and the scope, and leaves repository rules to that
   repository's own instructions instead of restating them.
@@ -34,9 +36,11 @@ edits through this plan; follow `PROMPTING.md` (goals over prescriptions).
 - Follow-ups (guide): a follow-up becomes a quest through `/quest-plan`,
   never a session task card or a GitHub issue.
 - Reviews (guide): "At least one review is required" defers to the
-  repository's review policy for whose review counts. A review by the PR's
-  author, or an AI-attributed comment posted from the maintainer's account,
-  does not count.
+  repository's review policy for whose review counts. Where that policy
+  says nothing, a review by the PR's author, or an AI-attributed comment
+  posted from the maintainer's account, does not count. This is guidance
+  for the agent's judgment; the helper commands still never decide whose
+  review counts, as the epic's non-goal says.
 - Decisions (`iterate`): a sub-agent that cannot prompt picks the
   recommended option only for decisions the repository's instructions don't
   reserve for the maintainer (moq reserves API shape, naming, and scope);
