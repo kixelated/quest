@@ -213,11 +213,12 @@ command's scope.
 CI results are read for the current head. The first required check to fail
 prints `checks:failed` right away. `checks:passed` prints once nothing on the
 head is still going (no pending check and no unfinished GitHub Actions run, which
-may still create jobs), every check the base branch names is present, and
-every required check passed; it names the last required check to finish. Each
-prints once per head, with the check's name (spaces as `_`) in the actor field
-and its details URL. Results count as `quest status` counts them, so neutral
-and skipped results pass.
+may still create jobs), every check and workflow the base branch names is
+present, and every required check passed; it names the last check to finish,
+when the head went idle. Each prints once per head, with the check's name
+(spaces as `_`) in the actor field and its details URL. Results count as
+`quest status` counts them, so neutral and skipped results pass. Each job of a
+workflow a ruleset requires is required.
 Requiredness comes from the base branch's protection and rulesets, readable
 with read access; optional checks never wake the wait, unless the base branch
 requires none, in which case every check is required. A result counts when it

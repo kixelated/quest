@@ -44,7 +44,7 @@ const CHECKS = `query($owner: String!, $repo: String!, $number: Int!, $after: St
 						__typename
 						... on CheckRun {
 							name status conclusion completedAt detailsUrl isRequired(pullRequestNumber: $number)
-							checkSuite { status workflowRun { databaseId } }
+							checkSuite { status workflowRun { file { path } } }
 						}
 						... on StatusContext { context state createdAt targetUrl isRequired(pullRequestNumber: $number) }
 					}
@@ -101,6 +101,8 @@ interface Check {
 	name: string;
 	required: boolean;
 	url: string | null;
+	/** The workflow file a GitHub Actions job runs in. */
+	workflow?: string;
 	/** A GitHub Actions job whose workflow run has not finished, so it may still create jobs. */
 	running: boolean;
 	result?: { outcome: "passed" | "failed"; point: string; time: number };
@@ -110,8 +112,8 @@ interface Check {
 interface Requirements {
 	/** Required check names. */
 	names: Set<string>;
-	/** A required workflow names no checks, but still means the base requires some. */
-	workflows: boolean;
+	/** Workflow files that must pass as a whole, so each of their jobs is required. */
+	workflows: string[];
 }
 
 /** Wait until activity, returning plain output lines. Network and time are injected. */
@@ -349,7 +351,10 @@ async function watch(
 					.flatMap((rule) => array(object(rule.parameters).required_status_checks))
 					.map((row) => string(row.context)),
 			]),
-			workflows: rules.some((rule) => rule.type === "workflows"),
+			workflows: rules
+				.filter((rule) => rule.type === "workflows")
+				.flatMap((rule) => array(object(rule.parameters).workflows))
+				.map((row) => string(row.path)),
 		};
 		requirements.set(branch, found);
 		return found;
@@ -474,10 +479,12 @@ function check(row: ObjectValue): Check {
 	const run = row.__typename === "CheckRun";
 	const { check: classified, outcome } = classifyCheck(row);
 	const suite = run && row.checkSuite ? object(row.checkSuite) : undefined;
+	const file = suite?.workflowRun ? object(suite.workflowRun).file : null;
 	const found: Check = {
 		name: classified.name,
 		required: classified.required,
 		url: classified.url,
+		...(file ? { workflow: string(object(file).path) } : {}),
 		running: suite?.workflowRun ? suite.status !== "COMPLETED" : false,
 	};
 	if (outcome === "pending") return found;
@@ -487,8 +494,9 @@ function check(row: ObjectValue): Check {
 }
 
 /**
- * The head's first required failure, and every required check passing, each reported once per head
- * when reached at or after the starting point. A base branch that requires no checks requires them all.
+ * The head's first required failure, and every required check passing once the head is idle, each
+ * reported once per head when reached at or after the starting point. A base branch that requires
+ * no checks requires them all.
  */
 function checkActivities(
 	head: string,
@@ -497,7 +505,9 @@ function checkActivities(
 	state: Cursor["checks"],
 	prUrl: string,
 ): Activity[] {
-	const required = needs.names.size || needs.workflows ? all.filter((entry) => entry.required) : all;
+	const inWorkflow = (entry: Check) => entry.workflow !== undefined && needs.workflows.includes(entry.workflow);
+	const required =
+		needs.names.size || needs.workflows.length ? all.filter((entry) => entry.required || inWorkflow(entry)) : all;
 	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
 		const id = `${head}:${outcome}`;
 		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
@@ -516,13 +526,18 @@ function checkActivities(
 	settled.sort((a, b) => a.result.time - b.result.time);
 	const failed = settled.find((entry) => entry.result.outcome === "failed" && entry.result.time >= state.since);
 	// GitHub lists a check only once it starts, so a pass waits until nothing on the head is still
-	// going: no pending check, no workflow run that may yet create a job, and every required name present.
+	// going: no pending check, no workflow run that may yet create a job, and every required name
+	// and workflow present. It is dated by the last check to finish, when the head went idle.
 	const idle =
 		all.every((entry) => entry.result && !entry.running) &&
-		[...needs.names].every((name) => all.some((entry) => entry.name === name));
+		[...needs.names].every((name) => all.some((entry) => entry.name === name)) &&
+		needs.workflows.every((path) => all.some((entry) => entry.workflow === path));
 	const passed =
 		idle && settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
-			? settled.at(-1)
+			? all.reduce<Check | undefined>(
+					(last, entry) => (!last || entry.result!.time >= last.result!.time ? entry : last),
+					undefined,
+				)
 			: undefined;
 	return [...reached("failed", failed), ...reached("passed", passed)];
 }

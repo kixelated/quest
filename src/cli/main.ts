@@ -149,7 +149,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
 				"each once per head, with the check's name as the actor and its details URL. " +
 				"Results count as quest status counts them, so neutral and skipped results pass. " +
-				"checks:passed waits until no check is pending, no GitHub Actions run is unfinished, and every check the base branch names is present. " +
+				"checks:passed waits until no check is pending, no GitHub Actions run is unfinished, and every check and workflow the base branch names is present, then names the last check to finish. " +
 				"Optional checks never wake the wait, unless the base branch requires none, which requires them all. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
 				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +

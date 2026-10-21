@@ -79,7 +79,8 @@ interface CheckFixture {
 	result?: string;
 	time?: string;
 	status?: boolean;
-	/** A finished job whose workflow run is still going, so it may yet create jobs. */
+	/** The workflow file a job runs in, and whether its run is still going, so it may yet create jobs. */
+	workflow?: string;
 	running?: boolean;
 }
 
@@ -110,7 +111,7 @@ function checks(
 					isRequired: entry.required ?? false,
 					checkSuite: {
 						status: entry.result && !entry.running ? "COMPLETED" : "IN_PROGRESS",
-						workflowRun: { databaseId: 1 },
+						workflowRun: { file: { path: entry.workflow ?? ".github/workflows/check.yml" } },
 					},
 				};
 	return response({
@@ -850,7 +851,10 @@ test("a required check named on a later page of rules holds back checks:passed",
 	]);
 });
 
-test("a required workflow keeps optional checks optional, and its unfinished run holds back checks:passed", async () => {
+const CI = ".github/workflows/ci.yml";
+const workflowRule = { type: "workflows", parameters: { workflows: [{ path: CI, repository_id: 1 }] } };
+
+test("a required workflow requires its jobs, keeps optional checks optional, and holds back checks:passed until its run finishes", async () => {
 	const fixture = setup(
 		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
 		[A],
@@ -860,21 +864,53 @@ test("a required workflow keeps optional checks optional, and its unfinished run
 				// The run's next job has not been created yet.
 				checks([
 					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "build", required: true, result: "SUCCESS", time: LATER, running: true },
+					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI, running: true },
 				]),
 				checks([
 					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "build", required: true, result: "SUCCESS", time: LATER },
-					{ name: "gate", required: true, result: "SUCCESS", time: LATEST },
+					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI },
+					{ name: "gate", result: "SUCCESS", time: LATEST, workflow: CI },
 				]),
 			],
-			rules: [{ type: "workflows", parameters: { workflows: [{ path: ".github/workflows/ci.yml" }] } }],
+			rules: [workflowRule],
 		},
 	);
 	const lines = await waitForActivity(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000, 300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
+});
+
+test("a failing job in a required workflow wakes the wait", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [
+			checks([
+				{ name: "lint", result: "SUCCESS", time: LATER },
+				{ name: "build", result: "FAILURE", time: LATEST, workflow: CI, running: true },
+			]),
+		],
+		rules: [workflowRule],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed build /);
+});
+
+test("checks:passed is dated when the head goes idle, after required checks finished before the start", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([{ name: "check", required: true, result: "SUCCESS", time: POINT }, { name: "slow" }]),
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: POINT },
+				{ name: "slow", result: "SUCCESS", time: LATEST },
+			]),
+		],
+		protected: ["check"],
+	});
+	const lines = await waitForActivity(pr, { since: LATER }, fixture.deps);
+	expect(fixture.sleeps).toEqual([300_000]);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed slow /);
 });
 
 test("with no required checks, an unfinished workflow run holds back checks:passed", async () => {
