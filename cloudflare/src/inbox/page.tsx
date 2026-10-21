@@ -532,12 +532,13 @@ export function InboxPage(props: InboxProps) {
 					</ul>
 				) : (
 					<p>
-						No enrolled projects yet. <a href="/projects">Enroll a project</a> to get its issues, pull
-						requests, and ready quests here.
+						No enrolled projects yet. <a href="/projects">Enroll a project</a>, or open one a co-maintainer
+						enrolled, to get its issues, pull requests, and ready quests here.
 					</p>
 				)}
 				<p class="note-small muted">
-					Lists projects you enrolled. Runners and accounts are set up with <code>quest runner</code>.
+					Lists enrolled projects you maintain, once you open each one's setup page. Runners and accounts are
+					set up with <code>quest runner</code>.
 				</p>
 			</section>
 			{props.skipped.length > 0 && (

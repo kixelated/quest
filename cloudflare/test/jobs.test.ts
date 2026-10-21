@@ -469,8 +469,8 @@ describe("runner connections", () => {
 	});
 
 	it("notifies the project's maintainer when a job asks a question or fails, once each", async () => {
+		// The project's maintainer is a member of it, with a device.
 		const maintainer = await maintainerOf();
-		await db.prepare("UPDATE github_projects SET enrolledBy=? WHERE id=10").bind(maintainer.user).run();
 		const pair = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
 			"deriveBits",
 		])) as CryptoKeyPair;

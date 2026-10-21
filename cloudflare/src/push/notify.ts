@@ -37,13 +37,14 @@ export function keys(env: Env): KeyPair | null {
 export type Device = Subscription & { user: string };
 
 /**
- * The devices of everyone whose inbox lists this project: today the
- * maintainer who enrolled it. Delivery rechecks that they still maintain it.
+ * The devices of everyone whose inbox lists this project: its members.
+ * Delivery rechecks that they still maintain it, and a denial ends the
+ * membership as it does in the inbox.
  */
 export async function devices(env: Env, project: number): Promise<Device[]> {
 	if (!keys(env)) return [];
 	const { results } = await env.DB.prepare(
-		"SELECT s.endpoint,s.p256dh,s.auth,s.user FROM push_subscriptions s JOIN github_projects p ON p.enrolledBy=s.user WHERE p.id=?",
+		"SELECT s.endpoint,s.p256dh,s.auth,s.user FROM push_subscriptions s JOIN github_project_members m ON m.user=s.user WHERE m.repository=?",
 	)
 		.bind(project)
 		.all<Device>();

@@ -17,7 +17,7 @@ its epics and quests with their statuses, filtered by status with
 `?show=available` and the like. Each quest has a page at its path without
 `.md`, such as `/repos/quest/quest/m0/kix/prompts`: its Markdown rendered
 with raw HTML escaped, its status, and what to do next. Readiness comes from
-`quest/core`, so the board agrees with `quest ready`. Progress counts finished
+`quest/core`, so the board agrees with `quest unblocked`. Progress counts finished
 quests, which merges delete, from Git history (`scripts/history.ts`), weighted
 by size. A deletion counts only when its commit changed something outside
 `quest/`, since deleting only plans abandons a quest.
@@ -170,8 +170,8 @@ and deletes its own object.
 ### Decision inbox
 
 After signing in, a maintainer lands on `/inbox` (`src/inbox/`): one active
-decision thread across the projects they enrolled, then what is up next, what
-is in progress, and their projects. Each item is one job target (`issues/1`,
+decision thread across their projects, then what is up next, what is in
+progress, and their projects. Each item is one job target (`issues/1`,
 `pulls/2`, a quest path), so an issue, its planning job, and that job's
 questions stay one item, and webhook updates and reconnects never add another
 prompt. Agents waiting on an answer come first, then failed jobs, new pull
@@ -188,6 +188,15 @@ The inbox reads each target's latest job however old it is: every one that
 awaits a decision, and any other whose issue, pull request, or quest is still
 observed, so finished work stays set aside. Retrying a failed planning
 interview keeps its `plans/<id>` target.
+
+A user's projects are those in `github_project_members`. Enrolling a project
+adds its enroller, and any other user joins by passing the maintainer check on
+one of its pages, such as its setup page; no extra GitHub calls list
+maintainers. Membership only decides what the inbox lists: every action still
+rechecks authority. A check GitHub denies drops the user's membership along with
+their read and skip state for the project, while one that cannot complete, such
+as a rate limit, fails the request and leaves membership as it is.
+Disconnecting a project removes its memberships.
 
 Each maintainer's read state lives in `inbox_items`, keyed by a version of what
 the item showed (a question, a GitHub change, a quest's text). A newer version
@@ -223,7 +232,7 @@ publication decision, an account limit, a failed job, a new or reopened issue,
 and a pull request opened ready for review or marked ready. Drafts,
 progress, presence, and finished work never push, and neither does anything on
 a paused project. Each push goes once, from the first delivery or the attempt
-that changed, to the devices of everyone whose inbox shows the project. It
+that changed, to the devices of the project's members, whose inbox shows it. It
 carries the project, the item's title, and the unread count; one
 notification tag and push `Topic` per item replace an earlier one instead of
 stacking. Tapping it opens the item in the inbox. Notifications have no answer

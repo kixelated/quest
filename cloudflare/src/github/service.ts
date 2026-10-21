@@ -56,6 +56,8 @@ export class GitHubError extends Error {
 }
 /** A publication the bot cannot make, which needs a maintainer's decision rather than a retry. */
 export class PublicationBlocked extends GitHubError {}
+/** A maintainer check that was answered with a denial, rather than one that could not complete. */
+export class NotMaintainer extends GitHubError {}
 
 /** One file a publication sets or, with null content, deletes. */
 /** One path's new content, or null to delete it, with its Git mode: a file, an executable, or a symlink. */
@@ -275,27 +277,61 @@ export class GitHubService {
 		});
 	}
 
+	/**
+	 * Verify current maintainer authority, and keep the user's inbox membership
+	 * of an enrolled project in step with the answer. Membership lists the
+	 * project; it never stands in for this check. A check that cannot complete,
+	 * such as an outage or a rate limit, fails without changing membership.
+	 */
 	async #maintainer(token: string, repo: GitHubRepository, userId: string) {
+		const db = this.#env.DB;
+		try {
+			await this.#authority(token, repo, userId);
+		} catch (error) {
+			if (error instanceof NotMaintainer)
+				await db.batch([
+					db
+						.prepare("DELETE FROM github_project_members WHERE repository=? AND user=?")
+						.bind(repo.id, userId),
+					db.prepare("DELETE FROM inbox_items WHERE repository=? AND user=?").bind(repo.id, userId),
+				]);
+			throw error;
+		}
+		await db
+			.prepare(
+				"INSERT INTO github_project_members(repository,user) SELECT id,? FROM github_projects WHERE id=? ON CONFLICT DO NOTHING",
+			)
+			.bind(userId, repo.id)
+			.run();
+	}
+
+	async #authority(token: string, repo: GitHubRepository, userId: string) {
 		const account = await this.#env.DB.prepare(
 			"SELECT accountId FROM account WHERE userId=? AND providerId='github' LIMIT 1",
 		)
 			.bind(userId)
 			.first<{ accountId: string }>();
-		if (!account || !/^\d+$/.test(account.accountId)) throw new GitHubError("Linked GitHub identity required");
+		if (!account || !/^\d+$/.test(account.accountId)) throw new NotMaintainer("Linked GitHub identity required");
 		const user = await this.#api<{ id: number; login: string }>(token, `/user/${account.accountId}`);
 		if (String(user.id) !== account.accountId || !name(user.login))
 			throw new GitHubError("GitHub identity changed");
+		// Every caller has already read the repository with this token, and the
+		// user resolved above, so a 404 here means the user is no collaborator.
 		const permission = await this.#api<{ permission: string; role_name: string; user: { id: number } }>(
 			token,
 			`${repositoryPath(repo)}/collaborators/${user.login}/permission`,
-		);
+		).catch((error: unknown) => {
+			if (error instanceof GitHubError && error.status === 404)
+				throw new NotMaintainer("Current GitHub maintainer authority required");
+			throw error;
+		});
 		// GitHub maps maintain to legacy permission=write. Do not accidentally
 		// grant maintainer authority to ordinary writers or custom roles.
 		if (
 			String(permission.user.id) !== account.accountId ||
 			(permission.permission !== "admin" && permission.role_name !== "maintain")
 		)
-			throw new GitHubError("Current GitHub maintainer authority required");
+			throw new NotMaintainer("Current GitHub maintainer authority required");
 	}
 
 	async #authorized<T>(
@@ -351,11 +387,12 @@ export class GitHubService {
 		return row?.state ?? null;
 	}
 
+	/** The enrolled projects whose inbox the user belongs to. */
 	async projects(userId: string): Promise<Enrollment[]> {
-		// Remembered selections are navigation only, never an authority grant.
+		// Membership is navigation only, never an authority grant.
 		return (
 			await this.#env.DB.prepare(
-				"SELECT id,owner,name,state FROM github_projects WHERE enrolledBy=? ORDER BY owner,name",
+				"SELECT p.id,p.owner,p.name,p.state FROM github_projects p JOIN github_project_members m ON m.repository=p.id WHERE m.user=? ORDER BY p.owner,p.name",
 			)
 				.bind(userId)
 				.all<Enrollment>()
@@ -677,6 +714,10 @@ export class GitHubService {
 							`INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,?,?,?,'enabled',?,?)
 					ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,name=excluded.name,installation=excluded.installation,state=excluded.state,updatedAt=excluded.updatedAt`,
 						).bind(repo.id, repo.owner, repo.name, installation, userId, Date.now()),
+						// The project did not exist when the check above ran.
+						this.#env.DB.prepare(
+							"INSERT INTO github_project_members(repository,user) VALUES(?,?) ON CONFLICT DO NOTHING",
+						).bind(repo.id, userId),
 					]);
 				}
 				return [];

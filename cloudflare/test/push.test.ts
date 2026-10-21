@@ -122,6 +122,8 @@ describe("decision notifications", () => {
 	let sent: Sent[] = [];
 	let status = 201;
 	let github: Awaited<ReturnType<typeof maintainerOf>>["github"];
+	// Push services answer here; everything else goes to the mocked GitHub.
+	let respond: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 	beforeEach(async () => {
 		await db.batch([
@@ -134,8 +136,7 @@ describe("decision notifications", () => {
 		({ user, cookie, github } = maintainer);
 		sent = [];
 		status = 201;
-		// Push services answer here; everything else goes to the mocked GitHub.
-		vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+		respond = async (input, init) => {
 			const url = String(input instanceof Request ? input.url : input);
 			if (!url.startsWith("https://fcm.googleapis.com/")) return maintainer.mock(input);
 			sent.push({
@@ -144,7 +145,8 @@ describe("decision notifications", () => {
 				body: new Uint8Array(await new Response(init?.body).arrayBuffer()),
 			});
 			return new Response(null, { status });
-		});
+		};
+		vi.spyOn(globalThis, "fetch").mockImplementation(respond);
 	});
 	afterEach(() => vi.restoreAllMocks());
 
@@ -237,6 +239,35 @@ describe("decision notifications", () => {
 		});
 		expect(sent).toHaveLength(0);
 		expect(await subscriptions()).toHaveLength(1);
+	});
+
+	it("pushes to every member of the project, and drops one who no longer maintains it", async () => {
+		const mine = await subscribe();
+		const who = identity("github");
+		const session = (await oauth(who)).session!;
+		vi.spyOn(globalThis, "fetch").mockImplementation(respond);
+		const member = (await db
+			.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
+			.bind(who.id)
+			.first<{ userId: string }>())!.userId;
+		await db.prepare("INSERT INTO github_project_members(repository,user) VALUES(10,?)").bind(member).run();
+		const theirs = await browser();
+		expect((await post("/push/subscribe", theirs.json, { Cookie: session, Origin: origin })).status).toBe(204);
+		const opened = (number: number) => ({
+			action: "opened",
+			installation: { id: 5 },
+			repository: { id: 10 },
+			issue: { id: 10 + number, number, title: `Issue ${number}` },
+		});
+		github.maintainers.push(who.id);
+		await delivery("issues", opened(3));
+		expect(sent.map((s) => s.endpoint).sort()).toEqual([mine.endpoint, theirs.endpoint].sort());
+		// A co-maintainer who lost the role is not notified, and leaves the project's inbox.
+		github.maintainers.length = 0;
+		await delivery("issues", opened(4));
+		expect(sent.slice(2).map((s) => s.endpoint)).toEqual([mine.endpoint]);
+		const members = await db.prepare("SELECT user FROM github_project_members WHERE repository=10").all();
+		expect(members.results).toEqual([{ user }]);
 	});
 
 	it("pushes a new issue once, opening its decision, and never other updates", async () => {

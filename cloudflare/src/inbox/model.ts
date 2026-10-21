@@ -5,7 +5,7 @@
 
 import { parse } from "quest/core";
 import { encodePath } from "../board/model";
-import { GitHubError, type Enrollment, GitHubService } from "../github/service";
+import { GitHubError, type Enrollment, GitHubService, NotMaintainer } from "../github/service";
 import { type Activity, type ProjectState, readState } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { hub } from "../jobs/routes";
@@ -226,21 +226,24 @@ export async function title(db: D1Database, project: Enrollment, target: string)
 }
 
 /**
- * Load the inbox across the projects a maintainer enrolled. Every project
- * rechecks current GitHub authority; one that fails is reported, not hidden.
+ * Load the inbox across the projects the user is a member of. Every project
+ * rechecks current GitHub authority. A denied check ends the membership and
+ * hides the project; one that cannot complete is reported, not hidden.
  */
 export async function load(env: Env, user: string) {
 	const github = new GitHubService(env);
-	const projects: ProjectView[] = await Promise.all(
-		(await github.projects(user)).map(async (project) => {
+	const views = await Promise.all(
+		(await github.projects(user)).map(async (project): Promise<ProjectView | null> => {
 			try {
 				return { project, state: await github.projectState(project, user), error: null };
 			} catch (error) {
+				if (error instanceof NotMaintainer) return null;
 				if (!(error instanceof GitHubError)) throw error;
 				return { project, state: null, error: error.message };
 			}
 		}),
 	);
+	const projects = views.filter((view) => view !== null);
 	const items = await collect(
 		env.DB,
 		user,
