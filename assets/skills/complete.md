@@ -32,8 +32,8 @@ Other sessions share this machine: hold new agents while the load average exceed
 Tell each merge sub-agent that you watch its merge queue, so it reports once
 auto-merge is enabled. Wait on each such PR with `quest wait`, as `quest skill merge`
 describes, until it merges.
-If it leaves the queue unmerged or auto-merge is disabled, confirm with the PR's
-current state, then ask about the PR again; never dispatch `/quest-merge` without
+If it leaves the queue unmerged or auto-merge is disabled, confirm with
+`quest status <pr>`, then ask about the PR again; never dispatch `/quest-merge` without
 the user's choice, since a new head needs fresh approval.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.

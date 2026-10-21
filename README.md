@@ -173,7 +173,7 @@ pushes come from repository activity; pushes observed while waiting come from ne
 commit SHAs, regardless of git author dates. Force pushes come from the PR
 timeline, excluding the one that created the starting head. A merge through
 the queue prints `removed_from_merge_queue` about a second before `merged`, so a
-poll can catch the removal alone; check the PR's state before treating it as a
+poll can catch the removal alone; check `quest status` before treating it as a
 failed merge. Actors are printed without deciding
 whose review counts. Check runs and edits to existing comments or reviews are
 outside this command's scope.
@@ -200,6 +200,55 @@ with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
 a cursor, or the given `--since` (else the head SHA) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
+
+## Read a pull request's state
+
+`quest status` prints a GitHub PR's current state in one call, such as after
+`quest wait` wakes. It accepts the same PR argument and authentication as
+`quest wait`, and reports facts without deciding whether the PR is ready or
+whose review counts:
+
+```console
+$ quest status 128
+url https://github.com/kixelated/quest/pull/128
+state open
+draft false
+head 0ade9d977d54c6f48152410532c58e9ea78db3d0
+mergeable conflicting
+merge-state dirty
+review-decision -
+auto-merge -
+merge-queue -
+checks success passed=14 failing=0 pending=0
+review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
+review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
+thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+```
+
+Each line starts with its record type; any free text, a check name or a path,
+comes last, and a missing value prints as `-`:
+
+| Line | Fields |
+| --- | --- |
+| `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
+| `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
+| `auto-merge` | Method, who enabled it, and when. |
+| `merge-queue` | Queue state, position, and when it was enqueued. |
+| `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
+| `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
+| `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
+| `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
+| `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+
+The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
+`resolveReviewThread` take. Neutral and skipped checks pass. A required check
+is one branch protection or a ruleset requires for this PR. `--json` prints the
+same facts as one object with the fields `url`, `state`, `draft`, `head`,
+`mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
+`checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
+`threads`. Long lists are paged; reactions are the newest 100 per PR or review,
+as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
+failures exit 1.
 
 ## Work with your agents
 
