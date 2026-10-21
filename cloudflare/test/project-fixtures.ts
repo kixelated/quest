@@ -17,12 +17,16 @@ export const documents = [
 ];
 
 export async function project(id: number, owner: string, state: "enabled" | "paused" = "enabled") {
-	await db
-		.prepare(
-			"INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,'upstream','project',5,?,?,0) ON CONFLICT(id) DO UPDATE SET state=excluded.state",
-		)
-		.bind(id, state, owner)
-		.run();
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(?,'upstream','project',5,?,?,0) ON CONFLICT(id) DO UPDATE SET state=excluded.state",
+			)
+			.bind(id, state, owner),
+		db
+			.prepare("INSERT INTO github_project_members(repository,user) VALUES(?,?) ON CONFLICT DO NOTHING")
+			.bind(id, owner),
+	]);
 }
 
 export const pull = {
@@ -55,7 +59,8 @@ export const issue = {
  * pull request #2, and mock GitHub. `github` changes what the mock reports, and
  * `mock` reinstalls it after another sign-in replaces it. Merges of #2 record
  * their request in `merged`, and land only at `head`; `refuse` makes GitHub
- * refuse them with that message.
+ * refuse them with that message. Other GitHub IDs in `maintainers` hold the
+ * maintain role too, and `limited` rate-limits every role check.
  */
 export async function maintainerOf() {
 	const github = {
@@ -68,6 +73,8 @@ export async function maintainerOf() {
 		methods: ["squash", "merge", "rebase"],
 		refuse: null as string | null,
 		merged: [] as unknown[],
+		maintainers: [] as string[],
+		limited: false,
 	};
 	const who = identity("github");
 	const cookie = (await oauth(who)).session!;
@@ -130,13 +137,16 @@ export async function maintainerOf() {
 			const id = path.split("/").at(-1)!;
 			return Response.json({ id: Number(id), login: `person${id}` });
 		}
-		// Only the signed-in maintainer holds the maintain role; anyone else may read.
+		// Only the signed-in maintainer and `maintainers` hold the maintain role; anyone else may read.
 		const permission = path.match(/\/collaborators\/person(\d+)\/permission$/);
+		if (permission && github.limited) return Response.json({ message: "API rate limit exceeded" }, { status: 429 });
 		if (permission)
 			return Response.json(
 				permission[1] === who.id
 					? { user: { id: Number(who.id) }, permission: "write", role_name: github.role }
-					: { user: { id: Number(permission[1]) }, permission: "read", role_name: "read" },
+					: github.maintainers.includes(permission[1]!)
+						? { user: { id: Number(permission[1]) }, permission: "write", role_name: "maintain" }
+						: { user: { id: Number(permission[1]) }, permission: "read", role_name: "read" },
 			);
 		// The live issue and pull request that a job binds, which observations can lag.
 		if (path === "/repos/upstream/project/issues/1") return Response.json({ state: github.issue });

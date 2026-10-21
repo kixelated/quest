@@ -165,8 +165,8 @@ and deletes its own object.
 ### Decision inbox
 
 After signing in, a maintainer lands on `/inbox` (`src/inbox/`): one active
-decision thread across the projects they enrolled, then what is up next, what
-is in progress, and their projects. Each item is one job target (`issues/1`,
+decision thread across their projects, then what is up next, what is in
+progress, and their projects. Each item is one job target (`issues/1`,
 `pulls/2`, a quest path), so an issue, its planning job, and that job's
 questions stay one item, and webhook updates and reconnects never add another
 prompt. Agents waiting on an answer come first, then failed jobs, new pull
@@ -180,6 +180,15 @@ The inbox reads each target's latest job however old it is: every one that
 awaits a decision, and any other whose issue, pull request, or quest is still
 observed, so finished work stays set aside. Retrying a failed planning
 interview keeps its `plans/<id>` target.
+
+A user's projects are those in `github_project_members`. Enrolling a project
+adds its enroller, and any other user joins by passing the maintainer check on
+one of its pages, such as its setup page; no extra GitHub calls list
+maintainers. Membership only decides what the inbox lists: every action still
+rechecks authority. A check GitHub denies drops the user's membership along with
+their read and skip state for the project, while one that cannot complete, such
+as a rate limit, fails the request and leaves membership as it is.
+Disconnecting a project removes its memberships.
 
 Each maintainer's read state lives in `inbox_items`, keyed by a version of what
 the item showed (a question, a GitHub change, a quest's text). A newer version

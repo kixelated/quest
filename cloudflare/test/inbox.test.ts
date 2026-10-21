@@ -4,7 +4,7 @@ import { app } from "../src/index";
 import { questHref } from "../src/inbox/model";
 import * as store from "../src/jobs/store";
 import { privateKey } from "./github-key";
-import { origin } from "./login-fixtures";
+import { identity, oauth, origin } from "./login-fixtures";
 import { commit, delivery, head, maintainerOf, project } from "./project-fixtures";
 
 const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
@@ -14,6 +14,7 @@ const jobs = "/projects/github/upstream/project/jobs";
 let user = "";
 let cookie = "";
 let github: Awaited<ReturnType<typeof maintainerOf>>["github"];
+let mock: Awaited<ReturnType<typeof maintainerOf>>["mock"];
 
 beforeEach(async () => {
 	await db.batch([
@@ -22,18 +23,48 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM github_projects"),
 		db.prepare("DELETE FROM github_installations"),
 	]);
-	({ user, cookie, github } = await maintainerOf());
+	({ user, cookie, github, mock } = await maintainerOf());
 });
 afterEach(() => vi.restoreAllMocks());
 
-async function inbox(query: Record<string, string> = {}) {
+async function inbox(query: Record<string, string> = {}, session = cookie) {
 	const response = await app.request(
 		`${origin}/inbox?${new URLSearchParams(query)}`,
-		{ headers: { Cookie: cookie } },
+		{ headers: { Cookie: session } },
 		testEnv,
 	);
 	expect(response.status).toBe(200);
 	return response.text();
+}
+/** Sign in another GitHub user, who holds the maintain role when `maintains`. */
+async function other(maintains: boolean) {
+	const who = identity("github");
+	const session = (await oauth(who)).session!;
+	vi.spyOn(globalThis, "fetch").mockImplementation(mock);
+	if (maintains) github.maintainers.push(who.id);
+	const { userId } = (await db
+		.prepare("SELECT userId FROM account WHERE providerId='github' AND accountId=?")
+		.bind(who.id)
+		.first<{ userId: string }>())!;
+	return { session, id: userId };
+}
+/** Open the project's activity page, which checks maintainer authority. */
+function visit(session = cookie) {
+	return app.request(`${origin}/projects/github/upstream/project/state`, { headers: { Cookie: session } }, testEnv);
+}
+async function members() {
+	const { results } = await db
+		.prepare("SELECT user FROM github_project_members WHERE repository=10")
+		.all<{ user: string }>();
+	return results.map((row) => row.user);
+}
+/** How many items the user has read or skipped on the project. */
+async function reads(who = user) {
+	const row = await db
+		.prepare("SELECT count(*) AS n FROM inbox_items WHERE repository=10 AND user=?")
+		.bind(who)
+		.first<{ n: number }>();
+	return row!.n;
 }
 /** The active decision thread's markup. */
 function thread(html: string) {
@@ -460,12 +491,66 @@ describe("decision inbox", () => {
 		expect(html).not.toContain("Skipped and finished");
 	});
 
-	it("reports a project without current authority and hides its items", async () => {
-		github.role = "write";
-		const html = await inbox();
-		expect(html).toContain("Unavailable: Current GitHub maintainer authority required");
+	it("shows a co-maintainer the project once they open it", async () => {
+		const co = await other(true);
+		let html = await inbox({}, co.session);
+		expect(html).toContain("No enrolled projects yet");
 		expect(html).not.toContain("Idea");
-		expect(html).toContain("Nothing needs a decision right now.");
+		expect((await visit(co.session)).status).toBe(200);
+		expect(await members()).toEqual(expect.arrayContaining([user, co.id]));
+		html = await inbox({}, co.session);
+		expect(html).toContain("Idea");
+		expect(html).not.toContain("Unavailable");
+	});
+
+	it("never lists a project for a non-maintainer", async () => {
+		const outsider = await other(false);
+		const refused = await visit(outsider.session);
+		expect(refused.status).toBe(403);
+		expect(await refused.text()).toContain("Current GitHub maintainer authority required");
+		expect(await members()).toEqual([user]);
+		const html = await inbox({}, outsider.session);
+		expect(html).toContain("No enrolled projects yet");
+		expect(html).not.toContain("Idea");
+	});
+
+	it("drops a revoked maintainer along with their read state", async () => {
+		await submit("/projects/github/upstream/project/skip", [
+			["item", "issues/1"],
+			["version", "0"],
+		]);
+		expect(await reads()).toBe(1);
+		github.role = "write";
+		let html = await inbox();
+		expect(html).not.toContain("Idea");
+		expect(html).not.toContain("Unavailable");
+		expect(html).toContain("No enrolled projects yet");
+		expect(await members()).toEqual([]);
+		expect(await reads()).toBe(0);
+		// Regaining the role does not restore membership until the maintainer opens the project.
+		github.role = "maintain";
+		expect(await inbox()).not.toContain("Idea");
+		expect((await visit()).status).toBe(200);
+		html = await inbox();
+		expect(html.match(/<h2>Up next<\/h2>[\s\S]*?<\/ol>/)![0]).toContain("Idea");
+		expect(html).not.toContain("Skipped and finished");
+	});
+
+	it("keeps membership when a maintainer check cannot complete", async () => {
+		await submit("/projects/github/upstream/project/skip", [
+			["item", "issues/1"],
+			["version", "0"],
+		]);
+		github.limited = true;
+		let html = await inbox();
+		expect(html).toContain("Unavailable: GitHub request failed (429)");
+		expect(html).not.toContain("Idea");
+		expect((await visit()).status).toBe(403);
+		expect(await members()).toEqual([user]);
+		expect(await reads()).toBe(1);
+		github.limited = false;
+		html = await inbox();
+		expect(html).toMatch(/Skipped and finished \(1\)[\s\S]*Idea/);
 	});
 
 	it("keeps paused projects' questions but offers no new work", async () => {
