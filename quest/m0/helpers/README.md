@@ -23,9 +23,8 @@ commands from Sep-Oct. Session counts in each child come from that window.
   `quest status`, since that body format is a skill convention.
 - GitHub calls live in `src/cli/` beside `quest wait`, outside the
   forge-agnostic core. Pure tree edits, such as link rewriting, go in the
-  core. The first child to add a second GitHub caller extracts the client in
-  `src/cli/wait.ts` (auth, rate-limit retry, same-origin pagination) instead
-  of copying it.
+  core. GitHub commands share the client in `src/cli/github.ts` (auth,
+  rate-limit retry, same-origin pagination, GraphQL) instead of copying it.
 - Decided (user): no separate documentation page. Each child updates
   `--help`, README examples, and the skill prose it replaces; the user asked
   for those skill edits through this plan.
@@ -49,8 +48,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Required
 
-- [PR status](/quest/m0/helpers/status.md) - one call for head, checks, merge state, reviews by head, and unresolved threads
-- [Move and delete quests](/quest/m0/helpers/move.md) - `quest mv` and `quest rm` keep every root-absolute link valid
 - [CI checks in wait](/quest/m0/helpers/wait-checks.md) - `quest wait` wakes on required check results for the head
 - [quest start](/quest/m0/helpers/start.md) - claim a quest with a draft PR, the `## Decisions needed` hand-back, `quest unblocked --unclaimed`, and CI on ready PRs only
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR

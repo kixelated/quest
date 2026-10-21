@@ -152,6 +152,6 @@ Any findings that seem out-of-scope, or bugs encountered during the process, sho
 
 A quest that is no longer needed or cannot be completed is abandoned.
 Delete it and explain why in the PR.
-Grep its absolute path and remove every reference.
+Use `quest rm`, which deletes the quest and every link to it.
 
 Remove the `quest` label from issues no other quest tracks.

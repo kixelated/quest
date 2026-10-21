@@ -201,6 +201,23 @@ export async function reconcile(
 	if (result.at(-1)!.meta.changes !== 1) throw new GitHubError("Project changed during refresh; refresh again");
 }
 
+/**
+ * Whether `quest` can start on current observations: ready and unclaimed, or
+ * occupied only by `retry`, the open pull request of the quest's own failed
+ * job, which retrying it continues. Never while occupancy is unknown.
+ */
+export function startable(state: ProjectState, quest: string, retry: number | null) {
+	const { available, changes, documents } = state.project;
+	if (!available) return false;
+	if (available.includes(quest)) return true;
+	return (
+		retry !== null &&
+		!state.claims.includes(quest) &&
+		changes.every((change) => change.quest !== quest || change.number === retry) &&
+		ready(documents.map((d) => parse(d.path, d.content))).includes(quest)
+	);
+}
+
 export async function readState(db: D1Database, repo: GitHubRepository): Promise<ProjectState | null> {
 	const records = await db.batch([
 		db
@@ -237,6 +254,7 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 							quest,
 							author: pull.author?.login ?? "GitHub contributor",
 							href: `https://github.com/${repo.owner}/${repo.name}/pull/${pull.number}`,
+							number: pull.number,
 						},
 					]
 				: [];
