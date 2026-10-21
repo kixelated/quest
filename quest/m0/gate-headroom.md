@@ -37,10 +37,13 @@ burst of 8 took 104 s gated versus 19 s ungated.
   window, and each admission deletes the older ones. Headroom needs several
   admissions per window, records kept for a minute, and a count-then-claim
   step that is atomic across processes, or a burst that all reads "0 recent"
-  is admitted together. This replaces `Host.claim(window)`. For example, each
-  caller claims the lowest free numbered slot file with `O_EXCL`, so its
-  number is the count of recent admissions ahead of it; slots expire after a
-  minute.
+  is admitted together. This replaces `Host.claim(window)`. Record first, then
+  count, as today's claim does: each caller creates its own record, counts
+  every unexpired record including its own, and withdraws its record when the
+  count leaves no room. The last admitted caller then sees every admitted
+  record, so a burst cannot over-admit, and no lock can go stale. Derive the
+  count from the unexpired records, not from a slot number, since expired
+  slots leave holes.
 - **`SETTLE_MS` apart, not two windows.** Today a claim is refused while the
   previous window's claim exists, and every waiter wakes at the next boundary,
   so queued commands start about 10 s apart. Keep the full-`SETTLE_MS`
@@ -59,9 +62,9 @@ burst of 8 took 104 s gated versus 19 s ungated.
 - **Backward clock steps.** A wall clock stepping back can admit two commands
   closer than `SETTLE_MS`. Keep the wall clock: `performance.now()` is
   per-process, and `CLOCK_MONOTONIC` restarts at boot while the fallback
-  directory persists. Count a record dated in the future as made just now,
-  and discard one dated more than a minute ahead, so no record counts as
-  recent indefinitely.
+  directory persists. A record dated in the future means the clock stepped
+  back: rewrite its time to now, so it still counts and spaces admissions
+  however far the clock stepped, then expires a minute later.
 - **Ctrl-C once.** A terminal Ctrl-C reaches the child directly and again
   through the forwarder. On Unix, while Quest is in the terminal's foreground
   process group, skip forwarding SIGINT and SIGHUP, which the terminal also
