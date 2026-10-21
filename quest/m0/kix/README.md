@@ -101,7 +101,6 @@ operator-paid-hosting decisions:
 - [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
-- [Inbox merge](/quest/m0/kix/merge.md) - PR items merge the reviewed head through GitHub's rules
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
 - [Co-maintainer inbox](/quest/m0/kix/members.md) - every current maintainer sees enrolled projects in their inbox
 - [Answer flow](/quest/m0/kix/answer-flow.md) - move to the next decision after an answer, with neutral refusals

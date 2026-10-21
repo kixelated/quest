@@ -25,6 +25,8 @@ export type Pull = Entity & {
 	headRefOid: string;
 	isDraft: boolean;
 	reviewDecision: string | null;
+	/** GitHub's merge readiness for the App, such as CLEAN, BLOCKED, or DIRTY; absent in older observations. */
+	mergeStateStatus?: string;
 	reviews: { totalCount: number };
 	latestReviews: {
 		nodes: { state: string; author: { login: string } | null; commit: { oid: string } | null }[];
@@ -65,7 +67,7 @@ export type ProjectState = {
 };
 
 const entityFields = "databaseId:fullDatabaseId number title state updatedAt author { login } comments { totalCount }";
-const pullFields = `${entityFields} headRefName headRefOid isDraft reviewDecision reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
+const pullFields = `${entityFields} headRefName headRefOid isDraft reviewDecision mergeStateStatus reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
 export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {

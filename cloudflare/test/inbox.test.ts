@@ -159,6 +159,68 @@ describe("decision inbox", () => {
 		expect(await inbox()).toMatch(/Skipped and finished \(1\)[\s\S]*Fix/);
 	});
 
+	it("merges a clean pull request at the head on screen, or says why GitHub refused", async () => {
+		const merge = "/projects/github/upstream/project/pulls/2/merge";
+		const active = thread(await inbox());
+		expect(active).toContain(`action="${merge}"`);
+		expect(active).toContain(`name="head" value="${head}"`);
+		expect(active).toContain('<button class="button quiet">Iterate on this PR');
+		const moved = await submit(merge, [["head", "b".repeat(40)]]);
+		expect(moved.status).toBe(403);
+		expect(await moved.text()).toContain("head moved since you looked; review it again");
+		github.refuse = "At least 1 approving review is required by reviewers with write access.";
+		const refused = await submit(merge, [["head", head]]);
+		expect(refused.status).toBe(403);
+		expect(await refused.text()).toContain(
+			"GitHub refused the merge: At least 1 approving review is required by reviewers with write access.",
+		);
+		// Each click is one request bound to its head; a refusal is never retried.
+		expect(github.merged).toHaveLength(2);
+		github.refuse = null;
+		github.methods = ["squash"];
+		const merged = await submit(merge, [
+			["head", head],
+			["version", "0"],
+		]);
+		expect(merged.status).toBe(303);
+		expect(merged.headers.get("Location")).toBe("/inbox");
+		expect(github.merged.at(-1)).toEqual({ sha: head, merge_method: "squash" });
+		// The merged item is finished, and no new work starts before GitHub is read again.
+		const html = await inbox();
+		expect(html).toMatch(/Skipped and finished \(1\)[\s\S]*Fix/);
+		expect(thread(html)).toContain("GitHub reported changes");
+	});
+
+	it("offers merge only on a clean pull request no job holds, to current maintainers", async () => {
+		const merge = "/projects/github/upstream/project/pulls/2/merge";
+		await db
+			.prepare(
+				"UPDATE github_project_activity SET data=json_set(data,'$.mergeStateStatus','BLOCKED') WHERE id='21'",
+			)
+			.run();
+		let active = thread(await inbox());
+		expect(active).not.toContain(merge);
+		expect(active).toContain("Review on GitHub");
+		expect(active).toContain('<button class="button primary">Iterate on this PR');
+		await db
+			.prepare(
+				"UPDATE github_project_activity SET data=json_set(data,'$.mergeStateStatus','CLEAN') WHERE id='21'",
+			)
+			.run();
+		await running("iterate", "pulls/2");
+		active = thread(await inbox({ project: "10", item: "pulls/2" }));
+		expect(active).not.toContain(merge);
+		const held = await submit(merge, [["head", head]]);
+		expect(held.status).toBe(409);
+		expect(await held.text()).toContain("job before merging it");
+		await db.prepare("DELETE FROM jobs").run();
+		github.role = "write";
+		const outsider = await submit(merge, [["head", head]]);
+		expect(outsider.status).toBe(403);
+		expect(await outsider.text()).toContain("Current GitHub maintainer authority required");
+		expect(github.merged).toHaveLength(0);
+	});
+
 	it("offers a bootstrap job when the default branch has no flake", async () => {
 		github.flake = false;
 		const refused = await submit(jobs, [
