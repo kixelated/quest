@@ -430,6 +430,7 @@ and the agent's final reply. It never prints a key. It exits 0 when the agent
 finished, 3 when the provider refused the key for lack of credit, 2 for invalid
 arguments, 128 plus the signal number when interrupted, and 1 otherwise. `stop`
 signals the agent and waits until its `start` or `resume` has reported.
+`quest agent` does not run on native Windows yet; use WSL.
 
 ## Prunable local checkouts
 

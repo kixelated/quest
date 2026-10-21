@@ -34,6 +34,12 @@ every user would have to add it.
   stub contract ("the stub never changes between versions") once: `init` and
   `uninstall` accept only a stub that exactly matches the current text, so they
   must also recognize the known older stub text.
+- Support native Windows, which `quest agent` refuses for now: resolve the
+  agent CLI to an absolute path from `PATH` with `PATHEXT`, never from the
+  worktree (Windows searches the current directory first, so a worktree could
+  supply its own `claude.exe` and receive the key), and launch npm `.cmd` shims,
+  which `spawn` cannot run without a shell. Then run the fake-CLI tests on the
+  native Windows jobs.
 - The command does no load or CPU admission. The skill keeps holding launches
   as it does for sub-agents, until agent lifecycle integration removes those
   rules.

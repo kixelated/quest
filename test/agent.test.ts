@@ -15,7 +15,14 @@ import {
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { agentEnvironment, redactedLines, spawnDirectory } from "../src/cli/agent";
+import {
+	AgentInputError,
+	agentEnvironment,
+	boundedLines,
+	redactedLines,
+	refuseUnsupported,
+	spawnDirectory,
+} from "../src/cli/agent";
 import { type Output, main } from "../src/cli/main";
 import { tempDir } from "./fixture";
 
@@ -484,7 +491,31 @@ fakes("every command refuses a state directory that is a symlink", async () => {
 	expect(readdirSync(elsewhere)).toEqual([]);
 });
 
-test("missing keys, positions past the list, and unknown references are usage errors", async () => {
+test("lines longer than the limit are dropped, not held", () => {
+	const read: string[] = [];
+	const lines = boundedLines(10, (line) => read.push(line));
+	lines.data(`short\n${"x".repeat(15)}`);
+	lines.data("yyy\nafter\n");
+	lines.data(`${"z".repeat(20)}\nlast`);
+	expect(lines.end()).toBe(2);
+	expect(read).toEqual(["short", "after", "last"]);
+});
+
+test("native Windows is refused until the agent CLI is resolved outside the worktree", () => {
+	expect(() => refuseUnsupported("win32")).toThrow(AgentInputError);
+	expect(() => refuseUnsupported("linux")).not.toThrow();
+	expect(() => refuseUnsupported("darwin")).not.toThrow();
+});
+
+test.runIf(process.platform === "win32")("quest agent start is a usage error on native Windows", async () => {
+	const result = await quest("agent", "start", ...launch("claude", "1"), ".", "go");
+	expect(result).toMatchObject({
+		code: 2,
+		stderr: "error: quest agent does not support native Windows yet; use WSL\n",
+	});
+});
+
+fakes("missing keys, positions past the list, and unknown references are usage errors", async () => {
 	const s = setup("sk-one vault://x");
 	const unknown = await quest("agent", "start", ...launch("claude", "1"), s.worktree, "go");
 	expect(unknown).toMatchObject({

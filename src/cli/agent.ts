@@ -494,6 +494,48 @@ export function redactedLines(redact: (value: string) => string, overlap: number
 	};
 }
 
+/** The longest line of agent output read; a longer one is dropped rather than held. */
+export const LINE_LIMIT = 16 * 1024 * 1024;
+
+/**
+ * Split a stream into lines for `read`, dropping any line longer than `limit`
+ * instead of holding it. `end` returns how many lines were dropped.
+ */
+export function boundedLines(limit: number, read: (line: string) => void) {
+	let line = "";
+	let dropping = false;
+	let dropped = 0;
+	return {
+		data(chunk: string) {
+			const lines = (line + chunk).split("\n");
+			line = lines.pop()!;
+			for (const complete of lines) {
+				if (dropping) dropping = false;
+				else if (complete.length > limit) dropped++;
+				else read(complete);
+			}
+			if (line.length > limit) {
+				if (!dropping) dropped++;
+				dropping = true;
+				line = "";
+			}
+		},
+		end(): number {
+			if (!dropping) read(line);
+			return dropped;
+		},
+	};
+}
+
+/**
+ * Native Windows is refused until the agent CLI is resolved to an absolute
+ * path: its program search looks in the worktree before PATH, so a worktree
+ * could supply its own `claude.exe` and receive the key.
+ */
+export function refuseUnsupported(platform: NodeJS.Platform = process.platform): void {
+	if (platform === "win32") throw new AgentInputError("quest agent does not support native Windows yet; use WSL");
+}
+
 /**
  * Run one agent turn in the foreground: a new session with `prompt`, or
  * `session` resumed with it. Prints the session id as soon as it is known,
@@ -505,6 +547,7 @@ export async function runAgent(
 	session: string | undefined,
 	deps: AgentDependencies,
 ): Promise<number> {
+	refuseUnsupported();
 	let worktree: string;
 	try {
 		worktree = realpathSync(launch.worktree);
@@ -535,6 +578,7 @@ export async function runAgent(
 	// An agent whose record cannot be saved, for example because `stop --all`
 	// deleted the state, could not be stopped, so it is killed.
 	let lost: unknown;
+	let dropped = 0;
 	const update = () => {
 		try {
 			save(record, state);
@@ -573,15 +617,15 @@ export async function runAgent(
 				// The kept tails are redacted before they are cut, so a cut never splits a key.
 				let out = "";
 				let err = "";
-				let line = "";
+				const lines = boundedLines(LINE_LIMIT, (line) => announce(reader.line(line)));
 				const forwarded = redactedLines(redact, Math.max(...keys.map((k) => k.length)) - 1, deps.stderr);
 				agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
 					out = tail(redact(out + chunk));
-					const lines = (line + chunk).split("\n");
-					line = lines.pop()!;
-					for (const complete of lines) announce(reader.line(complete));
+					lines.data(chunk);
 				});
-				agent.stdout.once("end", () => announce(reader.line(line)));
+				agent.stdout.once("end", () => {
+					dropped = lines.end();
+				});
 				agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
 					err = tail(redact(err + chunk));
 					forwarded.data(chunk);
@@ -613,6 +657,9 @@ export async function runAgent(
 					: result.exhausted
 						? "exhausted"
 						: "failed";
+		if (dropped > 0) {
+			deps.stderr(`quest: dropped ${dropped} line(s) of ${argv[0]} output over ${LINE_LIMIT} characters\n`);
+		}
 		if (outcome === "failed" && result.reply === undefined && stdout.trim() !== "") {
 			deps.stderr(`quest: ${argv[0]} printed no result; its output ended with:\n${stdout}\n`);
 		}
