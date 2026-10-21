@@ -1,4 +1,4 @@
-import type { Pull } from "../github/state";
+import { type Pull, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker } from "../layout";
@@ -265,11 +265,14 @@ function AccountForm(props: { item: Item; runners: Runners }) {
 /** Why new work cannot start from here yet, and how to fix it; `null` when it can. */
 function blocked(item: Item, view: ProjectView | undefined) {
 	if (item.project.state !== "enabled") return "Contributions are paused for this project.";
-	const available = view?.state?.project.available;
+	const state = view?.state;
 	// Webhooks reread the project in the background; a failed read says why.
-	const failed = view?.state?.failure ? `The background read failed: ${view.state.failure}. ` : "";
-	if (!available) return `${failed || "GitHub reported changes. "}Refresh to start new work from current state.`;
-	if (item.kind === "quest" && !available.includes(item.target))
+	const failed = state?.failure ? `The background read failed: ${state.failure}. ` : "";
+	if (!state?.project.available)
+		return `${failed || "GitHub reported changes. "}Refresh to start new work from current state.`;
+	// A retry continues its failed job's pull request, so that claim does not block it.
+	const retry = item.need === "retry" ? (item.job?.pull ?? null) : null;
+	if (item.kind === "quest" && !startable(state, item.target, retry))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
 		return `${failed}Refresh to read this from GitHub.`;
