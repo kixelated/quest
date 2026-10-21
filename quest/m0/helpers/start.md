@@ -33,13 +33,21 @@ each other"); none came from two quests touching the same files.
 - Contributors without push access open the draft PR from their fork. A
   collision is any open PR whose head branch is the quest's branch, from any
   repository; the earliest `createdAt` wins and later claimers stop.
+- Open: a fork contributor's token usually cannot label a base-repository
+  PR, so a fork claim may lack `quest:start` and look idle to maintainers
+  and kix. Options: a credentialed actor (the kix GitHub App or an upstream
+  workflow) labels fork claim PRs on a quest branch, which keeps the label
+  the only ownership signal (recommended), or an unlabeled fork draft on a
+  quest branch counts as `quest:start`. Settle this with the user before
+  implementing.
 - `quest:start` comes off when the starting session hands back, with the PR
   left as a draft (decisions remain) or ready. A PR with no `quest:*` label is
   idle and waits on the maintainer. The
   [PR state commands](/quest/m0/helpers/pr-states.md) add the other labels.
-  This quest adds the shared label helper: take a label only when no other
-  `quest:*` label is on the PR, and back off if another appears in the
-  timeline first.
+  This quest adds the shared label helper: take a label only when no
+  `quest:*` label is on the PR, back off if another appears in the timeline
+  first, and print a hold token (the event that added it) that later swaps
+  and releases must present.
 - `quest start --release <quest>` closes the draft PR and deletes the claim
   branch only while its tip is still the empty claim commit, using a lease on
   that SHA; otherwise it refuses and says why.

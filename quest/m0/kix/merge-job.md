@@ -31,6 +31,9 @@ or needs them.
   skill's design checkpoint pauses the job into a decision. The
   [inbox merge](/quest/m0/kix/merge.md) button keeps its exact-head binding
   for a PR that is already clean.
+- Widen the inbox merge button: a maintainer sees merge on an open PR that
+  is not clean (conflicted, failing, or unreviewed), and picking it starts
+  this job. A clean PR keeps the direct exact-head merge.
 - Land by enabling auto-merge bound to the head the job verified, unless the
   repository's root instructions name another landing step.
 - Add a `merge` workflow beside plan, start, iterate, and bootstrap in
@@ -44,3 +47,4 @@ or needs them.
 
 - [Runner](/quest/m0/kix/runner.md) - jobs that run the merge skill
 - [PR state commands](/quest/m0/helpers/pr-states.md) - the label contract kix shares with local sessions
+- [Inbox merge](/quest/m0/kix/merge.md) - the merge button this widens to unclean PRs

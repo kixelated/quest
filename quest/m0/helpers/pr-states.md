@@ -24,15 +24,21 @@ repositories ("those are in another repo?").
   `quest:start` (from `quest start`), `quest:iterate`, `quest:ready`, and
   `quest:merge`. Exactly one is on an owned PR. Planning PRs get none.
 - Decided (user): a command per state, each doing its GitHub step. Every
-  command refuses while another state's label is on the PR, then swaps in
-  its own, using the label helper from `quest start`.
+  command refuses while any `quest:*` label is on the PR that this session
+  does not hold, including its own state's, then swaps in its own, using the
+  label helper from `quest start`.
+- The label holds no owner identity, and sessions often share one GitHub
+  account, so taking a label prints a hold token: the ID of the timeline
+  event that added it. A swap, `--done`, `--land`, and `quest release` take
+  that token and refuse unless it is still the latest add of the PR's
+  current label. A stale label is offered to the user for takeover instead.
   - `quest iterate <pr>` only takes the PR.
   - `quest ready <pr>` takes it and, once the agent is done, marks it ready
     for review with `--done`.
   - `quest merge <pr>` takes it for the fix loop. `quest merge --land <sha>`
     enables auto-merge bound to that full head SHA, which also enters
     GitHub's merge queue.
-  - `quest release <pr>` removes whichever label this session holds.
+  - `quest release <pr> <token>` removes the label that token holds.
 - Decided (user): `quest:merge` stays on through the fix loop and while the
   PR is queued or auto-merging, until it merges. If it leaves the queue
   unmerged, the command that notices removes the label, and the PR is idle
@@ -51,7 +57,8 @@ repositories ("those are in another repo?").
   PR before acting and release it at hand-back, and to skip PRs other
   sessions hold. Replace the merge skill's raw auto-merge call with
   `quest merge --land`. The user asked for those edits through this plan.
-- Test a race for one PR, a refused swap, landing on a moved head, a PR
+- Test a race for one PR, two sessions taking the same state, a release
+  with a stale token, a refused swap, landing on a moved head, a PR
   leaving the queue, and a repository whose root instructions override
   landing.
 
