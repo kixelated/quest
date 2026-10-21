@@ -169,9 +169,10 @@ or files outside `quest/`, without editing it. They run `quest check` on the
 result and exit 1 if it fails, for example when a quest moved out of its epic.
 
 An epic is its directory or README; removing one that holds other quests needs
-`-r`. The root and milestones are never removed. `mv` refuses a destination
-that exists, and refuses to move a quest while it has a claim branch on
-`origin` or an open PR on GitHub, since the branch would no longer name it.
+`-r`. The root and milestones are never moved or removed. `mv` refuses a
+destination that exists, and refuses to move a quest while it has a claim
+branch on `origin` or an open PR on GitHub, since the branch would no longer
+name it.
 Neither command touches branches or PRs.
 
 ## Wait for pull request activity

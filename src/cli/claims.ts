@@ -47,15 +47,30 @@ export async function openPullRequests(
 	github: GitHub,
 	repository: Repository,
 ): Promise<{ branch: string; url: string }[]> {
-	const base = `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}`;
-	const rows = await github.all(`${base}/pulls?state=open&per_page=100`);
+	const rows = await github.all(`${path(repository)}/pulls?state=open&per_page=100`);
 	return rows.map((row) => ({ branch: string(object(row.head).ref), url: string(row.html_url) }));
 }
 
 /**
+ * The repositories whose open PRs can claim a quest: `repository`, and the
+ * one it was forked from, since a fork's clone names the fork `origin` while
+ * its quest PRs open upstream.
+ */
+export async function pullRequestRepositories(github: GitHub, repository: Repository): Promise<Repository[]> {
+	const parent = object(await (await github.request(path(repository))).json()).parent;
+	if (parent === undefined || parent === null) return [repository];
+	const [owner, repo] = string(object(parent).full_name).split("/");
+	return [repository, { owner, repo }];
+}
+
+function path(repository: Repository): string {
+	return `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}`;
+}
+
+/**
  * Which of `branches` someone holds: pushed to `remote`, or the head of an
- * open PR there. Without the remote it warns and checks nothing; off GitHub
- * it checks branches only.
+ * open PR there or in the repository `remote` was forked from. Without the
+ * remote it warns and checks nothing; off GitHub it checks branches only.
  */
 export async function claims(
 	root: string,
@@ -77,8 +92,11 @@ export async function claims(
 	if (repository === null) {
 		deps.warn(`${remote} is not on GitHub, so only its branches were checked for claims`);
 	} else {
-		for (const pr of await openPullRequests(new GitHub(deps.github()), repository)) {
-			if (wanted.has(pr.branch)) held.set(pr.branch, pr.url);
+		const github = new GitHub(deps.github());
+		for (const each of await pullRequestRepositories(github, repository)) {
+			for (const pr of await openPullRequests(github, each)) {
+				if (wanted.has(pr.branch)) held.set(pr.branch, pr.url);
+			}
 		}
 	}
 	return [...held].map(([branch, url]) => ({ branch, url })).sort((a, b) => (a.branch < b.branch ? -1 : 1));

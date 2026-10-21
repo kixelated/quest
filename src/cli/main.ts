@@ -185,7 +185,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Move a quest, or an epic directory and everything under it, with git mv, and rewrite every " +
 				"root-absolute link to it under quest/. The change is staged.\n\n" +
-				"Refuses outside a git work tree, when the destination exists, and while a moved quest has a claim " +
+				"Refuses the root epic and milestones, which are permanent. Refuses outside a git work tree, when " +
+				"the destination exists, and while a moved quest has a claim " +
 				"branch on origin or an open PR on GitHub, since the old branch would no longer name it. Moving a " +
 				"quest into or out of an epic changes which epic lists it; the check afterwards reports what to fix.\n\n" +
 				"Prints R for the move and M for each edited document. Mentions of the old path that are not links, " +

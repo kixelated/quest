@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, posix, relative, resolve, sep } from "node:path";
 
-import { ROOT, check, formatFinding, isQuest, move, normalize, permanent, relocate, remove } from "../core";
+import { check, formatFinding, isQuest, move, normalize, permanent, relocate, remove } from "../core";
 import { type ClaimDependencies, claims, questBranch } from "./claims";
 import { exists, load, sources, under } from "./tree";
 
@@ -32,9 +32,11 @@ export async function moveQuest(
 	workTree(root);
 	const from = treePath(root, fromArg);
 	const to = treePath(root, toArg);
-	if (from === "quest" || from === ROOT) throw new Error("the root epic cannot move");
 	if (!exists(root, from)) throw new Error(`${fromArg} does not exist`);
 	const directory = statSync(join(root, from)).isDirectory();
+	if (from === "quest" || permanent(directory ? `${from}/README.md` : from)) {
+		throw new Error(`${fromArg} is permanent; the root epic and milestones never move`);
+	}
 	if (!directory && !isQuest(from)) throw new Error(`${fromArg} is not a quest document`);
 	if (!directory && !isQuest(to)) throw new Error(`${toArg} must name a Markdown quest document`);
 	if (exists(root, to)) throw new Error(`${toArg} already exists`);
@@ -66,7 +68,7 @@ export async function moveQuest(
 	);
 	return {
 		changes: [`R ${from} -> ${to}`, ...modified(edited.texts)],
-		warnings: [...warnings, ...mentions(root, directory ? `${from}/` : from)],
+		warnings: [...warnings, ...mentions(root, from)],
 		findings: findings(root),
 	};
 }
@@ -101,7 +103,7 @@ export function removeQuest(root: string, arg: string, recursive: boolean): Repo
 	write(root, edited);
 	return {
 		changes: [...doomed.map((doc) => `D ${doc.path}`), ...modified(edited)],
-		warnings: mentions(root, whole ? `${epic}/` : target),
+		warnings: mentions(root, whole ? epic! : target),
 		findings: findings(root),
 	};
 }
@@ -149,11 +151,16 @@ function modified(texts: Map<string, string>): string[] {
 	return [...texts.keys()].sort().map((path) => `M ${path}`);
 }
 
-/** Every tracked line that still names `path`, which no edit could safely change. */
+/**
+ * Every tracked line that still names `path`, or a path under it, which no
+ * edit could safely change. A longer sibling name, such as `drain.md` or
+ * `drain-2` for `drain`, is not a mention; a trailing full stop is.
+ */
 function mentions(root: string, path: string): string[] {
+	const pattern = `${path.replace(/[.[\]()*+?{}|^$\\]/g, "\\$&")}\\.*([^A-Za-z0-9_.-]|$)`;
 	let out: string;
 	try {
-		out = execFileSync("git", ["-C", root, "grep", "-n", "-I", "-F", "-e", path], {
+		out = execFileSync("git", ["-C", root, "grep", "-n", "-I", "-E", "-e", pattern], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 		});

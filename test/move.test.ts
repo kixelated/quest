@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { move, remove } from "../src/core";
-import { openPullRequests } from "../src/cli/claims";
+import { openPullRequests, pullRequestRepositories } from "../src/cli/claims";
 import { GitHub, type GitHubDependencies } from "../src/cli/github";
 import { main } from "../src/cli/main";
 import { ROOT_README, Tree, tempDir } from "./fixture";
@@ -202,6 +202,32 @@ describe("quest mv", () => {
 		);
 	});
 
+	test("reports mentions of a moved epic's directory but not of its siblings", async () => {
+		const tree = Tree.baseline().write(
+			"notes.md",
+			"See quest/m0/epic.\nRun `quest rm -r quest/m0/epic` first.\nNot quest/m0/epic-2 or quest/m0/epic.md.\n",
+		);
+		committed(tree);
+		const out = await quest(tree, "mv", "quest/m0/epic", "quest/m0/feature");
+		expect(out.code).toBe(0);
+		expect(out.stderr).toBe(
+			"quest: no origin remote, so claims were not checked\n" +
+				"quest: notes.md:1: mentions quest/m0/epic; update it by hand\n" +
+				"quest: notes.md:2: mentions quest/m0/epic; update it by hand\n",
+		);
+	});
+
+	test("refuses the root epic and milestones", async () => {
+		const tree = Tree.baseline().write("quest/m1/README.md", "# M1\n\n## Goal\n\nNext.\n");
+		committed(tree);
+		for (const path of ["quest", "quest/README.md", "quest/m0", "quest/m0/README.md"]) {
+			const out = await quest(tree, "mv", path, "quest/m1/old");
+			expect(out.code).toBe(1);
+			expect(out.stderr).toBe(`quest: ${path} is permanent; the root epic and milestones never move\n`);
+		}
+		expect(staged(tree)).toEqual([]);
+	});
+
 	test("refuses a destination that exists", async () => {
 		const tree = committed(Tree.baseline());
 		const out = await quest(tree, "mv", "quest/m0/epic/one.md", "quest/m0/epic/two.md");
@@ -339,5 +365,26 @@ test("open pull requests come from every page, by head branch", async () => {
 	expect(requested).toEqual([
 		"/repos/example/project/pulls?state=open&per_page=100",
 		"/repos/example/project/pulls?state=open&page=2",
+	]);
+});
+
+test("claims are checked in the repository a fork came from, too", async () => {
+	const repos: Record<string, unknown> = {
+		"/repos/me/project": { fork: true, parent: { full_name: "example/project" } },
+		"/repos/example/project": { fork: false },
+	};
+	const github = new GitHub({
+		token: "test-token",
+		now: () => 0,
+		sleep: async () => undefined,
+		warn: () => undefined,
+		fetch: async (url) => new Response(JSON.stringify(repos[url.pathname])),
+	});
+	expect(await pullRequestRepositories(github, { owner: "me", repo: "project" })).toEqual([
+		{ owner: "me", repo: "project" },
+		{ owner: "example", repo: "project" },
+	]);
+	expect(await pullRequestRepositories(github, { owner: "example", repo: "project" })).toEqual([
+		{ owner: "example", repo: "project" },
 	]);
 });
