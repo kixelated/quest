@@ -38,21 +38,25 @@ async function current(publicKey) {
 	return null;
 }
 
-// Signing out stops this device's notifications at once. The server forgets the
-// session's subscriptions, and dropping the browser's own also discards any push
-// the push service still holds for it. A sign-out without JavaScript leaves those
-// to arrive within their TTL.
+// Signing out stops this device's notifications at once and clears the app
+// badge, which signed-out pages never update. The server forgets the session's
+// subscriptions, and dropping the browser's own also discards any push the push
+// service still holds for it. A sign-out without JavaScript leaves those to
+// arrive within their TTL.
 for (const form of document.querySelectorAll('form[action="/sign-out"]')) {
-	if (!supported) break;
 	form.addEventListener(
 		"submit",
 		(event) => {
 			event.preventDefault();
-			registration
-				.then((found) => found.pushManager.getSubscription())
-				.then((subscription) => subscription?.unsubscribe())
-				.catch(() => {})
-				.finally(() => form.submit());
+			const steps = [
+				"clearAppBadge" in navigator ? navigator.clearAppBadge() : null,
+				supported
+					? registration
+							.then((found) => found.pushManager.getSubscription())
+							.then((subscription) => subscription?.unsubscribe())
+					: null,
+			];
+			Promise.allSettled(steps).then(() => form.submit());
 		},
 		{ once: true },
 	);

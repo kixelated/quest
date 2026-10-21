@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("drops the browser's push subscription before signing out", async () => {
+it("drops the browser's push subscription and clears the app badge before signing out", async () => {
 	const steps: string[] = [];
 	const subscription = {
 		endpoint: "https://fcm.googleapis.com/fcm/send/device",
@@ -24,11 +24,15 @@ it("drops the browser's push subscription before signing out", async () => {
 	vi.stubGlobal("Notification", { permission: "granted" });
 	vi.stubGlobal("navigator", {
 		serviceWorker: { register: async () => ({ pushManager: { getSubscription: async () => subscription } }) },
+		clearAppBadge: async () => steps.push("clear"),
 	});
 	// @ts-expect-error: a browser script with no type declarations.
 	await import("../src/app.js");
+	steps.length = 0;
 	let prevented = false;
 	submit!({ preventDefault: () => (prevented = true) });
 	expect(prevented).toBe(true);
-	await vi.waitFor(() => expect(steps).toEqual(["unsubscribe", "submit"]));
+	await vi.waitFor(() => expect(steps).toHaveLength(3));
+	expect(steps.slice(0, 2).sort()).toEqual(["clear", "unsubscribe"]);
+	expect(steps[2]).toBe("submit");
 });

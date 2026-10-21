@@ -267,7 +267,12 @@ app.get("/inbox", async (c) => {
 	const target = c.req.query("item");
 	const chosen = target ? items.find((i) => String(i.project.id) === project && i.target === target) : undefined;
 	const active = chosen ?? decisions[0] ?? null;
-	const response = await page(
+	// Seen once shown, before the nav and the app badge count what is new.
+	if (active?.need) {
+		await inbox.markSeen(c.env.DB, user, active);
+		active.unread = false;
+	}
+	return page(
 		c,
 		{ title: "Decisions", description: "Your decision inbox: questions, issues, pull requests, and ready quests." },
 		<InboxPage
@@ -283,9 +288,6 @@ app.get("/inbox", async (c) => {
 			notifications={push.keys(c.env)?.publicKey ?? null}
 		/>,
 	);
-	// Seen once shown, so the nav's count agrees with the page that shows it.
-	if (active?.need) await inbox.markSeen(c.env.DB, user, active);
-	return response;
 });
 app.get("/projects/github/:owner/:repository/board", async (c) => {
 	const state = await liveProject(c);

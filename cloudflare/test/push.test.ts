@@ -351,8 +351,10 @@ describe("decision notifications", () => {
 		expect(html).toContain('<link rel="manifest" href="/manifest.webmanifest"/>');
 		const inbox = await (await app.request(`${origin}/inbox`, { headers: { Cookie: cookie } }, testEnv)).text();
 		expect(inbox).toContain("data-compact");
-		expect(inbox).toContain('<span class="count">3</span>');
-		// Opening the inbox marks its active decision seen.
+		// The inbox marks its active decision seen before the nav and badge count it.
+		expect(inbox).toContain('<span class="count">2</span>');
+		expect(inbox).toContain('data-unread="2"');
+		expect(inbox).toContain("3 waiting on you, 2 new.");
 		const after = await (await app.request(`${origin}/docs`, { headers: { Cookie: cookie } }, testEnv)).text();
 		expect(after).toContain('<span class="count">2</span>');
 	});
