@@ -19,33 +19,43 @@ test("check prints findings on stderr and fails", () => {
 	expect(out.stderr).toContain("quest: quest/m0/epic/one.md:7: unknown '## Requires'");
 });
 
-test("ready lists ready quests", () => {
-	expect(Tree.baseline().run("ready")).toEqual({ code: 0, stdout: "quest/m0/epic/one.md\n", stderr: "" });
-});
-
-// Blocked or not, ready exits 0: the blocker list on stdout is the result.
-test("ready prints blockers on stdout and explains on stderr", () => {
-	const out = Tree.baseline().run("ready", "/quest/m0/epic/two.md");
+// Blocked or not, unblocked <path> exits 0: the blocker list on stdout is the result.
+test("unblocked with a path prints blockers on stdout and explains on stderr", () => {
+	const out = Tree.baseline().run("unblocked", "/quest/m0/epic/two.md");
 	expect(out.code).toBe(0);
 	expect(out.stdout).toBe("quest/m0/epic/one.md\n");
 	expect(out.stderr).toContain("quest: blocked by quest/m0/epic/one.md\n");
 	expect(out.stderr).toContain("quest: /quest/m0/epic/two.md is blocked;");
 });
 
-test("ready accepts a filesystem path", () => {
-	const tree = Tree.baseline();
-	expect(tree.run("ready", `${tree.path}/quest/m0/epic/two.md`).stdout).toBe("quest/m0/epic/one.md\n");
+test("unblocked with a ready quest prints nothing", () => {
+	expect(Tree.baseline().run("unblocked", "quest/m0/epic/one.md")).toEqual({ code: 0, stdout: "", stderr: "" });
 });
 
-test("ready rejects a path that is not a quest", () => {
-	const out = Tree.baseline().run("ready", "nope.md");
+test("unblocked accepts a filesystem path", () => {
+	const tree = Tree.baseline();
+	expect(tree.run("unblocked", `${tree.path}/quest/m0/epic/two.md`).stdout).toBe("quest/m0/epic/one.md\n");
+});
+
+test("unblocked rejects a path that is not a quest", () => {
+	const out = Tree.baseline().run("unblocked", "nope.md");
 	expect(out.code).toBe(1);
 	expect(out.stderr).toMatch(/^quest: nope.md is not a quest document under .*\/quest\n$/);
 });
 
+test("unblocked rejects ranking options with a path", () => {
+	for (const option of ["--json", "--unclaimed", "--limit=1"]) {
+		expect(Tree.baseline().run("unblocked", "quest/m0/epic/one.md", option).code).toBe(2);
+	}
+});
+
+test("the ready command is gone", () => {
+	expect(Tree.baseline().run("ready").code).toBe(2);
+});
+
 test("the root option is accepted after the command", () => {
 	const tree = Tree.baseline();
-	expect(run("ready", "--root", tree.path).stdout).toBe("quest/m0/epic/one.md\n");
+	expect(run("unblocked", "--root", tree.path).stdout).toBe("1\tquest/m0/epic/one.md\n");
 });
 
 test("init and uninstall print each changed path and nothing else", () => {
@@ -78,7 +88,7 @@ test("skill rejects an unknown name", () => {
 test("usage errors exit 2", () => {
 	expect(run("bogus").code).toBe(2);
 	expect(run("skill", "--stub").code).toBe(2);
-	expect(run("ready", "a", "b").code).toBe(2);
+	expect(run("unblocked", "a", "b").code).toBe(2);
 	expect(run().code).toBe(2);
 });
 

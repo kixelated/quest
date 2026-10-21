@@ -45,17 +45,17 @@ From your repository root, validate the result and list the ready quests:
 
 ```sh
 quest check
-quest ready
+quest unblocked
 ```
 
 Review the plan before setting out. `/quest-start` claims one quest and opens a
 pull request; `/quest-spawn` sends several agents out in parallel when
 your session supports them. Use `$quest-start` and `$quest-spawn` in Codex.
-Check the forge for a live runner lock or an open change before starting.
-kix.quest records each active job in its database and reassigns a job whose
-runner goes offline. On GitHub, check the upstream repository for the quest's
-branch and for open PRs from it, including PRs from forks. `quest ready`
-reads dependencies in the quest tree; it does not look for these live states.
+Both claim through `quest start`, which pushes the quest's branch and opens a
+draft PR right away, and refuses a quest whose branch or PR, including one from
+a fork, already exists. `quest unblocked --unclaimed` lists the ready quests
+nobody holds. kix.quest records each active job in its database and reassigns a
+job whose runner goes offline; check it for a live runner lock before starting.
 
 You review each change: `/quest-ready` takes a draft to review, and
 `/quest-merge` (`$quest-merge` in Codex) merges it once checks and reviews pass.

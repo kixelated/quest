@@ -10,7 +10,7 @@ interview runs on one of their runners; they never see a terminal.
 ## Plan
 
 Decided 2026-10-20 (user) from the transcript audit recorded in
-[quest start](/quest/m0/helpers/start.md), where `/quest-plan` arguments
+[quest start](https://github.com/kixelated/quest/blob/d265755/quest/m0/helpers/start.md), where `/quest-plan` arguments
 were mostly free-form ideas, pasted outside input (emails, call notes,
 findings), and "follow-ups":
 

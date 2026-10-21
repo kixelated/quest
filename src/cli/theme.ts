@@ -57,15 +57,8 @@ interface Row {
 export class Theme {
 	constructor(private readonly terminal: Terminal) {}
 
-	/** `quest ready`: every ready quest, under a count. */
-	ready(docs: Map<string, Doc>, paths: string[]): string[] {
-		if (paths.length === 0) return ["No quests ready."];
-		const count = `${paths.length} ${paths.length === 1 ? "quest" : "quests"} ready`;
-		return [count, ...layout(paths.map((path) => ({ indent: 0, label: this.quest(docs, path, "ready"), path })))];
-	}
-
 	/**
-	 * `quest ready <path>`: the quest with its marker, then its status: Ready
+	 * `quest unblocked <path>`: the quest with its marker, then its status: Ready
 	 * or the `Required` chain, with each required epic expanded
 	 * into the quests it still holds.
 	 */
