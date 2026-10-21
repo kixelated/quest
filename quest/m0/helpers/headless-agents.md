@@ -38,10 +38,14 @@ Recommended shape, open for review:
   starting, resuming, and stopping background agents in isolated worktrees,
   and with `api`, billing them to the user's keys. Stub text is part of the
   user turn the classifier reads. Open: stubs are static by design ("the stub
-  never changes between versions"), so this changes their contract once and
-  needs `quest init` rerun in existing repositories. The alternative is to rely
-  on the command's legibility alone. Replay the 2026-10-20 commands against
-  each option before choosing.
+  never changes between versions"), so this changes their contract once.
+  Rerunning `quest init` is not enough: `init` and `uninstall` accept only a
+  stub that exactly matches the current text, so `init` refuses an older stub
+  and `uninstall` leaves it in place. Existing repositories need an upgrade
+  path, such as `init` and `uninstall` also recognizing known older stub texts,
+  or a manual remove-and-reinit; that cost counts against this option. The
+  alternative is to rely on the command's legibility alone. Replay the
+  2026-10-20 commands against each option before choosing.
 - The spawn skill's launcher prose shrinks to calling the command.
 - Validate with a multi-agent `api` spawn in a repository with no `autoMode`
   settings: no classifier blocks, and exhausted keys hand off without the
