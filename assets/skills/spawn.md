@@ -62,24 +62,22 @@ The rest of the argument still filters the quests in scope.
 
 ## API keys
 
-With an `api` argument, bill agents to API keys instead of this session's account: run each as a headless agent CLI process rather than a sub-agent.
-`QUEST_API_KEYS` lists the keys, separated by whitespace; refer to each by its position.
-An entry may be a secret reference instead of a key, such as a 1Password `op://` URI.
-Resolve every reference in one secret-manager invocation when the spawn starts, such as `op inject` on a template listing each reference, so the user approves at most one prompt and can leave; a 1Password service account token in `OP_SERVICE_ACCOUNT_TOKEN` makes it promptless.
-Keep the resolved keys in a file only the user can read, in memory-backed storage such as `$XDG_RUNTIME_DIR` when available, and delete it when the spawn ends.
-Children run as the same user and could read that file, so this limits which key each child is given, not what it can reach.
-Stop and report if the variable is unset or the agent CLI is not installed.
-Never show a key in a command, prompt, log, report, or commit: expand it from that file inside the command.
+With an `api` argument, bill agents to API keys instead of this session's account: run each as a headless agent through `quest agent` rather than as a sub-agent.
+`QUEST_API_KEYS` lists the keys, separated by whitespace; refer to each by its 1-based position.
+`quest agent` resolves any 1Password `op://` entries in one `op inject` on first use, keeps the keys in a user-only store, and gives each agent only its own key, so never resolve, read, or show a key yourself.
+A 1Password service account token in `OP_SERVICE_ACCOUNT_TOKEN` makes resolution promptless.
+Stop and report if it says `QUEST_API_KEYS` is unset or the agent CLI is not installed.
 
-Start each process in the background, in its own isolated worktree, with JSON output, this session's model, effort, and permission mode passed explicitly, and permission prompts off, so the harness reports its exit as it would a sub-agent's.
-For example, `claude -p --output-format json --model <model> --effort <level>` or `codex exec --json`.
-Set its key only in that process's environment, as the agent's key variable such as `ANTHROPIC_API_KEY` or `CODEX_API_KEY`, then unset `QUEST_API_KEYS` and secret-manager tokens such as `OP_SERVICE_ACCOUNT_TOKEN` there so it holds no other key, and clear this session's own harness variables, such as every `CLAUDE*` and `ANTHROPIC*` variable for Claude Code, so the process neither reuses this session's credentials nor acts as its sub-session.
-Read its final reply and session id from that agent's output: `claude -p` prints one result object with a dollar cost, while `codex exec --json` streams JSONL events, with the thread id in `thread.started`, the reply in the last `item.completed`, and token usage instead of cost.
-Report cost only when the agent provides it.
-Tell it that it cannot prompt, so it ends with any decisions and its recommendations in its final reply, and that ending its turn ends the process and kills its background commands, so it waits in the foreground.
-Ask the user, then resume that session in the background with the answer, as you would message a sub-agent: `claude -p --resume <id>` or `codex exec resume <id>`.
+Start each agent as a background command, in its own isolated worktree, so the harness reports its exit as it would a sub-agent's:
+`quest agent start --harness <claude|codex> --key <position> --model <model> --effort <level> --permission-mode <mode> <worktree> <prompt>`.
+Pass this session's model, effort, and permission mode; Codex takes its sandbox mode.
+It prints the session id first, then the cost when the agent reports one, the outcome, and the agent's final reply.
+Tell the agent that it cannot prompt, so it ends with any decisions and its recommendations in its final reply, and that ending its turn ends the process and kills its background commands, so it waits in the foreground.
+Ask the user, then resume that session in the background with the answer, as you would message a sub-agent: `quest agent resume` with the same options, the worktree, the session id, and the answer.
+Stop one agent with `quest agent stop <worktree>`.
+When the spawn ends, run `quest agent stop --all`, which stops any agent still running and deletes the resolved keys.
 
 Assign quests to keys round-robin.
-When a run fails because its key's credit balance is exhausted, drop that key for the rest of the spawn and resume the session on the next key.
+Exit status 3 means the key's credit is exhausted: drop that key for the rest of the spawn and resume the session on the next key.
 Once every key is exhausted, start nothing new and never fall back to this session's account.
 List each interrupted quest with its worktree and session id so the user can resume it later.

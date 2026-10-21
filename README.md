@@ -398,6 +398,35 @@ Arguments, working directory, environment and terminal streams pass through to
 the executable, and waiting happens before it starts. There is no fairness
 guarantee or timeout: a command waits as long as the host stays busy.
 
+## Headless agents
+
+`quest agent` runs one headless agent turn per call, billed to one of the keys
+in `QUEST_API_KEYS`, so `/quest-spawn api` launches every agent with one command
+whose arguments name the whole launch:
+
+```sh
+quest agent start --harness claude --key 1 --model claude-opus-5-5 --effort high --permission-mode auto .worktrees/foo "/quest-start quest/m0/foo.md"
+quest agent resume --harness claude --key 2 --model claude-opus-5-5 --effort high --permission-mode auto .worktrees/foo <session> "Take the recommendation."
+quest agent stop .worktrees/foo
+quest agent stop --all
+```
+
+`--key` names a key by its 1-based position. The first launch resolves every
+1Password `op://` entry in one `op inject` and keeps the keys in a user-only
+store under `$XDG_RUNTIME_DIR` (or the temporary directory), shared by the
+repository's worktrees until `quest agent stop --all` deletes it. The agent
+runs in the worktree with the user's environment minus the coordinating
+session's harness variables, other keys, secret-manager tokens, and any
+`quest gate` admission, plus its one key. `--permission-mode` is Claude Code's permission mode, or Codex's sandbox
+mode; the agent cannot prompt.
+
+It prints `session <id>` as soon as the id is known, then `cost <dollars>` when
+the agent reports it, `outcome finished|failed|exhausted|stopped`, a blank line,
+and the agent's final reply. It never prints a key. It exits 0 when the agent
+finished, 3 when the provider refused the key for lack of credit, 2 for invalid
+arguments, and 1 otherwise. `stop` signals the agent and waits until its `start`
+or `resume` has reported.
+
 ## Prunable local checkouts
 
 The experimental `quest worktree` commands share one disk budget across this
@@ -471,10 +500,11 @@ agent acts on its own recommendations and asks only before merging or deleting.
 To bill spawned agents to API keys instead of your agent's account, export
 `QUEST_API_KEYS` with one or more whitespace-separated keys and run
 `/quest-spawn api`. Entries may be secret references such as 1Password `op://`
-URIs, resolved in one `op inject` when the spawn starts; a 1Password service
-account token (`OP_SERVICE_ACCOUNT_TOKEN`) avoids even that prompt. Each quest
-runs as a headless `claude -p` or `codex exec` process on one key; a key whose
-credit runs out is dropped, and spawning stops once every key is exhausted.
+URIs, resolved in one `op inject` when the first agent starts; a 1Password
+service account token (`OP_SERVICE_ACCOUNT_TOKEN`) avoids even that prompt. Each
+quest runs through [`quest agent`](#headless-agents) as a headless `claude -p`
+or `codex exec` process on one key; a key whose credit runs out is dropped, and
+spawning stops once every key is exhausted.
 Disable auto-reload or set a spend limit in each provider console so draining a
 key cannot charge a card. Agents run as your user, so they are not isolated from
 the other keys.
