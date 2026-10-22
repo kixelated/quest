@@ -1,6 +1,6 @@
 // `quest iterate`, `ready`, `merge`, and `release`, against a PR replayed in memory.
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import type { GitHubDependencies, ObjectValue } from "../src/cli/github";
 import { finish, land, release, take, withoutHandBack } from "../src/cli/hold";
@@ -340,4 +340,23 @@ describe("arguments", () => {
 	test("--squash and --rebase conflict", async () => {
 		expect((await cli("merge", URL_, "token", "--land", HEAD, "--squash", "--rebase")).code).toBe(2);
 	});
+});
+
+// process.stdout.write returns a boolean; printing the token once made it the exit code.
+test("iterate and release exit 0 when stdout returns a value", async () => {
+	const pull = new FakePull();
+	vi.stubEnv("GH_TOKEN", "token");
+	vi.stubGlobal("fetch", pull.deps().fetch);
+	try {
+		let stdout = "";
+		const out = { stdout: (text: string) => ((stdout += text), true), stderr: () => true } as Output;
+		expect(await main(["iterate", URL_], out)).toBe(0);
+		const token = stdout.trim();
+		expect(pull.labels).toEqual(["quest:iterate"]);
+		expect(await main(["release", URL_, token], out)).toBe(0);
+		expect(pull.labels).toEqual([]);
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
 });

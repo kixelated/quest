@@ -48,8 +48,13 @@ class UsageError extends Error {}
 export function main(argv: string[], out: Output): number | Promise<number> {
 	let pending: Promise<number> | undefined;
 	let code = 0;
-	const print = (line: string) => out.stdout(`${line}\n`);
-	const warn = (line: string) => out.stderr(`quest: ${line}\n`);
+	// Block bodies: process.stdout.write returns a boolean, which settle would take for the exit code.
+	const print = (line: string): void => {
+		out.stdout(`${line}\n`);
+	};
+	const warn = (line: string): void => {
+		out.stderr(`quest: ${line}\n`);
+	};
 	const theme = out.terminal ? new Theme(out.terminal) : null;
 
 	const program = new Command("quest")
