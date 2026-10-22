@@ -16,5 +16,4 @@ Summarize the reviews and CI from `quest status <pr>`, then interactively prompt
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Also offer `/quest-plan` for suggested follow-ups.
 A background agent that cannot prompt lists these in its report instead.
