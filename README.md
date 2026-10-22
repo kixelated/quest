@@ -511,7 +511,10 @@ Work handed to another service manager, such as `systemd-run` or a container
 daemon, escapes the scope. If the supervisor itself is killed, its command keeps
 running and its scratch is kept; the next `quest worktree` command drops the run
 once its scope is empty and then releases the checkout. `status` lists each
-run's scope, which `systemctl --user stop` ends.
+run's scope, with the reason a run it cannot inspect is kept until an
+inspection succeeds. `quest worktree stop example` kills what crashed
+supervisors left in their scopes, waits until they are empty, and so releases
+the checkout; it leaves runs whose supervisor is alive to that supervisor.
 
 Release deletes only declared scratch, and refuses a path that Git does not
 ignore, that holds tracked files or another Git worktree, or that is reached
@@ -530,10 +533,22 @@ quest worktree restore example
 checkout's disk again; then reinstall or rebuild its scratch, for example with
 `just install`.
 
-Quest never removes a checkout. Once one is finished, remove it with
-`git worktree unlock` and `git worktree remove`, which refuses modified or
-untracked files but deletes ignored ones; `release` then drops its record. A
-failed creation stays charged until `release` drops it. Records live in
+Once a checkout is finished, remove it and its record:
+
+```sh
+quest worktree remove example
+```
+
+`remove` never forces. It refuses while supervised runs are live, and refuses
+modified or untracked files and any commit, at `HEAD` or under the checkout's
+own refs such as `refs/bisect/`, that no branch or remote-tracking ref
+reaches. A squash-merged change leaves its commits unreached, so they count as
+preserved only when origin's GitHub repository (a fork's parent) has a merged
+PR whose head is exactly that commit; other commits need no forge or token.
+It then prunes the scratch and refuses ignored files that remain, leaving the
+checkout released, before `git worktree remove` deletes it. A checkout already
+removed with `git worktree remove` only drops its record, as with `release`.
+A failed creation stays charged until `release` drops it. Records live in
 `$QUEST_WORKTREE_HOME`, or `$XDG_STATE_HOME/quest/worktrees` (default
 `~/.local/state/quest/worktrees`). The registry lock of a process that exited on
 this host is reclaimed; a live lock, or one held from another host, is never

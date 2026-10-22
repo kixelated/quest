@@ -21,12 +21,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f
         with:
           determinate: false
+      # A PR from a quest's branch must delete or rewrite its quest. A quest
+      # built from the base checks that before any of the head's code runs on
+      # this runner, so the head cannot weaken the check it is held to.
+      - name: Check out the base
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Build quest from the base
+        if: github.event_name == 'pull_request'
+        run: nix build --out-link "$RUNNER_TEMP/quest-base" .#quest
+      # The full history holds the merge base with the base branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The checkout is detached, so name the head branch.
+      - name: Check that the PR leaves its quest accurate
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ runner.temp }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: ./quest-base/bin/quest --root "$GITHUB_WORKSPACE" check --base "origin/$BASE_REF" --branch "$HEAD_REF"
       - name: Install dependencies
         run: nix develop --command just install
       # `quest worktree run` owns processes through a systemd user scope, which the tests exercise.
