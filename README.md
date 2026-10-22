@@ -514,14 +514,12 @@ the version you pin decides what your agents follow:
 | `quest-ready` | Mark a draft PR ready for review, wait for an automated review, then decide whether to merge. |
 | `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
+| `quest-afk` | Keep starting agreed work while you are away, leaving every decision for your return. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
 a separate invocation, so you review every change.
-
-Before stepping away, add `afk` to `/quest-spawn` or `/quest-complete`: the
-agent acts on its own recommendations and asks only before merging or deleting.
 
 To bill spawned agents to API keys instead of your agent's account, export
 `QUEST_API_KEYS` with one or more whitespace-separated keys and run

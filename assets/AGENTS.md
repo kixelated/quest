@@ -82,6 +82,8 @@ A sub-agent's brief carries the quest or PR, the user's picks, and the scope; it
 A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
 Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
 
+End every quest skill with a final summary in sections, such as the PRs and their states, the open decisions with recommendations, and suggested follow-ups, so a user returning to the session first sees what needs them.
+
 ## Creation
 
 Quests are created in PRs and reviewed.

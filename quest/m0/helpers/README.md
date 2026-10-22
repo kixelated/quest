@@ -56,7 +56,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Required
 
-- [Unattended work](/quest/m0/helpers/afk.md) - `/quest-afk` replaces the `afk` argument: it skips every decision and keeps starting agreed work; every skill ends with a summary
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
 - [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
