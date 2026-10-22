@@ -63,26 +63,28 @@ export class Workspace {
 	 */
 	static async prepare(root: string, job: Job, remote: string): Promise<Workspace> {
 		const git = join(root, "repos", job.owner, `${job.name}.git`);
-		if (!existsSync(join(git, "HEAD"))) {
-			await run("git", ["init", "--quiet", "--bare", git]);
-			await run("git", ["-C", git, "remote", "add", "origin", remote]);
-			// kix publishes the job's work; a push from the checkout has nowhere to go.
-			await run("git", ["-C", git, "config", "remote.origin.pushurl", "kix-publishes-this-job"]);
-		} else {
-			await run("git", ["-C", git, "remote", "set-url", "origin", remote]);
-		}
 		const dir = join(root, "jobs", job.id);
 		const file = join(root, "jobs", `${job.id}.json`);
-		const record = load(file);
-		if (record && record.head === job.head && existsSync(join(dir, ".git")))
-			return new Workspace(git, dir, file, record);
-		await remove(git, dir);
-		const start = job.head ?? job.revision;
-		await fetch(git, start);
-		await run("git", ["-C", git, "worktree", "add", "--quiet", "--detach", dir, start]);
-		const fresh: Record = { head: job.head, base: start };
-		save(file, fresh);
-		return new Workspace(git, dir, file, fresh);
+		return locked(git, async () => {
+			if (!existsSync(join(git, "HEAD"))) {
+				await run("git", ["init", "--quiet", "--bare", git]);
+				await run("git", ["-C", git, "remote", "add", "origin", remote]);
+				// kix publishes the job's work; a push from the checkout has nowhere to go.
+				await run("git", ["-C", git, "config", "remote.origin.pushurl", "kix-publishes-this-job"]);
+			} else {
+				await run("git", ["-C", git, "remote", "set-url", "origin", remote]);
+			}
+			const record = load(file);
+			if (record && record.head === job.head && existsSync(join(dir, ".git")))
+				return new Workspace(git, dir, file, record);
+			await remove(git, dir);
+			const start = job.head ?? job.revision;
+			await fetch(git, start);
+			await run("git", ["-C", git, "worktree", "add", "--quiet", "--detach", dir, start]);
+			const fresh: Record = { head: job.head, base: start };
+			save(file, fresh);
+			return new Workspace(git, dir, file, fresh);
+		});
 	}
 
 	/** The worktree's files that differ from what the branch holds, untracked ones included and ignored ones not. */
@@ -149,11 +151,46 @@ export class Workspace {
 		save(this.#file, this.#record);
 	}
 
+	/**
+	 * Continue from `head`, which kix reports the branch holds after a
+	 * publication whose reply never arrived. It must descend from the head this
+	 * checkout last saw, since only this attempt's publications move the branch.
+	 */
+	async adopt(head: string): Promise<void> {
+		if (!/^[0-9a-f]{40}$/.test(head)) throw new Error(`kix reported an invalid head: ${head}`);
+		const known = this.#record.head ?? this.#record.base;
+		await locked(this.#git, () => fetch(this.#git, head));
+		try {
+			await run("git", ["-C", this.#git, "merge-base", "--is-ancestor", known, head]);
+		} catch {
+			throw new Error(`kix reports the branch at ${head}, which does not continue from ${known}`);
+		}
+		this.#record = { head, base: head };
+		save(this.#file, this.#record);
+	}
+
 	/** Delete the checkout and its record once the job is done with this runner. */
 	async remove(): Promise<void> {
-		await remove(this.#git, this.dir);
+		await locked(this.#git, () => remove(this.#git, this.dir));
 		rmSync(this.#file, { force: true });
 	}
+}
+
+/** Each bare clone's queue: jobs on one repository share its config, objects, and worktree list. */
+const queues = new Map<string, Promise<void>>();
+
+/** Run `action` once every earlier operation on the bare clone `git` has settled. */
+function locked<T>(git: string, action: () => Promise<T>): Promise<T> {
+	const result = (queues.get(git) ?? Promise.resolve()).then(action);
+	const settled = result.then(
+		() => {},
+		() => {},
+	);
+	queues.set(git, settled);
+	void settled.then(() => {
+		if (queues.get(git) === settled) queues.delete(git);
+	});
+	return result;
 }
 
 function load(file: string): Record | undefined {

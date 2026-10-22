@@ -363,6 +363,49 @@ describe("job coordination", () => {
 		]);
 	});
 
+	it("resumes with another maintainer's answer only once the requester approves it", async () => {
+		const home = await runner("owner", "home");
+		await connected(home, [account("main")]);
+		const id = await job(10, "owner");
+		await run({ [home.id]: 1 }, 0);
+		const input = { summary: "Need a decision", session: "session-1", prompt: { question: "A or B?" } };
+		const { question } = await store.ask(db, home, id, 1, input, 1);
+		expect(await store.answer(db, id, question, "other", "B", 2)).toEqual({ resumed: false });
+		expect(await state(id)).toMatchObject({ state: "waiting" });
+		expect((await state(id)).questions[0]).toMatchObject({ answer: "B", answeredBy: "other", approvedAt: null });
+		expect((await run({ [home.id]: 1 }, 3)).assign).toEqual([]);
+		// Another maintainer can neither answer it again nor approve it.
+		await expect(store.answer(db, id, question, "other", "C", 4)).rejects.toThrow("no longer open");
+		await expect(store.approve(db, id, question, "other", 4)).rejects.toThrow("Only the job's requester");
+		await store.approve(db, id, question, "owner", 5);
+		expect(await state(id)).toMatchObject({ state: "queued" });
+		expect((await state(id)).questions[0]).toMatchObject({ answer: "B", answeredBy: "other", approvedAt: 5 });
+		await expect(store.approve(db, id, question, "owner", 6)).rejects.toThrow("No answer awaits approval");
+		expect((await run({ [home.id]: 1 }, 7)).assign).toMatchObject([
+			{ job: { id, attempt: 2, questions: [{ answer: "B", approvedAt: 5 }] } },
+		]);
+	});
+
+	it("lets the requester answer instead of approving, and approves account choices too", async () => {
+		const machine = await runner("owner", "machine");
+		await connected(machine, [account("first"), account("second")]);
+		const id = await job(10, "owner");
+		await run({ [machine.id]: 1 }, 0);
+		const { question } = await store.ask(db, machine, id, 1, { summary: "?", session: "s", prompt: {} }, 1);
+		await store.answer(db, id, question, "other", "B", 2);
+		expect(await store.answer(db, id, question, "owner", "A", 3)).toEqual({ resumed: true });
+		expect(await state(id)).toMatchObject({ state: "queued" });
+		expect((await state(id)).questions[0]).toMatchObject({ answer: "A", answeredBy: "owner", approvedAt: 3 });
+
+		await run({ [machine.id]: 1 }, 4);
+		await store.finish(db, machine, id, 2, { outcome: "limited", summary: "Limit", result: undefined }, 5);
+		const choice = (await state(id)).questions.find((q) => q.kind === "account")!.id;
+		await store.answer(db, id, choice, "other", { runner: machine.id, account: "second" }, 6);
+		expect(await state(id)).toMatchObject({ state: "waiting", pinAccount: null });
+		await store.approve(db, id, choice, "owner", 7);
+		expect(await state(id)).toMatchObject({ state: "queued", pinRunner: machine.id, pinAccount: "second" });
+	});
+
 	it("pauses an account-limited job with a decision instead of switching accounts", async () => {
 		const machine = await runner("owner", "machine");
 		await connected(machine, [account("first"), account("second")]);

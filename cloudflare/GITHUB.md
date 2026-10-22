@@ -92,8 +92,10 @@ and moves one branch. Before writing anything it checks, in order:
   identity, visibility, installation, and enrollment are checked live, as for
   every other operation.
 - The branch is where the job left it: absent before the first publication,
-  then the last commit kix published. A `head` that differs gets a reply naming
-  the commit to continue from. A branch changed outside the job, or one that
+  then the last commit kix published. A `head` that differs gets a
+  `409 { error, head }` naming the commit to continue from, so a runner whose
+  previous reply was lost continues from what landed instead of failing. A
+  branch changed outside the job, or one that
   earlier work left on the fork, becomes a decision; it is never overwritten.
 
 `plan`, `start`, and `bootstrap` jobs write their branch on the service fork

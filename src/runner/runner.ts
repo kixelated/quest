@@ -57,6 +57,7 @@ export class Runner {
 				replaced: () => {
 					this.#closing = true;
 					for (const attempt of this.#live) attempt.abandon();
+					clearTimeout(this.#wake);
 					this.connection.close();
 					resolve("replaced");
 				},
@@ -186,6 +187,7 @@ export class Runner {
 			env: options.env ?? process.env,
 			request: (message) => this.#send(message),
 			publish: (body) => this.#publish(body),
+			context: (job, attempt) => this.#target(job, attempt),
 			limited: (account, until) => this.#limited(account, until),
 			log: options.log,
 		};
@@ -205,6 +207,18 @@ export class Runner {
 		return { status: response.status, body: parsed };
 	}
 
+	async #target(job: string, attempt: number): Promise<unknown> {
+		const fetcher = this.options.fetch ?? fetch;
+		const query = new URLSearchParams({ job, attempt: String(attempt) });
+		const response = await fetcher(`${this.options.login.url.replace(/\/$/, "")}/api/runner/context?${query}`, {
+			headers: { Authorization: `Bearer ${this.options.login.token}` },
+		});
+		const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+		if (!response.ok)
+			throw new Error(typeof body.error === "string" ? body.error : `kix answered ${response.status}`);
+		return body;
+	}
+
 	/** Keep a refused account out of routing until it resets, and report the change. */
 	#limited(account: Account, until: number | null): void {
 		const { home } = this.options;
@@ -221,6 +235,8 @@ export class Runner {
 	/** Report again when the next limited account resets. */
 	#schedule(): void {
 		clearTimeout(this.#wake);
+		// A closing runner reports nothing more, and its timer must not keep the process alive.
+		if (this.#closing) return;
 		const now = this.#now();
 		const next = Math.min(
 			...this.options.home

@@ -69,7 +69,14 @@ function fakeGitHub() {
 				id: repo!.startsWith("quest-bot-forks/") ? 6 : 5,
 				app_id: 123,
 				suspended_at: null,
-				permissions: { metadata: "read", contents: "write", pull_requests: "write" },
+				permissions: {
+					metadata: "read",
+					contents: "write",
+					pull_requests: "write",
+					issues: "write",
+					checks: "read",
+					statuses: "read",
+				},
 			});
 		if (path.endsWith("/access_tokens"))
 			return json({ token: path.includes("/6/") ? "fork-token" : "upstream-token" });
@@ -77,6 +84,90 @@ function fakeGitHub() {
 		if (path === `/user/${githubUser}`) return json({ id: githubUser, login: "maintainer" });
 		if (rest.endsWith("/permission"))
 			return json({ user: { id: githubUser }, permission: "write", role_name: fake.role });
+		if (path === "/graphql" && body.query.includes("issue(number:"))
+			return json({
+				data: {
+					repository: {
+						issue: {
+							number: body.variables.number,
+							title: "Parser breaks",
+							state: "OPEN",
+							body: "On empty input",
+							author: { login: "reporter" },
+							comments: {
+								nodes: [{ author: null, body: "Same here", createdAt: "2026-10-01T00:00:00Z" }],
+							},
+						},
+					},
+				},
+			});
+		if (path === "/graphql" && body.query.includes("pullRequest(number:"))
+			return json({
+				data: {
+					repository: {
+						pullRequest: {
+							number: body.variables.number,
+							title: "Fix",
+							state: "OPEN",
+							body: "Fixes it",
+							isDraft: false,
+							author: { login: "contributor" },
+							baseRefName: "main",
+							headRefName: "contributor/fix",
+							headRefOid: prHead,
+							comments: { nodes: [] },
+							reviews: {
+								nodes: [{ author: { login: "bot" }, state: "COMMENTED", body: "", submittedAt: "t" }],
+							},
+							reviewThreads: {
+								nodes: [
+									{
+										isResolved: true,
+										isOutdated: false,
+										path: "a.ts",
+										line: 1,
+										comments: {
+											nodes: [{ author: { login: "bot" }, body: "Done already", createdAt: "t" }],
+										},
+									},
+									{
+										isResolved: false,
+										isOutdated: false,
+										path: "b.ts",
+										line: 7,
+										comments: {
+											nodes: [{ author: { login: "bot" }, body: "Handle null", createdAt: "t" }],
+										},
+									},
+								],
+							},
+							commits: {
+								nodes: [
+									{
+										commit: {
+											oid: prHead,
+											statusCheckRollup: {
+												state: "FAILURE",
+												contexts: {
+													nodes: [
+														{
+															__typename: "CheckRun",
+															name: "test",
+															status: "COMPLETED",
+															conclusion: "FAILURE",
+															detailsUrl: "https://ci.test/1",
+														},
+													],
+												},
+											},
+										},
+									},
+								],
+							},
+						},
+					},
+				},
+			});
 		if (path === "/graphql") {
 			const pull = pulls.find((p) => p.node_id === body.variables.id);
 			if (!pull || !body.query.includes("markPullRequestReadyForReview")) return json({ errors: [{}] });
@@ -350,7 +441,7 @@ describe("runner publication", () => {
 		const before = gitWrites().length;
 		const stale = await publish({ job: id, attempt: 1, head: null, message: "again", changes: [file("a", "a")] });
 		expect(stale.status).toBe(409);
-		expect(await stale.json()).toEqual({ error: `The job's branch is at ${head}; continue from it` });
+		expect(await stale.json()).toEqual({ error: `The job's branch is at ${head}; continue from it`, head });
 		expect(gitWrites()).toHaveLength(before);
 
 		const second = await publish({
@@ -634,7 +725,10 @@ describe("runner publication", () => {
 			message: "two",
 			changes: [file("a", "2")],
 		});
-		expect(await retry.json()).toEqual({ error: `The job's branch is at ${landed}; continue from it` });
+		expect(await retry.json()).toEqual({
+			error: `The job's branch is at ${landed}; continue from it`,
+			head: landed,
+		});
 		expect(await job(id)).toMatchObject({ head: landed, pending: null });
 		const next = await publish({ job: id, attempt: 1, head: landed, message: "three", changes: [file("a", "3")] });
 		expect(next.status).toBe(200);
@@ -938,5 +1032,65 @@ describe("runner publication", () => {
 		])
 			expect((await publish(body)).status).toBe(409);
 		expect(github.requests).toEqual([]);
+	});
+});
+
+describe("job context", () => {
+	function read(id: string, attempt: number, token = machine.token) {
+		return app.request(
+			`${origin}/api/runner/context?${new URLSearchParams({ job: id, attempt: String(attempt) })}`,
+			{ headers: { Authorization: `Bearer ${token}` } },
+			testEnv,
+		);
+	}
+
+	it("reads the current attempt's issue as the App", async () => {
+		const id = await running({ workflow: "plan", target: "issues/4", branch: "plan/issue-4" });
+		const response = await read(id, 1);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			kind: "issue",
+			number: 4,
+			title: "Parser breaks",
+			state: "OPEN",
+			author: "reporter",
+			body: "On empty input",
+			comments: [{ author: null, body: "Same here", at: "2026-10-01T00:00:00Z" }],
+		});
+		expect(github.requests.find((r) => r.path === "/graphql")!.body.variables).toEqual({
+			owner: "upstream",
+			name: "project",
+			number: 4,
+		});
+		// Only the current attempt of a known runner reads it.
+		expect((await read(id, 2)).status).toBe(409);
+		expect((await read(id, 1, "x".repeat(43))).status).toBe(401);
+	});
+
+	it("gives an iteration its pull request's unresolved threads and checks", async () => {
+		const id = await running({
+			workflow: "iterate",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		const body = (await (await read(id, 1)).json()) as Record<string, any>;
+		expect(body).toMatchObject({ kind: "pull", number: 2, head: { ref: "contributor/fix", oid: prHead } });
+		expect(body.threads).toEqual([
+			{ path: "b.ts", line: 7, outdated: false, comments: [{ author: "bot", body: "Handle null", at: "t" }] },
+		]);
+		expect(body.checks).toEqual({
+			commit: prHead,
+			state: "FAILURE",
+			runs: [{ name: "test", state: "FAILURE", url: "https://ci.test/1" }],
+		});
+	});
+
+	it("has nothing to read for a quest's job", async () => {
+		const id = await running();
+		const response = await read(id, 1);
+		expect(response.status).toBe(403);
+		expect(await response.json()).toEqual({ error: "Only issue and pull request jobs have a target to read" });
 	});
 });

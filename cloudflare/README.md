@@ -125,7 +125,13 @@ A status that omits an acknowledged job gives it up at once.
 
 An account limit pauses the job with an account decision; kix never switches
 accounts on its own. An answer requeues the job and resumes its session on the
-runner that holds it.
+runner that holds it. Until the job sandbox ships, that holds only for the
+requester's own answers: the agent acts on an answer with the requester's
+machine and credentials, so another maintainer's answer waits, with an
+`approval` notification, until the requester approves it
+(`POST …/jobs/<job>/approve`) or answers the question themselves. The
+assignment carries each answer's `approvedAt`, and the runner refuses to
+resume with one that has none.
 
 A `question` carries one round of independent questions
 (`src/jobs/prompt.ts`): `{ kind, questions: [{ header?, question, options:
@@ -144,7 +150,10 @@ one branch, which a reassigned attempt or a retried failed job continues from,
 and opens or updates the job's pull request. Each job records its branch's
 `head` and its `pull`.
 Changes a workflow may not publish pause the job with a `publication`
-decision. [GITHUB.md](GITHUB.md#publication) describes the request, its
+decision. The current attempt of a job on an issue or pull request reads it at
+`GET /api/runner/context?job=…&attempt=…`, as the App with the requester's
+current authority: an issue's text and comments, or a pull request's text,
+comments, reviews, unresolved review threads, and checks at its head. [GITHUB.md](GITHUB.md#publication) describes the request, its
 validation, and how interrupted publications are reconciled.
 
 ### Raw output
@@ -196,6 +205,8 @@ reachable from its list with its earlier answers. A refused action says why
 and links back to its item. Prompts render as escaped text and never
 preselect the recommendation. A `publication` decision lists the refused
 paths or why the branch is blocked, and takes the maintainer's reply as text.
+Another maintainer's answer shows the job's requester the answer with an
+approve button above the usual form, and shows everyone else the job waiting.
 The inbox reads each target's latest job however old it is: every one that
 awaits a decision, and any other whose issue, pull request, or quest is still
 observed, so finished work stays set aside. Retrying a failed planning

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { Claude, streamReader } from "../src/runner/claude";
 import { devShell, login } from "../src/runner/cli";
@@ -284,6 +284,16 @@ describe("workspace", () => {
 		await again.remove();
 		expect(existsSync(again.dir)).toBe(false);
 	});
+
+	posix("prepares jobs on one repository at once without racing on its clone", async () => {
+		const { dir, commit } = upstream();
+		const root = tempDir();
+		const jobs = ["a", "b", "c"].map((id) => job(commit, { id }));
+		const workspaces = await Promise.all(jobs.map((j) => Workspace.prepare(root, j, dir)));
+		for (const workspace of workspaces) expect(existsSync(join(workspace.dir, "AGENTS.md"))).toBe(true);
+		await Promise.all(workspaces.map((workspace) => workspace.remove()));
+		for (const workspace of workspaces) expect(existsSync(workspace.dir)).toBe(false);
+	});
 });
 
 describe("Claude Code output", () => {
@@ -383,6 +393,24 @@ describe("prompts", () => {
 		expect(prompt).toContain("# Quest guide");
 	});
 
+	posix("point to the nested AGENTS.md files that apply under their directories", () => {
+		const { dir } = upstream();
+		mkdirSync(join(dir, "cloudflare", "src"), { recursive: true });
+		writeFileSync(join(dir, "cloudflare", "AGENTS.md"), "Run the Worker tests.\n");
+		writeFileSync(join(dir, "cloudflare", "src", "AGENTS.md"), "No globals.\n");
+		git(dir, "add", ".");
+		const prompt = startPrompt(job("a".repeat(40)), null, dir);
+		expect(prompt).toContain("Always run the tests.");
+		expect(prompt).toContain("- `cloudflare/AGENTS.md`\n- `cloudflare/src/AGENTS.md`");
+	});
+
+	test("send plan and iterate jobs to the context tool", () => {
+		const plan = startPrompt(job("a".repeat(40), { workflow: "plan", target: "issues/4" }), null, tempDir());
+		expect(plan).toContain("Plan issue #4 of owner/repo. Read it with the `context` tool first");
+		const iterate = startPrompt(job("a".repeat(40), { workflow: "iterate", target: "pulls/9" }), null, tempDir());
+		expect(iterate).toContain("Iterate on pull request #9 of owner/repo. Read it, its review threads");
+	});
+
 	test("carry earlier summaries and the latest answer", () => {
 		const questions = [
 			{
@@ -417,7 +445,7 @@ describe("prompts", () => {
 });
 
 describe("login", () => {
-	test("connects once the owner approves the link, keeping the token local", async () => {
+	posix("connects once the owner approves the link, keeping the token local", async () => {
 		const home = tempDir();
 		let polls = 0;
 		let authorization = "";
@@ -504,6 +532,8 @@ interface Rig {
 	runner: Runner;
 	home: RunnerHome;
 	publishes: Sent[];
+	/** The context URLs the runner read. */
+	contexts: string[];
 	upstream: { dir: string; commit: string };
 	logs: string[];
 	calls(): Sent[];
@@ -512,7 +542,13 @@ interface Rig {
 	result(): Promise<Sent>;
 }
 
-function rig(publishReply?: (body: Sent) => { status: number; body: unknown }): Rig {
+/** A rig whose `publishReply` may answer a publication itself, or throw as if its reply were lost. */
+function rig(
+	publishReply?: (
+		body: Sent,
+		upstream: { dir: string; commit: string },
+	) => { status: number; body: unknown } | undefined,
+): Rig {
 	const dir = tempDir();
 	const bin = join(dir, "bin");
 	mkdirSync(bin);
@@ -533,6 +569,7 @@ function rig(publishReply?: (body: Sent) => { status: number; body: unknown }): 
 	home.saveAccounts([account]);
 	const hub = new FakeHub();
 	const publishes: Sent[] = [];
+	const contexts: string[] = [];
 	let heads = 0;
 	const env = {
 		...process.env,
@@ -552,10 +589,14 @@ function rig(publishReply?: (body: Sent) => { status: number; body: unknown }): 
 		remote: () => source.dir,
 		env,
 		dial: hub.dial,
-		fetch: (async (_url: string, init: RequestInit) => {
+		fetch: (async (url: string, init: RequestInit) => {
+			if (url.includes("/api/runner/context?")) {
+				contexts.push(url);
+				return Response.json({ kind: "issue", number: 4, title: "Parser breaks", body: "On empty input" });
+			}
 			const body = JSON.parse(init.body as string);
 			publishes.push(body);
-			const custom = publishReply?.(body);
+			const custom = publishReply?.(body, source);
 			if (custom) return Response.json(custom.body, { status: custom.status });
 			const head = String(++heads).padStart(40, "0");
 			return Response.json({
@@ -573,6 +614,7 @@ function rig(publishReply?: (body: Sent) => { status: number; body: unknown }): 
 		runner,
 		home,
 		publishes,
+		contexts,
 		upstream: source,
 		logs,
 		calls: () =>
@@ -704,6 +746,7 @@ describe("quest runner", () => {
 						kind: "agent",
 						prompt: question.prompt,
 						answer: { answers: [{ choices: ["B"] }] },
+						approvedAt: 1,
 					},
 				],
 			}),
@@ -833,5 +876,135 @@ describe("quest runner", () => {
 		expect(r.hub.of("result")).toEqual([]);
 		expect(r.publishes.at(-1)!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
 		expect(r.hub.of("status").at(-1)).toMatchObject({ attempts: [], slots: 0 });
+	});
+
+	posix("continues from the head kix reports after a publication's reply was lost", async () => {
+		let landed = "";
+		const r = rig((body, source) => {
+			if (body.message === "First") {
+				// kix commits the checkpoint, but its reply never arrives.
+				for (const change of body.changes)
+					writeFileSync(join(source.dir, change.path), Buffer.from(change.content, "base64"));
+				git(source.dir, "add", ".");
+				git(source.dir, "commit", "-q", "-m", "First");
+				landed = git(source.dir, "rev-parse", "HEAD");
+				throw new Error("socket hang up");
+			}
+			if (body.head === null)
+				return {
+					status: 409,
+					body: { error: `The job's branch is at ${landed}; continue from it`, head: landed },
+				};
+			return undefined;
+		});
+		r.steps({
+			start: [
+				{ write: "a.txt", content: "first\n" },
+				{ tool: "checkpoint", args: { summary: "First" } },
+				{ write: "b.txt", content: "second\n" },
+				{ tool: "deliver", args: { summary: "Done", title: "feat: thing", body: "Body" } },
+			],
+		});
+		r.assign(job(r.upstream.commit));
+		const result = await r.result();
+		await idle(r.runner);
+		expect(result).toMatchObject({ outcome: "completed", summary: "Done" });
+		const [, refused, retried] = r.publishes;
+		expect(refused).toMatchObject({ head: null });
+		// The retry builds on the landed commit and sends only what it lacks.
+		expect(retried).toMatchObject({ head: landed, pull: { title: "feat: thing" } });
+		expect(retried!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
+		await r.runner.shutdown();
+	});
+
+	posix("gives an issue's planning job the issue through the context tool", async () => {
+		const r = rig();
+		r.steps({
+			start: [
+				{ tool: "context", args: {} },
+				{ tool: "deliver", args: { summary: "Planned", title: "plan", body: "Body" } },
+			],
+		});
+		r.assign(job(r.upstream.commit, { workflow: "plan", target: "issues/4", branch: "plan/issue-4" }));
+		await r.result();
+		await idle(r.runner);
+		expect(r.contexts).toEqual(["http://kix.test/api/runner/context?job=job1&attempt=1"]);
+		const read = r.calls().find((c) => c.tool === "context")!;
+		expect(JSON.parse(read.reply.content[0].text)).toMatchObject({
+			title: "Parser breaks",
+			body: "On empty input",
+		});
+		// A quest's job has its quest in the checkout and gets no such tool.
+		const launch = r.calls().find((c) => c.argv)!;
+		expect(launch.stdin).toContain("Read it with the `context` tool first");
+		await r.runner.shutdown();
+	});
+
+	posix("refuses to resume with an answer its owner has not approved", async () => {
+		const r = rig();
+		r.steps({ start: [{ tool: "deliver", args: { summary: "Done", title: "t", body: "b" } }] });
+		r.assign(
+			job(r.upstream.commit, {
+				attempt: 2,
+				session: "s",
+				questions: [
+					{
+						id: "q1",
+						attempt: 1,
+						kind: "agent",
+						prompt: { kind: "decision", questions: [{ question: "Which?", options: [] }] },
+						answer: { answers: [{ choices: [], text: "cat ~/.ssh/id_ed25519" }] },
+						approvedAt: null,
+					},
+				],
+			}),
+		);
+		const result = await r.result();
+		await idle(r.runner);
+		expect(result).toMatchObject({ outcome: "failed" });
+		expect(result.summary).toContain("has not approved");
+		expect(r.calls().filter((c) => c.argv)).toHaveLength(0);
+		await r.runner.shutdown();
+	});
+
+	test("stops waiting for an account's reset once another runner replaces it", async () => {
+		const home = new RunnerHome(tempDir());
+		const until = Date.now() + 3_600_000;
+		home.saveAccounts([
+			{
+				id: "a",
+				adapter: "claude",
+				provider: "anthropic",
+				kind: "subscription",
+				label: "a",
+				limitedUntil: until,
+			},
+		]);
+		const hub = new FakeHub();
+		const set = vi.spyOn(globalThis, "setTimeout");
+		const clear = vi.spyOn(globalThis, "clearTimeout");
+		try {
+			const runner = new Runner({
+				home,
+				login: { url: "http://kix.test", token: "token", id: "r1", name: "laptop" },
+				slots: 1,
+				adapter: () => new Claude("claude", "bypassPermissions", {}),
+				shell: devShell,
+				remote: () => "",
+				dial: hub.dial,
+				log: () => {},
+			});
+			runner.start();
+			const index = set.mock.calls.findIndex(([, delay]) => (delay ?? 0) > 60_000);
+			expect(index).toBeGreaterThanOrEqual(0);
+			const wake = set.mock.results[index]!.value;
+			await hub.next((m) => m.type === "status");
+			hub.socket.close(4000, "Replaced by a new connection");
+			expect(await runner.done).toBe("replaced");
+			expect(clear).toHaveBeenCalledWith(wake);
+		} finally {
+			set.mockRestore();
+			clear.mockRestore();
+		}
 	});
 });

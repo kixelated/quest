@@ -66,6 +66,8 @@ export type Question = {
 	answeredBy: string | null;
 	askedAt: number;
 	answeredAt: number | null;
+	/** When the job's requester approved the answer; their own answers are approved as given. */
+	approvedAt: number | null;
 };
 export type Event = { attempt: number; kind: string; body: unknown; at: number };
 /** A connected runner's account, as routing sees it. */
@@ -602,7 +604,7 @@ export async function decisions(db: D1Database, job: string) {
 			`SELECT q.prompt,q.answer FROM jobs c
  JOIN jobs j ON j.id=c.id OR (j.repository=c.repository AND j.target=c.target AND j.pull=c.pull)
  JOIN job_questions q ON q.job=j.id
- WHERE c.id=? AND q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
+ WHERE c.id=? AND q.kind='agent' AND q.approvedAt IS NOT NULL ORDER BY q.askedAt,q.rowid`,
 		)
 		.bind(job)
 		.all<{ prompt: string; answer: string }>();
@@ -686,7 +688,7 @@ export async function readJob(db: D1Database, id: string) {
 		db.prepare("SELECT attempt,kind,body,at FROM job_events WHERE job=? ORDER BY rowid").bind(id),
 		db
 			.prepare(
-				"SELECT id,attempt,kind,prompt,answer,answeredBy,askedAt,answeredAt FROM job_questions WHERE job=? ORDER BY askedAt,rowid",
+				"SELECT id,attempt,kind,prompt,answer,answeredBy,askedAt,answeredAt,approvedAt FROM job_questions WHERE job=? ORDER BY askedAt,rowid",
 			)
 			.bind(id),
 	]);
@@ -750,75 +752,134 @@ export async function listInboxJobs(db: D1Database, repository: number, observed
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
+type Pin = { runner: string; account: string };
+
+/** The account an account decision chose. */
+function pinOf(kind: QuestionKind, reply: unknown): Pin | null {
+	if (kind !== "account") return null;
+	const choice = reply as { runner?: unknown; account?: unknown } | null;
+	if (typeof choice?.runner !== "string" || typeof choice.account !== "string")
+		throw new JobError("Choose one of the job owner's accounts that can run it");
+	return { runner: choice.runner, account: choice.account };
+}
+
+/** Whether the chosen account is still on its runner; the runner may drop it at any time. */
+const pinned = "(? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts WHERE runner=? AND id=?))";
+
 /**
- * Answer the job's open question once, then requeue it. An account decision
- * pins the chosen account and starts a new session from the job's summaries.
+ * Requeue a job whose question was just approved at `now`, in the same batch
+ * as the approval. An account decision pins the chosen account and starts a
+ * new session from the job's summaries.
+ */
+function resume(db: D1Database, job: string, question: string, pin: Pin | null, now: number) {
+	const approved = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND approvedAt=?)";
+	if (!pin)
+		return [
+			db
+				.prepare(`UPDATE jobs SET state='queued',updatedAt=? WHERE id=? AND state='waiting' AND ${approved}`)
+				.bind(now, job, question, now),
+		];
+	return [
+		// Choosing the limited account again is the maintainer's explicit retry.
+		db
+			.prepare(
+				`UPDATE runner_accounts SET limited=0 WHERE runner=? AND id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND state='waiting') AND ${approved}`,
+			)
+			.bind(pin.runner, pin.account, job, question, now),
+		db
+			.prepare(
+				`UPDATE jobs SET state='queued',pinRunner=?,pinAccount=?,session=NULL,updatedAt=? WHERE id=? AND state='waiting' AND ${approved}`,
+			)
+			.bind(pin.runner, pin.account, now, job, question, now),
+	];
+}
+
+/**
+ * Answer the job's open question once. The job's requester, whose runner
+ * runs it, resumes it at once. Until the job sandbox ships, another
+ * maintainer's answer waits for the requester to approve it, since the
+ * agent acts on it with the requester's machine and credentials; the
+ * requester may answer it themselves instead. Returns whether it resumed.
  */
 export async function answer(db: D1Database, job: string, question: string, user: string, reply: unknown, now: number) {
 	const open = await db
 		.prepare(
-			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
+			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.approvedAt IS NULL AND (q.answer IS NULL OR j.actor=?) AND q.attempt=j.attempt AND j.state='waiting'",
 		)
-		.bind(question, job)
+		.bind(question, job, user)
 		.first<{ kind: QuestionKind; actor: string; trusted: number }>();
 	if (!open) throw new JobError("Question is no longer open");
-	let pin: { runner: string; account: string } | null = null;
-	if (open.kind === "account") {
-		const choice = reply as { runner?: unknown; account?: unknown } | null;
-		const owned =
-			typeof choice?.runner === "string" &&
-			typeof choice.account === "string" &&
-			(await db
-				.prepare(
-					"SELECT 1 FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE a.runner=? AND a.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1))",
-				)
-				.bind(choice.runner, choice.account, open.actor, open.trusted)
-				.first());
-		if (!owned) throw new JobError("Choose one of the job owner's accounts that can run it");
-		pin = { runner: choice!.runner as string, account: choice!.account as string };
-	}
-	const answered = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND answeredBy=? AND answeredAt=?)";
+	const pin = pinOf(open.kind, reply);
+	if (
+		pin &&
+		!(await db
+			.prepare(
+				"SELECT 1 FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE a.runner=? AND a.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1))",
+			)
+			.bind(pin.runner, pin.account, open.actor, open.trusted)
+			.first())
+	)
+		throw new JobError("Choose one of the job owner's accounts that can run it");
+	const own = user === open.actor;
 	const statements = [
-		// The runner may drop the chosen account after the check above.
 		db
 			.prepare(
-				"UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=? WHERE id=? AND job=? AND answer IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts WHERE runner=? AND id=?))",
+				`UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=?,approvedAt=? WHERE id=? AND job=? AND approvedAt IS NULL
+ AND (answer IS NULL OR ?=(SELECT actor FROM jobs WHERE id=?)) AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND ${pinned}`,
 			)
 			.bind(
 				JSON.stringify(reply),
 				user,
 				now,
+				own ? now : null,
 				question,
+				job,
+				user,
 				job,
 				job,
 				pin?.runner ?? null,
 				pin?.runner ?? null,
 				pin?.account ?? null,
 			),
+		...(own ? resume(db, job, question, pin, now) : []),
 	];
-	if (pin)
-		statements.push(
-			// Choosing the limited account again is the maintainer's explicit retry.
-			db
-				.prepare(
-					`UPDATE runner_accounts SET limited=0 WHERE runner=? AND id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND state='waiting') AND ${answered}`,
-				)
-				.bind(pin.runner, pin.account, job, question, user, now),
-			db
-				.prepare(
-					`UPDATE jobs SET state='queued',pinRunner=?,pinAccount=?,session=NULL,updatedAt=? WHERE id=? AND state='waiting' AND ${answered}`,
-				)
-				.bind(pin.runner, pin.account, now, job, question, user, now),
-		);
-	else
-		statements.push(
-			db
-				.prepare(`UPDATE jobs SET state='queued',updatedAt=? WHERE id=? AND state='waiting' AND ${answered}`)
-				.bind(now, job, question, user, now),
-		);
 	const results = await db.batch(statements);
 	if (results[0]!.meta.changes !== 1)
 		throw new JobError(pin ? "Question is no longer open or the account is gone" : "Question is no longer open");
+	return { resumed: own };
+}
+
+/** The job's requester approves another maintainer's answer, which resumes the job. */
+export async function approve(db: D1Database, job: string, question: string, user: string, now: number) {
+	const pending = await db
+		.prepare(
+			"SELECT q.kind,q.answer,j.actor FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NOT NULL AND q.approvedAt IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
+		)
+		.bind(question, job)
+		.first<{ kind: QuestionKind; answer: string; actor: string }>();
+	if (!pending) throw new JobError("No answer awaits approval");
+	if (pending.actor !== user) throw new JobError("Only the job's requester can approve another maintainer's answer");
+	const pin = pinOf(pending.kind, JSON.parse(pending.answer));
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE job_questions SET approvedAt=? WHERE id=? AND job=? AND answer=? AND approvedAt IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting' AND actor=?) AND ${pinned}`,
+			)
+			.bind(
+				now,
+				question,
+				job,
+				pending.answer,
+				job,
+				user,
+				pin?.runner ?? null,
+				pin?.runner ?? null,
+				pin?.account ?? null,
+			),
+		...resume(db, job, question, pin, now),
+	]);
+	if (results[0]!.meta.changes !== 1)
+		throw new JobError(pin ? "No answer awaits approval, or the account is gone" : "No answer awaits approval");
 }
 
 /**

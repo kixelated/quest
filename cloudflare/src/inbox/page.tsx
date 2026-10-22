@@ -27,6 +27,7 @@ export type InboxProps = {
 
 const recorded: Record<Done, string> = {
 	answer: "Answer recorded.",
+	approve: "Answer approved.",
 	start: "Job requested.",
 	stop: "Stop requested.",
 	skip: "Skipped until it changes.",
@@ -41,10 +42,12 @@ function needLabel(item: Item) {
 		return item.prompt?.kind === "permission" ? "Tool permission request" : "Waiting for your decision";
 	}
 	if (item.need === "account") return "Account limited";
+	if (item.need === "approve") return "Answer to approve";
 	if (item.need === "retry") return "Failed";
 	if (item.need === "start")
 		return item.skipped && item.job ? `${kinds[item.kind]} · job ${item.job.state}` : kinds[item.kind];
 	if (!item.job) return "Claimed draft";
+	if (item.job.state === "waiting") return "Awaiting approval";
 	return item.job.state === "queued" ? "Queued" : "Working";
 }
 
@@ -69,6 +72,8 @@ function progress(item: Item, runners: Runners, user: string) {
 	if (item.need === "account")
 		return "The job's account hit its limit. Choose an account to continue; kix never switches accounts on its own.";
 	if (item.need === "retry") return "The job failed. Its summary says what happened.";
+	if (job.state === "waiting" && item.need === null)
+		return "Answered. The job resumes once its requester approves the answer, since it runs on their machine.";
 	return null;
 }
 
@@ -104,38 +109,63 @@ function parsed(question: QuestionView): Prompt | null {
 	}
 }
 
-/** The thread's submitted answers, kept across refreshes and reconnects. */
+/** One submitted answer, as escaped text. */
+function Reply(props: { question: QuestionView }) {
+	const q = props.question;
+	if (q.kind === "account") return <>Chose an account to continue on.</>;
+	if (q.kind === "publication") return <>{typeof q.answer === "string" ? q.answer : ""}</>;
+	const prompt = parsed(q);
+	const replies = (q.answer as { answers?: { choices: string[]; text?: string }[] }).answers ?? [];
+	return (
+		<>
+			{prompt?.questions.map((ask, i) => (
+				<p>
+					<span class="muted">{ask.question}</span>
+					<br />
+					{[...(replies[i]?.choices ?? []), ...(replies[i]?.text ? [replies[i]!.text] : [])].join(" · ")}
+				</p>
+			))}
+		</>
+	);
+}
+
+/** The thread's approved answers, kept across refreshes and reconnects. */
 function History(props: { item: Item }) {
-	const answered = props.item.job?.questions.filter((q) => q.answer !== null) ?? [];
+	const answered = props.item.job?.questions.filter((q) => q.approvedAt !== null) ?? [];
 	if (!answered.length) return null;
 	return (
 		<details class="history">
 			<summary>Earlier answers ({answered.length})</summary>
 			<ol>
-				{answered.map((q) => {
-					if (q.kind === "account") {
-						return <li>Chose an account to continue on.</li>;
-					}
-					if (q.kind === "publication") return <li>{typeof q.answer === "string" ? q.answer : ""}</li>;
-					const prompt = parsed(q);
-					const replies = (q.answer as { answers?: { choices: string[]; text?: string }[] }).answers ?? [];
-					return (
-						<li>
-							{prompt?.questions.map((ask, i) => (
-								<p>
-									<span class="muted">{ask.question}</span>
-									<br />
-									{[
-										...(replies[i]?.choices ?? []),
-										...(replies[i]?.text ? [replies[i]!.text] : []),
-									].join(" · ")}
-								</p>
-							))}
-						</li>
-					);
-				})}
+				{answered.map((q) => (
+					<li>
+						<Reply question={q} />
+					</li>
+				))}
 			</ol>
 		</details>
+	);
+}
+
+/**
+ * Another maintainer's answer to the requester's job. Until the job sandbox
+ * ships, the requester's runner acts on it only once they approve it.
+ */
+function Approval(props: { item: Item }) {
+	const { item } = props;
+	return (
+		<section class="summary">
+			<h3>Another maintainer answered</h3>
+			<Reply question={item.question!} />
+			<p class="note-small muted">
+				The agent acts on this answer with your machine and credentials, so the job resumes only once you
+				approve it. You can answer differently below instead.
+			</p>
+			<form method="post" action={`${jobsURL(item)}/${item.job!.id}/approve`} class="decision-form">
+				<input type="hidden" name="question" value={item.question!.id} />
+				<button class="button primary">Approve and resume</button>
+			</form>
+		</section>
 	);
 }
 
@@ -398,8 +428,11 @@ function Thread(props: { item: Item; view: ProjectView | undefined; runners: Run
 				</section>
 			)}
 			<History item={item} />
-			{item.need === "answer" &&
-				(item.question?.kind === "publication" ? (
+			{item.need === "approve" && <Approval item={item} />}
+			{(item.need === "answer" || item.need === "account" || item.need === "approve") &&
+				(item.question?.kind === "account" ? (
+					<AccountForm item={item} runners={runners} />
+				) : item.question?.kind === "publication" ? (
 					<PublicationForm item={item} />
 				) : item.prompt ? (
 					<AgentForm item={item} prompt={item.prompt} />
@@ -408,7 +441,6 @@ function Thread(props: { item: Item; view: ProjectView | undefined; runners: Run
 						The agent's question could not be read. Stop the job or wait for the runner to ask again.
 					</p>
 				))}
-			{item.need === "account" && <AccountForm item={item} runners={runners} />}
 			<Actions item={item} view={props.view} />
 		</article>
 	);

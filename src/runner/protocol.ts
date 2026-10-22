@@ -33,6 +33,11 @@ export interface Question {
 	kind: "agent" | "account" | "publication";
 	prompt: unknown;
 	answer: unknown;
+	/**
+	 * When the job's requester, this runner's owner, approved the answer:
+	 * their own answers as given, another maintainer's once they approve it.
+	 */
+	approvedAt?: number | null;
 }
 
 /** The job an `assign` carries: its record and its project. */

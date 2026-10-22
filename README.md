@@ -463,12 +463,14 @@ Every job runs in its own checkout inside the project's `nix develop` shell,
 with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
 job instead. The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
-and `deliver` publishes the result and its pull request. kix publishes as its
-GitHub App, so the runner never pushes. A job that hits an account's limit
+and `deliver` publishes the result and its pull request. A job on an issue or
+pull request reads it through `context`, since the runner holds no GitHub
+token. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
-runner. Until the job sandbox ships, runners take only trusted revisions, and
-agents run with `--permission-mode bypassPermissions`.
+runner. Until the job sandbox ships, runners take only trusted revisions,
+agents run with `--permission-mode bypassPermissions`, and a job resumes with
+another maintainer's answer only once you approve it in the inbox.
 
 The flake's `runner` package is a `quest` whose Claude Code is pinned by this
 repository's lock (`nix run github:kixelated/quest#runner -- runner`);
