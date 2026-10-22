@@ -18,9 +18,9 @@ import {
 	unblocked,
 } from "../core";
 import { AgentInputError, HARNESSES, type Launch, processDependencies, runAgent, stopAgent, stopAll } from "./agent";
-import { claims, questBranch } from "./claims";
+import { claims, questBranch, upstream } from "./claims";
 import { gate } from "./gate";
-import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
+import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { init, uninstall } from "./setup";
@@ -354,7 +354,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	const worktree = program
 		.command("worktree")
-		.description("Reserve disk for Git checkouts and release it by pruning their scratch in place");
+		.description(
+			"Reserve disk for Git checkouts, release it by pruning their scratch in place, and remove finished ones",
+		);
 	const state = () => new Worktrees();
 	const record = (value: unknown) => print(JSON.stringify(value));
 	worktree
@@ -389,7 +391,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"When no other supervised run remains, the scratch declared at creation is pruned. Put the whole job, " +
 				"such as an agent session or a script that installs, builds, and tests, in one run.\n\n" +
 				"A supervisor that crashes leaves its run recorded; the next worktree command drops it once its scope " +
-				"is empty, and releases the checkout. Needs Linux 5.14+ with a systemd 254+ user manager and unified cgroup " +
+				"is empty, and releases the checkout; `quest worktree stop` ends what it left. Needs Linux 5.14+ with a systemd 254+ user manager and unified cgroup " +
 				"v2, and fails on other hosts. Exits with the command's status; a release that fails is reported, leaves " +
 				"the checkout reserved, and turns success into exit 1.",
 		)
@@ -418,6 +420,45 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and drops the record of a removed checkout",
 		)
 		.action((id: string) => record(state().release(id)));
+	const settled = (result: Promise<unknown>) => {
+		pending = result.then(
+			(value) => {
+				record(value);
+				return 0;
+			},
+			(error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			},
+		);
+	};
+	// Only a commit no local ref reaches asks the forge, so other removals need no token.
+	const merged = async (repository: string, commit: string) => {
+		try {
+			remoteUrl(repository, "origin");
+		} catch {
+			return false; // No forge to ask.
+		}
+		const up = await upstream(repository, "origin", { github: () => gitHubDependencies(warn), warn });
+		return up.github !== null && mergedHead(up.github.client, up.github.repository, commit);
+	};
+	worktree
+		.command("remove <id>")
+		.description(
+			"Delete a finished checkout and drop its record, never forcing. Refuses while supervised runs are live, " +
+				"and refuses modified, untracked, or ignored files beyond the declared scratch, and commits no branch " +
+				"or remote-tracking ref reaches, unless origin's GitHub repository merged a PR whose head is exactly " +
+				"that commit. Prunes the scratch first, so a refusal over ignored files leaves the checkout released.",
+		)
+		.action((id: string) => settled(state().remove(id, merged)));
+	worktree
+		.command("stop <id>")
+		.description(
+			"Kill the processes crashed supervisors left in the checkout's scopes and wait until they are gone, then " +
+				"release the checkout once no run remains. Runs whose supervisor is alive are left to it and reported " +
+				"as a failure.",
+		)
+		.action((id: string) => settled(state().stop(id)));
 	worktree
 		.command("restore <id>")
 		.description("Reserve a released checkout's disk again before rebuilding its scratch")

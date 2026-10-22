@@ -16,6 +16,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Retained, type Scopes, currentOwner, kill, killable } from "../src/cli/supervise";
+import { GitHub, mergedHead } from "../src/cli/github";
 import { main } from "../src/cli/main";
 import { Worktrees, diskUsage } from "../src/cli/worktree";
 import { run } from "./fixture";
@@ -36,16 +37,27 @@ function repository(path: string): string {
 	return path;
 }
 
-/** Scopes whose runs finish when the test says so, and stay live while listed. */
+/** Scopes that are never live and whose runs exit at once, except where `overrides` says otherwise. */
+function stubScopes(overrides: Partial<Scopes>): Scopes {
+	return { check() {}, live: () => false, run: () => Promise.resolve(0), stop: async () => {}, ...overrides };
+}
+/** Scopes whose runs finish when the test says so, and stay live while listed until stopped. */
 function fakeScopes() {
 	const live = new Set<string>();
 	const finish = new Map<string, (code: number) => void>();
-	const scopes: Scopes = {
-		check() {},
+	const scopes = stubScopes({
 		live: (unit) => live.has(unit),
 		run: (unit) => new Promise((resolve) => finish.set(unit, resolve)),
-	};
+		stop: async (unit) => void live.delete(unit),
+	});
 	return { live, finish, scopes };
+}
+/** Record a run whose supervisor crashed, as `quest worktree run` leaves it. */
+function orphan(home: string, unit: string, owner = deadOwner()) {
+	const file = join(home, "registry.json");
+	const registry = JSON.parse(readFileSync(file, "utf8"));
+	registry.records[0].runs.push({ unit, owner });
+	writeFileSync(file, JSON.stringify(registry));
 }
 function fixture(scopes?: Scopes) {
 	const root = mkdtempSync(join(tmpdir(), "quest-worktree-test-"));
@@ -189,6 +201,103 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		expect(() => worktrees.restore(record.id)).toThrow("unknown worktree");
 		expect(worktrees.create(repo, "work", 10_000_000).phase).toBe("active");
 	});
+	it("removes a finished checkout once a branch or remote-tracking ref reaches its commits", async () => {
+		const { repo, worktrees } = fixture();
+		const forge = vi.fn(async () => false);
+		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
+		mkdirSync(join(record.path, "cache"));
+		writeFileSync(join(record.path, "cache", "artifact"), "disposable");
+		writeFileSync(join(record.path, "file"), "pushed\n");
+		git(record.path, "commit", "-am", "pushed");
+		const head = git(record.path, "rev-parse", "HEAD");
+		await expect(worktrees.remove(record.id, forge)).rejects.toThrow(
+			`remote-tracking ref reaches, and no merged change has as its head: ${head}`,
+		);
+		expect(forge.mock.calls).toEqual([[record.repository, head]]);
+		git(record.path, "update-ref", "refs/remotes/origin/work", "HEAD");
+		forge.mockClear();
+		expect((await worktrees.remove(record.id, forge)).id).toBe(record.id);
+		expect(forge).not.toHaveBeenCalled();
+		expect(existsSync(record.path)).toBe(false);
+		expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(".worktrees/work");
+		expect(worktrees.status().records).toEqual([]);
+		await expect(worktrees.remove(record.id)).rejects.toThrow("unknown worktree");
+		// A branch made in the checkout outlives it, so its commits are preserved.
+		const branched = worktrees.create(repo, "branched", 10_000_000);
+		git(branched.path, "switch", "-c", "topic");
+		git(branched.path, "commit", "--allow-empty", "-m", "on a branch");
+		const tip = git(branched.path, "rev-parse", "HEAD");
+		await worktrees.remove(branched.id);
+		expect(git(repo, "rev-parse", "topic")).toBe(tip);
+		// A checkout already removed by hand only drops its record.
+		const gone = worktrees.create(repo, "gone", 10_000_000);
+		git(repo, "worktree", "unlock", gone.path);
+		git(repo, "worktree", "remove", gone.path);
+		await worktrees.remove(gone.id);
+		expect(worktrees.status().records).toEqual([]);
+	});
+	it("removes a squash-merged checkout only when a merged change's head is exactly its commit", async () => {
+		const { repo, worktrees } = fixture();
+		const record = worktrees.create(repo, "work", 10_000_000);
+		git(record.path, "commit", "--allow-empty", "-m", "first");
+		const first = git(record.path, "rev-parse", "HEAD");
+		git(record.path, "commit", "--allow-empty", "-m", "second");
+		const head = git(record.path, "rev-parse", "HEAD");
+		// A merged change whose head is an ancestor leaves the later commit unpreserved.
+		await expect(worktrees.remove(record.id, async (_, commit) => commit === first)).rejects.toThrow(head);
+		expect(existsSync(record.path)).toBe(true);
+		await worktrees.remove(
+			record.id,
+			async (repository, commit) => repository === record.repository && commit === head,
+		);
+		expect(existsSync(record.path)).toBe(false);
+	});
+	it("refuses to remove a checkout holding work that is not preserved", async () => {
+		const { live, scopes } = fakeScopes();
+		const { root, repo, home, worktrees } = fixture(scopes);
+		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
+		const kept = () => {
+			expect(existsSync(join(record.path, "file"))).toBe(true);
+			expect(worktrees.status().records).toHaveLength(1);
+		};
+		writeFileSync(join(record.path, "file"), "modified\n");
+		await expect(worktrees.remove(record.id)).rejects.toThrow("modified or untracked files:  M file");
+		git(record.path, "checkout", "--", "file");
+		writeFileSync(join(record.path, "new"), "untracked");
+		await expect(worktrees.remove(record.id)).rejects.toThrow("modified or untracked files: ?? new");
+		rmSync(join(record.path, "new"));
+		kept();
+		// A ref that only this checkout holds, such as a bisect mark, is deleted with it.
+		git(record.path, "commit", "--allow-empty", "-m", "marked");
+		const marked = git(record.path, "rev-parse", "HEAD");
+		git(record.path, "update-ref", "refs/bisect/bad", "HEAD");
+		git(record.path, "checkout", "--detach", "HEAD~1");
+		await expect(worktrees.remove(record.id)).rejects.toThrow(marked);
+		git(record.path, "update-ref", "-d", "refs/bisect/bad");
+		kept();
+		orphan(home, "orphan.scope");
+		live.add("orphan.scope");
+		await expect(worktrees.remove(record.id)).rejects.toThrow("supervised runs are live");
+		live.delete("orphan.scope");
+		// Ignored files nobody declared as scratch stay; the declared scratch is pruned first.
+		mkdirSync(join(record.path, "cache"));
+		writeFileSync(join(record.path, ".env"), "secret");
+		await expect(worktrees.remove(record.id)).rejects.toThrow(
+			"declared scratch remain, so the checkout was only released: !! .env",
+		);
+		expect(existsSync(join(record.path, "cache"))).toBe(false);
+		expect(readFileSync(join(record.path, ".env"), "utf8")).toBe("secret");
+		expect(worktrees.status().records[0].phase).toBe("released");
+		rmSync(join(record.path, ".env"));
+		// Git refuses a checkout with submodules; the checkout keeps its lock and record.
+		const sub = repository(join(root, "sub"));
+		git(record.path, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", sub, "sub");
+		git(record.path, "commit", "-m", "submodule");
+		git(record.path, "update-ref", "refs/remotes/origin/work", "HEAD");
+		await expect(worktrees.remove(record.id)).rejects.toThrow("submodules");
+		kept();
+		expect(worktrees.release(record.id).phase).toBe("released");
+	});
 	it("serializes reservations across independent repositories and preserves failed allocations", () => {
 		const { root, repo, home, worktrees } = fixture();
 		const second = repository(join(root, "second"));
@@ -275,7 +384,7 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		expect(() => worktrees.release(replaced.id)).toThrow("ownership/lock changed");
 		expect(existsSync(join(other.path, "cache"))).toBe(true);
 	});
-	it("wires capacity, reservation, and scratch through the command line", () => {
+	it("wires capacity, reservation, scratch, stop, and removal through the command line", async () => {
 		const { repo, home } = fixture();
 		vi.stubEnv("QUEST_WORKTREE_HOME", home);
 		expect(run("worktree", "create", "cli", "--root", repo).code).toBe(2);
@@ -289,6 +398,19 @@ describe("worktrees", { timeout: 20_000 }, () => {
 		const status = run("worktree", "status");
 		expect(status.code).toBe(0);
 		expect(JSON.parse(status.stdout).records[0].phase).toBe("released");
+		// The checkout's commit is on main, so removing it asks no forge, and the fixture has no origin.
+		let stdout = "";
+		const out = { stdout: (text: string) => (stdout += text), stderr: () => {} };
+		expect(await main(["worktree", "stop", "cli"], out)).toBe(0);
+		expect(await main(["worktree", "remove", "cli"], out)).toBe(0);
+		expect(
+			stdout
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line).path),
+		).toEqual([path, path]);
+		expect(existsSync(path)).toBe(false);
+		expect(await main(["worktree", "remove", "cli"], out)).toBe(1);
 	});
 });
 
@@ -319,10 +441,7 @@ describe("supervised runs", { timeout: 20_000 }, () => {
 		const { repo, home, worktrees } = fixture(scopes);
 		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
 		mkdirSync(join(record.path, "cache"));
-		const file = join(home, "registry.json");
-		const registry = JSON.parse(readFileSync(file, "utf8"));
-		registry.records[0].runs = [{ unit: "orphan.scope", owner: deadOwner() }];
-		writeFileSync(file, JSON.stringify(registry));
+		orphan(home, "orphan.scope");
 		live.add("orphan.scope");
 		expect(worktrees.status().records[0].runs).toHaveLength(1);
 		expect(() => worktrees.release(record.id)).toThrow("supervised runs are live");
@@ -331,26 +450,53 @@ describe("supervised runs", { timeout: 20_000 }, () => {
 		expect(worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
 		expect(existsSync(join(record.path, "cache"))).toBe(false);
 	});
-	it("treats a run it cannot inspect as live", () => {
+	it("treats a run it cannot inspect as live until an inspection succeeds", () => {
 		const { repo, home } = fixture();
-		const worktrees = new Worktrees(home, {
-			check() {},
-			live: () => {
-				throw new Error("no user manager");
-			},
-			run: () => Promise.resolve(0),
-		});
+		let inspect = (): boolean => {
+			throw new Error("no user manager");
+		};
+		const worktrees = new Worktrees(home, stubScopes({ live: () => inspect() }));
 		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
 		mkdirSync(join(record.path, "cache"));
-		const file = join(home, "registry.json");
-		const registry = JSON.parse(readFileSync(file, "utf8"));
-		registry.records[0].runs = [{ unit: "orphan.scope", owner: deadOwner() }];
-		writeFileSync(file, JSON.stringify(registry));
+		orphan(home, "orphan.scope");
 		expect(worktrees.status().records[0]).toMatchObject({
 			phase: "active",
-			failure: expect.stringContaining("no user manager"),
+			runs: [{ unit: "orphan.scope", failure: expect.stringContaining("no user manager") }],
 		});
 		expect(existsSync(join(record.path, "cache"))).toBe(true);
+		// The next inspection that succeeds clears the stale reason, though the run is still live.
+		inspect = () => true;
+		const [run] = worktrees.status().records[0].runs;
+		expect(run.unit).toBe("orphan.scope");
+		expect(run.failure).toBeUndefined();
+		inspect = () => false;
+		expect(worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+	});
+	it("stops a crashed supervisor's processes and leaves a live supervisor's run alone", async () => {
+		const { live, scopes } = fakeScopes();
+		const stop = vi.spyOn(scopes, "stop");
+		const { repo, home, worktrees } = fixture(scopes);
+		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
+		mkdirSync(join(record.path, "cache"));
+		orphan(home, "crashed.scope");
+		orphan(home, "supervised.scope", currentOwner());
+		live.add("crashed.scope");
+		await expect(worktrees.stop(record.id)).rejects.toThrow(
+			`left to it; signal it instead: supervised.scope (process ${process.pid}`,
+		);
+		expect(stop.mock.calls).toEqual([["crashed.scope"]]);
+		expect(worktrees.status().records[0].runs.map((run) => run.unit)).toEqual(["supervised.scope"]);
+		expect(existsSync(join(record.path, "cache"))).toBe(true);
+		// With only a crashed supervisor's run left, stopping it releases the checkout.
+		const file = join(home, "registry.json");
+		const registry = JSON.parse(readFileSync(file, "utf8"));
+		registry.records[0].runs = [];
+		writeFileSync(file, JSON.stringify(registry));
+		orphan(home, "crashed-again.scope");
+		live.add("crashed-again.scope");
+		expect(worktrees.status().records[0].runs).toHaveLength(1);
+		expect(await worktrees.stop(record.id)).toMatchObject({ phase: "released", runs: [] });
+		expect(existsSync(join(record.path, "cache"))).toBe(false);
 	});
 	it("reports a failed release as a retained reservation", async () => {
 		const { finish, scopes } = fakeScopes();
@@ -368,11 +514,7 @@ describe("supervised runs", { timeout: 20_000 }, () => {
 	});
 	it("keeps scratch when the command never started", async () => {
 		const { repo, home } = fixture();
-		const worktrees = new Worktrees(home, {
-			check() {},
-			live: () => false,
-			run: () => Promise.reject(new Error("no user manager")),
-		});
+		const worktrees = new Worktrees(home, stubScopes({ run: () => Promise.reject(new Error("no user manager")) }));
 		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
 		mkdirSync(join(record.path, "cache"));
 		await expect(worktrees.run(record.id, ["build"])).rejects.toThrow("no user manager");
@@ -381,20 +523,18 @@ describe("supervised runs", { timeout: 20_000 }, () => {
 	});
 	it("keeps a run recorded when its processes cannot be confirmed stopped", async () => {
 		const { repo, home } = fixture();
-		const worktrees = new Worktrees(home, {
-			check() {},
-			live: () => false,
-			run: () => Promise.reject(new Retained("cannot confirm that the scope stopped")),
-		});
+		const worktrees = new Worktrees(
+			home,
+			stubScopes({ run: () => Promise.reject(new Retained("cannot confirm that the scope stopped")) }),
+		);
 		const record = worktrees.create(repo, "work", 10_000_000, "HEAD", ["cache"]);
 		mkdirSync(join(record.path, "cache"));
 		await expect(worktrees.run(record.id, ["build"])).rejects.toThrow("cannot confirm");
 		// This process owns the run until it exits; then reconciliation asks the scope.
 		expect(worktrees.status().records[0]).toMatchObject({
 			phase: "active",
-			failure: "cannot confirm that the scope stopped",
+			runs: [{ failure: "cannot confirm that the scope stopped" }],
 		});
-		expect(worktrees.status().records[0].runs).toHaveLength(1);
 		expect(() => worktrees.release(record.id)).toThrow("supervised runs are live");
 		expect(existsSync(join(record.path, "cache"))).toBe(true);
 	});
@@ -412,6 +552,36 @@ describe("supervised runs", { timeout: 20_000 }, () => {
 		expect(code).toBe(1);
 		expect(stderr).toContain("needs Linux 5.14 or later with a systemd user manager");
 		expect(new Worktrees(home).status().records[0].runs).toEqual([]);
+	});
+});
+
+describe("merged PR heads on GitHub", () => {
+	/** GitHub answering the commit query with `found`, recording the variables it was sent. */
+	function github(found: unknown) {
+		const sent: unknown[] = [];
+		const fetch = (async (_url: unknown, init?: RequestInit) => {
+			sent.push(JSON.parse(String(init?.body)).variables);
+			return Response.json({ data: { repository: { object: found } } });
+		}) as typeof globalThis.fetch;
+		return { sent, client: new GitHub({ fetch, now: Date.now, sleep: async () => {}, token: "test", warn() {} }) };
+	}
+	const repository = { owner: "example", repo: "project" };
+	const pulls = (...nodes: unknown[]) => ({ associatedPullRequests: { nodes } });
+
+	it("accepts only a merged PR whose head is exactly the commit", async () => {
+		const { sent, client } = github(pulls({ merged: true, headRefOid: "abc" }));
+		expect(await mergedHead(client, repository, "abc")).toBe(true);
+		expect(sent).toEqual([{ owner: "example", name: "project", oid: "abc" }]);
+		// A PR that contains the commit below a later head, or was closed unmerged, is no evidence.
+		expect(await mergedHead(github(pulls({ merged: true, headRefOid: "later" })).client, repository, "abc")).toBe(
+			false,
+		);
+		expect(await mergedHead(github(pulls({ merged: false, headRefOid: "abc" })).client, repository, "abc")).toBe(
+			false,
+		);
+		// GitHub does not have the commit, or the object is not a commit.
+		expect(await mergedHead(github(null).client, repository, "abc")).toBe(false);
+		expect(await mergedHead(github({}).client, repository, "abc")).toBe(false);
 	});
 });
 
