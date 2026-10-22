@@ -14,6 +14,14 @@ import {
 import { classifyCheck } from "./status";
 
 const POLL = 5 * 60_000;
+/**
+ * The last poll before a timeout starts this long before it, leaving time for its few requests;
+ * activity after it is left for the returned cursor. Polling only on the 5-minute schedule left
+ * up to 5 minutes before a timeout unread. A longer X-Poll-Interval from GitHub still wins.
+ */
+const FINAL_POLL = 30_000;
+/** The REST page size. A full last page cannot show by itself that a next page has appeared. */
+const PAGE = 100;
 const SHA = /^[a-f\d]{7,40}$/i;
 /** The timeline records a force push a few seconds after repository activity (1-2s observed). */
 const TIMELINE_LAG = 60_000;
@@ -264,7 +272,11 @@ async function watch(
 		const mark = cursor.marks[source];
 		return event.time > mark.time || (event.time === mark.time && !seen[source].has(event.id));
 	};
-	/** Read every page once, then poll the last page conditionally, following it when it fills. */
+	/**
+	 * Read every page once, then poll the last page conditionally, following it when it fills. A 304
+	 * has no Link header and the ETag covers only the body, so a full last page is reread whole to
+	 * learn of a next one.
+	 */
 	const pager = (first: string) => {
 		let path = first;
 		let etag: string | undefined;
@@ -276,10 +288,11 @@ async function watch(
 					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
 					return rows;
 				}
-				rows.push(...array(await response.json()));
+				const page = array(await response.json());
+				rows.push(...page);
 				const next = link(response, "next");
 				if (!next) {
-					etag = response.headers.get("etag") ?? undefined;
+					etag = page.length < PAGE ? (response.headers.get("etag") ?? undefined) : undefined;
 					return rows;
 				}
 				path = next;
@@ -365,15 +378,15 @@ async function watch(
 		return found;
 	};
 
-	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=100`);
+	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=${PAGE}`);
 	// `since` excludes its own instant and filters by update time, which is never before
 	// creation; start a second early so unseen replies at the mark's second are still read.
 	const comments = pager(
-		`${base}/pulls/${pr.number}/comments?per_page=100&since=${new Date(cursor.marks.replies.time - 1000).toISOString()}`,
+		`${base}/pulls/${pr.number}/comments?per_page=${PAGE}&since=${new Date(cursor.marks.replies.time - 1000).toISOString()}`,
 	);
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
 	for (;;) {
-		github.pollInterval = POLL;
+		github.pollInterval = 0;
 		for (const row of await timeline()) {
 			const type = string(row.event);
 			if (type === "committed") {
@@ -455,7 +468,11 @@ async function watch(
 					`${event.point} ${event.type} ${event.actor} ${event.url}${index === unique.length - 1 ? ` ${nextCursor}` : ""}`,
 			);
 		}
-		await github.pause(github.pollInterval);
+		// GitHub's X-Poll-Interval is a floor: the final poll shortens only the default schedule,
+		// and is skipped when that interval runs past it.
+		const remaining = deadline - deps.now();
+		const next = Math.min(Math.max(POLL, github.pollInterval), remaining - FINAL_POLL);
+		await github.pause(next > 0 && next >= github.pollInterval ? next : remaining);
 	}
 }
 

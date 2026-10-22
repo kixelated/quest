@@ -53,6 +53,8 @@ export type Job = {
 	pendingAt: number | null;
 	/** The pull request this job delivered. */
 	pull: number | null;
+	/** The failed job this retry continues. */
+	continues: string | null;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -539,16 +541,15 @@ export async function settle(db: D1Database, job: string, commit: string, landed
 
 /**
  * The answered agent questions behind the job's pull request, oldest first,
- * for its decision record: the job's own, and those of any earlier job on its
- * target that delivered the same pull request, which a retry continues.
+ * for its decision record: the job's own, and those of each failed job it
+ * continues as a retry, whether or not that job opened the pull request.
  */
 export async function decisions(db: D1Database, job: string) {
 	const { results } = await db
 		.prepare(
-			`SELECT q.prompt,q.answer FROM jobs c
- JOIN jobs j ON j.id=c.id OR (j.repository=c.repository AND j.target=c.target AND j.pull=c.pull)
- JOIN job_questions q ON q.job=j.id
- WHERE c.id=? AND q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
+			`WITH RECURSIVE chain(id) AS (SELECT ? UNION SELECT j.continues FROM jobs j JOIN chain c ON j.id=c.id WHERE j.continues IS NOT NULL)
+ SELECT q.prompt,q.answer FROM chain JOIN job_questions q ON q.job=chain.id
+ WHERE q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
 		)
 		.bind(job)
 		.all<{ prompt: string; answer: string }>();
@@ -584,12 +585,13 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	// runner's status can commit after the request read them. An iteration
 	// continues the pull request's existing head branch. Retrying a target
 	// whose latest job failed continues that job's branch and pull request
-	// where it left them, as a reassigned attempt would.
+	// where it left them, as a reassigned attempt would, and records which
+	// job it continues.
 	const [insert, active, enabled, pinned] = await db.batch([
 		db
 			.prepare(
-				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,?,?,?,?,'queued',?,? FROM github_projects p
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,continues,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,f.id,?,?,?,?,'queued',?,? FROM github_projects p
  LEFT JOIN jobs f ON ?<>'iterate' AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
  WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
@@ -659,13 +661,17 @@ export async function listJobs(db: D1Database, repository: number) {
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
-/** The pull request of the target's latest job when that job failed: what a retry continues. */
-export async function failedPull(db: D1Database, repository: number, target: string) {
+export type Published = Pick<Job, "branch" | "head" | "pending" | "pull">;
+
+/** Where the target's latest job left its branch and pull request, when that job failed: what a retry continues. */
+export async function failed(db: D1Database, repository: number, target: string) {
 	const latest = await db
-		.prepare("SELECT state,pull FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1")
+		.prepare(
+			"SELECT state,branch,head,pending,pull FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1",
+		)
 		.bind(repository, target)
-		.first<Pick<Job, "state" | "pull">>();
-	return latest?.state === "failed" ? latest.pull : null;
+		.first<Published & Pick<Job, "state">>();
+	return latest?.state === "failed" ? latest : null;
 }
 
 /** Whether a job on `target` is queued, running, or waiting, and so may still push to it. */
@@ -765,6 +771,59 @@ export async function answer(db: D1Database, job: string, question: string, user
 	const results = await db.batch(statements);
 	if (results[0]!.meta.changes !== 1)
 		throw new JobError(pin ? "Question is no longer open or the account is gone" : "Question is no longer open");
+}
+
+/** How a publication decision records that the maintainer chose to start over. */
+export const RESTART = { restart: true } as const;
+
+/**
+ * Answer a waiting job's publication decision by starting over: the job ends,
+ * and a new one on the same target and revision queues from `head`, the
+ * commit its branch is then reset to, with a new agent session and none of the
+ * old job's answers. The new job's later creation also means a pull request
+ * closed before now is not mistaken for one it delivered.
+ */
+export async function restart(db: D1Database, job: string, question: string, user: string, head: string, now: number) {
+	const id = crypto.randomUUID();
+	const answered = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND answeredBy=? AND answeredAt=?)";
+	const [update] = await db.batch([
+		db
+			.prepare(
+				"UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=? WHERE id=? AND job=? AND kind='publication' AND answer IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting')",
+			)
+			.bind(JSON.stringify(RESTART), user, now, question, job, job),
+		db
+			.prepare(`UPDATE jobs SET state='cancelled',updatedAt=? WHERE id=? AND state='waiting' AND ${answered}`)
+			.bind(now, job, question, user, now),
+		db
+			.prepare(
+				`INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,repository,workflow,target,revision,branch,?,actor,trusted,pinRunner,pinAccount,'queued',?,? FROM jobs WHERE id=? AND state='cancelled' AND ${answered}`,
+			)
+			.bind(id, head, now, now, job, question, user, now),
+	]);
+	if (update!.meta.changes !== 1) throw new JobError("Question is no longer open");
+	return id;
+}
+
+/**
+ * Pause a queued job that has not run yet on a publication decision, such as
+ * a restart whose branch reset failed. A job a runner already took is left alone.
+ */
+export async function hold(db: D1Database, job: string, input: { summary: string; prompt: unknown }, now: number) {
+	const id = crypto.randomUUID();
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO job_questions(id,job,attempt,kind,prompt,askedAt) SELECT ?,id,attempt,'publication',?,? FROM jobs WHERE id=? AND attempt=0 AND state='queued' AND cancel=0",
+			)
+			.bind(id, JSON.stringify(input.prompt), now, job),
+		db
+			.prepare(
+				"UPDATE jobs SET state='waiting',summary=?,updatedAt=? WHERE id=? AND state='queued' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?)",
+			)
+			.bind(input.summary, now, job, id),
+	]);
 }
 
 /**
