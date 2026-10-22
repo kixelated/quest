@@ -12,6 +12,8 @@ export type Pull = Issue & {
 	review: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
 	reviews?: { state: string; author: string }[];
 	draft?: boolean;
+	/** Opened from the service fork, so its branch is not on the upstream. */
+	fork?: boolean;
 	/** A `## Decisions needed` section in it hands a draft back to the maintainer. */
 	body?: string;
 	/** GitHub's mergeStateStatus; only CLEAN merges. Defaults to BLOCKED, or DRAFT for a draft. */
@@ -28,8 +30,17 @@ export type Repo = {
 	pulls: Pull[];
 	/** Quest branches pushed without a pull request, such as `quest/m0/docs`. */
 	claims: string[];
+	/** Branches on the repository's service fork, `<forks>/<name>`, and their commits. */
+	fork: Record<string, string>;
 };
-export type World = { app: { id: number; slug: string }; installation: number; users: User[]; repos: Repo[] };
+export type World = {
+	app: { id: number; slug: string };
+	installation: number;
+	/** The service fork namespace, `GITHUB_FORK_OWNER`. */
+	forks: string;
+	users: User[];
+	repos: Repo[];
+};
 
 const sha1 = (text: string) => createHash("sha1").update(text).digest("hex");
 /** The Git object ID of a file's content, which the Worker verifies. */
@@ -97,7 +108,10 @@ function graphql(repo: Repo, query: string) {
 	if (/(?<!:)pullRequests\(/.test(query)) result.pullRequests = page(repo.pulls.map((pull) => pullNode(repo, pull)));
 	if (query.includes("open:pullRequests(")) result.open = page(open.map((pull) => pullNode(repo, pull)));
 	if (query.includes("refs(")) {
-		const branches = [...repo.claims, ...open.flatMap((p) => (p.branch.startsWith("quest/") ? [p.branch] : []))];
+		const branches = [
+			...repo.claims,
+			...open.flatMap((p) => (p.branch.startsWith("quest/") && !p.fork ? [p.branch] : [])),
+		];
 		result.refs = page(
 			[...new Set(branches.map((b) => b.replace(/^quest\//, "")))].map((name) => ({
 				name,
@@ -180,6 +194,8 @@ export function fakeGitHub(world: World) {
 			return repo ? json(graphql(repo, query)) : json({ errors: [{ message: "Not Found" }] });
 		}
 		const match = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
+		const upstream = match?.[1] === world.forks && world.repos.find((r) => r.name === match[2]);
+		if (upstream) return serviceFork(upstream, match![3] ?? "", method, await body());
 		const repo = match && world.repos.find((r) => r.owner === match[1] && r.name === match[2]);
 		if (!repo) return json({ message: "Not Found" }, 404);
 		const rest = match![3] ?? "";
@@ -238,6 +254,52 @@ export function fakeGitHub(world: World) {
 		}
 		return missing();
 	};
+
+	/** The upstream's service fork: its identity and the branch moves that resetting a job's branch makes. */
+	function serviceFork(upstream: Repo, rest: string, method: string, text: string) {
+		const forkId = upstream.id * 10;
+		if (rest === "")
+			return json({
+				id: forkId,
+				name: upstream.name,
+				owner: { login: world.forks },
+				fork: true,
+				parent: { id: upstream.id },
+				private: false,
+				visibility: "public",
+				default_branch: "main",
+				archived: false,
+				disabled: false,
+			});
+		if (rest === "/installation")
+			return json({
+				id: world.installation,
+				app_id: world.app.id,
+				suspended_at: null,
+				permissions: { metadata: "read", contents: "write" },
+			});
+		const ref = rest.match(/^\/git\/refs?\/heads\/(.+)$/)?.[1];
+		const branch = ref && decodeURIComponent(ref);
+		if (branch && method === "GET") {
+			const sha = upstream.fork[branch];
+			return sha ? json({ object: { type: "commit", sha } }) : json({ message: "Not Found" }, 404);
+		}
+		const input = text ? (JSON.parse(text) as { ref?: string; sha: string; force?: boolean }) : null;
+		// Only forced updates are modeled; a fast-forward needs commit history the fake does not keep.
+		if (branch && method === "PATCH" && input?.force) {
+			if (!upstream.fork[branch]) return json({ message: "Reference does not exist" }, 422);
+			upstream.fork[branch] = input.sha;
+			return json({ object: { type: "commit", sha: input.sha } });
+		}
+		if (rest === "/git/refs" && method === "POST" && input?.ref?.startsWith("refs/heads/")) {
+			const name = input.ref.slice("refs/heads/".length);
+			if (upstream.fork[name]) return json({ message: "Reference already exists" }, 422);
+			upstream.fork[name] = input.sha;
+			return json({ object: { type: "commit", sha: input.sha } }, 201);
+		}
+		console.warn(`fake GitHub: no model for ${method} ${world.forks}/${upstream.name}${rest}`);
+		return json({ message: "Not modeled by the fake GitHub" }, 501);
+	}
 }
 
 /** Sign a webhook body the way GitHub does. */

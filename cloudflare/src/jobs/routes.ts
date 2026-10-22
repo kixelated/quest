@@ -2,12 +2,12 @@ import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
 import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
-import { type ProjectState, type Pull, startable } from "../github/state";
+import { type ProjectState, type Pull, continued, startable } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
 import { data, id, text } from "./protocol";
-import { LIMITS, parsePublication, publish } from "./publish";
+import { LIMITS, parsePublication, publish, restart } from "./publish";
 import * as store from "./store";
 import { JobError } from "./store";
 
@@ -162,7 +162,7 @@ async function owned(c: Context<Bindings>) {
 	const { user, repo } = await maintained(c);
 	const job = await store.readJob(c.env.DB, c.req.param("job")!);
 	if (!job || job.repository !== repo.id) throw new JobError("Job not found");
-	return { user, job };
+	return { user, repo, job };
 }
 
 const base = "/projects/github/:owner/:repository/jobs";
@@ -176,10 +176,10 @@ type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccoun
 
 /**
  * Resolve a requested workflow and target against current observations.
- * `failed` is the pull request of the target's failed latest job, which a
- * retry continues rather than counting it as another claim.
+ * `failed` is the target's failed latest job, whose pull request a retry
+ * continues rather than counting it as another claim.
  */
-function resolve(workflow: unknown, target: unknown, state: ProjectState, failed: number | null): Plan {
+function resolve(workflow: unknown, target: unknown, state: ProjectState, failed: store.Published | null): Plan {
 	const commit = state.project.commit;
 	const open = (kind: "issue" | "pull", prefix: string) =>
 		state.activity.find(
@@ -190,7 +190,7 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState, failed
 				item.data?.state === "OPEN",
 		);
 	if (workflow === "start") {
-		if (typeof target !== "string" || !startable(state, target, failed))
+		if (typeof target !== "string" || !startable(state, target, failed && continued(state, failed)))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
 		const branch = target.replace(/(\/README)?\.md$/, "");
 		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");
@@ -246,7 +246,7 @@ jobs.post(base, async (c) => {
 		throw new JobError("Invalid runner or account");
 	const failed =
 		body.workflow === "start" && typeof body.target === "string"
-			? await store.failedPull(c.env.DB, repo.id, body.target)
+			? await store.failed(c.env.DB, repo.id, body.target)
 			: null;
 	const { job, enabled, flake } = await github.jobSource(repo, user, (state) =>
 		resolve(body.workflow, body.target, state, failed),
@@ -271,9 +271,16 @@ jobs.post(base, async (c) => {
 });
 
 jobs.post(`${base}/:job/answer`, async (c) => {
-	const { user, job } = await owned(c);
+	const { user, repo, job } = await owned(c);
 	const { body, form } = await input(c);
 	const question = job.questions.find((q) => q.id === id(body.question));
+	// A form's Start over button, or `restart: true` from the JSON API.
+	if (question && body.restart !== undefined) {
+		if (body.restart !== (form ? "1" : true)) throw new JobError("Invalid restart");
+		const created = await restart(c.env, user, repo, job, question.id);
+		await hub(c.env, job.actor).dispatch(job.actor);
+		return reply(c, form, "start", { id: created }, 201);
+	}
 	const answer = question && (form ? formReply(question, form) : body.answer);
 	if (!question || answer === undefined) throw new JobError("Question and answer required");
 	await store.answer(
