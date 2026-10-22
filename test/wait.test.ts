@@ -482,6 +482,55 @@ test("all initial timeline pages are read, and the last known page is polled bef
 	expect(fixture.calls.at(-1)!.headers.has("if-none-match")).toBe(false);
 });
 
+test("a full last page is reread whole, since a 304 cannot show that a next page appeared", async () => {
+	const labeled = Array.from({ length: 99 }, (_, id) => ({ event: "labeled", id, created_at: POINT }));
+	const full = [committed(A), ...labeled];
+	const page2 = `https://api.github.com${timeline}&page=2`;
+	const fixture = setup([
+		pull(),
+		response([pushed()]),
+		response(full, { etag: '"full"' }),
+		response(full, { etag: '"full"', link: `<${page2}>; rel="next"` }),
+		response([reviewed(1, "2026-10-07T12:12:00Z")]),
+	]);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:12:00Z reviewed /);
+	expect(fixture.calls[4].headers.has("if-none-match")).toBe(false);
+});
+
+test("a review landing after the last scheduled poll is reported by a final poll before the timeout", async () => {
+	// 540 s polls at 0 and 300 s; the final poll at 510 s reads a review from 480 s.
+	const fixture = setup([
+		pull(),
+		response([pushed()]),
+		response([committed(A)], { etag: '"e"' }),
+		response(null, {}, 304),
+		response([committed(A), reviewed(1, "2026-10-07T12:18:00Z")]),
+	]);
+	const lines = await waitForActivity(pr, { timeout: 540 }, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:18:00Z reviewed /);
+	expect(fixture.sleeps).toEqual([300_000, 210_000]);
+});
+
+test("a review landing after the final poll is left for the timeout's cursor, never dropped", async () => {
+	const first = setup([
+		pull(),
+		response([pushed()]),
+		response([committed(A)], { etag: '"e"' }),
+		response(null, {}, 304),
+		response(null, {}, 304),
+	]);
+	const timeout = await waitForActivity(pr, { timeout: 540 }, first.deps).catch((error: unknown) => error);
+	expect(timeout).toBeInstanceOf(WaitTimeout);
+	expect(first.sleeps).toEqual([300_000, 210_000, 30_000]);
+	const second = setup([response([committed(A), reviewed(1, "2026-10-07T12:18:50Z")])]);
+	const lines = await waitForActivity(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:18:50Z reviewed /);
+});
+
 test("older initial pages are not skipped even when the last page has no recent activity", async () => {
 	const page2 = `https://api.github.com${timeline}&page=2`;
 	const fixture = setup(
@@ -538,6 +587,13 @@ test("primary rate limit reset and server poll intervals are honored", async () 
 	]);
 	await waitForActivity(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([60_000, 600_000]);
+});
+
+test("a server poll interval past the final poll skips it rather than polling early", async () => {
+	// A 600 s X-Poll-Interval outlasts a 540 s timeout, so no final poll runs at 510 s.
+	const fixture = setup([pull(), response([pushed()]), response([], { "x-poll-interval": "600" })]);
+	await expect(waitForActivity(pr, { timeout: 540 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
+	expect(fixture.sleeps).toEqual([540_000]);
 });
 
 test("persistent rate limiting eventually fails loudly instead of masking an error", async () => {

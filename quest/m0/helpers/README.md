@@ -59,7 +59,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [PR state commands](/quest/m0/helpers/pr-states.md) - `quest iterate`, `ready`, `merge`, and `release` label the one owner of a PR
 - [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
-- [Wait gaps](/quest/m0/helpers/wait-gaps.md) - `quest wait` reports every event after its starting point exactly once
 
 ## Related
 

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Worktrees } from "../src/cli/worktree";
-import { tempDir } from "./fixture";
+import { onTerminal, tempDir } from "./fixture";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -124,5 +124,24 @@ describe.runIf(process.platform === "linux")("supervised runs under systemd", { 
 			spawnSync("systemctl", ["--user", "is-active", orphan.unit], { encoding: "utf8" }).stdout.trim(),
 		).not.toBe("active");
 		expect(existsSync(join(record.path, "cache"))).toBe(false);
+	});
+
+	it("lets a terminal Ctrl-C reach the command once", async () => {
+		const { dir, home } = fixture();
+		const child = join(dir, "child.js");
+		writeFileSync(
+			child,
+			`let interrupts = 0;
+			process.on("SIGINT", () => interrupts++);
+			console.log("ready");
+			setTimeout(() => console.log("interrupts=" + interrupts), 1000);`,
+		);
+		const command = ["bun", `--config=${join(root, "bunfig.toml")}`, join(root, "src/cli/bin.ts")];
+		const result = await onTerminal([...command, "worktree", "run", "work", "--", "bun", child], "\x03", {
+			...process.env,
+			QUEST_WORKTREE_HOME: home,
+		});
+		expect(result.output).toContain("interrupts=1");
+		expect(result.code).toBe(130);
 	});
 });
