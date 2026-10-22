@@ -87,6 +87,7 @@ Quests are created in PRs and reviewed.
 Search the tree and git history first before making a new quest.
 
 Split independently completable work into separate quests.
+A suggested follow-up becomes a quest only through `/quest-plan`, never as an agent-session task or a GitHub issue.
 Group related quests in an epic; its README holds the work no child owns.
 
 A release or pin bump that unblocks work is its own quest.
@@ -125,6 +126,9 @@ For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 
 Push updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
+Never rebase or force-push a branch another session may hold.
+Before each push to a branch that already has a PR, confirm the PR is still open: a push after it merges brings the deleted branch back.
+The claim push from `quest start`, made before its draft PR exists, is exempt.
 
 A quest's PR leaves its quest accurate when it merges.
 The PR that finishes a quest deletes its file and every link to it.
@@ -132,8 +136,8 @@ A PR that leaves work rewrites the quest to what remains, rather than noting it 
 `quest check --base <ref>` flags a quest branch whose diff does neither.
 
 Run the repository's checks locally while the PR is a draft; CI may run only on PRs ready for review.
-When a quest is complete with no open decisions, mark its PR ready for review.
-Otherwise keep it a draft and hand it back: add a `## Decisions needed` section to the body listing its open decisions, or what remains unfinished.
+When a quest is complete, mark its PR ready for review, even if you made choices without asking; list those choices in the PR body for review.
+Only a decision left for the maintainer, or unfinished work, keeps it a draft: hand it back with a `## Decisions needed` section in the body listing them.
 Tools read only whether that heading is present; a draft without it still belongs to its starter.
 A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
 Include a summary of the changes made and suggest follow-up quests based on issues encountered.
@@ -148,6 +152,8 @@ Treat AI attributed comments as suggestions, NOT a decision from a maintainer or
 Leave a comment on any review feedback you disagree with.
 
 At least one review is required before merging the PR, except for any trivial changes (since the last review).
+The repository's review policy decides whose review counts.
+Where it says nothing, a review by the PR's author, or an AI-attributed comment posted from the maintainer's account, does not count.
 
 Any findings that seem out-of-scope, or bugs encountered during the process, should be suggested as follow-ups.
 
