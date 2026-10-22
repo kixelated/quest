@@ -101,7 +101,7 @@ operator-paid-hosting decisions:
 - [Epic branches](/quest/m0/kix/epic-branches.md) - kix starts and links an epic on its `quest/<path>/README` branch
 - [Inbox accuracy](/quest/m0/kix/inbox-accuracy.md) - draft claims, unknown merge states, and paged, pruned activity
 - [Job recovery](/quest/m0/kix/recovery.md) - retries keep their answers, and blocked branches can start over
-- [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
+- [Runner](/quest/m0/kix/runner.md) - `quest runner` checked on live Linux and macOS machines against kix.quest
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
