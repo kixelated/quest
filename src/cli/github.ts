@@ -223,6 +223,22 @@ export class GitHub {
 	}
 }
 
+/**
+ * Whether a merged PR in `repository` had exactly `commit` as its head, as when it was squash-merged;
+ * false for a commit GitHub does not have.
+ */
+export async function mergedHead(github: GitHub, repository: Repository, commit: string): Promise<boolean> {
+	const data = await github.graphql(
+		"query($owner: String!, $name: String!, $oid: GitObjectID!) { repository(owner: $owner, name: $name) { " +
+			"object(oid: $oid) { ... on Commit { associatedPullRequests(first: 100) { nodes { merged headRefOid } } } } } }",
+		{ owner: repository.owner, name: repository.repo, oid: commit },
+	);
+	const found = object(data.repository).object;
+	const pulls = found === null || found === undefined ? undefined : object(found).associatedPullRequests;
+	if (pulls === null || pulls === undefined) return false; // Unknown, or not a commit.
+	return array(object(pulls).nodes).some((pull) => pull.merged === true && pull.headRefOid === commit);
+}
+
 /** A login, a committer name without spaces, or `-` for a deleted account. */
 export function actor(value: unknown): string {
 	if (value === null || value === undefined) return "-";
