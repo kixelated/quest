@@ -38,6 +38,11 @@ Decided 2026-10-15, from Codex's review of kixelated/quest#121:
 - macOS runners take trusted revisions only, since a Linux VM cannot build a
   darwin devShell. An untrusted-head job waits with "needs a Linux runner"
   while none is online. Cloud runners are Linux-only.
+- `quest runner` (`src/runner/`) runs Claude Code with
+  `--permission-mode bypassPermissions` and the user's environment, minus
+  GitHub tokens, and refuses untrusted jobs. Decided 2026-10-22 on
+  [kixelated/quest#188](https://github.com/kixelated/quest/pull/188): keep
+  that until this sandbox ships and replaces it as the job's boundary.
 - The devShell bootstrap job runs sandboxed in the runner's own pinned Nix
   environment.
 - Test that the boundary stops writes outside the worktree, reading
@@ -46,7 +51,3 @@ Decided 2026-10-15, from Codex's review of kixelated/quest#121:
 - Sources:
   [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)
   and [sandbox-runtime](https://www.npmjs.com/package/@anthropic-ai/sandbox-runtime).
-
-## Required
-
-- [Runner](/quest/m0/kix/runner.md) - the job execution path being sandboxed

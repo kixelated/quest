@@ -45,7 +45,3 @@ Earlier guidance:
 - Reuse the same prompt flow when an implementation worker needs a decision.
   Record the settled answer in its plan where relevant without adding a
   service-specific required section to the core quest format.
-
-## Required
-
-- [Runner](/quest/m0/kix/runner.md) - planning sessions, questions, and resumption

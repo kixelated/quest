@@ -40,4 +40,3 @@ merge.
 ## Related
 
 - [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; `quest worktree run` already supervises jobs and releases scratch
-- [Own-PC runner](/quest/m0/kix/runner.md) - reuse lifecycle ownership in the hosted job adapter

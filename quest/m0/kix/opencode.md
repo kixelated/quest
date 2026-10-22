@@ -24,7 +24,3 @@ jobs in the UI: questions, checkpoint summaries, and results.
 - Sources: [OpenCode Go](https://opencode.ai/docs/go/),
   [server](https://opencode.ai/docs/server/), and
   [Sign in with ChatGPT](https://help.openai.com/articles/20001542).
-
-## Required
-
-- [Runner](/quest/m0/kix/runner.md) - the adapter interface and account homes

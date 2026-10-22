@@ -53,7 +53,6 @@ cloud runners; donor allocations follow working cloud runners separately.
 
 ## Required
 
-- [Runner](/quest/m0/kix/runner.md) - the executor and account contract
 - [Job sandbox](/quest/m0/kix/sandbox.md) - the boundary keeping provider credentials outside job commands
 - [opencode adapter](/quest/m0/kix/opencode.md) - the supported API-provider adapter
 

@@ -47,4 +47,3 @@ every user would have to add it.
 ## Related
 
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the skill's load-average launch rules, so neither the skill nor the command polls load
-- [Runner](/quest/m0/kix/runner.md) - the kix runner's headless Claude Code path; share the adapter in `src/cli/agent.ts`
