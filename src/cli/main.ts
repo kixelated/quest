@@ -27,16 +27,16 @@ import {
 	removeAccount,
 	runRunner,
 } from "../runner/cli";
-import { claims, questBranch } from "./claims";
+import { held, questBranch, reach, target, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { init, uninstall } from "./setup";
-import { Refusal, describe, releaseQuest, startQuest } from "./start";
+import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
-import { collect, exists, load, under } from "./tree";
+import { type Snapshot, checkout, collect, exists, load, snapshot, under } from "./tree";
 import { pullRequestStatus, statusLines } from "./status";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { Worktrees } from "./worktree";
@@ -126,16 +126,21 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	/** The quest document `path` names, as the tree writes it, as the shell completes it, or as a filesystem path. */
-	const find = (docs: Doc[], path: string): Doc => {
+	const locate = (docs: Doc[], path: string): Doc | null => {
 		const inside = withinRoot(root(), path);
-		const doc = lookup(docs, path) ?? (inside === null ? null : lookup(docs, inside));
+		return lookup(docs, path) ?? (inside === null ? null : lookup(docs, inside));
+	};
+
+	/** Like `locate`, failing when `path` names no quest. */
+	const find = (docs: Doc[], path: string): Doc => {
+		const doc = locate(docs, path);
 		if (doc === null) throw new Error(`${path} is not a quest document under ${under(root(), "quest")}`);
 		return doc;
 	};
 
 	/** Whether the tree passes `quest check`; otherwise report its findings and fail. */
-	const valid = (docs: Doc[]): boolean => {
-		const findings = check(docs, (path) => exists(root(), path));
+	const valid = ({ docs, exists }: Snapshot): boolean => {
+		const findings = check(docs, exists);
 		for (const finding of findings) warn(formatFinding(finding));
 		if (findings.length > 0) code = 1;
 		return findings.length === 0;
@@ -163,12 +168,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	};
 
 	/** A claim command's outcome: 0 when done, 3 when refused, and 1 for any other failure. */
-	const settle = <T>(work: Promise<T>, done: (result: T) => void) => {
+	const settle = <T>(work: Promise<T>, done: (result: T) => number | void) => {
 		pending = work.then(
-			(result) => {
-				done(result);
-				return 0;
-			},
+			(result) => done(result) ?? 0,
 			(error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
 				return error instanceof Refusal ? 3 : 1;
@@ -185,10 +187,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Counts exclude structural epic membership. Other prerequisites may remain for dependents. " +
 				"Invalid trees fail before printing a ranking. Prints a count and path per line; --json prints an " +
 				"ordered array of {path, dependents} objects.\n\n" +
-				"--unclaimed drops quests someone holds: a quest branch upstream, or an open PR from that branch in " +
-				"any repository. A GitHub fork's upstream is its parent, and the fork's own branches and PRs count " +
-				"too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last active, so a stale claim can be offered for takeover. Off " +
-				"GitHub, only branches are checked. Outside conditions are never checked.\n\n" +
+				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
+				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
+				"branch whose tip is a merged PR's head holds nothing; a closed, unmerged PR's branch still does. A " +
+				"GitHub fork's upstream is its parent, and the branches and PRs of the fork the remote pushes to " +
+				"count too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last " +
+				"active, so a stale claim can be offered for takeover. Off GitHub, only branches are checked. " +
+				"Outside conditions are never checked.\n\n" +
 				"Given a path, piped output lists its blockers, one per line with nesting indented, with an " +
 				"explanation on stderr; no output means it is ready. On a terminal it prints a quest log instead: a " +
 				"yellow ! for a ready quest, a grey ! for a blocked one, and each size label in its colour. Set " +
@@ -205,16 +210,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				path: string | undefined,
 				options: { json?: boolean; limit?: number; unclaimed?: boolean; remote: string },
 			) => {
-				const docs = load(root());
 				if (path !== undefined) {
 					if (options.json || options.limit !== undefined || options.unclaimed) {
 						throw new UsageError("--json, --limit, and --unclaimed apply to the ranking; omit the path");
 					}
+					const docs = load(root());
 					explain(docs, find(docs, path), path);
 					return;
 				}
-				if (!valid(docs)) return;
-				const ranked = unblocked(docs);
 				const show = (quests: RankedQuest[]) => {
 					const shown = quests.slice(0, options.limit);
 					if (options.json) {
@@ -226,21 +229,32 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					for (const quest of shown) print(`${quest.dependents}\t${quest.path}`);
 				};
 				if (!options.unclaimed) {
-					show(ranked);
+					const tree = checkout(root());
+					if (valid(tree)) show(unblocked(tree.docs));
 					return;
 				}
-				const branches = ranked.map((quest) => questBranch(quest.path));
+				// Readiness comes from the upstream default branch, so a stale checkout cannot offer
+				// a deleted quest or one whose prerequisite has since finished.
+				const deps = { github: () => gitHubDependencies(warn), warn };
 				settle(
-					claims(root(), options.remote, branches, { github: () => gitHubDependencies(warn), warn }),
-					(held) => {
-						const byBranch = new Map(held.map((claim) => [claim.branch, claim]));
+					(async () => {
+						const up = await reach(root(), options.remote, deps);
+						const tree = up === null ? checkout(root()) : snapshot(root(), upstreamHead(root(), up.git));
+						if (!valid(tree)) return null;
+						const ranked = unblocked(tree.docs);
+						const branches = ranked.map((quest) => questBranch(quest.path));
+						return { ranked, holdings: up === null ? [] : (await held(root(), up, branches)).claims };
+					})(),
+					(result) => {
+						if (result === null) return 1;
+						const byBranch = new Map(result.holdings.map((claim) => [claim.branch, claim]));
 						const now = Date.now();
-						for (const quest of ranked) {
+						for (const quest of result.ranked) {
 							const claim = byBranch.get(questBranch(quest.path));
 							if (claim)
 								warn(`skipped ${quest.path}: held by ${describe(claim.branch, claim.pull, now)}`);
 						}
-						show(ranked.filter((quest) => !byBranch.has(questBranch(quest.path))));
+						show(result.ranked.filter((quest) => !byBranch.has(questBranch(quest.path))));
 					},
 				);
 			},
@@ -251,16 +265,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Claim a ready quest with a draft PR, or release that claim")
 		.description(
 			"Claim a ready quest: push an empty claim commit, built on the upstream default branch, to the quest's " +
-				"branch (its path without .md) without forcing, then open a draft PR from it right away. Switches the " +
+				"branch (its path without .md), then open a draft PR from it right away. Switches the " +
 				"checkout to the claim on a new local branch, or fast-forwards that branch when it is checked out, " +
 				"and prints the PR URL, or the branch off GitHub.\n\n" +
-				"Fails on a tree quest check rejects, which can hide a blocker. " +
-				"Refuses a blocked quest, one missing from the upstream default branch, and one already held: a " +
-				"branch upstream or an open PR from that branch in any repository. A rejected push means someone " +
-				"else pushed the branch first. When two PRs race, as from forks, the earliest open PR keeps the " +
-				"claim; a later one is closed and its branch deleted.\n\n" +
+				"Readiness comes from the fetched upstream default branch's tree, not the checkout. Fails on a tree " +
+				"quest check rejects, which can hide a blocker. Refuses a blocked quest, one missing from the " +
+				"upstream default branch, and one already held: a branch upstream or an open PR from that branch in " +
+				"any repository. A branch whose tip is a merged PR's head holds nothing, and the claim replaces it " +
+				"with a lease on that tip. A rejected push means someone else pushed the branch first. When two PRs " +
+				"race, as from forks, the earliest open PR keeps the claim; a later one is closed and its branch " +
+				"deleted.\n\n" +
 				"The remote's upstream holds claims: a GitHub fork pushes the branch to itself and opens the PR on its " +
-				"parent. Off GitHub, only the branch is pushed, with a warning.\n\n" +
+				"parent, and so does a remote that fetches from upstream but pushes to a fork. Off GitHub, only the " +
+				"branch is pushed, with a warning.\n\n" +
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
@@ -270,25 +287,32 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--release", "Release the claim instead: delete the empty claim branch and close its PR")
 		.option("--remote <name>", "Remote to push the claim to", "origin")
 		.action((path: string, options: { release?: boolean; remote: string }) => {
-			const docs = load(root());
-			const doc = find(docs, path);
 			const deps = { github: () => gitHubDependencies(warn), warn };
 			if (options.release) {
-				settle(releaseQuest(root(), doc.path, options.remote, deps), (released) => {
+				settle(releaseQuest(root(), find(load(root()), path).path, options.remote, deps), (released) => {
 					print(`deleted ${released.branch}`);
 					for (const url of released.closed) print(`closed ${url}`);
 				});
 				return;
 			}
-			// A malformed tree can hide a blocker, as a misspelled `## Required` does.
-			if (!valid(docs)) return;
-			if (blockers(docs, doc).length > 0) {
-				explain(docs, doc, path);
-				code = 3;
-				return;
-			}
-			settle(startQuest(root(), doc.path, doc.title?.text ?? doc.path, options.remote, deps), (started) =>
-				print(started.url ?? started.branch),
+			settle(
+				(async () => {
+					// Readiness comes from the upstream default branch the claim builds on, not the checkout.
+					const at = await target(root(), options.remote, deps);
+					const doc = locate(at.tree.docs, path);
+					if (doc === null) throw notUpstream(find(load(root()), path).path);
+					// A malformed tree can hide a blocker, as a misspelled `## Required` does.
+					if (!valid(at.tree)) return 1;
+					if (blockers(at.tree.docs, doc).length > 0) {
+						explain(at.tree.docs, doc, path);
+						return 3;
+					}
+					return startQuest(root(), at, doc.path, doc.title?.text ?? doc.path, deps);
+				})(),
+				(started) => {
+					if (typeof started === "number") return started;
+					print(started.url ?? started.branch);
+				},
 			);
 		});
 

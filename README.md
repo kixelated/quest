@@ -139,13 +139,18 @@ when no quests are ready; `--limit <count>` requires a positive integer.
 Invalid trees fail with diagnostics and no ranking.
 `quest-spawn` uses the ranking unless you explicitly select work in another order.
 
-`--unclaimed` drops quests someone already holds: the quest's branch on the
+`--unclaimed` ranks the fetched upstream default branch's tree rather than
+your checkout, so a stale checkout cannot offer a finished or deleted quest.
+It then drops quests someone already holds: the quest's branch on the
 upstream repository, or an open PR from that branch in any repository, forks
-included. It lists each one it skips on stderr with its PR and how long ago
-that PR was last active, so you can decide whether a stale claim should be
-taken over. In a fork's clone, the upstream is the fork's parent, and the
-fork's own branches and PRs count too; `--remote` picks a remote other than
-`origin`. Off GitHub, only branches are checked.
+included. A branch whose tip is the head of a merged PR holds nothing, since
+its work landed; a closed, unmerged PR's branch still holds its quest. It
+lists each one it skips on stderr with its PR and how long ago that PR was
+last active, so you can decide whether a stale claim should be taken over.
+In a fork's clone, the upstream is the fork's parent, and the fork's own
+branches and PRs count too; a remote that fetches from upstream and pushes to
+a fork works the same way. `--remote` picks a remote other than `origin`.
+Off GitHub, only branches are checked.
 Neither form inspects kix.quest runner locks or outside conditions.
 
 ## Claim a quest
@@ -158,14 +163,16 @@ quest start --release quest/m0/export.md
 ```
 
 It pushes an empty claim commit, built on the upstream default branch, to the
-quest's branch (its path without `.md`) without forcing, then opens a draft PR
+quest's branch (its path without `.md`), then opens a draft PR
 from it right away and prints the PR's URL. It switches your checkout to the
 claim on a new local branch, or fast-forwards that branch if it is already
-checked out. A fork pushes to itself and opens the PR on its parent. It fails
-on a tree `quest check` rejects, which can hide a blocker, and refuses a
+checked out. A fork pushes to itself and opens the PR on its parent. It reads
+readiness from the upstream default branch it builds on, not your checkout. It
+fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
 another claimer got there first, and when two PRs race, the earliest open one
-keeps the claim and the later one is closed. Off GitHub, it pushes the branch
+keeps the claim and the later one is closed. A branch left at a merged PR's
+head is replaced, with a lease on that tip. Off GitHub, it pushes the branch
 without a PR.
 
 `--release` deletes the branch, with a lease on its tip, and closes its PR, but
@@ -551,14 +558,12 @@ the version you pin decides what your agents follow:
 | `quest-ready` | Mark a draft PR ready for review, wait for an automated review, then decide whether to merge. |
 | `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
+| `quest-afk` | Keep starting agreed work while you are away, leaving every decision for your return. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
 a separate invocation, so you review every change.
-
-Before stepping away, add `afk` to `/quest-spawn` or `/quest-complete`: the
-agent acts on its own recommendations and asks only before merging or deleting.
 
 To bill spawned agents to API keys instead of your agent's account, export
 `QUEST_API_KEYS` with one or more whitespace-separated keys and run
