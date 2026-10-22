@@ -26,7 +26,6 @@ Present those one at a time: a short paragraph explaining the problem, the quest
 - `/quest-delete`: If the quest should be deleted.
 
 Start each quest in a background sub-agent with its own isolated worktree, since agents cannot write to a worktree their parent created.
-Each brief carries the quest or PR, the user's picks, and the scope; leave repository rules to that repository's own instructions instead of restating them.
 
 Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.

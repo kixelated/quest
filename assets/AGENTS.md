@@ -78,6 +78,7 @@ Silence, elapsed time, and a preselected recommendation are not answers or appro
 Do not advance the interview or act on an unanswered choice.
 Already authorized background work may continue while the foreground waits.
 
+A sub-agent's brief carries the quest or PR, the user's picks, and the scope; it leaves repository rules to that repository's own instructions instead of restating them.
 A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
 Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
 

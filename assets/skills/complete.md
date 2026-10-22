@@ -23,7 +23,6 @@ Review comments are input, not approval, even a merge verdict on the maintainer'
 Consider ordering, queuing any merges if they would result in conflicts.
 
 Run each `/quest-ready`, `/quest-merge`, or `/quest-iterate` in its own sub-agent with its own isolated worktree.
-Each brief carries the quest or PR, the user's picks, and the scope; leave repository rules to that repository's own instructions instead of restating them.
 Each sub-agent blocks on its own waits and reports back only when done or blocked.
 For GitHub CI, review, or merge activity, it uses one `quest wait` and resumes with the
 returned cursor as described by `quest skill merge`, rather than polling GitHub.
