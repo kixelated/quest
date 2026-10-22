@@ -85,8 +85,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Run an expensive command once the host has room for it")
 		.description(
 			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
-				"min(4 GiB, RAM/4), admitting one waiting command every 5 seconds. Nested calls run immediately. " +
-				"Limits come from the host; there is no configuration.",
+				"min(4 GiB, RAM/4). Each admission in the last minute counts as one more unit of load and one " +
+				"budget less memory: commands start at once while those still fit, and 5 seconds apart while " +
+				"only the raw measures do. Nested calls run immediately. Limits come from the host; there is " +
+				"no configuration.",
 		)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")
@@ -321,7 +323,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Wait for pull request activity on GitHub")
 		.description(
 			"Wait for a review, comment, review-thread reply, reaction to the PR or a review, push, merge, close, " +
-				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes; rate limits delay requests. No timeout by default.\n\n" +
+				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes, and once more 30 seconds before the timeout; rate limits and longer GitHub poll intervals delay requests. No timeout by default.\n\n" +
 				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
 				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +

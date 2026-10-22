@@ -80,7 +80,9 @@ A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
 create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
 every request rechecks current GitHub authority. `start` takes only quests that
 observations show ready and unclaimed, except that retrying a failed job does
-not count that job's own open pull request as a claim. A job on an issue or pull request
+not count that job's own open pull request as a claim: the one it recorded, or
+else the only open one observed on its branch at a commit it published. A
+retry records the failed job it `continues`. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
 observations read it. `iterate` jobs are untrusted and route
 only to Linux runners that declare VM builds. Without a `flake.nix`, the route
@@ -205,6 +207,8 @@ reachable from its list with its earlier answers. A refused action says why
 and links back to its item. Prompts render as escaped text and never
 preselect the recommendation. A `publication` decision lists the refused
 paths or why the branch is blocked, and takes the maintainer's reply as text.
+A service fork branch that changed outside its job also offers Start over,
+which resets the branch to the job's revision and queues a new job there.
 Another maintainer's answer shows the job's requester the answer with an
 approve button above the usual form, and shows everyone else the job waiting.
 The inbox reads each target's latest job however old it is: every one that

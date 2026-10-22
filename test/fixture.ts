@@ -1,6 +1,8 @@
 // A minimal but complete quest tree on disk: root epic -> milestone ->
 // epic -> two quests, one blocking the other.
 
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -180,4 +182,31 @@ export function runOn(
 	const code = main(args, out);
 	if (typeof code !== "number") throw new Error("use await main for asynchronous CLI commands");
 	return { code, stdout, stderr };
+}
+
+/**
+ * Run `command` as the foreground job of a new pseudo-terminal, through util-linux `script`,
+ * and type `keys` once the terminal shows "ready". Resolves with everything the terminal showed.
+ */
+export async function onTerminal(
+	command: string[],
+	keys: string,
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<{ code: number | null; output: string }> {
+	const quoted = command.map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(" ");
+	const child = spawn("script", ["--quiet", "--return", "--flush", "--command", quoted, "/dev/null"], {
+		env: { ...env, SHELL: "/bin/sh" },
+		stdio: ["pipe", "pipe", "inherit"],
+	});
+	let output = "";
+	let typed = false;
+	child.stdout.setEncoding("utf8");
+	child.stdout.on("data", (data: string) => {
+		output += data;
+		if (typed || !output.includes("ready")) return;
+		typed = true;
+		child.stdin.write(keys);
+	});
+	const [code] = await once(child, "exit");
+	return { code, output };
 }

@@ -3,7 +3,14 @@
 // the job's one branch, and opens or updates its pull request. Nothing a runner
 // sends is executed, and runners never receive GitHub credentials.
 import { isQuest } from "quest/core";
-import { type Branch, type Change, GitHubService, PublicationBlocked, type GitHubRepository } from "../github/service";
+import {
+	type Branch,
+	BranchChanged,
+	type Change,
+	GitHubService,
+	PublicationBlocked,
+	type GitHubRepository,
+} from "../github/service";
 import { id, text } from "./protocol";
 import * as store from "./store";
 import { JobError, type Runner, type Workflow } from "./store";
@@ -117,6 +124,8 @@ export class HeadMoved extends JobError {
 type Decision = { decision: string; cancel: boolean; asked: boolean };
 type Published = { head: string | null; pull?: { number: number; url: string; draft: boolean } };
 
+const DECISION = "Publishing this work needs a maintainer's decision";
+
 /** Pause the attempt on a decision the maintainer must make before this can publish. */
 async function decide(db: D1Database, runner: Runner, input: Publication, prompt: unknown): Promise<Decision> {
 	const { question, cancel, asked } = await store.ask(
@@ -126,7 +135,7 @@ async function decide(db: D1Database, runner: Runner, input: Publication, prompt
 		input.attempt,
 		{
 			kind: "publication",
-			summary: "Publishing this work needs a maintainer's decision",
+			summary: DECISION,
 			session: input.session,
 			prompt,
 		},
@@ -148,9 +157,9 @@ async function verify(db: D1Database, job: store.Publishing, input: Publication,
 		head = current;
 	}
 	if (current !== head)
-		throw new PublicationBlocked(
+		throw new BranchChanged(
 			head === null
-				? `${branch.repository.owner}/${branch.repository.name} already has the branch ${job.branch} from earlier work. Delete it on GitHub to start over.`
+				? `${branch.repository.owner}/${branch.repository.name} already has the branch ${job.branch} from earlier work.`
 				: `The branch ${job.branch} changed outside this job.`,
 		);
 	if (input.head !== head) throw new HeadMoved(head);
@@ -197,9 +206,10 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 			return input.changes.length ? commit(db, runner, job, input, branch, head) : head;
 		});
 	} catch (error) {
-		if (error instanceof PublicationBlocked)
-			return decide(db, runner, input, { type: "publication", blocked: error.message });
-		throw error;
+		if (!(error instanceof PublicationBlocked)) throw error;
+		// Only a service fork branch is kix's to reset; an iterated pull request's head is not.
+		const restart = error instanceof BranchChanged && job.workflow !== "iterate";
+		return decide(db, runner, input, { type: "publication", blocked: error.message, ...(restart && { restart }) });
 	}
 	if (!input.pull) return { head };
 	if (!head) throw new JobError("Publish the job's changes before opening its pull request");
@@ -215,4 +225,55 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 	const pull = await github.deliver(upstream, current.actor, current, { ...input.pull, body, draft });
 	await store.delivered(db, job.id, pull.number);
 	return { head, pull };
+}
+
+/**
+ * Start a job over after a publication found its service fork branch changed
+ * or left by earlier work: replace the job with a fresh one at its revision,
+ * then reset the branch there. The new job's delivery adopts the branch's
+ * pull request if it is still open, and otherwise opens another.
+ */
+export async function restart(
+	env: Env,
+	user: string,
+	upstream: GitHubRepository,
+	job: Omit<store.Job, "result"> & { questions: store.Question[] },
+	question: string,
+) {
+	// The requester may start over in place of another maintainer's answer that awaits approval.
+	const open = job.questions.find(
+		(q) =>
+			q.id === question &&
+			q.approvedAt === null &&
+			(q.answer === null || user === job.actor) &&
+			q.attempt === job.attempt,
+	);
+	const offered = open?.kind === "publication" && (open.prompt as { restart?: unknown } | null)?.restart === true;
+	if (job.state !== "waiting" || job.workflow === "iterate" || !offered)
+		throw new JobError("Only a job whose own branch changed can start over");
+	// The answering maintainer's authority is rechecked before anything changes.
+	return new GitHubService(env).contribute(upstream, user, job, async (branch) => {
+		// Claim the decision before the reset discards commits, so a concurrent answer or cancel wins cleanly.
+		const created = await store.restart(env.DB, job.id, question, user, job.revision, Date.now());
+		try {
+			await branch.reset(job.revision);
+		} catch (error) {
+			// The new job waits to start over again; one a runner already took finds the branch changed when it publishes.
+			await store.hold(
+				env.DB,
+				created,
+				{
+					summary: DECISION,
+					prompt: {
+						type: "publication",
+						blocked: `Starting over did not reset the branch ${job.branch}.`,
+						restart: true,
+					},
+				},
+				Date.now(),
+			);
+			throw error;
+		}
+		return created;
+	});
 }

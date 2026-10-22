@@ -6,6 +6,7 @@ import { closeSync, existsSync, constants as fs, openSync, readFileSync, watch, 
 import { constants, hostname } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { forwards } from "./interrupt";
 
 /** A process, identified so that a reused PID never looks like its predecessor. */
 export interface Owner {
@@ -206,8 +207,9 @@ export const systemdScopes: Scopes = {
 					return;
 				}
 				interrupted = 128 + constants.signals[name];
-				if (admitted) child.kill(name);
-				else admission.destroy(); // The shell reads end-of-file and never starts the command.
+				if (admitted) {
+					if (forwards(name)) child.kill(name);
+				} else admission.destroy(); // The shell reads end-of-file and never starts the command.
 			};
 			const handlers = {
 				SIGINT: () => interrupt("SIGINT"),

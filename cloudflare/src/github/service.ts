@@ -82,6 +82,8 @@ export class ProjectChanged extends GitHubError {
 }
 /** A publication the bot cannot make, which needs a maintainer's decision rather than a retry. */
 export class PublicationBlocked extends GitHubError {}
+/** A job's branch is not where the job left it, which starting the job over can reset. */
+export class BranchChanged extends PublicationBlocked {}
 /** A maintainer check that was answered with a denial, rather than one that could not complete. */
 export class NotMaintainer extends GitHubError {}
 
@@ -94,7 +96,7 @@ export type Contribution = {
 	target: string;
 	branch: string;
 	pull: number | null;
-	/** When the job was created, in milliseconds; older pull requests on its branch are not its own. */
+	/** When the job was created, in milliseconds; an older closed pull request on its branch is not its own. */
 	createdAt: number;
 };
 /** The one branch a job may write, on the repository the service resolved for it. */
@@ -106,6 +108,8 @@ export interface Branch {
 	commit(parent: string, changes: Change[], message: string): Promise<string>;
 	/** Move the branch from `from` (null creates it) to `to`; false when it moved first. */
 	move(from: string | null, to: string): Promise<boolean>;
+	/** Point the branch at `to` wherever it is, creating it if it is gone, discarding its commits. */
+	reset(to: string): Promise<void>;
 }
 export type ContributionState = "enabled" | "paused";
 export type Enrollment = GitHubRepository & { state: ContributionState };
@@ -1139,6 +1143,15 @@ export class GitHubService {
 					throw error;
 				}
 			},
+			reset: async (to) => {
+				try {
+					await this.#api(token, `${path}/git/refs/heads/${ref}`, "PATCH", { sha: sha(to), force: true });
+				} catch (error) {
+					// GitHub refuses to update a reference that does not exist.
+					if (!(error instanceof GitHubError) || error.status !== 422) throw error;
+					await this.#api(token, `${path}/git/refs`, "POST", { ref: `refs/heads/${branch}`, sha: sha(to) });
+				}
+			},
 		};
 	}
 
@@ -1161,16 +1174,22 @@ export class GitHubService {
 			const fork = await this.#fork(upstream, upstream.name, {}, async (_token, fork) => fork);
 			const pulls = `${repositoryPath(upstream)}/pulls`;
 			const label = `${fork.owner.login}:${job.branch}`;
-			// An unrecorded earlier delivery may have opened one, which the maintainer may since have closed.
+			// An unrecorded earlier delivery may have opened one. The branch is
+			// where the job left it, so its only open pull request is the job's,
+			// even one a failed job this retry continues opened. Otherwise one
+			// opened since the job is, which the maintainer may since have closed.
 			// GitHub reports whole seconds, so compare against the second the job was created in.
 			const since = Math.floor(job.createdAt / 1000) * 1000;
-			const opened = async () =>
-				(
-					await this.#api<PullHead[]>(
-						token,
-						`${pulls}?state=all&per_page=100&head=${encodeURIComponent(label)}`,
-					)
-				).find((pull) => Date.parse(pull.created_at) >= since) ?? null;
+			const opened = async () => {
+				const found = await this.#api<PullHead[]>(
+					token,
+					`${pulls}?state=all&per_page=100&head=${encodeURIComponent(label)}`,
+				);
+				const open = found.filter((pull) => pull.state === "open");
+				return (
+					(open.length === 1 ? open[0] : found.find((pull) => Date.parse(pull.created_at) >= since)) ?? null
+				);
+			};
 			let pull = job.pull ? await this.#api<PullHead>(token, `${pulls}/${number(job.pull)}`) : await opened();
 			if (pull && (pull.head.repo?.id !== fork.id || pull.head.ref !== job.branch))
 				throw new GitHubError("The job's pull request no longer comes from its branch");

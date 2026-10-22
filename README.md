@@ -387,12 +387,20 @@ available memory is below one command's budget: 4 GiB, or a quarter of RAM on
 smaller hosts, where RAM is capped by any container memory limit. On Linux,
 available memory includes reclaimable host and cgroup file cache and is bounded
 by the remaining budget of each enclosing memory cgroup. Load and memory count
-work from every session and user. The load average lags new work, so the gate
-admits at most one waiting command per 5-second window per host, never in
-consecutive windows, rather than releasing every waiter at once: a burst of
-waiters starts about 10 seconds apart. Windows reports no load
-average and macOS counts reclaimable cache as used memory, so those signals are
-skipped there.
+work from every session and user. Windows reports no load average and macOS
+counts reclaimable cache as used memory, so those signals are skipped there.
+
+Both measures lag new work, so each command admitted in the last minute counts
+as one more unit of load and takes one budget from available memory. While the
+host has room even counting those, commands start at once: a burst of gated
+test runs on an idle host starts together. Once only the raw load and memory
+have room, commands start one at a time, 5 seconds after the previous admission.
+A user's admissions on one host are recorded under
+`~/.cache/quest/admissions/<hostname>`, whatever the caller's environment or
+login session. The home directory comes from the user database, not `$HOME`;
+an account missing from it, as in arbitrary-UID containers, uses
+`/tmp/quest-<uid>/admissions/<hostname>`, and refuses that directory unless only
+its UID can write it.
 
 Admission is the gate's only job: it holds no slot or lock while the command
 runs and does not track the command's descendants. A nested invocation runs
@@ -403,8 +411,10 @@ This repository's `just check`, `just test`, `just worker-check`, and
 `just worker-test` run through the gate.
 
 Arguments, working directory, environment and terminal streams pass through to
-the executable, and waiting happens before it starts. There is no fairness
-guarantee or timeout: a command waits as long as the host stays busy.
+the executable, and waiting happens before it starts. A terminal's Ctrl-C
+reaches the command once, directly; SIGTERM and SIGHUP sent to Quest are
+forwarded. There is no fairness guarantee or timeout: a command waits as long as
+the host stays busy.
 
 ## Headless agents
 
