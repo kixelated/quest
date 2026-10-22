@@ -34,6 +34,8 @@ export type Change = {
 	href: string;
 	/** The pull request's number, when the change is one observed on GitHub. */
 	number?: number;
+	/** A draft its author still holds, without a `## Decisions needed` section: a claim, not yet turned in. */
+	owned?: boolean;
 };
 
 /** An issue filed from a fork, quarantined under `issues/` until a maintainer promotes it. */

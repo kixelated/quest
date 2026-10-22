@@ -57,7 +57,9 @@ A quest shows its most advanced state: Ready to turn in, then Accepted by, then
 Available or Requires. Accepted by comes from a live runner lock: an active
 job in kix.quest's database, which moves when its runner goes offline; open changes
 carry Ready to turn in. On GitHub, a draft PR from the quest branch, opened
-right away and from a fork too, claims work.
+right away and from a fork too, claims work: the board shows it as Claimed
+by its starter until its body hands it back with a `## Decisions needed`
+section or it is marked ready, and only then as Ready to turn in.
 None of these states adds a section to the quest file.
 
 Tokens are display only: a run's spend and donated tokens show with an amber
