@@ -38,7 +38,7 @@ export type ObjectValue = Record<string, unknown>;
 /** Accept a GitHub PR URL, or a number in the origin repository. */
 export function pullRequest(value: string, root: string): PullRequest {
 	if (/^[1-9]\d*$/.test(value)) {
-		const repository = githubRepository(remoteUrl(root, "origin"));
+		const { repository } = remoteRepository(root, "origin");
 		if (!repository) throw new Error("origin must name a github.com repository; pass a GitHub PR URL instead");
 		return { ...repository, number: Number(value) };
 	}
@@ -55,10 +55,45 @@ export function remoteUrl(root: string, remote: string): string {
 	}).trim();
 }
 
-/** The github.com repository a remote URL names, or `null` for any other host. */
+/**
+ * The URL `remote` fetches from, or pushes to with `push`, and the github.com
+ * repository it names. The configured URL comes first, so a rewrite
+ * (`insteadOf`) to another host still names GitHub; otherwise the rewritten one.
+ */
+export function remoteRepository(
+	root: string,
+	remote: string,
+	push = false,
+): { url: string; repository: Repository | null } {
+	const git = (args: string[]) => {
+		try {
+			return execFileSync("git", ["-C", root, ...args], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			}).trim();
+		} catch {
+			// An unset config key exits 1.
+			return "";
+		}
+	};
+	const configured =
+		(push ? git(["config", "--get", `remote.${remote}.pushurl`]) : "") ||
+		git(["config", "--get", `remote.${remote}.url`]);
+	const named = githubRepository(configured);
+	if (named !== null) return { url: configured, repository: named };
+	const url = push ? git(["remote", "get-url", "--push", remote]) : remoteUrl(root, remote);
+	return { url, repository: githubRepository(url) };
+}
+
+/**
+ * The github.com repository a remote URL names, or `null` for any other host:
+ * HTTPS with or without credentials, `ssh://`, or the scp-like `user@github.com:` form.
+ */
 export function githubRepository(url: string): Repository | null {
 	const match =
-		/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?$/.exec(url);
+		/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|ssh:\/\/(?:[^@/]+@)?github\.com(?::\d+)?\/|[^@/:]+@github\.com:)([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(
+			url,
+		);
 	return match ? { owner: match[1], repo: match[2] } : null;
 }
 

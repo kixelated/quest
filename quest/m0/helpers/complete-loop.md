@@ -24,7 +24,3 @@ edits through this plan.
   `iterate`, which has none today. Record a design change somewhere the next
   agent can read it back from the PR, such as the comment recording the
   decision.
-
-## Related
-
-- [Unattended work](/quest/m0/helpers/afk.md) - carries on picks the user already made

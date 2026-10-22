@@ -1,5 +1,7 @@
-// Loading the quest tree from a checkout on disk for the core to read.
+// Loading the quest tree for the core to read: from a checkout on disk, or
+// from a commit, such as the upstream default branch's tip.
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -53,6 +55,66 @@ export function exists(root: string, path: string): boolean {
 	return existsSync(join(root, path));
 }
 
+/** A quest tree as `quest check` reads it: its documents, and whether a repository-relative path exists. */
+export interface Snapshot {
+	docs: Doc[];
+	exists(path: string): boolean;
+}
+
+/** The quest tree in the checkout at `root`. */
+export function checkout(root: string): Snapshot {
+	return { docs: load(root), exists: (path) => exists(root, path) };
+}
+
+/**
+ * The quest tree at `commit`, read from git rather than the checkout, with
+ * paths relative to `root` as on disk. A symbolic link is a path, not a quest.
+ */
+export function snapshot(root: string, commit: string): Snapshot {
+	const paths = new Set<string>();
+	const quests: { path: string; oid: string }[] = [];
+	// `<mode> <type> <oid>\t<path>`; run in `root`, git lists only its subtree, relative to it.
+	for (const entry of git(root, ["ls-tree", "-r", "-z", commit]).toString("utf8").split("\0")) {
+		if (entry === "") continue;
+		const tab = entry.indexOf("\t");
+		const [mode, type, oid] = entry.slice(0, tab).split(" ");
+		const path = entry.slice(tab + 1);
+		paths.add(path);
+		for (let dir = path; dir.includes("/");) {
+			dir = dir.slice(0, dir.lastIndexOf("/"));
+			paths.add(dir);
+		}
+		if (type === "blob" && mode !== "120000" && path.startsWith("quest/") && isQuest(path)) {
+			quests.push({ path, oid });
+		}
+	}
+	if (quests.length === 0) throw new Error(`no quest documents found under ${under(root, "quest")} at ${commit}`);
+
+	// One `cat-file --batch` reads every document: `<oid> blob <size>\n<content>\n` each, in input order.
+	const batch = git(root, ["cat-file", "--batch"], `${quests.map((quest) => quest.oid).join("\n")}\n`);
+	let offset = 0;
+	const docs = quests.map(({ path }) => {
+		const header = batch.indexOf(10, offset);
+		const size = Number(batch.toString("utf8", offset, header).split(" ")[2]);
+		const text = decode(batch.subarray(header + 1, header + 1 + size), path);
+		offset = header + size + 2;
+		return { path, text };
+	});
+	return {
+		docs: docs.sort((a, b) => comparePaths(a.path, b.path)).map((source) => parse(source.path, source.text)),
+		exists: (path) => paths.has(path),
+	};
+}
+
+function git(root: string, args: string[], input = ""): Buffer {
+	try {
+		return execFileSync("git", ["-C", root, ...args], { input, maxBuffer: 1 << 30, stdio: "pipe" });
+	} catch (error) {
+		const stderr = String((error as { stderr?: unknown }).stderr ?? "").trim();
+		throw new Error(`git ${args[0]} failed${stderr ? `: ${stderr}` : ""}`);
+	}
+}
+
 // Fatal, so a file that is not UTF-8 is an error rather than silently mangled
 // text; ignoreBOM keeps a byte-order mark in the text, as the parser expects.
 const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -60,6 +122,14 @@ const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 function read(root: string, path: string): string {
 	try {
 		return UTF8.decode(readFileSync(join(root, path)));
+	} catch (error) {
+		throw new Error(`reading ${path}: ${(error as Error).message}`);
+	}
+}
+
+function decode(bytes: Uint8Array, path: string): string {
+	try {
+		return UTF8.decode(bytes);
 	} catch (error) {
 		throw new Error(`reading ${path}: ${(error as Error).message}`);
 	}

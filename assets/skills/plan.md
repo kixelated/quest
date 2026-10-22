@@ -4,6 +4,9 @@ description: Scope and create quests through an interactive interview. Use when 
 
 Before you begin, run `quest guide` and read its output completely.
 
+Before anything else, search for existing work: the quest tree, git history for deleted quests, and open PRs touching `quest/`.
+Show any overlap in the first round.
+
 Interview the user until you reach a shared understanding.
 Every follow-up the user picks goes through this interview, including edits to existing quests and to quests in other repositories.
 A background agent that cannot prompt puts the problem in its report with a recommendation, so this skill can run in the foreground; it never creates or edits quests itself.
