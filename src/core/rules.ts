@@ -20,6 +20,7 @@ import {
 	children,
 	owner,
 	permanent,
+	questBranch,
 	resolve,
 	rooted,
 	withoutFragment,
@@ -91,18 +92,24 @@ export function check(docs: Doc[], exists: (path: string) => boolean): Finding[]
 	return found.sort(compareFindings);
 }
 
-/** A quest file and a directory's README cannot use the same quest path. */
+/**
+ * A quest's branch cannot be a prefix of another's: git stores refs as files
+ * and directories, so `quest/m0/foo` cannot exist beside `quest/m0/foo/bar`.
+ * A quest `X.md` therefore collides with every document under `X/`. That
+ * includes a directory named `README` under an epic, whose children's branches
+ * nest under the epic's `.../README` branch.
+ */
 function collisions(found: Finding[], known: Set<string>, docs: Doc[]) {
+	const paths = [...known].sort(comparePaths);
 	for (const doc of docs) {
-		// A README already names its directory, including after its last child
-		// completes. A directory named README therefore has a distinct path.
-		if (doc.path.endsWith("/README.md")) continue;
-		const epic = `${doc.path.slice(0, -3)}/README.md`;
-		if (!known.has(epic)) continue;
+		const dir = `${questBranch(doc.path)}/`;
+		const readme = `${dir}README.md`;
+		const nested = known.has(readme) ? readme : paths.find((path) => path.startsWith(dir));
+		if (nested === undefined) continue;
 		found.push({
 			path: doc.path,
 			line: null,
-			message: `quest path collides with ${epic}; rename one of these documents`,
+			message: `quest path collides with ${nested}; rename one of these documents`,
 		});
 	}
 }

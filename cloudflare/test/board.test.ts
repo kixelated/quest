@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { finished } from "../scripts/history";
 import { render } from "../src/board/markdown";
-import { type Board, blobHref, findGroup, only, questHref, readBoard, trail } from "../src/board/model";
+import { type Board, blobHref, findDoc, findGroup, only, questHref, readBoard, trail } from "../src/board/model";
 import type { Project } from "../src/board/project";
 
 const docs: Record<string, string> = {
@@ -86,11 +86,17 @@ describe("board model", () => {
 		expect(items[0].kind === "epic" && items[0].epic.items.length).toBe(1);
 	});
 
+	it("names an epic's page by its branch, not its directory", () => {
+		expect(questHref(project(), "quest/m0/epic/README.md")).toBe("/repos/demo/quest/m0/epic/README");
+		expect(findDoc(board, "quest/m0/epic/README")?.path).toBe("quest/m0/epic/README.md");
+		expect(findDoc(board, "quest/m0/epic")).toBeNull();
+	});
+
 	it("encodes each board and forge path segment", () => {
 		const source = project();
 		const path = "quest/m0/an epic#/name#?%.md";
 		expect(questHref(source, path)).toBe("/repos/demo/quest/m0/an%20epic%23/name%23%3F%25");
-		expect(questHref(source, "quest/m0/an epic#/README.md")).toBe("/repos/demo/quest/m0/an%20epic%23");
+		expect(questHref(source, "quest/m0/an epic#/README.md")).toBe("/repos/demo/quest/m0/an%20epic%23/README");
 		expect(blobHref(source, path)).toBe(
 			`https://example.com/acme/demo/blob/${source.commit}/quest/m0/an%20epic%23/name%23%3F%25.md`,
 		);
@@ -140,7 +146,7 @@ describe("quest markdown", () => {
 			"## Plan\n\n[epic](/quest/m0/epic/README.md#goal) [ready](epic/ready.md) [docs](../../docs/a.md) [web](https://example.com)\n",
 			known,
 		);
-		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic#goal"');
+		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic/README#goal"');
 		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic/ready"');
 		expect(plan.html).toContain(`href="https://example.com/acme/demo/blob/${project().commit}/docs/a.md"`);
 		expect(plan.html).toContain('href="https://example.com"');
