@@ -99,7 +99,6 @@ operator-paid-hosting decisions:
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
 - [Epic branches](/quest/m0/kix/epic-branches.md) - kix starts and links an epic on its `quest/<path>/README` branch
-- [Inbox accuracy](/quest/m0/kix/inbox-accuracy.md) - draft claims, unknown merge states, and paged, pruned activity
 - [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode

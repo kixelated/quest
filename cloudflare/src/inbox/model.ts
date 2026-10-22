@@ -6,7 +6,7 @@
 import { parse } from "quest/core";
 import { encodePath } from "../board/model";
 import { GitHubError, type Enrollment, GitHubService, NotMaintainer } from "../github/service";
-import { type Activity, type ProjectState, readState } from "../github/state";
+import { type Activity, type ProjectState, type Pull, owned, readState } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { hub } from "../jobs/routes";
 import * as store from "../jobs/store";
@@ -106,6 +106,11 @@ export function entities(project: Enrollment, state: ProjectState | null) {
 	return found;
 }
 
+/** A PR whose observed draft its starter still holds, so nothing waits on the maintainer. */
+function held(entity: Pick<Item, "kind" | "activity">) {
+	return entity.kind === "pull" && !!entity.activity?.data && owned(entity.activity.data as Pull);
+}
+
 function fallback(project: Enrollment, target: string): Entity {
 	const web = `https://github.com/${project.owner}/${project.name}`;
 	const kind = kindOf(target);
@@ -151,8 +156,11 @@ export function decisions(view: ProjectView, found: Map<string, Entity>, jobs: J
 		} else if (entity) {
 			// Starting new work on a paused project would be refused, so it is not offered.
 			if (project.state !== "enabled") continue;
-			need = "start";
-			ended = !!job && !changed;
+			// A draft its starter still holds is their work in progress until they hand it back.
+			if (!held(entity)) {
+				need = "start";
+				ended = !!job && !changed;
+			}
 		} else continue;
 		const read = reads.find((r) => r.repository === project.id && r.item === target);
 		let prompt: Prompt | null = null;

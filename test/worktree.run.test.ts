@@ -118,10 +118,11 @@ describe.runIf(process.platform === "linux")("supervised runs under systemd", { 
 		expect(orphan).toBeDefined();
 		expect(() => worktrees.release(record.id)).toThrow("supervised runs are live");
 		expect(existsSync(join(record.path, "cache"))).toBe(true);
-		// Stopping a scope waits until it is empty.
-		const stop = spawnSync("systemctl", ["--user", "stop", orphan.unit], { encoding: "utf8" });
-		expect(stop.status, stop.stderr).toBe(0);
-		expect(worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+		// Stopping kills what the scope holds and waits until it is empty, which releases the checkout.
+		expect(await worktrees.stop(record.id)).toMatchObject({ phase: "released", runs: [] });
+		expect(
+			spawnSync("systemctl", ["--user", "is-active", orphan.unit], { encoding: "utf8" }).stdout.trim(),
+		).not.toBe("active");
 		expect(existsSync(join(record.path, "cache"))).toBe(false);
 	});
 });

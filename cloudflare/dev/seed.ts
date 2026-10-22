@@ -51,8 +51,12 @@ export function world(): World {
 				content: quest("Later", "Work after the beta.", [
 					"- [Offline mode](/quest/m1/offline.md) - keep working without a network",
 					"- [Themes](/quest/m1/themes.md) - custom colors",
+					"- [Search](/quest/m1/search.md) - find anything",
+					"- [Fonts](/quest/m1/fonts.md) - choose the editor font",
 				]),
 			},
+			{ path: "quest/m1/fonts.md", content: quest("[S] Choose the editor font", "Read comfortably.") },
+			{ path: "quest/m1/search.md", content: quest("[S] Search across projects", "Find anything.") },
 			{
 				path: "quest/m1/offline.md",
 				content: quest(
@@ -111,14 +115,46 @@ export function world(): World {
 				checks: null,
 				review: "REVIEW_REQUIRED",
 			},
+			// A claim its starter still holds: work in progress, not a decision.
+			{
+				number: 17,
+				title: "Draft the theme picker",
+				author: "contributor",
+				branch: "quest/m1/themes",
+				checks: "PENDING",
+				review: null,
+				draft: true,
+				body: "Started on the picker.",
+			},
+			// A draft handed back with decisions: it waits on the maintainer.
+			{
+				number: 18,
+				title: "Search quest titles",
+				author: "contributor",
+				branch: "quest/m1/search",
+				checks: "SUCCESS",
+				review: null,
+				draft: true,
+				body: "Titles are indexed.\n\n## Decisions needed\n\n1. Index quest bodies too?\n",
+			},
+			// Clean when first read; `seed` rereads it while GitHub reports UNKNOWN.
+			{
+				number: 19,
+				title: "Speed up cold start",
+				author: "contributor",
+				branch: "perf/cold-start",
+				checks: "SUCCESS",
+				review: "APPROVED",
+				merge: "CLEAN",
+			},
 		],
 		claims: ["quest/m0/docs"],
 		// Changed outside its waiting job, which can start over.
-		fork: { "quest/m1/themes": "f".repeat(40) },
+		fork: { "quest/m1/fonts": "f".repeat(40) },
 	};
 	// kix opened this one for a job that then failed before recording it.
 	rocket.pulls.push({
-		number: 17,
+		number: 20,
 		title: "Import a project from a ZIP archive",
 		author: "quest-dev[bot]",
 		branch: "quest/m0/import",
@@ -230,6 +266,9 @@ export async function seed(options: { fetch: Fetch; db: D1Database; world: World
 		"pause archive",
 	);
 
+	// GitHub recomputes a recorded PR's mergeability, such as after a push to
+	// its base. The read below keeps its last known state rather than marking it new.
+	rocket.pulls.find((pull) => pull.number === 19)!.merge = "UNKNOWN";
 	// An issue opened since the refresh: its webhook rereads the project in the background.
 	const pointer = { number: 9, title: "Sync stops after the laptop sleeps", author: "reporter" };
 	rocket.issues.push(pointer);
@@ -388,28 +427,28 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			revision: commit,
 			branch: "quest/m0/import",
 			state: "failed",
-			// It opened pull request 17 at this commit, then failed before recording it.
-			head: head(17),
+			// It opened pull request 20 at this commit, then failed before recording it.
+			head: head(20),
 			runner: "workstation",
 			account: "claude-max",
 			summary: "just check failed after the pull request opened: the importer skips empty folders.",
 		},
 		{
-			id: "seed-start-themes",
+			id: "seed-start-fonts",
 			workflow: "start",
-			target: "quest/m1/themes.md",
+			target: "quest/m1/fonts.md",
 			revision: commit,
-			branch: "quest/m1/themes",
+			branch: "quest/m1/fonts",
 			state: "waiting",
 			head: "e".repeat(40),
 			runner: "workstation",
 			account: "claude-max",
-			summary: "Added the theme picker; publishing it found the branch moved.",
+			summary: "Added the font picker; publishing it found the branch moved.",
 			question: {
 				kind: "publication",
 				prompt: {
 					type: "publication",
-					blocked: "The branch quest/m1/themes changed outside this job.",
+					blocked: "The branch quest/m1/fonts changed outside this job.",
 					restart: true,
 				},
 			},
