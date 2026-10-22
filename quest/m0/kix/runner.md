@@ -86,7 +86,6 @@ replacing the hosted Agent SDK runtime:
   decision inbox: each runner's online state, its accounts, and the
   preference-order control. Decided 2026-10-18 as a follow-up of the
   decision inbox (#144), folded here rather than its own quest.
-
-## Related
-
-- [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; reuse `quest worktree run` for supervision, scratch release, and disk admission
+- Reuse `quest worktree` in the job adapter: `run` for supervision, scratch
+  release, and disk admission, `remove` once a job's checkout is finished,
+  and `stop` for a crashed supervisor's leftover processes.

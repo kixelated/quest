@@ -13,6 +13,10 @@ merge.
   for expensive phases. Remove the skill's physical-core agent-count and load
   average admission rules once command admission is integrated. Disk capacity
   gates checkout allocation, not the number of reasoning agents.
+- Landed: `quest worktree run` supervises a job and releases its scratch,
+  `remove` deletes a finished checkout without losing work (a squash-merged
+  head counts only with exact PR-head evidence), and `stop` ends a crashed
+  supervisor's leftover processes.
 - A 2026-10-19 transcript audit counted 1,731 load-average polling commands
   in moq-dev/moq and moq-dev/moq.pro sessions since Oct 14, so the remaining
   agent-level load rules still cost tokens until this lands.
@@ -39,5 +43,4 @@ merge.
 
 ## Related
 
-- [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; `quest worktree run` already supervises jobs and releases scratch
 - [Own-PC runner](/quest/m0/kix/runner.md) - reuse lifecycle ownership in the hosted job adapter

@@ -60,7 +60,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 - [Wait gaps](/quest/m0/helpers/wait-gaps.md) - `quest wait` reports every event after its starting point exactly once
-- [Guard in CI](/quest/m0/helpers/ci-guard.md) - pull request CI runs the landed-quest guard
 
 ## Related
 
