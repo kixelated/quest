@@ -15,7 +15,7 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Retained, type Scopes, currentOwner, kill, killable } from "../src/cli/supervise";
+import { type Owner, Retained, type Scopes, currentOwner, kill, killable } from "../src/cli/supervise";
 import { GitHub, mergedHead } from "../src/cli/github";
 import { main } from "../src/cli/main";
 import { Worktrees, diskUsage } from "../src/cli/worktree";
@@ -53,7 +53,7 @@ function fakeScopes() {
 	return { live, finish, scopes };
 }
 /** Record a run whose supervisor crashed, as `quest worktree run` leaves it. */
-function orphan(home: string, unit: string, owner = deadOwner()) {
+function orphan(home: string, unit: string, owner: Owner = deadOwner()) {
 	const file = join(home, "registry.json");
 	const registry = JSON.parse(readFileSync(file, "utf8"));
 	registry.records[0].runs.push({ unit, owner });
