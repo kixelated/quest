@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, posix, relative, resolve, sep } from "node:path";
 
-import { check, formatFinding, isQuest, move, normalize, permanent, relocate, remove } from "../core";
-import { type ClaimDependencies, claims, questBranch } from "./claims";
+import { check, formatFinding, isQuest, move, normalize, permanent, questBranch, relocate, remove } from "../core";
+import { type ClaimDependencies, claims } from "./claims";
 import { exists, load, sources, under } from "./tree";
 
 /** What a command changed, and what it left for the caller to look at. */

@@ -2,7 +2,20 @@
 // status and progress. Readiness comes from the shared core, so the board
 // always agrees with `quest unblocked`.
 
-import { type Doc, ROOT, blockers, children, comparePaths, entries, isEpic, parse, permanent, ready } from "quest/core";
+import {
+	type Doc,
+	ROOT,
+	blockers,
+	branchQuest,
+	children,
+	comparePaths,
+	entries,
+	isEpic,
+	parse,
+	permanent,
+	questBranch,
+	ready,
+} from "quest/core";
 import type { Size } from "../layout";
 import type { Change, Completed, Project } from "./project";
 
@@ -65,18 +78,14 @@ export function title(text: string): { size: Size | null; name: string } {
 	return match ? { size: match[1] as Size, name: match[2] } : { size: null, name: text };
 }
 
-/**
- * A quest's page: its path without `.md`, like its branch name. A README is
- * its directory's page.
- */
 export function boardHref(project: Project): string {
 	return project.href ?? `/repos/${project.name}`;
 }
 
+/** A quest's page: its branch name, so an epic's ends in `/README`. The root's is the board. */
 export function questHref(project: Project, path: string): string {
 	if (path === ROOT) return boardHref(project);
-	const page = path.replace(/\/README\.md$/, "").replace(/\.md$/, "");
-	return `${boardHref(project)}/${encodePath(page)}`;
+	return `${boardHref(project)}/${encodePath(questBranch(path))}`;
 }
 
 /**
@@ -97,13 +106,9 @@ export function milestoneAnchor(milestone: Milestone): string {
 	return milestone.path.split("/")[1] ?? "unsorted";
 }
 
-/** The document a page path names: `quest/m0/board`, `quest/m0/epic`, or `quest/m0/epic/README`. */
+/** The document a page path names, as its branch does: `quest/m0/board` or `quest/m0/epic/README`. */
 export function findDoc(board: Board, page: string): Doc | null {
-	for (const path of [`${page}.md`, `${page}/README.md`]) {
-		const doc = board.docs.get(path);
-		if (doc) return doc;
-	}
-	return null;
+	return board.docs.get(branchQuest(page)) ?? null;
 }
 
 /** The first paragraph of a section, as plain words. */

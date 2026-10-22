@@ -12,6 +12,7 @@ export {
 	type Heading,
 	type Link,
 	type Position,
+	branchQuest,
 	children,
 	entries,
 	has,
@@ -20,6 +21,7 @@ export {
 	owner,
 	parse,
 	permanent,
+	questBranch,
 	resolve,
 	rooted,
 } from "./doc";

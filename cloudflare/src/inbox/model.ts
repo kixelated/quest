@@ -3,7 +3,7 @@
 // are one item, so updates, reconnects, and duplicate webhooks coalesce instead
 // of adding prompts. Agent text and GitHub data stay untrusted display data.
 
-import { parse } from "quest/core";
+import { parse, questBranch } from "quest/core";
 import { encodePath } from "../board/model";
 import { GitHubError, type Enrollment, GitHubService, NotMaintainer } from "../github/service";
 import { type Activity, type ProjectState, readState } from "../github/state";
@@ -64,9 +64,9 @@ function kindOf(target: string): Kind {
 	return target === "devshell" ? "devshell" : "quest";
 }
 
-/** A quest's page on the project's board: its path without `.md`, or its epic's directory. */
+/** A quest's page on the project's board: its branch name, so an epic's ends in `/README`. */
 export function questHref(project: Enrollment, path: string) {
-	return `${projectURL(project.owner, project.name)}/board/${encodePath(path.replace(/(\/README)?\.md$/, ""))}`;
+	return `${projectURL(project.owner, project.name)}/board/${encodePath(questBranch(path))}`;
 }
 
 export type Entity = Pick<Item, "kind" | "title" | "href" | "activity" | "version" | "at">;

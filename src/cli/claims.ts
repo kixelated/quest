@@ -16,11 +16,6 @@ import {
 /** The heading that hands a draft back to the maintainer; only its presence matters. */
 const HAND_BACK = /^#{2}[ \t]+Decisions needed[ \t]*#*[ \t]*$/im;
 
-/** A quest's branch: its path without `.md`. */
-export function questBranch(path: string): string {
-	return path.replace(/\.md$/, "");
-}
-
 /** An open PR, from any head repository, as the claim checks read it. */
 export interface OpenPull {
 	number: number;

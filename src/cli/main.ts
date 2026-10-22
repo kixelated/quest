@@ -14,11 +14,12 @@ import {
 	formatFinding,
 	label,
 	lookup,
+	questBranch,
 	renderBlocker,
 	unblocked,
 } from "../core";
 import { AgentInputError, HARNESSES, type Launch, processDependencies, runAgent, stopAgent, stopAll } from "./agent";
-import { claims, questBranch } from "./claims";
+import { claims } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest } from "./github";
 import { landed } from "./landed";
