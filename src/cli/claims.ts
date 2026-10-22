@@ -1,18 +1,21 @@
-// Who holds a quest: its claim branch upstream, or an open PR from a branch of
-// that name in any repository. Commands that must not disturb held work look
-// here first, and `quest start` records a claim the same way.
+// Who holds a quest: its claim branch upstream, unless that branch is a merged
+// PR's head, or an open PR from a branch of that name in any repository.
+// Commands that must not disturb held work look here first, and `quest start`
+// records a claim the same way, judging readiness by the upstream tree.
 import { execFileSync } from "node:child_process";
 
 import { handedBack } from "../core";
 import {
 	type GitHubDependencies,
+	type ObjectValue,
 	type Repository,
 	GitHub,
-	githubRepository,
 	object,
+	remoteRepository,
 	remoteUrl,
 	string,
 } from "./github";
+import { type Snapshot, snapshot } from "./tree";
 
 /** A quest's branch: its path without `.md`. */
 export function questBranch(path: string): string {
@@ -68,29 +71,31 @@ export interface Upstream {
 /**
  * The upstream of `remote`. A GitHub repository that is a fork resolves to its
  * parent, reached with the same URL scheme as the remote; anything else is
- * its own upstream with no GitHub side.
+ * its own upstream with no GitHub side. The head repository is where the
+ * remote pushes, which may be a fork even when it fetches from upstream.
  */
 export async function upstream(root: string, remote: string, deps: ClaimDependencies): Promise<Upstream> {
-	// The configured URL first, so a URL rewrite (`insteadOf`) still names the GitHub repository.
-	const configured = gitOutput(root, ["config", "--get", `remote.${remote}.url`]);
-	const source = githubRepository(configured) ? configured : remoteUrl(root, remote);
-	const named = githubRepository(source);
+	const source = remoteRepository(root, remote);
 	const push = gitOutput(root, ["remote", "get-url", "--push", remote]);
-	if (named === null) return { git: remote, push, github: null };
+	if (source.repository === null) return { git: remote, push, github: null };
 
 	const client = new GitHub(deps.github());
-	const info = object(await (await client.request(repositoryPath(named))).json());
-	const self = { owner: string(object(info.owner).login), repo: string(info.name) };
-	if (info.fork === true && info.parent !== undefined && info.parent !== null) {
-		const parent = object(info.parent);
+	const info = await repositoryInfo(client, source.repository);
+	const self = info.repository;
+	// Push somewhere other than the fetched repository, such as a fork, and that is the head; a push
+	// URL off GitHub can open no PR, so it falls back to the fetched repository.
+	const pushed = remoteRepository(root, remote, true).repository;
+	const head = pushed === null || same(pushed, self) ? self : (await repositoryInfo(client, pushed)).repository;
+	if (info.parent !== null) {
+		const parent = info.parent;
 		return {
 			// Reach the parent the way the remote is reached, so the same credentials work.
-			git: string(/^https:/.test(source) ? parent.clone_url : parent.ssh_url),
+			git: string(/^https:/.test(source.url) ? parent.clone_url : parent.ssh_url),
 			push,
 			github: {
 				client,
 				repository: { owner: string(object(parent.owner).login), repo: string(parent.name) },
-				head: self,
+				head,
 				defaultBranch: string(parent.default_branch),
 			},
 		};
@@ -98,8 +103,26 @@ export async function upstream(root: string, remote: string, deps: ClaimDependen
 	return {
 		git: remote,
 		push,
-		github: { client, repository: self, head: self, defaultBranch: string(info.default_branch) },
+		github: { client, repository: self, head, defaultBranch: info.defaultBranch },
 	};
+}
+
+/** A repository as GitHub names it, its default branch, and its parent when it is a fork. */
+async function repositoryInfo(
+	client: GitHub,
+	named: Repository,
+): Promise<{ repository: Repository; defaultBranch: string; parent: ObjectValue | null }> {
+	const info = object(await (await client.request(repositoryPath(named))).json());
+	return {
+		repository: { owner: string(object(info.owner).login), repo: string(info.name) },
+		defaultBranch: string(info.default_branch),
+		parent: info.fork === true && info.parent !== undefined && info.parent !== null ? object(info.parent) : null,
+	};
+}
+
+/** Whether two names are the same repository; GitHub ignores case. */
+function same(a: Repository, b: Repository): boolean {
+	return a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
 }
 
 /** The REST path of a repository. */
@@ -153,38 +176,126 @@ export async function claims(
 	branches: string[],
 	deps: ClaimDependencies,
 ): Promise<Claim[]> {
+	const up = await reach(root, remote, deps);
+	return up === null ? [] : (await held(root, up, branches)).claims;
+}
+
+/**
+ * The upstream of `remote` for reading claims, warning when off GitHub that
+ * only branches count. Without the remote it warns and returns `null`.
+ */
+export async function reach(root: string, remote: string, deps: ClaimDependencies): Promise<Upstream | null> {
 	try {
 		remoteUrl(root, remote);
 	} catch {
 		deps.warn(`no ${remote} remote, so claims were not checked`);
-		return [];
+		return null;
 	}
 	const up = await upstream(root, remote, deps);
 	if (up.github === null) deps.warn(`${remote} is not on GitHub, so only its branches were checked for claims`);
-	return held(root, up, branches);
+	return up;
+}
+
+/** Which branches someone holds, and which landed branches a new claim replaces. */
+export interface Holdings {
+	/** Sorted by branch. */
+	claims: Claim[];
+	/**
+	 * Branches where the remote pushes whose tip is the head of a merged PR,
+	 * by that tip. Their work landed, so they hold nothing and a claim may replace them.
+	 */
+	landed: Map<string, string>;
 }
 
 /**
- * Which of `branches` someone holds, sorted by branch. A fork's own branches
- * and PRs count too, so a claim pushed there is seen before its PR opens.
+ * Which of `branches` someone holds. A fork's own branches and PRs count too,
+ * so a claim pushed there is seen before its PR opens. On GitHub, a branch
+ * whose tip is a merged PR's head holds nothing: its work landed. A closed,
+ * unmerged PR's branch still holds its quest, since that work may be wanted back.
  */
-export async function held(root: string, up: Upstream, branches: string[]): Promise<Claim[]> {
-	const pushed = new Set(remoteBranches(root, up.git).keys());
+export async function held(root: string, up: Upstream, branches: string[]): Promise<Holdings> {
+	// Where claim branches live: upstream, then the fork the remote pushes to.
+	const sources: { repository: Repository | null; tips: Map<string, string> }[] = [
+		{ repository: up.github?.repository ?? null, tips: remoteBranches(root, up.git) },
+	];
 	const pulls: OpenPull[] = [];
 	if (up.github) {
 		pulls.push(...(await openPullRequests(up.github.client, up.github.repository)));
 		const { head, repository } = up.github;
 		if (head.owner !== repository.owner || head.repo !== repository.repo) {
-			for (const branch of remoteBranches(root, up.push).keys()) pushed.add(branch);
+			sources.push({ repository: head, tips: remoteBranches(root, up.push) });
 			pulls.push(...(await openPullRequests(up.github.client, head)));
 		}
 	}
-	const result: Claim[] = [];
-	for (const branch of [...new Set(branches)].sort()) {
+	const pushTo = sources[sources.length - 1];
+	const landed = new Map<string, string>();
+	const holds = async (branch: string): Promise<Claim | null> => {
 		const pull = pullsFrom(pulls, branch)[0] ?? null;
-		if (pull !== null || pushed.has(branch)) result.push({ branch, url: pull?.url ?? null, pull });
+		if (pull !== null) return { branch, url: pull.url, pull };
+		let holding = false;
+		for (const source of sources) {
+			const tip = source.tips.get(branch);
+			if (tip === undefined) continue;
+			if (
+				up.github &&
+				source.repository &&
+				(await merged(up.github.client, up.github.repository, source.repository, branch, tip))
+			) {
+				if (source === pushTo) landed.set(branch, tip);
+			} else {
+				holding = true;
+			}
+		}
+		return holding ? { branch, url: null, pull: null } : null;
+	};
+	const found = await Promise.all([...new Set(branches)].sort().map(holds));
+	return { claims: found.filter((claim): claim is Claim => claim !== null), landed };
+}
+
+/** Whether `tip` is the head of a PR from `head`'s `branch` that merged into `repository`. */
+async function merged(
+	github: GitHub,
+	repository: Repository,
+	head: Repository,
+	branch: string,
+	tip: string,
+): Promise<boolean> {
+	const query = new URLSearchParams({ state: "closed", head: `${head.owner}:${branch}`, per_page: "100" });
+	const rows = await github.all(`${repositoryPath(repository)}/pulls?${query}`);
+	return rows.some((row) => typeof row.merged_at === "string" && object(row.head).sha === tip);
+}
+
+/** Where a claim lands: the remote, its upstream, and the upstream default branch's tip and quest tree. */
+export interface Target {
+	remote: string;
+	up: Upstream;
+	/** The upstream default branch's tip, fetched. */
+	base: string;
+	tree: Snapshot;
+}
+
+/** The target for claims pushed to `remote`, read from the fetched upstream default branch. */
+export async function target(root: string, remote: string, deps: ClaimDependencies): Promise<Target> {
+	const up = await upstream(root, remote, deps);
+	const base = upstreamHead(root, up.git);
+	return { remote, up, base, tree: snapshot(root, base) };
+}
+
+/** The tip of `remote`'s default branch (a name or URL), fetched so it can be read and built on. */
+export function upstreamHead(root: string, remote: string): string {
+	const sha = gitOutput(root, ["ls-remote", remote, "HEAD"]).split("\t")[0];
+	if (!sha) throw new Error(`${remote} has no default branch`);
+	ensure(root, remote, sha);
+	return sha;
+}
+
+/** Make `sha` from `remote` available locally. */
+export function ensure(root: string, remote: string, sha: string): void {
+	try {
+		gitOutput(root, ["cat-file", "-e", `${sha}^{commit}`]);
+	} catch {
+		gitOutput(root, ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", remote, sha]);
 	}
-	return result;
 }
 
 /** Run git in `root` and return its trimmed stdout; an unset config key is empty rather than an error. */

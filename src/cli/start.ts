@@ -7,7 +7,9 @@ import { randomBytes } from "node:crypto";
 import {
 	type ClaimDependencies,
 	type OpenPull,
+	type Target,
 	type Upstream,
+	ensure,
 	gitOutput,
 	held,
 	openPullRequests,
@@ -16,6 +18,7 @@ import {
 	questBranch,
 	repositoryPath,
 	upstream,
+	upstreamHead,
 } from "./claims";
 import { object, string } from "./github";
 
@@ -30,25 +33,28 @@ export interface Started {
 	url: string | null;
 }
 
-/** Claim `path`, a ready quest, on `remote`. Throws `Refusal` when someone else holds it. */
+/** The refusal for a quest the upstream default branch lacks: finished upstream, or not merged yet. */
+export function notUpstream(path: string): Refusal {
+	return new Refusal(`${path} is not on the upstream default branch; update your checkout`);
+}
+
+/**
+ * Claim `path`, a quest ready in the target's upstream tree. Throws `Refusal`
+ * when someone else holds it or the upstream tree lacks it. A branch left by
+ * a merged PR holds nothing, so the claim replaces it with a lease on its tip.
+ */
 export async function startQuest(
 	root: string,
+	{ remote, up, base, tree }: Target,
 	path: string,
 	title: string,
-	remote: string,
 	deps: ClaimDependencies,
 ): Promise<Started> {
 	const branch = questBranch(path);
-	const up = await upstream(root, remote, deps);
-	const [claim] = await held(root, up, [branch]);
+	if (!tree.docs.some((doc) => doc.path === path)) throw notUpstream(path);
+	const { claims, landed } = await held(root, up, [branch]);
+	const [claim] = claims;
 	if (claim) throw new Refusal(`${path} is held by ${describe(claim.branch, claim.pull, Date.now())}`);
-
-	// Build the claim on the upstream default branch, which must still have the quest.
-	const base = remoteHead(root, up.git);
-	const prefix = gitOutput(root, ["rev-parse", "--show-prefix"]);
-	if (!succeeds(root, ["cat-file", "-e", `${base}:${prefix}${path}`])) {
-		throw new Refusal(`${path} is not on the upstream default branch; update your checkout`);
-	}
 	// A nonce keeps two claimers on the same base, identity, and second from building the same commit.
 	const nonce = randomBytes(8).toString("hex");
 	const sha = gitOutput(root, [
@@ -61,7 +67,13 @@ export async function startQuest(
 		"-m",
 		`Quest-Claim: ${nonce}`,
 	]);
-	push(root, remote, [`${sha}:refs/heads/${branch}`], `someone pushed ${branch} first`);
+	// The lease expects the landed tip, or no branch at all.
+	push(
+		root,
+		remote,
+		[`--force-with-lease=refs/heads/${branch}:${landed.get(branch) ?? ""}`, `${sha}:refs/heads/${branch}`],
+		`someone pushed ${branch} first`,
+	);
 
 	let url: string | null = null;
 	if (up.github === null) {
@@ -175,7 +187,7 @@ export async function releaseQuest(
 	const tip = remoteBranches(root, up.push).get(branch);
 	if (!tip) throw new Error(`${remote} has no branch ${branch} to release`);
 	ensure(root, up.push, tip);
-	const base = remoteHead(root, up.git);
+	const base = upstreamHead(root, up.git);
 	const parents = gitOutput(root, ["rev-list", "--parents", "-n", "1", tip]).split(" ").slice(1);
 	// Only the claim itself: one empty commit straight on the default branch, not one following pushed work.
 	const claim =
@@ -229,21 +241,6 @@ async function close(up: Upstream, number: number): Promise<void> {
 	});
 }
 
-/** The upstream default branch's tip, fetched so a commit can build on it. */
-function remoteHead(root: string, remote: string): string {
-	const sha = gitOutput(root, ["ls-remote", remote, "HEAD"]).split("\t")[0];
-	if (!sha) throw new Error(`${remote} has no default branch to build a claim on`);
-	ensure(root, remote, sha);
-	return sha;
-}
-
-/** Make `sha` from `remote` available locally. */
-function ensure(root: string, remote: string, sha: string): void {
-	if (!succeeds(root, ["cat-file", "-e", `${sha}^{commit}`])) {
-		gitOutput(root, ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", remote, sha]);
-	}
-}
-
 /** Delete `branch` on `remote` only while its tip is still `sha`. */
 function deleteBranch(root: string, remote: string, branch: string, sha: string): void {
 	push(
@@ -255,7 +252,7 @@ function deleteBranch(root: string, remote: string, branch: string, sha: string)
 }
 
 /**
- * Push without forcing. A rejection, which means the remote ref is not what
+ * Push, forcing only where a lease in `args` allows. A rejection, which means the remote ref is not what
  * this push expects, is a `Refusal` with `rejected`; anything else fails.
  */
 function push(root: string, remote: string, args: string[], rejected: string): void {
