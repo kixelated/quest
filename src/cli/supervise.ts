@@ -51,6 +51,8 @@ export interface Scopes {
 	check(): void;
 	/** Whether any process may still run in the scope. */
 	live(unit: string): boolean;
+	/** Kill every process left in the scope and resolve once it is empty, including when it is already gone. */
+	stop(unit: string): Promise<void>;
 	/**
 	 * Run a command in a new scope with inherited streams, then stop its remaining descendants.
 	 * Resolves with the command's exit status only once the scope is empty. Rejects with `Retained`
@@ -144,19 +146,32 @@ export function kill(group: string): void {
 	}
 }
 
+/** The scope's cgroup directory, or undefined once systemd no longer knows the unit. */
+function scopeGroup(unit: string): string | undefined {
+	const group = execFileSync("systemctl", ["--user", "show", "--property=ControlGroup", "--value", unit], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	}).trim();
+	if (!group) return undefined;
+	if (!group.endsWith(`/${unit}`)) throw new Error(`unexpected cgroup for ${unit}: ${group}`);
+	return join("/sys/fs/cgroup", group);
+}
+
 export const systemdScopes: Scopes = {
 	check() {
 		if (process.platform !== "linux" || !killable()) throw new Error(UNSUPPORTED);
 	},
 
 	live(unit) {
-		const group = execFileSync("systemctl", ["--user", "show", "--property=ControlGroup", "--value", unit], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		if (!group) return false;
-		if (!group.endsWith(`/${unit}`)) throw new Error(`unexpected cgroup for ${unit}: ${group}`);
-		return populated(join("/sys/fs/cgroup", group));
+		const group = scopeGroup(unit);
+		return group !== undefined && populated(group);
+	},
+
+	async stop(unit) {
+		const group = scopeGroup(unit);
+		if (group === undefined) return;
+		kill(group);
+		await vacated(group);
 	},
 
 	run(unit, cwd, command) {

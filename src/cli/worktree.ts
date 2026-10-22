@@ -1,5 +1,5 @@
 // Git checkouts under a shared disk budget. Release prunes declared scratch in place, by hand or
-// once the last supervised run in the checkout stops.
+// once the last supervised run in the checkout stops. Remove deletes a checkout that holds no unpreserved work.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -27,6 +27,8 @@ import { type Owner, Retained, type Scopes, alive, currentOwner, systemdScopes }
 export interface Run {
 	unit: string;
 	owner: Owner;
+	/** Why the run is kept although it may have stopped; cleared once its scope is inspected again. */
+	failure?: string;
 }
 export interface WorktreeRecord {
 	id: string;
@@ -64,6 +66,9 @@ export function save(path: string, value: unknown): void {
 }
 function code(error: unknown): string | undefined {
 	return (error as NodeJS.ErrnoException).code;
+}
+function message(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 /** The entry itself, without following a final symlink; undefined when it is missing. */
 function entry(path: string): Stats | undefined {
@@ -159,6 +164,38 @@ function lockReason(path: string): string | undefined {
 		throw error;
 	}
 }
+
+function interrupted(record: WorktreeRecord): void {
+	if (record.phase === "creating")
+		throw new Error(
+			`creation was interrupted; inspect and remove the partial checkout with git worktree remove, then release again: ${record.path}`,
+		);
+}
+
+/** Git status entries, plus ignored paths (collapsed to their directories) when `ignored` is set. */
+function changes(root: string, ignored: boolean): string[] {
+	const args = ["status", "--porcelain=v1", "-z", "--untracked-files=normal", ...(ignored ? ["--ignored"] : [])];
+	return git(root, ...args)
+		.split("\0")
+		.filter(Boolean);
+}
+function clean(root: string): void {
+	const found = changes(root, false);
+	if (found.length) throw new Error(`checkout has modified or untracked files: ${found.slice(0, 20).join(", ")}`);
+}
+
+/**
+ * HEAD and the refs removal deletes with the checkout, such as `refs/bisect/*`, that no branch or
+ * remote-tracking ref reaches.
+ */
+function unreached(root: string): string[] {
+	const own = git(root, "for-each-ref", "--format=%(objectname)", "refs/worktree", "refs/bisect", "refs/rewritten");
+	const tips = new Set([git(root, "rev-parse", "HEAD").trim(), ...own.split("\n").filter(Boolean)]);
+	return [...tips].filter((tip) => git(root, "rev-list", "-n1", tip, "--not", "--branches", "--remotes").trim());
+}
+
+/** Whether the forge merged a change, such as a squash-merged PR, whose head is exactly `commit`. */
+export type Merged = (repository: string, commit: string) => Promise<boolean>;
 
 /** Allocated blocks, including ignored build output; symlinks are never traversed and hard links count once. */
 export function diskUsage(path: string, seen = new Set<string>()): number {
@@ -291,12 +328,14 @@ export class Worktrees {
 		return record;
 	}
 	/** Unknown counts as running, so scratch is never deleted under a process that may use it. */
-	private running(record: WorktreeRecord, run: Run): boolean {
+	private running(run: Run): boolean {
 		if (alive(run.owner)) return true;
 		try {
-			return this.scopes.live(run.unit);
+			const live = this.scopes.live(run.unit);
+			delete run.failure;
+			return live;
 		} catch (error) {
-			record.failure = `cannot inspect supervised run ${run.unit}: ${error instanceof Error ? error.message : error}`;
+			run.failure = `cannot inspect supervised run ${run.unit}: ${message(error)}`;
 			return true;
 		}
 	}
@@ -304,9 +343,15 @@ export class Worktrees {
 	private reconcile(registry: Registry): void {
 		for (const record of [...registry.records]) {
 			if (!record.runs.length) continue;
-			record.runs = record.runs.filter((run) => this.running(record, run));
+			record.runs = record.runs.filter((run) => this.running(run));
 			if (!record.runs.length) this.settle(registry, record);
 		}
+	}
+	private idle(record: WorktreeRecord): void {
+		if (record.runs.length)
+			throw new Error(
+				`supervised runs are live in this checkout: ${record.runs.map((run) => run.unit).join(", ")}`,
+			);
 	}
 	/** Releases a checkout whose last run stopped, keeping it charged and noting why on failure. */
 	private settle(registry: Registry, record: WorktreeRecord): void {
@@ -314,7 +359,7 @@ export class Worktrees {
 			this.prune(registry, record);
 			delete record.failure;
 		} catch (error) {
-			record.failure = `release failed; the checkout stays reserved: ${error instanceof Error ? error.message : error}`;
+			record.failure = `release failed; the checkout stays reserved: ${message(error)}`;
 		}
 	}
 	/**
@@ -432,10 +477,7 @@ export class Worktrees {
 			registry.records.splice(registry.records.indexOf(record), 1);
 			return;
 		}
-		if (record.phase === "creating")
-			throw new Error(
-				`creation was interrupted; inspect and remove the partial checkout with git worktree remove, then release again: ${record.path}`,
-			);
+		interrupted(record);
 		const root = canonical(record.path);
 		const paths = record.scratch.filter((path) => present(root, path)); // Reruns skip pruned paths.
 		const admin = entry(join(root, ".git"));
@@ -477,12 +519,88 @@ export class Worktrees {
 	release(id: string): WorktreeRecord {
 		return this.locked((registry) => {
 			const record = this.find(registry, id);
-			if (record.runs.length)
-				throw new Error(
-					`supervised runs are live in this checkout: ${record.runs.map((run) => run.unit).join(", ")}`,
-				);
+			this.idle(record);
 			this.prune(registry, record);
 			delete record.failure;
+			return record;
+		});
+	}
+	/**
+	 * Deletes a finished checkout and drops its record, never forcing. Refuses while supervised runs
+	 * are live, and refuses a checkout holding modified, untracked, or ignored files beyond its
+	 * declared scratch, or a commit no branch or remote-tracking ref reaches. Such a commit counts as
+	 * preserved only when `merged` reports a merged change whose head is exactly that commit.
+	 */
+	async remove(id: string, merged: Merged = async () => false): Promise<WorktreeRecord> {
+		// The forge is asked outside the lock; the locked pass below inspects the checkout again.
+		const pending = this.locked((registry) => {
+			const record = this.find(registry, id);
+			this.idle(record);
+			if (!this.owned(record)) return [];
+			interrupted(record);
+			const root = canonical(record.path);
+			clean(root);
+			return unreached(root).map((commit) => ({ repository: record.repository, commit }));
+		});
+		const landed = new Set<string>();
+		for (const { repository, commit } of pending) if (await merged(repository, commit)) landed.add(commit);
+		return this.locked((registry) => {
+			const record = this.find(registry, id);
+			this.idle(record);
+			const drop = () => registry.records.splice(registry.records.indexOf(record), 1);
+			if (!this.owned(record)) {
+				drop();
+				return record;
+			}
+			interrupted(record);
+			const root = canonical(record.path);
+			clean(root);
+			const kept = unreached(root).filter((commit) => !landed.has(commit));
+			if (kept.length)
+				throw new Error(
+					`commits that no branch or remote-tracking ref reaches, and no merged change has as its head: ${kept.join(", ")}`,
+				);
+			this.prune(registry, record);
+			const left = changes(root, true);
+			if (left.length)
+				throw new Error(
+					`ignored files outside the declared scratch remain, so the checkout was only released: ${left.slice(0, 20).join(", ")}`,
+				);
+			const reason = `quest worktree ${record.id}`;
+			git(record.repository, "worktree", "unlock", record.path);
+			try {
+				git(record.repository, "worktree", "remove", record.path);
+			} catch (error) {
+				try {
+					git(record.repository, "worktree", "lock", "--reason", reason, record.path);
+				} catch (relock) {
+					throw new Error(`${message(error)}; locking the checkout again failed: ${message(relock)}`);
+				}
+				throw error;
+			}
+			drop();
+			return record;
+		});
+	}
+	/**
+	 * Ends the processes a crashed supervisor left in this checkout's scopes; reconciliation then
+	 * releases the checkout once no run remains. Runs whose supervisor is alive are left to it, and
+	 * reported as a failure once the crashed ones are stopped.
+	 */
+	async stop(id: string): Promise<WorktreeRecord> {
+		const orphans = this.locked((registry) =>
+			this.find(registry, id)
+				.runs.filter((run) => !alive(run.owner))
+				.map((run) => run.unit),
+		);
+		for (const unit of orphans) await this.scopes.stop(unit);
+		return this.lockedWait((registry) => {
+			const record = this.find(registry, id);
+			const supervised = record.runs.filter((run) => alive(run.owner));
+			if (supervised.length)
+				throw new Error(
+					`runs whose supervisor is alive are left to it; signal it instead: ${supervised.map((run) => `${run.unit} (process ${run.owner.pid} on ${run.owner.host})`).join(", ")}`,
+				);
 			return record;
 		});
 	}
@@ -525,7 +643,9 @@ export class Worktrees {
 			const current = registry.records.find((item) => item.id === record.id);
 			if (!current) return undefined;
 			// Reconciliation drops a retained run once this process exits and its scope is empty.
-			if ("error" in result && result.error instanceof Retained) current.failure = result.error.message;
+			const retained = current.runs.find((item) => item.unit === run.unit);
+			if (retained && "error" in result && result.error instanceof Retained)
+				retained.failure = result.error.message;
 			else current.runs = current.runs.filter((item) => item.unit !== run.unit);
 			// A command that never started, such as on a host without a user manager, keeps its scratch.
 			if (!current.runs.length && "code" in result) this.settle(registry, current);

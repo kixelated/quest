@@ -17,7 +17,7 @@ Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.
 Interactively prompt the user with your recommendation and any alternatives.
-This includes deciding if we should `/quest-plan` for suggested follow-ups.
+Suggested follow-ups do not hold the merge; once the PR merges, offer `/quest-plan` for them.
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead.
 
