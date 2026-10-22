@@ -2,7 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
-import { refusal, validPath } from "../src/jobs/publish";
+import { refusal, restart, validPath } from "../src/jobs/publish";
 import * as store from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
@@ -13,6 +13,7 @@ const revision = "a".repeat(40);
 const prHead = "b".repeat(40);
 const user = "publisher";
 const githubUser = 7171;
+const upstream = { owner: "upstream", name: "project", id: 10 };
 
 type Request = { method: string; path: string; body: any; token: string | null };
 type Commit = { parents: string[]; tree: string; message: string };
@@ -125,7 +126,8 @@ function fakeGitHub() {
 		if (ref && method === "PATCH") {
 			const key = `${repo}:${decodeURIComponent(ref)}`;
 			const current = refs.get(key);
-			if (!current || body.force || !ancestor(current, body.sha))
+			if (!current) return json({ message: "Reference does not exist" }, 422);
+			if (!body.force && !ancestor(current, body.sha))
 				return json({ message: "Update is not a fast forward" }, 422);
 			refs.set(key, body.sha);
 			if (fake.loseMove) {
@@ -677,7 +679,86 @@ describe("runner publication", () => {
 		expect((await job(id)).questions[0]!.prompt).toEqual({
 			type: "publication",
 			blocked: expect.stringContaining("already has the branch quest/first"),
+			restart: true,
 		});
+	});
+
+	it("starts over from the job's revision, resetting its fork branch and adopting its open pull request", async () => {
+		const id = await running();
+		const { head } = (await (
+			await publish({
+				job: id,
+				attempt: 1,
+				head: null,
+				message: "one",
+				changes: [file("a", "1")],
+				pull: { title: "T", body: "B" },
+			})
+		).json()) as { head: string };
+		github.refs.set("quest-bot-forks/project:quest/first", prHead);
+		const blocked = await publish({
+			job: id,
+			attempt: 1,
+			head,
+			session: "s",
+			message: "two",
+			changes: [file("a", "2")],
+		});
+		expect(blocked.status).toBe(202);
+		const waiting = await job(id);
+		const question = waiting.questions[0]!.id;
+
+		const created = await restart(testEnv, user, upstream, waiting, question);
+		expect(github.refs.get("quest-bot-forks/project:quest/first")).toBe(revision);
+		expect((await job(id)).state).toBe("cancelled");
+		expect((await job(id)).questions[0]!.answer).toEqual(store.RESTART);
+		expect(await job(created)).toMatchObject({ state: "queued", head: revision, pull: null, continues: null });
+		await expect(restart(testEnv, user, upstream, await job(id), question)).rejects.toThrow("can start over");
+
+		// The new job publishes on the reset branch and keeps the pull request, still open.
+		await store.dispatch(db, user, new Map([[machine.id, 1]]), 1000);
+		const response = await publish({
+			job: created,
+			attempt: 1,
+			head: revision,
+			message: "again",
+			changes: [file("a", "3")],
+			pull: { title: "T", body: "B" },
+		});
+		expect(response.status).toBe(200);
+		const next = (await response.json()) as { head: string; pull: { number: number } };
+		expect(github.commits.get(next.head)!.parents).toEqual([revision]);
+		expect(next.pull.number).toBe(100);
+		expect(github.pulls).toHaveLength(1);
+	});
+
+	it("never offers to start over an iterated pull request's head", async () => {
+		const id = await running({
+			workflow: "iterate",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		github.refs.set("upstream/project:contributor/fix", revision);
+		const blocked = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			session: "s",
+			message: "m",
+			changes: [file("a", "1")],
+		});
+		expect(blocked.status).toBe(202);
+		const waiting = await job(id);
+		expect(waiting.questions[0]!.prompt).toEqual({
+			type: "publication",
+			blocked: "The branch contributor/fix changed outside this job.",
+		});
+		await expect(restart(testEnv, user, upstream, waiting, waiting.questions[0]!.id)).rejects.toThrow(
+			"can start over",
+		);
+		expect(github.refs.get("upstream/project:contributor/fix")).toBe(revision);
 	});
 
 	it("reconciles an interrupted delivery with the pull request it already opened", async () => {
@@ -818,6 +899,61 @@ describe("runner publication", () => {
 		const body: string = github.pulls[0].body;
 		expect(body).toContain("### Round 1\n\n- ` First? `\n  - ✅ ` A `");
 		expect(body).toContain("### Round 2\n\n- ` Second? `\n  - ✅ ` B `");
+	});
+
+	it("keeps the decisions of every failed job a retry continues, even one that opened no pull request", async () => {
+		const target = { workflow: "plan" as const, target: "issues/1", branch: "plan/issue-1" };
+		const decide = async (id: string, question: string, choice: string) => {
+			const prompt = { kind: "decision", questions: [{ question, options: [{ label: choice }] }] };
+			const asked = await store.ask(db, machine, id, 1, { summary: "?", session: "s", prompt }, 1);
+			await store.answer(db, id, asked.question, user, { answers: [{ choices: [choice] }] }, 1);
+			await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+		};
+		const changes = [file("quest/a.md", "# A\n")];
+		// The first job pushes commits but fails before opening a pull request.
+		const first = await running(target);
+		await decide(first, "First?", "A");
+		const pushed = await publish({ job: first, attempt: 2, head: null, message: "m", changes });
+		const { head } = (await pushed.json()) as { head: string };
+		await store.finish(db, machine, first, 2, { outcome: "failed", summary: "Failed", result: undefined }, 2);
+		// So does its retry, which publishes nothing.
+		const second = await running(target, 1000);
+		expect(await job(second)).toMatchObject({ continues: first, head, pull: null });
+		await decide(second, "Second?", "B");
+		await store.finish(db, machine, second, 2, { outcome: "failed", summary: "Failed", result: undefined }, 2);
+
+		const third = await running(target, 2000);
+		expect((await job(third)).continues).toBe(second);
+		const response = await publish({ job: third, attempt: 1, head, pull: { title: "Plan", body: "Plan" } });
+		expect(response.status).toBe(200);
+		const body: string = github.pulls[0].body;
+		expect(body).toContain("### Round 1\n\n- ` First? `\n  - ✅ ` A `");
+		expect(body).toContain("### Round 2\n\n- ` Second? `\n  - ✅ ` B `");
+		// A new job on the target after one that did not fail continues nothing.
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(third).run();
+		expect((await job(await running(target, 3000))).continues).toBeNull();
+	});
+
+	it("adopts the open pull request a failed job opened without recording it", async () => {
+		const failed = await running();
+		const { head } = (await (
+			await publish({
+				job: failed,
+				attempt: 1,
+				head: null,
+				message: "one",
+				changes: [file("a", "1")],
+				pull: { title: "T", body: "B" },
+			})
+		).json()) as { head: string };
+		await db.prepare("UPDATE jobs SET pull=NULL WHERE id=?").bind(failed).run();
+		await fail(failed);
+		const id = await running({}, 5000);
+		github.now = 6000;
+		const response = await publish({ job: id, attempt: 1, head, pull: { title: "T", body: "B2" } });
+		expect(await response.json()).toMatchObject({ pull: { number: 100 } });
+		expect(github.pulls).toHaveLength(1);
+		expect((await job(id)).pull).toBe(100);
 	});
 
 	it("starts a retried job fresh when its failed job published nothing", async () => {

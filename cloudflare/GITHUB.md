@@ -94,7 +94,12 @@ and moves one branch. Before writing anything it checks, in order:
 - The branch is where the job left it: absent before the first publication,
   then the last commit kix published. A `head` that differs gets a reply naming
   the commit to continue from. A branch changed outside the job, or one that
-  earlier work left on the fork, becomes a decision; it is never overwritten.
+  earlier work left on the fork, becomes a decision; publication never
+  overwrites it. On a service fork branch, the decision also offers to start
+  over: at the maintainer's request (`restart: true` in place of an `answer`,
+  after a live authority check), kix force-resets the branch to the job's
+  revision and replaces the job with a new one there, with a new agent session
+  and no recorded pull request. An iterated pull request's head is never reset.
 
 `plan`, `start`, and `bootstrap` jobs write their branch on the service fork
 `GITHUB_FORK_OWNER/<repository>`, whose immediate parent must be the upstream's
@@ -120,7 +125,10 @@ fenced-out attempt's write lands only if it passed the check before the
 reassignment, and the fast-forward check means it can never overwrite newer
 work. Delivery looks for the branch's open pull request before creating one,
 and reconciles a refused creation the same way, so a retry never opens a
-duplicate. A pull request the maintainer closed is not replaced.
+duplicate. Since the branch is verified to be where the job left it, its only
+open pull request is the job's, even one a failed job opened without recording
+it. A pull request opened since the job and then closed by the maintainer is
+not replaced.
 
 Planning pull requests are always drafts, as are those of jobs asked to stop.
 Other jobs set `draft`, which defaults to `true` while decisions or unfinished
@@ -131,8 +139,9 @@ branches. Pull requests use `maintainer_can_modify: false`, because an
 upstream-scoped token cannot grant edits on the fork branch.
 
 A planning pull request's body ends with a decision section the service
-writes from the job's answered `decision` questions, after those of a failed
-job whose pull request a retry continues (`src/jobs/trail.ts`): each round's
+writes from the job's answered `decision` questions, after those of each
+failed job it continues as a retry, whether or not that job opened the pull
+request (`src/jobs/trail.ts`): each round's
 questions, every option with ✅ on each choice, and the
 maintainer's own words. Permission requests and the service's `account` and
 `publication` questions stay out, since they can name runners and accounts.

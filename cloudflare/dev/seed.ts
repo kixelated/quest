@@ -32,8 +32,10 @@ export function world(): World {
 					"- [Getting started](/quest/m0/docs.md) - a first-run guide",
 					"- [Crash telemetry](/quest/m0/telemetry.md) - learn about crashes",
 					"- [ZIP export](/quest/m0/export.md) - take your data with you",
+					"- [ZIP import](/quest/m0/import.md) - bring your data back",
 				]),
 			},
+			{ path: "quest/m0/import.md", content: quest("[S] Import a project from a ZIP archive", "Restore it.") },
 			{ path: "quest/m0/landing.md", content: quest("[S] Build the landing page", "Explain the app.") },
 			{ path: "quest/m0/sign-in.md", content: quest("[M] Add passkey sign-in", "Sign in without a password.") },
 			{ path: "quest/m0/docs.md", content: quest("[XS] Write the getting-started guide", "A first-run guide.") },
@@ -111,7 +113,20 @@ export function world(): World {
 			},
 		],
 		claims: ["quest/m0/docs"],
+		// Changed outside its waiting job, which can start over.
+		fork: { "quest/m1/themes": "f".repeat(40) },
 	};
+	// kix opened this one for a job that then failed before recording it.
+	rocket.pulls.push({
+		number: 17,
+		title: "Import a project from a ZIP archive",
+		author: "quest-dev[bot]",
+		branch: "quest/m0/import",
+		fork: true,
+		checks: "PENDING",
+		review: null,
+		draft: true,
+	});
 	const archive: Repo = {
 		id: 9102,
 		owner: "example",
@@ -133,10 +148,12 @@ export function world(): World {
 		issues: [{ number: 1, title: "Archive the old site", author: "reporter" }],
 		pulls: [],
 		claims: [],
+		fork: {},
 	};
 	return {
 		app: { id: 123, slug: "quest-dev" },
 		installation: 9201,
+		forks: "quest-dev-forks",
 		users: [{ id: 9001, login: "dev-maintainer", name: "Dev Maintainer", email: "maintainer@example.test" }],
 		repos: [rocket, archive],
 	};
@@ -265,10 +282,12 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 		revision: string;
 		branch: string;
 		state: "queued" | "running" | "waiting" | "failed";
+		/** The commit the job last published to its branch. */
+		head?: string;
 		runner?: string;
 		account?: string;
 		summary?: string;
-		question?: { kind: "agent" | "account"; prompt: unknown };
+		question?: { kind: "agent" | "account" | "publication"; prompt: unknown };
 	};
 	const list: Job[] = [
 		{
@@ -363,6 +382,39 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			summary: "just test failed: two sign-in tests time out against the new redirect.",
 		},
 		{
+			id: "seed-start-import",
+			workflow: "start",
+			target: "quest/m0/import.md",
+			revision: commit,
+			branch: "quest/m0/import",
+			state: "failed",
+			// It opened pull request 17 at this commit, then failed before recording it.
+			head: head(17),
+			runner: "workstation",
+			account: "claude-max",
+			summary: "just check failed after the pull request opened: the importer skips empty folders.",
+		},
+		{
+			id: "seed-start-themes",
+			workflow: "start",
+			target: "quest/m1/themes.md",
+			revision: commit,
+			branch: "quest/m1/themes",
+			state: "waiting",
+			head: "e".repeat(40),
+			runner: "workstation",
+			account: "claude-max",
+			summary: "Added the theme picker; publishing it found the branch moved.",
+			question: {
+				kind: "publication",
+				prompt: {
+					type: "publication",
+					blocked: "The branch quest/m1/themes changed outside this job.",
+					restart: true,
+				},
+			},
+		},
+		{
 			id: "seed-plan-settings",
 			workflow: "plan",
 			target: "issues/7",
@@ -404,7 +456,7 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			return [
 				db
 					.prepare(
-						"INSERT INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,state,attempt,runner,account,delivered,summary,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+						"INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,state,attempt,runner,account,delivered,summary,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 					)
 					.bind(
 						job.id,
@@ -413,6 +465,7 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 						job.target,
 						job.revision,
 						job.branch,
+						job.head ?? null,
 						user,
 						job.workflow === "iterate" ? 0 : 1,
 						job.state,

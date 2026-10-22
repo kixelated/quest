@@ -267,6 +267,27 @@ export function startable(state: ProjectState, quest: string, retry: number | nu
 	);
 }
 
+/**
+ * The open pull request a retry of a failed job continues: the one the job
+ * recorded, or else the only open pull request observed on the job's branch
+ * at a commit the job published, which it opened without recording the
+ * number. Matching the commit, not only the branch name, keeps a
+ * contributor's pull request from a same-named branch a claim.
+ */
+export function continued(
+	state: ProjectState,
+	job: { branch: string; head: string | null; pending: string | null; pull: number | null },
+) {
+	if (job.pull !== null || state.open === null) return job.pull;
+	const open = new Set(state.open);
+	const published = [job.head, job.pending].filter((commit) => commit !== null);
+	const pulls = state.activity.filter((item) => {
+		const pull = item.kind === "pull" && !item.missing && open.has(item.id) ? (item.data as Pull | null) : null;
+		return pull?.state === "OPEN" && pull.headRefName === job.branch && published.includes(pull.headRefOid);
+	});
+	return pulls.length === 1 ? pulls[0]!.number : null;
+}
+
 export async function readState(db: D1Database, repo: GitHubRepository): Promise<ProjectState | null> {
 	const records = await db.batch([
 		db

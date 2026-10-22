@@ -1,4 +1,4 @@
-import { type Pull, startable } from "../github/state";
+import { type Pull, continued, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker, Notifications } from "../layout";
@@ -113,7 +113,8 @@ function History(props: { item: Item }) {
 					if (q.kind === "account") {
 						return <li>Chose an account to continue on.</li>;
 					}
-					if (q.kind === "publication") return <li>{typeof q.answer === "string" ? q.answer : ""}</li>;
+					if (q.kind === "publication")
+						return <li>{typeof q.answer === "string" ? q.answer : "Started over from the job's base."}</li>;
 					const prompt = parsed(q);
 					const replies = (q.answer as { answers?: { choices: string[]; text?: string }[] }).answers ?? [];
 					return (
@@ -184,17 +185,21 @@ function AgentForm(props: { item: Item; prompt: Prompt }) {
 
 /** A publication decision's prompt. kix wrote it, but its paths came from the runner. */
 function publication(question: QuestionView) {
-	const prompt = question.prompt as { refused?: unknown; blocked?: unknown } | null;
+	const prompt = question.prompt as { refused?: unknown; blocked?: unknown; restart?: unknown } | null;
 	return {
 		refused: Array.isArray(prompt?.refused) ? (prompt.refused as { path: string; reason: string }[]) : [],
 		blocked: typeof prompt?.blocked === "string" ? prompt.blocked : null,
+		restart: prompt?.restart === true,
 	};
 }
 
-/** Work kix would not publish as is; the maintainer's reply resumes the agent's session. */
+/**
+ * Work kix would not publish as is; the maintainer's reply resumes the
+ * agent's session. A branch that changed outside the job can instead start over.
+ */
 function PublicationForm(props: { item: Item }) {
 	const { item } = props;
-	const { refused, blocked } = publication(item.question!);
+	const { refused, blocked, restart } = publication(item.question!);
 	return (
 		<form method="post" action={`${jobsURL(item)}/${item.job!.id}/answer`} class="decision-form">
 			<input type="hidden" name="question" value={item.question!.id} />
@@ -216,6 +221,17 @@ function PublicationForm(props: { item: Item }) {
 				<textarea id="publication-text" name="text" rows={3} maxlength={PUBLICATION_REPLY} required />
 			</fieldset>
 			<button class="button primary">Send to the agent</button>
+			{restart && (
+				<>
+					<p class="note-small muted">
+						Or start over: kix resets <code>{item.job!.branch}</code> on its fork to the commit this job
+						started from, discarding the commits on it, and runs the job again with a new agent.
+					</p>
+					<button class="button quiet" name="restart" value="1" formnovalidate>
+						Start over
+					</button>
+				</>
+			)}
 		</form>
 	);
 }
@@ -273,7 +289,7 @@ function blocked(item: Item, view: ProjectView | undefined) {
 	if (!state?.project.available)
 		return `${failed || "GitHub reported changes. "}Refresh to start new work from current state.`;
 	// A retry continues its failed job's pull request, so that claim does not block it.
-	const retry = item.need === "retry" ? (item.job?.pull ?? null) : null;
+	const retry = item.need === "retry" && item.job ? continued(state, item.job) : null;
 	if (item.kind === "quest" && !startable(state, item.target, retry))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
