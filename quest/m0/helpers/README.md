@@ -57,7 +57,9 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Required
 
+- [Merge rules](/quest/m0/helpers/merge-rules.md) - squash merges only, and no merge with changes no review covered
 - [Complete loop](/quest/m0/helpers/complete-loop.md) - `/quest-complete` re-scans PRs, keeps picks and holds, and counts rounds per PR
+- [Status holds](/quest/m0/helpers/status-holds.md) - `quest status` shows a PR's `quest:*` hold
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 
 ## Related

@@ -110,6 +110,7 @@ fixes what it finds:
 
 ## Required
 
+- [Runner hardening](/quest/m0/kix/runner-hardening.md) - one runner per home, and `context` reads every review thread
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
@@ -119,5 +120,6 @@ fixes what it finds:
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
+- [Seeded GitHub fake](/quest/m0/kix/github-fake.md) - the local server runs publication end to end, and tests share its fake
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR
 - [Merged claims](/quest/m0/kix/merged-claims.md) - the board ignores branches whose pull request merged, as the CLI does

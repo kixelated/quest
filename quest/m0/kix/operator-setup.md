@@ -28,6 +28,11 @@ and a bounded test PR verify the integration before contributors are invited.
   background reconcile from
   [kixelated/quest#170](https://github.com/kixelated/quest/pull/170) only
   tests against the fake.
+- Check what GitHub does to an open pull request when "Start over" resets
+  its service-fork head branch to the base, which
+  [kixelated/quest#190](https://github.com/kixelated/quest/pull/190) handles
+  either way (adopt it if open, open a new one if closed) but tests only
+  against the fake. Added 2026-10-22 (user).
 - Rehearse on the operator's own runner and an explicitly selected
   operator account.
 - Record nonsecret setup/run instructions and deployment identifiers.

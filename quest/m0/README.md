@@ -35,7 +35,9 @@ ownership-manifest design:
 
 ## Required
 
-- [Lifecycle EBUSY](/quest/m0/lifecycle-ebusy.md) - the Windows lifecycle check stops failing at random while removing its temp directory
+- [Lifecycle flakes](/quest/m0/lifecycle-flakes.md) - lifecycle CI jobs stop failing on Windows `EBUSY` and unstarted macOS jobs
+- [Worker tests](/quest/m0/worker-tests.md) - every Worker test passes alone and in any order
+- [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
 
