@@ -38,17 +38,8 @@ the user's choice, since a new head needs fresh approval.
 Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.
 
-As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for its suggested follow-ups.
+As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for a PR's suggested follow-ups once it merges.
 Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
-
-## Unattended
-
-With an `afk` argument, the user has stepped away: your recommendation stands in for their pick of skip, `/quest-ready`, or `/quest-iterate`, so dispatch it without asking.
-It also answers each simple decision a sub-agent reports.
-Still ask about each `/quest-merge` and `/quest-delete` you recommend, as one simple question with your recommendation first.
-Skip a PR or reported decision that is not simple, noting why in the summary instead of asking.
-Hold suggested `/quest-plan` follow-ups for the summary, since planning is an interview.
-The rest of the argument still filters the PRs in scope.

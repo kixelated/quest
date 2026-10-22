@@ -18,11 +18,10 @@ Implement the quest until it is complete, or some blocker is hit, then push to i
 Never write to or clean up a directory other agents share, such as a session scratchpad.
 
 When done, explain the result in a few lines and summarize any issues encountered.
-Prompt the user interactively for any open decisions, including your recommendation.
-Record the outcome as a PR comment as a paper-trail.
+List choices you made without asking in the PR body rather than waiting on them.
 
-Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
+If the quest is complete and you see no decision left for the maintainer, run `/quest-ready` on it right away.
+Otherwise, prompt the user interactively for each open decision, including your recommendation, and record the outcome as a PR comment as a paper-trail.
+Once the quest is complete and the PR reflects the user's answers, run `/quest-ready` on it.
 
-Once the quest is complete and the user has settled every decision, including choices you made without asking, and the PR reflects them, run `/quest-ready` on it.
-
-A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, running `/quest-ready` only when the quest is complete and it has none.
+A background agent that cannot prompt lists its open decisions in its report instead, running `/quest-ready` only when the quest is complete and no decision is left for the maintainer.
