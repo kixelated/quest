@@ -14,11 +14,21 @@ import {
 	formatFinding,
 	label,
 	lookup,
+	questBranch,
 	renderBlocker,
 	unblocked,
 } from "../core";
 import { AgentInputError, HARNESSES, type Launch, processDependencies, runAgent, stopAgent, stopAll } from "./agent";
-import { held, questBranch, reach, target, upstream, upstreamHead } from "./claims";
+import {
+	DEFAULT_URL,
+	RunnerInputError,
+	addAccount,
+	listAccounts,
+	login,
+	removeAccount,
+	runRunner,
+} from "../runner/cli";
+import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
@@ -82,8 +92,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Run an expensive command once the host has room for it")
 		.description(
 			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
-				"min(4 GiB, RAM/4), admitting one waiting command every 5 seconds. Nested calls run immediately. " +
-				"Limits come from the host; there is no configuration.",
+				"min(4 GiB, RAM/4). Each admission in the last minute counts as one more unit of load and one " +
+				"budget less memory: commands start at once while those still fit, and 5 seconds apart while " +
+				"only the raw measures do. Nested calls run immediately. Limits come from the host; there is " +
+				"no configuration.",
 		)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")
@@ -318,7 +330,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Wait for pull request activity on GitHub")
 		.description(
 			"Wait for a review, comment, review-thread reply, reaction to the PR or a review, push, merge, close, " +
-				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes; rate limits delay requests. No timeout by default.\n\n" +
+				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes, and once more 30 seconds before the timeout; rate limits and longer GitHub poll intervals delay requests. No timeout by default.\n\n" +
 				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
 				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
@@ -666,6 +678,69 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				agentFailure,
 			);
 		});
+
+	const runnerIO = () => ({ stdout: out.stdout, stderr: out.stderr, env: process.env });
+	const runnerFailure = (error: unknown) => {
+		if (error instanceof RunnerInputError) {
+			out.stderr(`error: ${error.message}\n`);
+			return 2;
+		}
+		warn(error instanceof Error ? error.message : String(error));
+		return 1;
+	};
+	const runnerAction = (task: () => number | Promise<number>) => {
+		try {
+			pending = Promise.resolve(task()).catch(runnerFailure);
+		} catch (error) {
+			pending = Promise.resolve(runnerFailure(error));
+		}
+	};
+	const runner = program
+		.command("runner")
+		.summary("Run kix jobs on this machine with its own agent accounts")
+		.description(
+			"Turn this Linux or macOS machine into a kix runner. `quest runner login` connects it to your kix " +
+				"account, `quest runner account add` signs agent accounts in with their own CLIs, and `quest runner` " +
+				"runs routed jobs in the foreground until interrupted.\n\n" +
+				"Each account signs in through Claude Code's own flow in an isolated home (CLAUDE_CONFIG_DIR); kix " +
+				"stores only an opaque account id, its kind, and its label, and never sees its tokens. Every job runs " +
+				"inside its project's `nix develop` shell. State lives in $QUEST_RUNNER_HOME, by default " +
+				"$XDG_DATA_HOME/quest/runner.",
+		);
+	runner
+		.command("run", { isDefault: true })
+		.description(
+			"Connect to kix and run assigned jobs until interrupted. On SIGINT or SIGTERM, running agents stop, " +
+				"their work is published to their job branches, and their jobs move to another runner.",
+		)
+		.option("--slots <count>", "Jobs to run at once", positiveInteger("slots"), 1)
+		.action((options: { slots: number }) => runnerAction(() => runRunner(runnerIO(), options)));
+	runner
+		.command("login")
+		.description(
+			"Connect this machine to your kix account: print a link to approve it while signed in, then wait. " +
+				"The machine keeps its token; the link carries only its hash.",
+		)
+		.option("--url <origin>", "The kix origin", DEFAULT_URL)
+		.option("--name <name>", "The name kix shows for this machine (default: its hostname)")
+		.action((options: { url: string; name?: string }) => runnerAction(() => login(runnerIO(), options)));
+	const account = runner.command("account").description("Add, list, and remove this runner's agent accounts");
+	account
+		.command("add")
+		.description("Sign a Claude Code account in with `claude auth login` in a new isolated home")
+		.option("--console", "Sign in with an Anthropic Console account (API billing) instead of a subscription")
+		.option("--label <label>", "The name kix shows for the account (default: its email and plan)")
+		.action((options: { console?: boolean; label?: string }) =>
+			runnerAction(() => addAccount(runnerIO(), { console: !!options.console, label: options.label })),
+		);
+	account
+		.command("list")
+		.description("Print each account's id, kind, and label")
+		.action(() => runnerAction(() => listAccounts(runnerIO())));
+	account
+		.command("remove <id>")
+		.description("Remove an account and delete its home, signing it out of this machine")
+		.action((id: string) => runnerAction(() => removeAccount(runnerIO(), id)));
 
 	/** Changes on stdout; mentions and check findings on stderr, which fail the command. */
 	const report = (result: Report): number => {

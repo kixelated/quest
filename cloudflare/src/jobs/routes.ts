@@ -1,13 +1,14 @@
 import { type Context, Hono } from "hono";
+import { questBranch } from "quest/core";
 import { createAuth } from "../auth";
 import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
-import { type ProjectState, type Pull, startable } from "../github/state";
+import { type ProjectState, type Pull, continued, startable } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
 import { data, id, text } from "./protocol";
-import { LIMITS, parsePublication, publish } from "./publish";
+import { HeadMoved, LIMITS, parsePublication, publish, restart } from "./publish";
 import * as store from "./store";
 import { JobError } from "./store";
 
@@ -43,7 +44,7 @@ export function inboxURL(repository: number, target: string) {
 	return `/inbox?${new URLSearchParams({ project: String(repository), item: target })}`;
 }
 /** What an inbox form just recorded, which the next decision's page notes. */
-export type Done = "answer" | "start" | "stop" | "skip" | "merge";
+export type Done = "answer" | "approve" | "start" | "stop" | "skip" | "merge";
 /**
  * The inbox's next active decision, or its empty state, after a form recorded
  * one. The item acted on stays reachable from its list, with its earlier answers.
@@ -86,6 +87,14 @@ async function machine(c: Context<Bindings>) {
 	const token = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
 	return (token && (await store.authenticate(c.env.DB, token))) || null;
 }
+// The machine a token registered, which `quest runner login` polls until the owner approves it.
+jobs.get("/api/runner", async (c) => {
+	c.header("Cache-Control", "no-store");
+	const runner = await machine(c);
+	if (!runner) return c.json({ error: "Runner token required" }, 401);
+	const { id, name, platform, vm } = runner;
+	return c.json({ id, name, platform, vm: vm === 1 });
+});
 jobs.get("/api/runner/connect", async (c) => {
 	const runner = await machine(c);
 	if (!runner) return c.json({ error: "Runner token required" }, 401);
@@ -111,12 +120,39 @@ jobs.post("/api/runner/publish", async (c) => {
 	if (!Number.isSafeInteger(length) || length > LIMITS.request)
 		return c.json({ error: `A Content-Length of at most ${LIMITS.request} bytes is required` }, 413);
 	const input = parsePublication(await json(c));
-	const result = await publish(c.env, runner, input);
+	let result: Awaited<ReturnType<typeof publish>>;
+	try {
+		result = await publish(c.env, runner, input);
+	} catch (error) {
+		// The runner reconciles with the branch's head rather than failing its attempt.
+		if (error instanceof HeadMoved) return c.json({ error: error.message, head: error.head }, 409);
+		throw error;
+	}
 	if (!("decision" in result)) return c.json(result);
 	await hub(c.env, runner.owner).dispatch(runner.owner);
 	if (result.asked && !result.cancel) c.executionCtx.waitUntil(push.job(c.env, input.job, "publication"));
 	const { decision, cancel } = result;
 	return c.json({ decision, cancel }, 202);
+});
+
+// The current attempt of a job on an issue or pull request reads its target
+// as the App, with the requester's current authority: runners hold no GitHub
+// credentials, and the job record keeps only the target's number.
+jobs.get("/api/runner/context", async (c) => {
+	const runner = await machine(c);
+	if (!runner) return c.json({ error: "Runner token required" }, 401);
+	const job = id(c.req.query("job"));
+	const attempt = Number(c.req.query("attempt"));
+	if (!job || !Number.isSafeInteger(attempt) || attempt < 1) throw new JobError("Job and attempt required");
+	const current = await store.publishing(c.env.DB, runner, job, attempt);
+	c.header("Cache-Control", "no-store");
+	return c.json(
+		await new GitHubService(c.env).readTarget(
+			{ owner: current.owner, name: current.name, id: current.repository },
+			current.actor,
+			current.target,
+		),
+	);
 });
 
 // A signed-in user registers their own machines and sees their presence.
@@ -162,7 +198,7 @@ async function owned(c: Context<Bindings>) {
 	const { user, repo } = await maintained(c);
 	const job = await store.readJob(c.env.DB, c.req.param("job")!);
 	if (!job || job.repository !== repo.id) throw new JobError("Job not found");
-	return { user, job };
+	return { user, repo, job };
 }
 
 const base = "/projects/github/:owner/:repository/jobs";
@@ -176,10 +212,10 @@ type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccoun
 
 /**
  * Resolve a requested workflow and target against current observations.
- * `failed` is the pull request of the target's failed latest job, which a
- * retry continues rather than counting it as another claim.
+ * `failed` is the target's failed latest job, whose pull request a retry
+ * continues rather than counting it as another claim.
  */
-function resolve(workflow: unknown, target: unknown, state: ProjectState, failed: number | null): Plan {
+function resolve(workflow: unknown, target: unknown, state: ProjectState, failed: store.Published | null): Plan {
 	const commit = state.project.commit;
 	const open = (kind: "issue" | "pull", prefix: string) =>
 		state.activity.find(
@@ -190,9 +226,9 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState, failed
 				item.data?.state === "OPEN",
 		);
 	if (workflow === "start") {
-		if (typeof target !== "string" || !startable(state, target, failed))
+		if (typeof target !== "string" || !startable(state, target, failed && continued(state, failed)))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
-		const branch = target.replace(/(\/README)?\.md$/, "");
+		const branch = questBranch(target);
 		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");
 		return { workflow, target, revision: commit, branch, trusted: true };
 	}
@@ -246,7 +282,7 @@ jobs.post(base, async (c) => {
 		throw new JobError("Invalid runner or account");
 	const failed =
 		body.workflow === "start" && typeof body.target === "string"
-			? await store.failedPull(c.env.DB, repo.id, body.target)
+			? await store.failed(c.env.DB, repo.id, body.target)
 			: null;
 	const { job, enabled, flake } = await github.jobSource(repo, user, (state) =>
 		resolve(body.workflow, body.target, state, failed),
@@ -271,12 +307,19 @@ jobs.post(base, async (c) => {
 });
 
 jobs.post(`${base}/:job/answer`, async (c) => {
-	const { user, job } = await owned(c);
+	const { user, repo, job } = await owned(c);
 	const { body, form } = await input(c);
 	const question = job.questions.find((q) => q.id === id(body.question));
+	// A form's Start over button, or `restart: true` from the JSON API.
+	if (question && body.restart !== undefined) {
+		if (body.restart !== (form ? "1" : true)) throw new JobError("Invalid restart");
+		const created = await restart(c.env, user, repo, job, question.id);
+		await hub(c.env, job.actor).dispatch(job.actor);
+		return reply(c, form, "start", { id: created }, 201);
+	}
 	const answer = question && (form ? formReply(question, form) : body.answer);
 	if (!question || answer === undefined) throw new JobError("Question and answer required");
-	await store.answer(
+	const { resumed } = await store.answer(
 		c.env.DB,
 		job.id,
 		question.id,
@@ -290,8 +333,21 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 		Date.now(),
 	);
 	// Jobs run on their requester's runners, whoever answers.
-	await hub(c.env, job.actor).dispatch(job.actor);
+	if (resumed) await hub(c.env, job.actor).dispatch(job.actor);
+	else c.executionCtx.waitUntil(push.job(c.env, job.id, "approval"));
 	return reply(c, form, "answer", null);
+});
+
+// Until the job sandbox ships, another maintainer's answer resumes the job
+// only once its requester, whose runner acts on it, approves it.
+jobs.post(`${base}/:job/approve`, async (c) => {
+	const { user, job } = await owned(c);
+	const { body, form } = await input(c);
+	const question = id(body.question);
+	if (!question) throw new JobError("Question required");
+	await store.approve(c.env.DB, job.id, question, user, Date.now());
+	await hub(c.env, job.actor).dispatch(job.actor);
+	return reply(c, form, "approve", null);
 });
 
 /** The longest reply to a publication decision, in characters as the inbox form counts them. */

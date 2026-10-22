@@ -53,6 +53,8 @@ export type Job = {
 	pendingAt: number | null;
 	/** The pull request this job delivered. */
 	pull: number | null;
+	/** The failed job this retry continues. */
+	continues: string | null;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -66,6 +68,8 @@ export type Question = {
 	answeredBy: string | null;
 	askedAt: number;
 	answeredAt: number | null;
+	/** When the job's requester approved the answer; their own answers are approved as given. */
+	approvedAt: number | null;
 };
 export type Event = { attempt: number; kind: string; body: unknown; at: number };
 /** A connected runner's account, as routing sees it. */
@@ -79,7 +83,8 @@ export type Offer = {
 	limited: boolean;
 };
 
-async function digest(token: string) {
+/** A runner token's stored form: its SHA-256 in lowercase hex. */
+export async function digest(token: string) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
 	return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -93,13 +98,66 @@ export async function createRunner(
 	vm: boolean,
 	now: number,
 ) {
-	const id = crypto.randomUUID();
 	const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-	await db
-		.prepare("INSERT INTO runners(id,owner,name,tokenHash,platform,vm,createdAt) VALUES(?,?,?,?,?,?,?)")
-		.bind(id, owner, name, await digest(token), platform, vm ? 1 : 0, now)
-		.run();
+	const id = await registerRunner(db, owner, name, platform, vm, await digest(token), now);
 	return { id, token };
+}
+
+/**
+ * Register a machine that made its own token and sent only its hash, as
+ * `quest runner login` does, so the token never leaves the machine. Approving
+ * the same hash again returns the same runner; another owner's is refused.
+ */
+export async function registerRunner(
+	db: D1Database,
+	owner: string,
+	name: string,
+	platform: Platform,
+	vm: boolean,
+	tokenHash: string,
+	now: number,
+) {
+	const [, row] = await db.batch([
+		db
+			.prepare(
+				"INSERT INTO runners(id,owner,name,tokenHash,platform,vm,createdAt) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tokenHash) DO NOTHING",
+			)
+			.bind(crypto.randomUUID(), owner, name, tokenHash, platform, vm ? 1 : 0, now),
+		db.prepare("SELECT id,owner FROM runners WHERE tokenHash=?").bind(tokenHash),
+	]);
+	const runner = row!.results[0] as { id: string; owner: string };
+	if (runner.owner !== owner) throw new JobError("This runner is already connected to another account");
+	return runner.id;
+}
+
+/**
+ * Move one of the owner's accounts a place earlier or later in their
+ * preference order, which routing follows across all of their runners.
+ */
+export async function moveAccount(
+	db: D1Database,
+	owner: string,
+	runner: string,
+	account: string,
+	direction: "up" | "down",
+) {
+	const { results } = await db
+		.prepare(
+			"SELECT a.runner,a.id FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE r.owner=? ORDER BY a.rank,a.runner,a.id",
+		)
+		.bind(owner)
+		.all<{ runner: string; id: string }>();
+	const from = results.findIndex((a) => a.runner === runner && a.id === account);
+	if (from < 0) throw new JobError("Account not found");
+	const to = direction === "up" ? from - 1 : from + 1;
+	if (to < 0 || to >= results.length) return;
+	[results[from], results[to]] = [results[to]!, results[from]!];
+	// Ranks are renumbered in the new order, so ties from concurrent reports cannot hide the move.
+	await db.batch(
+		results.map((a, i) =>
+			db.prepare("UPDATE runner_accounts SET rank=? WHERE runner=? AND id=?").bind(i + 1, a.runner, a.id),
+		),
+	);
 }
 
 export async function authenticate(db: D1Database, token: string): Promise<Runner | null> {
@@ -539,16 +597,15 @@ export async function settle(db: D1Database, job: string, commit: string, landed
 
 /**
  * The answered agent questions behind the job's pull request, oldest first,
- * for its decision record: the job's own, and those of any earlier job on its
- * target that delivered the same pull request, which a retry continues.
+ * for its decision record: the job's own, and those of each failed job it
+ * continues as a retry, whether or not that job opened the pull request.
  */
 export async function decisions(db: D1Database, job: string) {
 	const { results } = await db
 		.prepare(
-			`SELECT q.prompt,q.answer FROM jobs c
- JOIN jobs j ON j.id=c.id OR (j.repository=c.repository AND j.target=c.target AND j.pull=c.pull)
- JOIN job_questions q ON q.job=j.id
- WHERE c.id=? AND q.kind='agent' AND q.answer IS NOT NULL ORDER BY q.askedAt,q.rowid`,
+			`WITH RECURSIVE chain(id) AS (SELECT ? UNION SELECT j.continues FROM jobs j JOIN chain c ON j.id=c.id WHERE j.continues IS NOT NULL)
+ SELECT q.prompt,q.answer FROM chain JOIN job_questions q ON q.job=chain.id
+ WHERE q.kind='agent' AND q.approvedAt IS NOT NULL ORDER BY q.askedAt,q.rowid`,
 		)
 		.bind(job)
 		.all<{ prompt: string; answer: string }>();
@@ -584,12 +641,13 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	// runner's status can commit after the request read them. An iteration
 	// continues the pull request's existing head branch. Retrying a target
 	// whose latest job failed continues that job's branch and pull request
-	// where it left them, as a reassigned attempt would.
+	// where it left them, as a reassigned attempt would, and records which
+	// job it continues.
 	const [insert, active, enabled, pinned] = await db.batch([
 		db
 			.prepare(
-				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,?,?,?,?,'queued',?,? FROM github_projects p
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,continues,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,f.id,?,?,?,?,'queued',?,? FROM github_projects p
  LEFT JOIN jobs f ON ?<>'iterate' AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
  WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
@@ -632,7 +690,7 @@ export async function readJob(db: D1Database, id: string) {
 		db.prepare("SELECT attempt,kind,body,at FROM job_events WHERE job=? ORDER BY rowid").bind(id),
 		db
 			.prepare(
-				"SELECT id,attempt,kind,prompt,answer,answeredBy,askedAt,answeredAt FROM job_questions WHERE job=? ORDER BY askedAt,rowid",
+				"SELECT id,attempt,kind,prompt,answer,answeredBy,askedAt,answeredAt,approvedAt FROM job_questions WHERE job=? ORDER BY askedAt,rowid",
 			)
 			.bind(id),
 	]);
@@ -659,13 +717,17 @@ export async function listJobs(db: D1Database, repository: number) {
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
-/** The pull request of the target's latest job when that job failed: what a retry continues. */
-export async function failedPull(db: D1Database, repository: number, target: string) {
+export type Published = Pick<Job, "branch" | "head" | "pending" | "pull">;
+
+/** Where the target's latest job left its branch and pull request, when that job failed: what a retry continues. */
+export async function failed(db: D1Database, repository: number, target: string) {
 	const latest = await db
-		.prepare("SELECT state,pull FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1")
+		.prepare(
+			"SELECT state,branch,head,pending,pull FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1",
+		)
 		.bind(repository, target)
-		.first<Pick<Job, "state" | "pull">>();
-	return latest?.state === "failed" ? latest.pull : null;
+		.first<Published & Pick<Job, "state">>();
+	return latest?.state === "failed" ? latest : null;
 }
 
 /** Whether a job on `target` is queued, running, or waiting, and so may still push to it. */
@@ -696,75 +758,190 @@ export async function listInboxJobs(db: D1Database, repository: number, observed
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
+type Pin = { runner: string; account: string };
+
+/** The account an account decision chose. */
+function pinOf(kind: QuestionKind, reply: unknown): Pin | null {
+	if (kind !== "account") return null;
+	const choice = reply as { runner?: unknown; account?: unknown } | null;
+	if (typeof choice?.runner !== "string" || typeof choice.account !== "string")
+		throw new JobError("Choose one of the job owner's accounts that can run it");
+	return { runner: choice.runner, account: choice.account };
+}
+
+/** Whether the chosen account is still on its runner; the runner may drop it at any time. */
+const pinned = "(? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts WHERE runner=? AND id=?))";
+
 /**
- * Answer the job's open question once, then requeue it. An account decision
- * pins the chosen account and starts a new session from the job's summaries.
+ * Requeue a job whose question was just approved at `now`, in the same batch
+ * as the approval. An account decision pins the chosen account and starts a
+ * new session from the job's summaries.
+ */
+function resume(db: D1Database, job: string, question: string, pin: Pin | null, now: number) {
+	const approved = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND approvedAt=?)";
+	if (!pin)
+		return [
+			db
+				.prepare(`UPDATE jobs SET state='queued',updatedAt=? WHERE id=? AND state='waiting' AND ${approved}`)
+				.bind(now, job, question, now),
+		];
+	return [
+		// Choosing the limited account again is the maintainer's explicit retry.
+		db
+			.prepare(
+				`UPDATE runner_accounts SET limited=0 WHERE runner=? AND id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND state='waiting') AND ${approved}`,
+			)
+			.bind(pin.runner, pin.account, job, question, now),
+		db
+			.prepare(
+				`UPDATE jobs SET state='queued',pinRunner=?,pinAccount=?,session=NULL,updatedAt=? WHERE id=? AND state='waiting' AND ${approved}`,
+			)
+			.bind(pin.runner, pin.account, now, job, question, now),
+	];
+}
+
+/**
+ * Answer the job's open question once. The job's requester, whose runner
+ * runs it, resumes it at once. Until the job sandbox ships, another
+ * maintainer's answer waits for the requester to approve it, since the
+ * agent acts on it with the requester's machine and credentials; the
+ * requester may answer it themselves instead. Returns whether it resumed.
  */
 export async function answer(db: D1Database, job: string, question: string, user: string, reply: unknown, now: number) {
 	const open = await db
 		.prepare(
-			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
+			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.approvedAt IS NULL AND (q.answer IS NULL OR j.actor=?) AND q.attempt=j.attempt AND j.state='waiting'",
 		)
-		.bind(question, job)
+		.bind(question, job, user)
 		.first<{ kind: QuestionKind; actor: string; trusted: number }>();
 	if (!open) throw new JobError("Question is no longer open");
-	let pin: { runner: string; account: string } | null = null;
-	if (open.kind === "account") {
-		const choice = reply as { runner?: unknown; account?: unknown } | null;
-		const owned =
-			typeof choice?.runner === "string" &&
-			typeof choice.account === "string" &&
-			(await db
-				.prepare(
-					"SELECT 1 FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE a.runner=? AND a.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1))",
-				)
-				.bind(choice.runner, choice.account, open.actor, open.trusted)
-				.first());
-		if (!owned) throw new JobError("Choose one of the job owner's accounts that can run it");
-		pin = { runner: choice!.runner as string, account: choice!.account as string };
-	}
-	const answered = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND answeredBy=? AND answeredAt=?)";
+	const pin = pinOf(open.kind, reply);
+	if (
+		pin &&
+		!(await db
+			.prepare(
+				"SELECT 1 FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE a.runner=? AND a.id=? AND r.owner=? AND (?=1 OR (r.platform='linux' AND r.vm=1))",
+			)
+			.bind(pin.runner, pin.account, open.actor, open.trusted)
+			.first())
+	)
+		throw new JobError("Choose one of the job owner's accounts that can run it");
+	const own = user === open.actor;
 	const statements = [
-		// The runner may drop the chosen account after the check above.
 		db
 			.prepare(
-				"UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=? WHERE id=? AND job=? AND answer IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND (? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts WHERE runner=? AND id=?))",
+				`UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=?,approvedAt=? WHERE id=? AND job=? AND approvedAt IS NULL
+ AND (answer IS NULL OR ?=(SELECT actor FROM jobs WHERE id=?)) AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND ${pinned}`,
 			)
 			.bind(
 				JSON.stringify(reply),
 				user,
 				now,
+				own ? now : null,
 				question,
+				job,
+				user,
 				job,
 				job,
 				pin?.runner ?? null,
 				pin?.runner ?? null,
 				pin?.account ?? null,
 			),
+		...(own ? resume(db, job, question, pin, now) : []),
 	];
-	if (pin)
-		statements.push(
-			// Choosing the limited account again is the maintainer's explicit retry.
-			db
-				.prepare(
-					`UPDATE runner_accounts SET limited=0 WHERE runner=? AND id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND state='waiting') AND ${answered}`,
-				)
-				.bind(pin.runner, pin.account, job, question, user, now),
-			db
-				.prepare(
-					`UPDATE jobs SET state='queued',pinRunner=?,pinAccount=?,session=NULL,updatedAt=? WHERE id=? AND state='waiting' AND ${answered}`,
-				)
-				.bind(pin.runner, pin.account, now, job, question, user, now),
-		);
-	else
-		statements.push(
-			db
-				.prepare(`UPDATE jobs SET state='queued',updatedAt=? WHERE id=? AND state='waiting' AND ${answered}`)
-				.bind(now, job, question, user, now),
-		);
 	const results = await db.batch(statements);
 	if (results[0]!.meta.changes !== 1)
 		throw new JobError(pin ? "Question is no longer open or the account is gone" : "Question is no longer open");
+	return { resumed: own };
+}
+
+/** The job's requester approves another maintainer's answer, which resumes the job. */
+export async function approve(db: D1Database, job: string, question: string, user: string, now: number) {
+	const pending = await db
+		.prepare(
+			"SELECT q.kind,q.answer,j.actor FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NOT NULL AND q.approvedAt IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
+		)
+		.bind(question, job)
+		.first<{ kind: QuestionKind; answer: string; actor: string }>();
+	if (!pending) throw new JobError("No answer awaits approval");
+	if (pending.actor !== user) throw new JobError("Only the job's requester can approve another maintainer's answer");
+	const pin = pinOf(pending.kind, JSON.parse(pending.answer));
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE job_questions SET approvedAt=? WHERE id=? AND job=? AND answer=? AND approvedAt IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting' AND actor=?) AND ${pinned}`,
+			)
+			.bind(
+				now,
+				question,
+				job,
+				pending.answer,
+				job,
+				user,
+				pin?.runner ?? null,
+				pin?.runner ?? null,
+				pin?.account ?? null,
+			),
+		...resume(db, job, question, pin, now),
+	]);
+	if (results[0]!.meta.changes !== 1)
+		throw new JobError(pin ? "No answer awaits approval, or the account is gone" : "No answer awaits approval");
+}
+
+/** How a publication decision records that the maintainer chose to start over. */
+export const RESTART = { restart: true } as const;
+
+/**
+ * Answer a waiting job's publication decision by starting over: the job ends,
+ * and a new one on the same target and revision queues from `head`, the
+ * commit its branch is then reset to, with a new agent session and none of the
+ * old job's answers. The new job's later creation also means a pull request
+ * closed before now is not mistaken for one it delivered. Like an answer, it
+ * may replace another maintainer's answer only when the requester starts over.
+ * It needs no approval: the new job runs the requester's own request.
+ */
+export async function restart(db: D1Database, job: string, question: string, user: string, head: string, now: number) {
+	const id = crypto.randomUUID();
+	const answered = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND answeredBy=? AND answeredAt=?)";
+	const [update] = await db.batch([
+		db
+			.prepare(
+				`UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=?,approvedAt=? WHERE id=? AND job=? AND kind='publication' AND approvedAt IS NULL
+ AND (answer IS NULL OR ?=(SELECT actor FROM jobs WHERE id=?)) AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting')`,
+			)
+			.bind(JSON.stringify(RESTART), user, now, now, question, job, user, job, job),
+		db
+			.prepare(`UPDATE jobs SET state='cancelled',updatedAt=? WHERE id=? AND state='waiting' AND ${answered}`)
+			.bind(now, job, question, user, now),
+		db
+			.prepare(
+				`INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,repository,workflow,target,revision,branch,?,actor,trusted,pinRunner,pinAccount,'queued',?,? FROM jobs WHERE id=? AND state='cancelled' AND ${answered}`,
+			)
+			.bind(id, head, now, now, job, question, user, now),
+	]);
+	if (update!.meta.changes !== 1) throw new JobError("Question is no longer open");
+	return id;
+}
+
+/**
+ * Pause a queued job that has not run yet on a publication decision, such as
+ * a restart whose branch reset failed. A job a runner already took is left alone.
+ */
+export async function hold(db: D1Database, job: string, input: { summary: string; prompt: unknown }, now: number) {
+	const id = crypto.randomUUID();
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO job_questions(id,job,attempt,kind,prompt,askedAt) SELECT ?,id,attempt,'publication',?,? FROM jobs WHERE id=? AND attempt=0 AND state='queued' AND cancel=0",
+			)
+			.bind(id, JSON.stringify(input.prompt), now, job),
+		db
+			.prepare(
+				"UPDATE jobs SET state='waiting',summary=?,updatedAt=? WHERE id=? AND state='queued' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?)",
+			)
+			.bind(input.summary, now, job, id),
+	]);
 }
 
 /**

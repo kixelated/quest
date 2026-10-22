@@ -24,7 +24,3 @@ publication.
   Stronger untrusted-project isolation is a separate quest.
 - Test registration, stale leases, reconnect, cancellation, and publication
   rejection for mismatched repository/revision.
-
-## Required
-
-- [Runner](/quest/m0/kix/runner.md) - the runner being shared

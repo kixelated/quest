@@ -4,6 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
+import { questBranch } from "../core";
 import {
 	type ClaimDependencies,
 	type OpenPull,
@@ -15,7 +16,6 @@ import {
 	openPullRequests,
 	pullsFrom,
 	remoteBranches,
-	questBranch,
 	repositoryPath,
 	upstream,
 	upstreamHead,

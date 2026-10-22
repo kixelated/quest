@@ -17,11 +17,6 @@ import {
 } from "./github";
 import { type Snapshot, snapshot } from "./tree";
 
-/** A quest's branch: its path without `.md`. */
-export function questBranch(path: string): string {
-	return path.replace(/\.md$/, "");
-}
-
 /** An open PR, from any head repository, as the claim checks read it. */
 export interface OpenPull {
 	number: number;

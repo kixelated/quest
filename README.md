@@ -423,12 +423,20 @@ available memory is below one command's budget: 4 GiB, or a quarter of RAM on
 smaller hosts, where RAM is capped by any container memory limit. On Linux,
 available memory includes reclaimable host and cgroup file cache and is bounded
 by the remaining budget of each enclosing memory cgroup. Load and memory count
-work from every session and user. The load average lags new work, so the gate
-admits at most one waiting command per 5-second window per host, never in
-consecutive windows, rather than releasing every waiter at once: a burst of
-waiters starts about 10 seconds apart. Windows reports no load
-average and macOS counts reclaimable cache as used memory, so those signals are
-skipped there.
+work from every session and user. Windows reports no load average and macOS
+counts reclaimable cache as used memory, so those signals are skipped there.
+
+Both measures lag new work, so each command admitted in the last minute counts
+as one more unit of load and takes one budget from available memory. While the
+host has room even counting those, commands start at once: a burst of gated
+test runs on an idle host starts together. Once only the raw load and memory
+have room, commands start one at a time, 5 seconds after the previous admission.
+A user's admissions on one host are recorded under
+`~/.cache/quest/admissions/<hostname>`, whatever the caller's environment or
+login session. The home directory comes from the user database, not `$HOME`;
+an account missing from it, as in arbitrary-UID containers, uses
+`/tmp/quest-<uid>/admissions/<hostname>`, and refuses that directory unless only
+its UID can write it.
 
 Admission is the gate's only job: it holds no slot or lock while the command
 runs and does not track the command's descendants. A nested invocation runs
@@ -439,8 +447,10 @@ This repository's `just check`, `just test`, `just worker-check`, and
 `just worker-test` run through the gate.
 
 Arguments, working directory, environment and terminal streams pass through to
-the executable, and waiting happens before it starts. There is no fairness
-guarantee or timeout: a command waits as long as the host stays busy.
+the executable, and waiting happens before it starts. A terminal's Ctrl-C
+reaches the command once, directly; SIGTERM and SIGHUP sent to Quest are
+forwarded. There is no fairness guarantee or timeout: a command waits as long as
+the host stays busy.
 
 ## Headless agents
 
@@ -474,6 +484,45 @@ finished, 3 when the provider refused the key for lack of credit, 2 for invalid
 arguments, 128 plus the signal number when interrupted, and 1 otherwise. `stop`
 signals the agent and waits until its `start` or `resume` has reported.
 `quest agent` does not run on native Windows yet; use WSL.
+
+## Run kix jobs on your machines
+
+`quest runner` turns a Linux or macOS machine with Nix into a
+[kix.quest](https://kix.quest) runner, driving Claude Code with that machine's
+own logins:
+
+```sh
+quest runner login --name laptop  # prints a link to approve while signed in to kix
+quest runner account add          # Claude Code's own sign-in, in an isolated home
+quest runner account add --console --label work
+quest runner account list
+quest runner --slots 2            # runs jobs in the foreground until interrupted
+```
+
+`login` makes a token that never leaves the machine; the link carries only its
+hash, and kix connects the runner once you approve it. Each account signs in
+through `claude auth login` in its own `CLAUDE_CONFIG_DIR`, so kix stores only
+an opaque account id, its kind, and a label. kix.quest/runners shows each
+runner's presence and sets the order jobs use your accounts in.
+
+Every job runs in its own checkout inside the project's `nix develop` shell,
+with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
+job instead. The agent reports through kix tools: `checkpoint` summaries publish
+work in progress to the job's branch, `ask` pauses the job on a decision for you,
+and `deliver` publishes the result and its pull request. A job on an issue or
+pull request reads it through `context`, since the runner holds no GitHub
+token. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
+pauses for you to pick another account; the runner never switches on its own.
+On SIGINT or SIGTERM, running work is published and its jobs move to another
+runner. Until the job sandbox ships, runners take only trusted revisions,
+agents run with `--permission-mode bypassPermissions`, and a job resumes with
+another maintainer's answer only once you approve it in the inbox.
+
+The flake's `runner` package is a `quest` whose Claude Code is pinned by this
+repository's lock (`nix run github:kixelated/quest#runner -- runner`);
+otherwise `claude` comes from `QUEST_RUNNER_CLAUDE` or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
+`$XDG_DATA_HOME/quest/runner`. To keep a runner up, run `quest runner` as a user
+service, such as a systemd user unit with `Restart=on-failure`.
 
 ## Prunable local checkouts
 

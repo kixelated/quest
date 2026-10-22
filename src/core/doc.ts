@@ -112,6 +112,20 @@ export function isQuest(path: string): boolean {
 	return name.endsWith(".md") && !NOT_QUESTS.includes(name);
 }
 
+/**
+ * A quest's branch: its path without `.md`, so an epic's is
+ * `quest/<path>/README`. The directory form would collide with its children's
+ * branches, since git cannot hold `quest/m0/foo` beside `quest/m0/foo/bar`.
+ */
+export function questBranch(path: string): string {
+	return path.replace(/\.md$/, "");
+}
+
+/** The quest file a branch names, whether or not it exists: the branch plus `.md`. */
+export function branchQuest(branch: string): string {
+	return `${branch}.md`;
+}
+
 /** Whether the document has this exact `## ` heading. */
 export function has(doc: Doc, heading: string): boolean {
 	return doc.headings.some((h) => h.text === heading);

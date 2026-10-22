@@ -45,7 +45,3 @@ or needs them.
 - Test a pick on a conflicted PR, a review round that the pick covers, a
   head moved outside the job, the design checkpoint, a PR that leaves the
   queue, and a PR already labeled by a local session.
-
-## Required
-
-- [Runner](/quest/m0/kix/runner.md) - jobs that run the merge skill

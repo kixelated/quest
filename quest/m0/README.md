@@ -35,7 +35,7 @@ ownership-manifest design:
 
 ## Required
 
-- [Gate headroom](/quest/m0/gate-headroom.md) - gated commands start at once while the host has room
+- [Lifecycle EBUSY](/quest/m0/lifecycle-ebusy.md) - the Windows lifecycle check stops failing at random while removing its temp directory
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
 

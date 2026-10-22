@@ -28,7 +28,3 @@ Decided 2026-10-15 in the decisions-not-implementations interview:
 - Check maintainer authority on every raw-output request, not just when the
   page loads, and test that other users and revoked maintainers are
   refused.
-
-## Required
-
-- [Runner](/quest/m0/kix/runner.md) - the checkpoint tool, summaries, and retained raw output
