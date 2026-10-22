@@ -2,8 +2,8 @@
 # Measure `quest gate` under contention. Run inside `nix develop`.
 #
 #   scripts/gate-bench.sh overhead [runs]
-#       Admission cost: `quest gate true` with a fresh claim directory, so no
-#       window is ever taken, against the same call with the gate bypassed.
+#       Admission cost: `quest gate true` with the gate bypassed, and admission
+#       alone against a fresh ledger, so no earlier run counts as recent.
 #   scripts/gate-bench.sh gated|ungated <suites> [cpus]
 #       Start <suites> Worker test suites at once, each in its own detached
 #       worktree of HEAD, through the gate or bypassing it. `cpus` is a taskset
@@ -45,17 +45,23 @@ stats() {
 }
 
 overhead() {
-    local runs=${1:-20} i start bypass=() gated=()
+    local runs=${1:-20} i start bypass=() admit=()
     cd "$root"
     for ((i = 0; i < runs; i++)); do
         start=$(now_ms)
         QUEST_GATE_ADMITTED=1 bun run --silent quest gate true
         bypass+=($(($(now_ms) - start)))
-        start=$(now_ms)
-        XDG_RUNTIME_DIR="$work/claims.$i" bun run --silent quest gate true
-        gated+=($(($(now_ms) - start)))
     done
-    echo "runs=$runs $(stats bypass_ms "${bypass[@]}")$(stats gated_ms "${gated[@]}")"
+    # Every caller shares one ledger, so time admission itself against a fresh one per run.
+    # shellcheck disable=SC2016 # Bun expands it.
+    mapfile -t admit < <(BENCH_GATE="$root/src/cli/gate.ts" BENCH_WORK="$work" BENCH_RUNS="$runs" bun --eval '
+        const { admit, fileHost, hostLimits } = await import(process.env.BENCH_GATE);
+        for (let i = 0; i < Number(process.env.BENCH_RUNS); i++) {
+            const start = performance.now();
+            await admit(hostLimits(), fileHost(`${process.env.BENCH_WORK}/ledger.${i}`), new AbortController().signal);
+            console.log(Math.round(performance.now() - start));
+        }')
+    echo "runs=$runs $(stats bypass_ms "${bypass[@]}")$(stats admit_ms "${admit[@]}")"
 }
 
 contend() {
