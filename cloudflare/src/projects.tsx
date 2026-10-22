@@ -1,4 +1,4 @@
-import type { ProjectState, Pull } from "./github/state";
+import type { Activity, ProjectState, Pull } from "./github/state";
 import type { Enrollment, ProjectPreview } from "./github/service";
 import { Difficulty, Marker } from "./layout";
 import { title } from "./board/model";
@@ -213,7 +213,13 @@ export function ProjectSetupPage(props: { preview: ProjectPreview; enrollment: E
 	);
 }
 
-export function ProjectStatePage(props: { owner: string; repository: string; state: ProjectState | null }) {
+export function ProjectStatePage(props: {
+	owner: string;
+	repository: string;
+	state: ProjectState | null;
+	/** One page of the activity log, and where the next begins. */
+	log: { items: Activity[]; next: string | null };
+}) {
 	const base = projectURL(props.owner, props.repository);
 	const state = props.state;
 	return (
@@ -262,9 +268,9 @@ export function ProjectStatePage(props: { owner: string; repository: string; sta
 						<p>No observed branch claims.</p>
 					)}
 					<h2>Issues and pull requests</h2>
-					{state.activity.length ? (
+					{props.log.items.length ? (
 						<ul class="log">
-							{state.activity.map((item) => (
+							{props.log.items.map((item) => (
 								<li class="entry">
 									<a
 										class="entry-title"
@@ -292,6 +298,11 @@ export function ProjectStatePage(props: { owner: string; repository: string; sta
 						</ul>
 					) : (
 						<p>No activity observed yet.</p>
+					)}
+					{props.log.next && (
+						<p>
+							<a href={`${base}/state?before=${encodeURIComponent(props.log.next)}`}>Older activity</a>
+						</p>
 					)}
 				</>
 			) : (

@@ -27,7 +27,8 @@ export type Status =
 	| { kind: "turn-in"; change: Change }
 	| { kind: "available" }
 	| { kind: "pending" }
-	| { kind: "accepted" }
+	/** Claimed by a quest branch, or by the draft PR its starter still holds. */
+	| { kind: "accepted"; change?: Change }
 	| { kind: "blocked"; requires: Ref[] };
 
 /** A link to another quest, or a blocker's own words when it names none. */
@@ -140,7 +141,7 @@ export function readBoard(project: Project): Board {
 
 	const status = (doc: Doc): Status => {
 		const change = changes.get(doc.path);
-		if (change) return { kind: "turn-in", change };
+		if (change) return change.owned ? { kind: "accepted", change } : { kind: "turn-in", change };
 		if (project.claims?.includes(doc.path)) return { kind: "accepted" };
 		if (free.has(doc.path)) return { kind: "available" };
 		if (open.has(doc.path)) return { kind: "pending" };

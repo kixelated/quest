@@ -152,6 +152,31 @@ describe("decision inbox", () => {
 		expect(thread(html)).not.toContain("Plan this issue");
 	});
 
+	it("shows a draft its starter holds as work in progress until it hands back decisions", async () => {
+		const draft = (handedBack: boolean) =>
+			db
+				.prepare(
+					"UPDATE github_project_activity SET data=json_set(data,'$.isDraft',json('true'),'$.handedBack',json(?)),changedAt=changedAt+1 WHERE id='21'",
+				)
+				.bind(String(handedBack))
+				.run();
+		await draft(false);
+		const html = await inbox();
+		expect(thread(html)).not.toContain(">Fix<");
+		expect(html.match(/<h2>In progress<\/h2>[\s\S]*?<\/ol>/)![0]).toMatch(
+			/Fix<\/a><span class="entry-meta"><span>Claimed draft/,
+		);
+		const held = thread(await inbox({ project: "10", item: "pulls/2" }));
+		expect(held).toContain("Its starter holds this draft");
+		expect(held).not.toContain("Iterate on this PR");
+		expect(held).not.toContain("Skip until it changes");
+		await draft(true);
+		const handed = await inbox();
+		expect(thread(handed)).toContain("Fix");
+		expect(thread(handed)).toContain("Iterate on this PR");
+		expect(handed).not.toContain("<h2>In progress</h2>");
+	});
+
 	it("drops a pull request the latest occupancy pass no longer found open", async () => {
 		expect(thread(await inbox({ project: "10", item: "pulls/2" }))).toContain("Iterate on this PR");
 		// History has not reread it, so its row still says open.

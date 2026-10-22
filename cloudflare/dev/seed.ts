@@ -49,8 +49,10 @@ export function world(): World {
 				content: quest("Later", "Work after the beta.", [
 					"- [Offline mode](/quest/m1/offline.md) - keep working without a network",
 					"- [Themes](/quest/m1/themes.md) - custom colors",
+					"- [Search](/quest/m1/search.md) - find anything",
 				]),
 			},
+			{ path: "quest/m1/search.md", content: quest("[S] Search across projects", "Find anything.") },
 			{
 				path: "quest/m1/offline.md",
 				content: quest(
@@ -108,6 +110,38 @@ export function world(): World {
 				branch: "deps",
 				checks: null,
 				review: "REVIEW_REQUIRED",
+			},
+			// A claim its starter still holds: work in progress, not a decision.
+			{
+				number: 17,
+				title: "Draft the theme picker",
+				author: "contributor",
+				branch: "quest/m1/themes",
+				checks: "PENDING",
+				review: null,
+				draft: true,
+				body: "Started on the picker.",
+			},
+			// A draft handed back with decisions: it waits on the maintainer.
+			{
+				number: 18,
+				title: "Search quest titles",
+				author: "contributor",
+				branch: "quest/m1/search",
+				checks: "SUCCESS",
+				review: null,
+				draft: true,
+				body: "Titles are indexed.\n\n## Decisions needed\n\n1. Index quest bodies too?\n",
+			},
+			// Clean when first read; `seed` rereads it while GitHub reports UNKNOWN.
+			{
+				number: 19,
+				title: "Speed up cold start",
+				author: "contributor",
+				branch: "perf/cold-start",
+				checks: "SUCCESS",
+				review: "APPROVED",
+				merge: "CLEAN",
 			},
 		],
 		claims: ["quest/m0/docs"],
@@ -213,6 +247,9 @@ export async function seed(options: { fetch: Fetch; db: D1Database; world: World
 		"pause archive",
 	);
 
+	// GitHub recomputes a recorded PR's mergeability, such as after a push to
+	// its base. The read below keeps its last known state rather than marking it new.
+	rocket.pulls.find((pull) => pull.number === 19)!.merge = "UNKNOWN";
 	// An issue opened since the refresh: its webhook rereads the project in the background.
 	const pointer = { number: 9, title: "Sync stops after the laptop sleeps", author: "reporter" };
 	rocket.issues.push(pointer);

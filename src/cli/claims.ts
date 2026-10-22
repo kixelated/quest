@@ -4,6 +4,7 @@
 // records a claim the same way, judging readiness by the upstream tree.
 import { execFileSync } from "node:child_process";
 
+import { handedBack } from "../core";
 import {
 	type GitHubDependencies,
 	type ObjectValue,
@@ -15,9 +16,6 @@ import {
 	string,
 } from "./github";
 import { type Snapshot, snapshot } from "./tree";
-
-/** The heading that hands a draft back to the maintainer; only its presence matters. */
-const HAND_BACK = /^#{2}[ \t]+Decisions needed[ \t]*#*[ \t]*$/im;
 
 /** An open PR, from any head repository, as the claim checks read it. */
 export interface OpenPull {
@@ -152,7 +150,7 @@ export async function openPullRequests(github: GitHub, repository: Repository): 
 			draft: row.draft === true,
 			created: Date.parse(string(row.created_at)),
 			updated: Date.parse(string(row.updated_at)),
-			handedBack: typeof row.body === "string" && HAND_BACK.test(row.body),
+			handedBack: typeof row.body === "string" && handedBack(row.body),
 		};
 	});
 }

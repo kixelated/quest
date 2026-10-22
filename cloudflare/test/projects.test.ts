@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
 import { readBoard } from "../src/board/model";
-import { type ActivityPage, associatedQuest } from "../src/github/state";
+import { type ActivityPage, associatedQuest, RETENTION, readActivity } from "../src/github/state";
 import { GitHubService } from "../src/github/service";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
@@ -795,6 +795,81 @@ describe("enrolled project observations", () => {
 			"d".repeat(40),
 		);
 	});
+	it("shows a draft its starter holds as claimed, and a handed-back draft as turned in", async () => {
+		await enrolled();
+		const page = activity();
+		const draft = Object.assign(page.pullRequests!.nodes[0]!, { isDraft: true, body: "Work so far." });
+		const first = await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
+		expect(first!.project.changes).toMatchObject([{ quest: "quest/first.md", number: 2, owned: true }]);
+		expect(readBoard(first!.project).quests.get("quest/first.md")!.status).toMatchObject({
+			kind: "accepted",
+			change: { number: 2 },
+		});
+		// Only whether the body hands the draft back is kept.
+		const data = first!.activity.find((item) => item.id === "200")!.data!;
+		expect(data).toMatchObject({ handedBack: false });
+		expect(data).not.toHaveProperty("body");
+		draft.body = "Work so far.\n\n## Decisions needed\n\n1. Which name?\n";
+		const next = await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
+		expect(next!.project.changes).toMatchObject([{ quest: "quest/first.md", owned: false }]);
+		expect(readBoard(next!.project).quests.get("quest/first.md")!.status.kind).toBe("turn-in");
+	});
+	it("keeps a recorded PR's state while GitHub computes its mergeability", async () => {
+		await enrolled();
+		const page = (status: string, oid = commit) => {
+			const result = activity();
+			const [mine, other] = result.pullRequests!.nodes as (ReturnType<typeof pull> & {
+				mergeStateStatus?: string;
+			})[];
+			Object.assign(mine!, { mergeStateStatus: status, headRefOid: oid });
+			mine!.commits.nodes[0]!.commit.oid = oid;
+			other!.mergeStateStatus = "UNKNOWN";
+			return result;
+		};
+		const refresh = async (status: string, oid = commit) => {
+			const state = await github({ activity: page(status, oid) }).service.projectState(
+				repo,
+				"enrollment-test",
+				true,
+			);
+			const rows = Object.fromEntries(
+				state!.activity.map((item) => [item.id, { changedAt: item.changedAt, data: item.data as any }]),
+			);
+			// Forget when each changed, so the next refresh shows whether it changes again.
+			await env.DB.prepare("UPDATE github_project_activity SET changedAt=0 WHERE repository=10").run();
+			return rows;
+		};
+		const seen = await refresh("CLEAN");
+		// A newly seen PR is news even while its state is unknown.
+		expect(seen["201"]).toMatchObject({ data: { mergeStateStatus: "UNKNOWN" } });
+		expect(seen["201"]!.changedAt).toBeGreaterThan(0);
+		// At the same head, the last known state stands and nothing is new.
+		expect(await refresh("UNKNOWN")).toMatchObject({ 200: { changedAt: 0, data: { mergeStateStatus: "CLEAN" } } });
+		// At a new head, the state is unknown, and the change is news only once it is known.
+		const moved = "e".repeat(40);
+		expect(await refresh("UNKNOWN", moved)).toMatchObject({
+			200: { changedAt: 0, data: { mergeStateStatus: "UNKNOWN", headRefOid: moved } },
+		});
+		expect((await refresh("BLOCKED", moved))["200"]!.changedAt).toBeGreaterThan(0);
+	});
+	it("prunes a closed entity's activity once it has been closed past retention", async () => {
+		await enrolled();
+		await github().service.projectState(repo, "enrollment-test", true);
+		const page = activity();
+		const old = new Date(Date.now() - RETENTION - 60_000).toISOString();
+		Object.assign(page.issues!.nodes[0]!, { state: "CLOSED", closedAt: old });
+		Object.assign(page.pullRequests!.nodes[1]!, { state: "MERGED", closedAt: new Date().toISOString() });
+		page.open = connection([page.pullRequests!.nodes[0]!]);
+		const state = await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
+		// Only open entities are read for the board and inbox; the log keeps recently closed ones.
+		expect(state!.activity.map((item) => item.id)).toEqual(["200"]);
+		const log = await readActivity(env.DB, repo.id);
+		expect(log.items.map((item) => [item.id, item.data?.state])).toEqual([
+			["201", "MERGED"],
+			["200", "OPEN"],
+		]);
+		expect(log.next).toBeNull();
+	});
 	it("resumes independent cursors and reconciles closed entities and removed claims in later scans", async () => {
 		await enrolled();
 		const page = activity();
@@ -1188,6 +1263,20 @@ describe("webhook reconciliation", () => {
 		expect(await row("100")).toMatchObject({ stale: 0, missing: 1 });
 	});
 
+	it("prunes a long-closed issue that a webhook names again", async () => {
+		await enrolled();
+		const closedAt = new Date(Date.now() - RETENTION - 60_000).toISOString();
+		mocked({ entities: { 1: { ...issue(), state: "CLOSED", closedAt } } });
+		await delivery(
+			"issue_comment",
+			{ ...event, action: "created", issue: { id: 100, number: 1 } },
+			undefined,
+			{},
+			testEnv,
+		);
+		expect(await row("100")).toBeNull();
+	});
+
 	it("rereads availability after a webhook that can claim a quest", async () => {
 		await enrolled();
 		const quiet = {
@@ -1262,6 +1351,32 @@ describe("project activity routes", () => {
 		const data = await app.request(`${base}/data`, { headers: { Cookie: cookie } }, testEnv);
 		expect(data.headers.get("cache-control")).toBe("no-store");
 		expect(await data.json()).toMatchObject({ complete: true, project: { commit } });
+	});
+	it("pages the activity log, newest first", async () => {
+		const cookie = await session();
+		await app.request(`${base}/refresh`, { method: "POST", headers: { Cookie: cookie, Origin: origin } }, testEnv);
+		await env.DB.batch(
+			Array.from({ length: 60 }, (_, i) =>
+				env.DB.prepare(
+					"INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt,data,seenIn) VALUES(10,'issue',?,?,?,0,?,'old')",
+				).bind(
+					String(1000 + i),
+					1000 + i,
+					i,
+					JSON.stringify({ ...issue(1000 + i, 1000 + i), title: `Closed ${i}`, state: "CLOSED" }),
+				),
+			),
+		);
+		const first = await (await app.request(`${base}/state`, { headers: { Cookie: cookie } }, testEnv)).text();
+		expect(first).toContain("&lt;script&gt;title&lt;/script&gt;");
+		expect(first).toContain("Closed 59");
+		expect(first).not.toContain("Closed 12<");
+		const older = first.match(/href="([^"]+\/state\?before=[^"]+)">Older activity/)![1]!.replaceAll("&amp;", "&");
+		const second = await (await app.request(`${origin}${older}`, { headers: { Cookie: cookie } }, testEnv)).text();
+		expect(second).toContain("Closed 12<");
+		expect(second).toContain("Closed 0<");
+		expect(second).not.toContain("Closed 13<");
+		expect(second).not.toContain("Older activity");
 	});
 	it("uses the shared board and resolves nested quest routes within the authenticated project", async () => {
 		const cookie = await session();

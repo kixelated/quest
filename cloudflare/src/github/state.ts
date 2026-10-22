@@ -1,4 +1,4 @@
-import { branchQuest, parse, ready } from "quest/core";
+import { branchQuest, handedBack, parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
@@ -17,6 +17,8 @@ type Entity = {
 	title: string;
 	state: string;
 	updatedAt: string;
+	/** When it closed or merged; absent in older observations. */
+	closedAt?: string | null;
 	author: { login: string } | null;
 	comments: { totalCount: number };
 };
@@ -24,6 +26,8 @@ export type Pull = Entity & {
 	headRefName: string;
 	headRefOid: string;
 	isDraft: boolean;
+	/** Its body has a `## Decisions needed` section; the body itself is not kept. Absent in older observations. */
+	handedBack?: boolean;
 	reviewDecision: string | null;
 	/** GitHub's merge readiness for the App, such as CLEAN, BLOCKED, or DIRTY; absent in older observations. */
 	mergeStateStatus?: string;
@@ -66,8 +70,17 @@ export type ProjectState = {
 	failure: string | null;
 };
 
-const entityFields = "databaseId:fullDatabaseId number title state updatedAt author { login } comments { totalCount }";
-const pullFields = `${entityFields} headRefName headRefOid isDraft reviewDecision mergeStateStatus reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
+/**
+ * How long a closed issue or PR stays in the activity log. Only the log shows
+ * closed entities, so after this its row is pruned when history next reads it.
+ * 30 days keeps a month of closed history while bounding storage: about 2.5k
+ * rows on moq-dev/moq (measured 2026-10-21), against 6.3k unpruned and growing.
+ */
+export const RETENTION = 30 * 24 * 60 * 60 * 1000;
+
+const entityFields =
+	"databaseId:fullDatabaseId number title state updatedAt closedAt author { login } comments { totalCount }";
+const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
 export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {
@@ -144,6 +157,26 @@ function validate(kind: "issue" | "pull", item: Entity) {
 	}
 }
 
+/** What is kept of an observed entity: a PR's body only as whether it hands its draft back. */
+function observed(kind: "issue" | "pull", item: Entity): Entity {
+	if (kind === "issue") return item;
+	const { body, ...pull } = item as Pull & { body?: unknown };
+	return { ...pull, handedBack: typeof body === "string" && handedBack(body) } as Pull;
+}
+
+/**
+ * A draft its starter still holds: claimed work in progress until its body
+ * hands it back with `## Decisions needed`, as the guide defines.
+ */
+export function owned(pull: Pull) {
+	return pull.isDraft && !pull.handedBack;
+}
+
+/** Closed for longer than `RETENTION`. */
+function expired(item: Entity, now: number) {
+	return item.state !== "OPEN" && typeof item.closedAt === "string" && Date.parse(item.closedAt) < now - RETENTION;
+}
+
 /** Entities that webhooks named since they were last read by number, oldest first. */
 export async function staleEntities(db: D1Database, repository: number) {
 	return (
@@ -203,7 +236,7 @@ export async function reconcile(
 		if (cursor === false) continue;
 		for (const item of connection!.nodes) {
 			validate(kind, item);
-			entities.set(`${kind}/${item.databaseId}`, { kind, item, stale: 0 });
+			entities.set(`${kind}/${item.databaseId}`, { kind, item: observed(kind, item), stale: 0 });
 			if (open) updated.occupancy.pulls.push(item.databaseId);
 		}
 	}
@@ -215,12 +248,30 @@ export async function reconcile(
 		if (item) validate(entity.kind, item);
 		// A number GitHub no longer resolves to this entity, such as a deleted issue.
 		if (!item || item.databaseId !== entity.id) gone.push(entity);
-		else entities.set(`${entity.kind}/${entity.id}`, { kind: entity.kind, item, stale: entity.stale });
+		else
+			entities.set(`${entity.kind}/${entity.id}`, {
+				kind: entity.kind,
+				item: observed(entity.kind, item),
+				stale: entity.stale,
+			});
 	});
+	// Long-closed entities lose their rows, unless a webhook named one again since it was read.
+	const kept = [...entities.values()].filter((entity) => !expired(entity.item, now));
+	const pruned = [...entities.values()]
+		.filter((entity) => expired(entity.item, now))
+		.map(({ kind, item, stale }) => ({ kind, id: item.databaseId, stale }));
 	updated.occupancy.claims = [...new Set(updated.occupancy.claims)];
 	updated.occupancy.pulls = [...new Set(updated.occupancy.pulls)];
 	const current = "EXISTS(SELECT 1 FROM github_project_state WHERE repository=? AND revision=? AND epoch=?)";
-	// json_each keeps the transaction to four statements and a few bindings,
+	// GitHub reports UNKNOWN while it computes mergeability, and may send no
+	// event once it has. A recorded PR at the same head keeps its last known
+	// merge state; at a new head it keeps its changedAt, so the change is news
+	// once a definite state arrives. A newly seen PR is news either way.
+	const prior = "github_project_activity.data";
+	const unknown = `json_extract(excluded.data,'$.mergeStateStatus')='UNKNOWN' AND ${prior} IS NOT NULL`;
+	const keeps = `${unknown} AND json_extract(${prior},'$.headRefOid')=json_extract(excluded.data,'$.headRefOid') AND json_extract(${prior},'$.mergeStateStatus') IS NOT NULL`;
+	const data = `CASE WHEN ${keeps} THEN json_set(excluded.data,'$.mergeStateStatus',json_extract(${prior},'$.mergeStateStatus')) ELSE excluded.data END`;
+	// json_each keeps the transaction to five statements and a few bindings,
 	// within D1's free query budget and SQLite's bound-parameter limit.
 	const statements = [
 		db
@@ -228,9 +279,14 @@ export async function reconcile(
 				`INSERT INTO github_project_activity(repository,kind,id,number,firstSeen,changedAt,data,seenIn,stale)
  SELECT ?,json_extract(value,'$.kind'),json_extract(value,'$.item.databaseId'),json_extract(value,'$.item.number'),?,?,json_extract(value,'$.item'),?,json_extract(value,'$.stale')
  FROM json_each(?) WHERE ${current}
- ON CONFLICT(repository,kind,id) DO UPDATE SET number=excluded.number,changedAt=CASE WHEN github_project_activity.data IS NOT excluded.data THEN excluded.changedAt ELSE github_project_activity.changedAt END,data=excluded.data,seenIn=excluded.seenIn,missing=0,stale=CASE WHEN excluded.stale>0 AND github_project_activity.stale=excluded.stale THEN 0 ELSE github_project_activity.stale END`,
+ ON CONFLICT(repository,kind,id) DO UPDATE SET number=excluded.number,changedAt=CASE WHEN ${unknown} AND NOT (${keeps}) THEN github_project_activity.changedAt WHEN ${prior} IS NOT ${data} THEN excluded.changedAt ELSE github_project_activity.changedAt END,data=${data},seenIn=excluded.seenIn,missing=0,stale=CASE WHEN excluded.stale>0 AND github_project_activity.stale=excluded.stale THEN 0 ELSE github_project_activity.stale END`,
 			)
-			.bind(repo.id, now, now, history.id, JSON.stringify([...entities.values()]), repo.id, revision, epoch),
+			.bind(repo.id, now, now, history.id, JSON.stringify(kept), repo.id, revision, epoch),
+		db
+			.prepare(
+				`DELETE FROM github_project_activity WHERE repository=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE json_extract(value,'$.kind')=github_project_activity.kind AND json_extract(value,'$.id')=github_project_activity.id AND json_extract(value,'$.stale')=github_project_activity.stale) AND ${current}`,
+			)
+			.bind(repo.id, JSON.stringify(pruned), repo.id, revision, epoch),
 		db
 			.prepare(
 				`UPDATE github_project_activity SET missing=1,stale=CASE WHEN stale=json_extract(value,'$.stale') THEN 0 ELSE stale END
@@ -269,6 +325,37 @@ export function startable(state: ProjectState, quest: string, retry: number | nu
 	);
 }
 
+/** Open entities and unread webhook pointers; migration 0015's partial index matches this term exactly. */
+const LIVE = "(data IS NULL OR json_extract(data,'$.state')='OPEN')";
+
+type Row = Omit<Activity, "data"> & { data: string | null };
+const parsed = (rows: Row[]): Activity[] =>
+	rows.map((item) => ({ ...item, data: item.data ? JSON.parse(item.data) : null }));
+
+/** Where `readActivity` resumes: the last shown row's position, newest first. */
+const CURSOR = /^(\d+)-(issue|pull)-([1-9]\d*)$/;
+
+/**
+ * One page of a project's activity log, open and closed alike, newest first,
+ * and the cursor of the next page. An unreadable cursor starts from the top.
+ */
+export async function readActivity(db: D1Database, repository: number, before: string | null = null, limit = 50) {
+	const at = before ? CURSOR.exec(before) : null;
+	const rows = (
+		await db
+			.prepare(
+				`SELECT kind,id,number,firstSeen,changedAt,data,missing FROM github_project_activity
+ WHERE repository=?1 AND (?2 IS NULL OR (firstSeen,kind,id)<(?2,?3,?4))
+ ORDER BY firstSeen DESC,kind DESC,id DESC LIMIT ?5`,
+			)
+			.bind(repository, at ? Number(at[1]) : null, at?.[2] ?? null, at?.[3] ?? null, limit + 1)
+			.all<Row>()
+	).results;
+	const items = parsed(rows.slice(0, limit));
+	const last = items.at(-1);
+	return { items, next: rows.length > limit && last ? `${last.firstSeen}-${last.kind}-${last.id}` : null };
+}
+
 export async function readState(db: D1Database, repo: GitHubRepository): Promise<ProjectState | null> {
 	const records = await db.batch([
 		db
@@ -276,9 +363,11 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 				"SELECT snapshot,scan,observedAt,revision,invalidated,failure FROM github_project_state WHERE repository=?",
 			)
 			.bind(repo.id),
+		// Only open entities and unread pointers decide the board, the inbox, and
+		// jobs, so this read grows with open work, not history.
 		db
 			.prepare(
-				"SELECT kind,id,number,firstSeen,changedAt,data,missing FROM github_project_activity WHERE repository=? ORDER BY firstSeen DESC,id DESC",
+				`SELECT kind,id,number,firstSeen,changedAt,data,missing FROM github_project_activity WHERE repository=? AND ${LIVE} ORDER BY firstSeen DESC,kind DESC,id DESC`,
 			)
 			.bind(repo.id),
 	]);
@@ -295,8 +384,7 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 	if (!row?.snapshot || !row.scan) return null;
 	const snapshot: Snapshot = JSON.parse(row.snapshot);
 	const scan: Scan = JSON.parse(row.scan);
-	const rows = records[1]!.results as (Omit<Activity, "data"> & { data: string | null })[];
-	const activity: Activity[] = rows.map((item) => ({ ...item, data: item.data ? JSON.parse(item.data) : null }));
+	const activity = parsed(records[1]!.results as Row[]);
 	const paths = new Set(snapshot.documents.map((d) => d.path));
 	// A PR's activity row can still say OPEN until history rereads it, so only
 	// PRs in the latest occupancy pass count as open.
@@ -313,6 +401,7 @@ export async function readState(db: D1Database, repo: GitHubRepository): Promise
 							author: pull.author?.login ?? "GitHub contributor",
 							href: `https://github.com/${repo.owner}/${repo.name}/pull/${pull.number}`,
 							number: pull.number,
+							owned: owned(pull),
 						},
 					]
 				: [];
