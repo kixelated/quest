@@ -458,7 +458,7 @@ const session = resume ? at("--resume") : at("--session-id");
 const stdin = fs.readFileSync(0, "utf8");
 const log = (value) => fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(value) + "\\n");
 log({ argv, stdin, cwd: process.cwd(), home: process.env.CLAUDE_CONFIG_DIR, gh: process.env.GH_TOKEN ?? null });
-const kix = JSON.parse(at("--mcp-config")).mcpServers.kix;
+const kix = JSON.parse(fs.readFileSync(at("--mcp-config"), "utf8")).mcpServers.kix;
 const out = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 out({ type: "system", subtype: "init", session_id: session });
 let id = 0;
@@ -645,6 +645,8 @@ describe("quest runner", () => {
 		expect(launch.argv).toEqual(expect.arrayContaining(["-p", "--output-format", "stream-json", "--session-id"]));
 		expect(launch.argv.slice(-2)).toEqual(["--disallowedTools", "AskUserQuestion"]);
 		expect(launch.home).toBe(r.home.accountHome("acct1"));
+		// The tools' bearer token never appears on the command line.
+		expect(JSON.stringify(launch.argv)).not.toContain("Bearer");
 		expect(launch.gh).toBeNull();
 		expect(launch.stdin).toContain("Always run the tests.");
 		expect(launch.stdin).toContain("kix adds for this job: Extra rule.");

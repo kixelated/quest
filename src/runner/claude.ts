@@ -4,7 +4,9 @@
 // tokens. The kix tools attach as an HTTP MCP server, and AskUserQuestion is
 // disabled so every question goes through kix's `ask` tool instead.
 import { execFile, spawn } from "node:child_process";
+import { rmSync, writeFileSync } from "node:fs";
 import { constants } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { boundedLines, LINE_LIMIT, strippedEnvironment } from "../cli/agent";
@@ -128,6 +130,9 @@ export class Claude implements Adapter {
 				},
 			},
 		};
+		// The bearer token stays out of the command line, which other users can read, in the account's private home.
+		const config = join(launch.home, `kix-tools-${launch.session}.json`);
+		writeFileSync(config, JSON.stringify(mcp), { mode: 0o600 });
 		const argv = [
 			...launch.shell,
 			this.binary,
@@ -139,7 +144,7 @@ export class Claude implements Adapter {
 			"--permission-mode",
 			this.permissionMode,
 			"--mcp-config",
-			JSON.stringify(mcp),
+			config,
 			"--strict-mcp-config",
 			"--append-system-prompt",
 			launch.system,
@@ -175,9 +180,11 @@ export class Claude implements Adapter {
 		let killer: ReturnType<typeof setTimeout> | undefined;
 		const done = new Promise<Exit>((resolve) => {
 			child.once("error", (error: NodeJS.ErrnoException) => {
+				rmSync(config, { force: true });
 				resolve({ limited: null, failed: true, reply: `could not start ${argv[0]}: ${error.message}` });
 			});
 			child.once("close", (code, name) => {
+				rmSync(config, { force: true });
 				clearTimeout(killer);
 				lines.end();
 				resolve(reader.exit(code ?? (name ? 128 + constants.signals[name] : 1), stderr));
