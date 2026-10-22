@@ -27,5 +27,4 @@ edits through this plan.
 
 ## Related
 
-- [PR state commands](/quest/m0/helpers/pr-states.md) - also rewrites how `complete` dispatches and skips held PRs
 - [Unattended work](/quest/m0/helpers/afk.md) - carries on picks the user already made

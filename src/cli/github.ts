@@ -98,11 +98,12 @@ export class GitHub {
 
 	/**
 	 * A 2xx or 304 response; anything else fails after rate-limit retries, with
-	 * GitHub's reason when it gives one. `body` makes it a POST unless `method` says otherwise.
+	 * GitHub's reason when it gives one, unless `allow` lists its status. `body` makes it a POST
+	 * unless `method` says otherwise.
 	 */
 	async request(
 		path: string,
-		options: { etag?: string; body?: unknown; method?: "POST" | "PATCH" } = {},
+		options: { etag?: string; body?: unknown; method?: "POST" | "PATCH" | "DELETE"; allow?: number[] } = {},
 	): Promise<Response> {
 		// Follow only same-origin pagination links; never send a token to another host.
 		const url = new URL(path, API);
@@ -115,7 +116,7 @@ export class GitHub {
 			try {
 				response = await this.deps.fetch(url, {
 					...(options.body === undefined
-						? {}
+						? options.method && { method: options.method }
 						: { method: options.method ?? "POST", body: JSON.stringify(options.body) }),
 					headers: {
 						Accept: "application/vnd.github+json",
@@ -131,7 +132,7 @@ export class GitHub {
 				throw error;
 			}
 			this.pollInterval = Math.max(this.pollInterval, seconds(response.headers.get("x-poll-interval")) ?? 0);
-			if (response.ok || response.status === 304) return response;
+			if (response.ok || response.status === 304 || options.allow?.includes(response.status)) return response;
 			const body = await response.text();
 			const limited =
 				response.status === 429 ||

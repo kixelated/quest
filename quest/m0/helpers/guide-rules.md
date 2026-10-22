@@ -62,5 +62,4 @@ edits through this plan; follow `PROMPTING.md` (goals over prescriptions).
 
 ## Related
 
-- [PR state commands](/quest/m0/helpers/pr-states.md) - refuses a merged PR mechanically and carries the merge method
 - [Unattended work](/quest/m0/helpers/afk.md) - the guide's final-summary rule

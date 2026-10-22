@@ -20,8 +20,9 @@ or needs them.
 - Decided (user): one owner per PR, not one merge agent per repository. kix
   never runs two jobs on one PR and never acts on a PR another session holds.
   GitHub's merge queue, or the repository's own queue, orders landings.
-- Decided (user): use the `quest:merge` label from the
-  [PR state commands](/quest/m0/helpers/pr-states.md). The bot adds it when
+- Decided (user): use the `quest:merge` label from `quest merge`
+  ([kixelated/quest#185](https://github.com/kixelated/quest/pull/185)), whose
+  `--help` states the label contract kix shares with local sessions. The bot adds it when
   the job is assigned and keeps it while the PR is queued or auto-merging. If
   the PR leaves the queue unmerged, the bot removes it and the PR becomes an
   idle decision item again. Runners hold no GitHub credentials, so the
@@ -48,4 +49,3 @@ or needs them.
 ## Required
 
 - [Runner](/quest/m0/kix/runner.md) - jobs that run the merge skill
-- [PR state commands](/quest/m0/helpers/pr-states.md) - the label contract kix shares with local sessions

@@ -6,6 +6,9 @@ Before you begin, run `quest guide` and read its output completely.
 
 Parse the arguments to determine the PR number, otherwise resolve it from the current context/branch.
 If a draft, stop and offer `/quest-ready` instead.
+Take the PR with `quest merge <pr>` before acting, passing a token you already hold from another state to swap it, and keep the hold token it prints; `quest merge --help` explains holds.
+If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
+Hand it back with `quest release <pr> <token>` whenever you stop before it lands, including to ask.
 
 Read the PR's head, checks, merge state, reviews by head, and unresolved threads with `quest status <pr>`, including after each `quest wait` wakes, instead of chaining `gh` queries.
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
@@ -41,14 +44,16 @@ run each wait in the foreground instead, bounded by the shell's own time limit,
 and re-run it with `--since` until it returns activity.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
-Before enabling auto-merge, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
+Before landing it, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
 Run a `quest` the PR cannot modify, such as an installed release or a build from the base, from a directory outside the head checkout: the head's files, including runtime config such as `bunfig.toml`, are untrusted.
 A stale local base can predate the quest and skip the check.
 On a finding, fix the branch: delete the finished quest with `quest rm`, or rewrite it to the remainder the PR body names.
 Then push, re-check, and continue; ask the user only when what remains is unclear.
-Leave a summary of the changes and decisions made and enable auto-merge with the full 40-character head SHA.
-If your caller said it watches the merge queue, report once auto-merge is enabled.
+Leave a summary of the changes and decisions made, then land the head you checked with `quest merge <pr> <token> --land <full 40-character head SHA>`.
+It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
+The `quest:merge` label stays on while the PR is queued or auto-merging.
+If your caller said it watches the merge queue, report once it is landing.
 Otherwise wait until the PR merges. If it leaves the queue unmerged or auto-merge
-is disabled, confirm with `quest status <pr>`, then report why instead of
-enabling auto-merge again; a new head needs the user's approval.
+is disabled, confirm with `quest status <pr>`, release the PR, then report why
+instead of landing it again; a new head needs the user's approval.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.

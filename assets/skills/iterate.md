@@ -6,6 +6,8 @@ Before you begin, run `quest guide` and `quest skill plan`, and read their outpu
 
 You own this PR until it is landable.
 Parse the arguments to determine the PR number. Any other text is the user's feedback on the PR; interpret it against the diff.
+Take it with `quest iterate <pr>` before acting, and keep the hold token it prints; `quest iterate --help` explains holds.
+If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
 If you cannot push to the PR's branch, stop and report.
 
 Read the PR, its linked issues and quest, the reviews and comments posted on it, and the surrounding code.
@@ -24,5 +26,6 @@ One round only; never request a review, including by toggling a ready PR to draf
 Push your changes to the PR and update its summary.
 Summarize the changes made, and offer `/quest-plan` for follow-ups that belong outside this PR.
 
-Mark the PR ready once nothing is unfinished and no decisions need the user.
+Mark the PR ready with `quest ready <pr> <token> --done` once nothing is unfinished and no decisions need the user.
+Hand it back with `quest release <pr> <token>`, using the latest token printed, whenever you stop, including to ask.
 Never merge; that is `/quest-merge`, once the user picks it.

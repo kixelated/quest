@@ -197,7 +197,7 @@ quest check --base origin/main --branch quest/m0/export
 ```
 
 Fetch the base first, since a stale one can predate the quest. The
-`quest-merge` skill runs this before enabling auto-merge. A repository with
+`quest-merge` skill runs this before landing a PR. A repository with
 `quest` installed in CI can also run it on pull requests, where the checkout is
 detached, so pass the head branch:
 
@@ -363,6 +363,40 @@ same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `threads`. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
+
+## Own a pull request
+
+Before a session pushes to an existing PR, it takes the PR, so two sessions
+never iterate on or merge one PR at once:
+
+```sh
+quest iterate 128                    # prints a hold token
+quest ready 128 <token>              # swap to quest:ready, printing a new token
+quest ready 128 <token> --done       # drop "Decisions needed" and mark it ready
+quest merge 128 <token>              # swap to quest:merge for the fix loop
+quest merge 128 <token> --land <sha> # auto-merge bound to that head
+quest release 128 <token>            # hand it back
+```
+
+A taken PR carries one label, `quest:iterate`, `quest:ready`, or
+`quest:merge`. Sessions often share a GitHub account, so taking a label prints
+a hold token: the ID of the timeline event that added it. Every command refuses
+while a `quest:*` label it holds no token for is on the PR, including its own
+state's; a draft its starter still holds, one without a `## Decisions needed`
+section; and a merged or closed PR, since a push after the merge brings the
+branch back. The refusal names the holder's label, age, and token, so you can
+decide whether to release a stale hold. When two sessions add different labels
+at once, the first label added keeps the PR and the other backs off.
+
+`--land` needs the full 40-character head SHA and refuses once the head moves.
+It enables auto-merge bound to that SHA, which enters GitHub's merge queue
+when the base has one, or merges at once when nothing is left to wait for. It
+makes a merge commit; `--squash` or `--rebase` picks another method, and a
+merge queue applies its own. `quest:merge` stays on while the PR is queued or
+auto-merging; once the PR leaves the queue unmerged, the next command removes
+it. The commands accept the same PR argument and authentication as
+`quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
+and 1 for other failures.
 
 ## Gate expensive commands
 

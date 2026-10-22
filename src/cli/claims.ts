@@ -13,8 +13,8 @@ import {
 	string,
 } from "./github";
 
-/** The heading that hands a draft back to the maintainer; only its presence matters. */
-const HAND_BACK = /^#{2}[ \t]+Decisions needed[ \t]*#*[ \t]*$/im;
+/** The heading that hands a draft back to the maintainer; only its presence matters. Web edits end lines in CRLF. */
+export const HAND_BACK = /^#{2}[ \t]+Decisions needed[ \t]*#*[ \t]*\r?$/im;
 
 /** A quest's branch: its path without `.md`. */
 export function questBranch(path: string): string {
