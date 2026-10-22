@@ -9,11 +9,11 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, test, vi } from "vitest";
 
-import { claims } from "../src/cli/claims";
-import { type GitHubDependencies, type ObjectValue } from "../src/cli/github";
+import { claims, target } from "../src/cli/claims";
+import { type GitHubDependencies, type ObjectValue, githubRepository } from "../src/cli/github";
 import { type Output, main } from "../src/cli/main";
 import { Refusal, ago, releaseQuest, startQuest } from "../src/cli/start";
-import { TWO, Tree, tempDir } from "./fixture";
+import { EPIC_README, TWO, Tree, tempDir } from "./fixture";
 
 const ONE = "quest/m0/epic/one.md";
 const BRANCH = "quest/m0/epic/one";
@@ -84,9 +84,10 @@ function clone(url: string, routes: Record<string, string> = {}): string {
 interface Pull {
 	number: number;
 	base: string;
-	head: { ref: string; repo: { full_name: string } | null };
+	head: { ref: string; sha?: string; repo: { full_name: string } | null };
 	draft: boolean;
 	state: string;
+	merged_at?: string | null;
 	body: string;
 	created_at: string;
 	updated_at: string;
@@ -110,6 +111,21 @@ class FakeGitHub {
 		this.repos.set(name, { owner: { login: owner }, name: repo, full_name: name, ...extra });
 	}
 
+	/** A fork of example/project. */
+	fork(name: string): void {
+		this.repo(name, {
+			fork: true,
+			default_branch: "main",
+			parent: {
+				owner: { login: "example" },
+				name: "project",
+				clone_url: UPSTREAM,
+				ssh_url: "git@github.com:example/project.git",
+				default_branch: "main",
+			},
+		});
+	}
+
 	/** Open a PR as another contributor, `minutes` before now. */
 	open(base: string, ref: string, headRepo: string, options: Partial<Pull> = {}): Pull {
 		const number = this.pulls.length + 1;
@@ -129,8 +145,29 @@ class FakeGitHub {
 		return pull;
 	}
 
+	/** Close a PR from `ref` of `headRepo` whose head was `sha`, merged or not. */
+	closed(headRepo: string, ref: string, sha: string, merged: boolean): Pull {
+		return this.open("example/project", ref, headRepo, {
+			head: { ref, sha, repo: { full_name: headRepo } },
+			state: "closed",
+			merged_at: merged ? new Date(this.clock).toISOString() : null,
+		});
+	}
+
 	open_(base: string): Pull[] {
 		return this.pulls.filter((pull) => pull.base === base && pull.state === "open");
+	}
+
+	/** The listing's `state` (default open) and `head` (`owner:ref`) filters. */
+	private list(base: string, query: URLSearchParams): Pull[] {
+		const state = query.get("state") ?? "open";
+		const head = query.get("head");
+		return this.pulls.filter(
+			(pull) =>
+				pull.base === base &&
+				(state === "all" || pull.state === state) &&
+				(head === null || `${pull.head.repo?.full_name.split("/")[0]}:${pull.head.ref}` === head),
+		);
 	}
 
 	deps(): GitHubDependencies {
@@ -153,7 +190,7 @@ class FakeGitHub {
 			return repo ? json(200, repo) : json(404, { message: "Not Found" });
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/pulls$/.exec(url.pathname);
-		if (match && method === "GET") return json(200, this.open_(match[1]));
+		if (match && method === "GET") return json(200, this.list(match[1], url.searchParams));
 		if (match && method === "POST") {
 			const [owner, ref] = String(body.head).includes(":") ? String(body.head).split(":") : [null, body.head];
 			const headRepo = owner ? `${owner}/${match[1].split("/")[1]}` : match[1];
@@ -178,6 +215,23 @@ function deps(github: FakeGitHub, warnings: string[] = []) {
 	return { github: () => github.deps(), warn: (message: string) => warnings.push(message) };
 }
 
+/** Commit `files` in `work`, where `null` deletes one, and push them to origin's default branch. */
+function land(work: string, files: Record<string, string | null>): void {
+	for (const [path, text] of Object.entries(files)) {
+		if (text === null) rmSync(join(work, path));
+		else writeFileSync(join(work, path), text);
+	}
+	git(work, "add", "-A");
+	git(work, "commit", "-q", "-m", "land");
+	git(work, "push", "-q", "origin", "HEAD:refs/heads/main");
+}
+
+/** Claim `path` from `work` as `quest start` does, reading the upstream tree first. */
+async function start(work: string, github: FakeGitHub, warnings: string[] = [], path = ONE) {
+	const dependencies = deps(github, warnings);
+	return startQuest(work, await target(work, "origin", dependencies), path, "[S] One", dependencies);
+}
+
 /** The branch tip on a bare repository, or "" when it is missing. */
 function tip(bare: string, branch = BRANCH): string {
 	return git(bare, "for-each-ref", "--format=%(objectname)", `refs/heads/${branch}`);
@@ -197,7 +251,7 @@ describe("start on GitHub", () => {
 		const bare = upstream();
 		const github = new FakeGitHub();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
-		const started = await startQuest(work, ONE, "[S] One", "origin", deps(github));
+		const started = await start(work, github);
 
 		expect(started).toEqual({ branch: BRANCH, sha: tip(bare), url: "https://github.com/example/project/pull/1" });
 		const base = git(bare, "rev-parse", "main");
@@ -228,7 +282,7 @@ describe("start on GitHub", () => {
 		git(work, "push", "-q", "origin", "HEAD:refs/heads/main");
 		const github = new FakeGitHub();
 
-		await startQuest(join(work, "sub"), ONE, "[S] One", "origin", deps(github));
+		await start(join(work, "sub"), github);
 		expect(github.pulls[0].body).toBe(`Claims [${ONE}](https://github.com/example/project/blob/main/sub/${ONE}).`);
 	});
 
@@ -237,7 +291,7 @@ describe("start on GitHub", () => {
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		git(work, "switch", "-q", "-c", BRANCH);
 		const warnings: string[] = [];
-		const started = await startQuest(work, ONE, "[S] One", "origin", deps(new FakeGitHub(), warnings));
+		const started = await start(work, new FakeGitHub(), warnings);
 		expect(warnings).toEqual([]);
 		expect(git(work, "rev-parse", "HEAD")).toBe(started.sha);
 	});
@@ -247,7 +301,7 @@ describe("start on GitHub", () => {
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		git(work, "branch", BRANCH);
 		const warnings: string[] = [];
-		const started = await startQuest(work, ONE, "[S] One", "origin", deps(new FakeGitHub(), warnings));
+		const started = await start(work, new FakeGitHub(), warnings);
 		expect(warnings).toEqual([
 			`local branch ${BRANCH} already exists; merge the claim commit ${started.sha} into it before pushing`,
 		]);
@@ -259,17 +313,7 @@ describe("start on GitHub", () => {
 		const forkBare = tempDir();
 		git(forkBare, "init", "-q", "--bare", "-b", "main");
 		const github = new FakeGitHub();
-		github.repo("me/project", {
-			fork: true,
-			default_branch: "main",
-			parent: {
-				owner: { login: "example" },
-				name: "project",
-				clone_url: UPSTREAM,
-				ssh_url: "git@github.com:example/project.git",
-				default_branch: "main",
-			},
-		});
+		github.fork("me/project");
 		// `corp:me/project` expands to the fork's HTTPS URL, so the parent is read over HTTPS too.
 		// The SSH form leads nowhere, so choosing it fails fast; pushes go to the fork's bare repository.
 		const work = clone("corp:me/project.git", {
@@ -278,7 +322,7 @@ describe("start on GitHub", () => {
 		});
 		git(work, "config", "url.https://github.com/.insteadOf", "corp:");
 		git(work, "config", "remote.origin.pushurl", forkBare);
-		const started = await startQuest(work, ONE, "[S] One", "origin", deps(github));
+		const started = await start(work, github);
 		expect(tip(forkBare)).toBe(started.sha);
 	});
 
@@ -286,9 +330,76 @@ describe("start on GitHub", () => {
 		const bare = upstream();
 		git(bare, "branch", BRANCH, "main");
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
-		await expect(startQuest(work, ONE, "[S] One", "origin", deps(new FakeGitHub()))).rejects.toThrow(
+		await expect(start(work, new FakeGitHub())).rejects.toThrow(
 			new Refusal(`${ONE} is held by branch ${BRANCH}, with no open PR`),
 		);
+	});
+
+	test("replaces a branch whose tip a merged PR landed", async () => {
+		const bare = upstream();
+		git(bare, "branch", BRANCH, "main");
+		const landed = tip(bare);
+		const github = new FakeGitHub();
+		github.closed("example/project", BRANCH, landed, true);
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+
+		expect(await claims(work, "origin", [BRANCH], deps(github))).toEqual([]);
+		const started = await start(work, github);
+		expect(started.sha).not.toBe(landed);
+		expect(tip(bare)).toBe(started.sha);
+		expect(github.open_("example/project")).toMatchObject([{ head: { ref: BRANCH } }]);
+	});
+
+	test("a branch whose PR closed unmerged, or that moved on after merging, still holds its quest", async () => {
+		const bare = upstream();
+		git(bare, "branch", BRANCH, "main");
+		const github = new FakeGitHub();
+		const closed = github.closed("example/project", BRANCH, tip(bare), false);
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const held = new Refusal(`${ONE} is held by branch ${BRANCH}, with no open PR`);
+		await expect(start(work, github)).rejects.toThrow(held);
+
+		// A merged PR whose head is no longer the tip: the work pushed since has not landed.
+		Object.assign(closed, { merged_at: closed.updated_at, head: { ...closed.head, sha: "0".repeat(40) } });
+		await expect(start(work, github)).rejects.toThrow(held);
+		expect(tip(bare)).toBe(git(bare, "rev-parse", "main"));
+	});
+
+	test("a fork replaces its own branch that a merged PR landed", async () => {
+		const bare = upstream();
+		const forkBare = upstream();
+		git(forkBare, "branch", BRANCH, "main");
+		const github = new FakeGitHub();
+		github.fork("me/project");
+		github.closed("me/project", BRANCH, tip(forkBare), true);
+		const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: bare });
+
+		const started = await start(work, github);
+		expect(tip(forkBare)).toBe(started.sha);
+		expect(tip(bare)).toBe("");
+	});
+
+	test("pushes where the push URL points, as a fork, when the remote fetches from upstream", async () => {
+		const bare = upstream();
+		const forkBare = tempDir();
+		git(forkBare, "init", "-q", "--bare", "-b", "main");
+		const github = new FakeGitHub();
+		github.fork("me/project");
+		const forkSsh = "git@github.com:me/project.git";
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare, [forkSsh]: forkBare });
+		git(work, "config", "remote.origin.pushurl", forkSsh);
+
+		const started = await start(work, github);
+		expect(tip(forkBare)).toBe(started.sha);
+		expect(tip(bare)).toBe("");
+		expect(github.pulls).toMatchObject([
+			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "me/project" } } },
+		]);
+		// The fork's branch is seen as a claim even before its PR is listed.
+		github.pulls.length = 0;
+		expect(await claims(work, "origin", [BRANCH], deps(github))).toEqual([
+			{ branch: BRANCH, url: null, pull: null },
+		]);
 	});
 
 	test("refuses a quest a fork's PR claims, and says whether it was handed back", async () => {
@@ -296,13 +407,13 @@ describe("start on GitHub", () => {
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		const github = new FakeGitHub();
 		const pull = github.open("example/project", BRANCH, "someone/project");
-		const start = () => startQuest(work, ONE, "[S] One", "origin", deps(github));
+		const attempt = () => start(work, github);
 
-		await expect(start()).rejects.toThrow(`${ONE} is held by ${pull.html_url} (draft, last active just now)`);
+		await expect(attempt()).rejects.toThrow(`${ONE} is held by ${pull.html_url} (draft, last active just now)`);
 		pull.body = "Work so far.\n\n## Decisions needed\n\n1. Which name?\n";
-		await expect(start()).rejects.toThrow(`held by ${pull.html_url} (draft, decisions needed,`);
+		await expect(attempt()).rejects.toThrow(`held by ${pull.html_url} (draft, decisions needed,`);
 		pull.draft = false;
-		await expect(start()).rejects.toThrow(`held by ${pull.html_url} (ready for review,`);
+		await expect(attempt()).rejects.toThrow(`held by ${pull.html_url} (ready for review,`);
 		expect(tip(bare)).toBe("");
 	});
 
@@ -310,10 +421,7 @@ describe("start on GitHub", () => {
 		const bare = upstream();
 		const github = new FakeGitHub();
 		const [a, b] = [clone(UPSTREAM, { [UPSTREAM]: bare }), clone(UPSTREAM, { [UPSTREAM]: bare })];
-		const results = await Promise.allSettled([
-			startQuest(a, ONE, "[S] One", "origin", deps(github)),
-			startQuest(b, ONE, "[S] One", "origin", deps(github)),
-		]);
+		const results = await Promise.allSettled([start(a, github), start(b, github)]);
 
 		const won = results.filter((result) => result.status === "fulfilled");
 		const lost = results.filter((result) => result.status === "rejected");
@@ -336,7 +444,7 @@ describe("start on GitHub", () => {
 			});
 		};
 
-		await expect(startQuest(work, ONE, "[S] One", "origin", deps(github))).rejects.toThrow(
+		await expect(start(work, github)).rejects.toThrow(
 			`${fork?.html_url ?? "https://github.com/example/project/pull/2"} claimed ${ONE} first; closed https://github.com/example/project/pull/1`,
 		);
 		expect(github.open_("example/project").map((pull) => pull.number)).toEqual([2]);
@@ -348,20 +456,10 @@ describe("start on GitHub", () => {
 		const forkBare = tempDir();
 		git(forkBare, "init", "-q", "--bare", "-b", "main");
 		const github = new FakeGitHub();
-		github.repo("me/project", {
-			fork: true,
-			default_branch: "main",
-			parent: {
-				owner: { login: "example" },
-				name: "project",
-				clone_url: UPSTREAM,
-				ssh_url: "git@github.com:example/project.git",
-				default_branch: "main",
-			},
-		});
+		github.fork("me/project");
 		const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: bare });
 
-		const started = await startQuest(work, ONE, "[S] One", "origin", deps(github));
+		const started = await start(work, github);
 		expect(tip(forkBare)).toBe(started.sha);
 		expect(tip(bare)).toBe("");
 		expect(github.pulls).toMatchObject([
@@ -370,7 +468,7 @@ describe("start on GitHub", () => {
 
 		// Another clone of the upstream sees the fork's claim.
 		const other = clone(UPSTREAM, { [UPSTREAM]: bare });
-		await expect(startQuest(other, ONE, "[S] One", "origin", deps(github))).rejects.toThrow(Refusal);
+		await expect(start(other, github)).rejects.toThrow(Refusal);
 
 		const released = await releaseQuest(work, ONE, "origin", deps(github));
 		expect(released).toEqual({ branch: BRANCH, closed: [started.url] });
@@ -382,7 +480,7 @@ describe("start on GitHub", () => {
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		const extra = "quest/m0/epic/three.md";
 		writeFileSync(join(work, extra), "# [S] Three\n\n## Goal\n\nOnly local.\n");
-		await expect(startQuest(work, extra, "[S] Three", "origin", deps(new FakeGitHub()))).rejects.toThrow(
+		await expect(start(work, new FakeGitHub(), [], extra)).rejects.toThrow(
 			new Refusal(`${extra} is not on the upstream default branch; update your checkout`),
 		);
 		expect(tip(bare, "quest/m0/epic/three")).toBe("");
@@ -392,7 +490,7 @@ describe("start on GitHub", () => {
 		const bare = upstream();
 		const github = new FakeGitHub();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
-		const started = await startQuest(work, ONE, "[S] One", "origin", deps(github));
+		const started = await start(work, github);
 
 		expect(await releaseQuest(work, ONE, "origin", deps(github))).toEqual({
 			branch: BRANCH,
@@ -406,7 +504,7 @@ describe("start on GitHub", () => {
 		const bare = upstream();
 		const github = new FakeGitHub();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
-		await startQuest(work, ONE, "[S] One", "origin", deps(github));
+		await start(work, github);
 		appendFileSync(join(work, ONE), "\nWork in progress.\n");
 		git(work, "commit", "-q", "-m", "work", "--", ONE);
 		git(work, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
@@ -467,10 +565,10 @@ describe("start on another forge", () => {
 		expect(tip(bare)).not.toBe("");
 	});
 
-	test("fails on a malformed tree before touching the remote", async () => {
+	test("fails on a malformed upstream tree before pushing a claim", async () => {
 		const { bare, work } = plain();
 		// A misspelled `## Required` hides the blocker from the readiness check.
-		writeFileSync(join(work, "quest/m0/epic/two.md"), TWO.replace("## Required", "## Requires"));
+		land(work, { "quest/m0/epic/two.md": TWO.replace("## Required", "## Requires") });
 		const out = await cli("--root", work, "start", "quest/m0/epic/two.md");
 		expect(out.code).toBe(1);
 		expect(out.stderr).toContain("unknown '## Requires'");
@@ -500,8 +598,10 @@ describe("start on another forge", () => {
 	test("unblocked --unclaimed drops held quests and lists them on stderr", async () => {
 		const { bare, work } = plain();
 		// Two ready quests, so the filter leaves one.
-		appendFileSync(join(work, "quest/m0/epic/README.md"), "- [Three](/quest/m0/epic/three.md)\n");
-		writeFileSync(join(work, "quest/m0/epic/three.md"), "# [S] Three\n\n## Goal\n\nAlso ready.\n");
+		land(work, {
+			"quest/m0/epic/README.md": `${EPIC_README}- [Three](/quest/m0/epic/three.md)\n`,
+			"quest/m0/epic/three.md": "# [S] Three\n\n## Goal\n\nAlso ready.\n",
+		});
 		git(bare, "branch", BRANCH, "main");
 
 		expect(await cli("--root", work, "unblocked", "--unclaimed")).toEqual({
@@ -514,6 +614,30 @@ describe("start on another forge", () => {
 		expect((await cli("--root", work, "unblocked", "--unclaimed", "--remote", "nope")).stderr).toBe(
 			"quest: no nope remote, so claims were not checked\n",
 		);
+	});
+
+	test("readiness comes from the upstream tree, not a checkout behind it", async () => {
+		const { bare, work } = plain();
+		const behind = clone(bare);
+		// Upstream finished One: it deleted the quest and its links, so Two is ready there.
+		land(work, {
+			"quest/m0/epic/README.md": EPIC_README.replace("- [One](/quest/m0/epic/one.md)\n", ""),
+			"quest/m0/epic/two.md": TWO.replace(/\n## Required\n[^]*$/, ""),
+			[ONE]: null,
+		});
+
+		expect(await cli("--root", behind, "unblocked")).toMatchObject({ stdout: `1\t${ONE}\n` });
+		expect(await cli("--root", behind, "unblocked", "--unclaimed")).toEqual({
+			code: 0,
+			stdout: "0\tquest/m0/epic/two.md\n",
+			stderr: "quest: origin is not on GitHub, so only its branches were checked for claims\n",
+		});
+		const finished = await cli("--root", behind, "start", ONE);
+		expect(finished.code).toBe(3);
+		expect(finished.stderr).toBe(`quest: ${ONE} is not on the upstream default branch; update your checkout\n`);
+		const ready = await cli("--root", behind, "start", "quest/m0/epic/two.md");
+		expect(ready.code, ready.stderr).toBe(0);
+		expect(tip(bare, "quest/m0/epic/two")).not.toBe("");
 	});
 });
 
@@ -533,17 +657,7 @@ test("claims from a fork count the parent's branches and PRs, and the fork's own
 	const forkBare = tempDir();
 	git(forkBare, "init", "-q", "--bare", "-b", "main");
 	const github = new FakeGitHub();
-	github.repo("me/project", {
-		fork: true,
-		default_branch: "main",
-		parent: {
-			owner: { login: "example" },
-			name: "project",
-			clone_url: UPSTREAM,
-			ssh_url: "git@github.com:example/project.git",
-			default_branch: "main",
-		},
-	});
+	github.fork("me/project");
 	const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: bare });
 	git(bare, "branch", "quest/m0/a", "main");
 	git(work, "push", "-q", "origin", "HEAD:refs/heads/quest/m0/b");
@@ -562,6 +676,30 @@ test("claims from a fork count the parent's branches and PRs, and the fork's own
 		["quest/m0/c", pull.html_url],
 		["quest/m0/d", own.html_url],
 	]);
+});
+
+test("githubRepository reads HTTPS, ssh://, and scp-like remote URLs", () => {
+	const repository = { owner: "example", repo: "project" };
+	for (const url of [
+		"https://github.com/example/project.git",
+		"https://github.com/example/project",
+		"https://x-access-token:secret@github.com/example/project.git",
+		"https://github.com/example/project/",
+		"ssh://git@github.com/example/project.git",
+		"ssh://git@github.com:22/example/project",
+		"git@github.com:example/project.git",
+		"org-123@github.com:example/project.git",
+	]) {
+		expect(githubRepository(url), url).toEqual(repository);
+	}
+	for (const url of [
+		"https://gitlab.com/example/project.git",
+		"https://github.com.evil.example/example/project",
+		"git@github.com:example",
+		"/srv/git/project.git",
+	]) {
+		expect(githubRepository(url), url).toBeNull();
+	}
 });
 
 test("ago rounds to minutes, hours, then days", () => {
