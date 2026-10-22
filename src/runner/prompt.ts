@@ -18,7 +18,7 @@ Report only through the kix tools:
 - \`deliver\`: when the work is done, with a summary and the pull request's title, body, and draft flag. kix publishes the working tree and opens or updates the pull request. End your turn after delivering.
 - \`context\`: on a job for an issue or pull request, read it as GitHub has it now: its text and comments, and a pull request's reviews, unresolved review threads, and checks. Use it wherever the workflow reads them with \`gh\` or \`quest status\`.
 
-Where the workflow says to claim with \`quest start\`, skip it. Where it says to push, open or update a pull request, mark it ready, or comment on it, call \`deliver\` instead. Where it says to ask or prompt the user, call \`ask\`; you can always prompt, so ignore instructions for agents that cannot. Never run \`git push\`, \`gh\`, or anything else that writes to GitHub. Commit locally if you like; kix publishes your working tree as it is.`;
+Where the workflow says to claim with \`quest start\`, or to take or release a pull request with \`quest iterate\` or \`quest release\`, skip it; kix holds the job's pull request. Where it says to push, open or update a pull request, mark it ready, or comment on it, call \`deliver\` instead. Where it says to ask or prompt the user, call \`ask\`; you can always prompt, so ignore instructions for agents that cannot. Never run \`git push\`, \`gh\`, or anything else that writes to GitHub. Commit locally if you like; kix publishes your working tree as it is.`;
 
 /**
  * The repository's `AGENTS.md` files, which not every CLI reads (Claude Code

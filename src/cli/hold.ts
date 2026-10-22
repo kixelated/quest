@@ -1,0 +1,343 @@
+// `quest iterate`, `ready`, `merge`, and `release`: one session owns a PR at a
+// time. It holds one `quest:<state>` label, and the ID of the timeline event
+// that added the label is its hold token, since sessions often share an account.
+import { handedBack } from "../core";
+import { repositoryPath } from "./claims";
+import { array, GitHub, type GitHubDependencies, object, type ObjectValue, type PullRequest, string } from "./github";
+import { Refusal, ago } from "./start";
+
+export type State = "iterate" | "ready" | "merge";
+export type Method = "merge" | "squash" | "rebase";
+
+const PREFIX = "quest:";
+const MERGE = `${PREFIX}merge`;
+/** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
+const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
+
+/** The PR, its `quest:*` labels, and the timeline events that add a label or start a landing. */
+const READ = `query($owner: String!, $repo: String!, $number: Int!) {
+	repository(owner: $owner, name: $repo) {
+		pullRequest(number: $number) {
+			id url state isDraft body headRefOid mergeStateStatus isMergeQueueEnabled
+			autoMergeRequest { enabledAt }
+			mergeQueueEntry { state }
+			labels(first: 100) { nodes { name } }
+			timelineItems(last: 100, itemTypes: [LABELED_EVENT, AUTO_MERGE_ENABLED_EVENT, ADDED_TO_MERGE_QUEUE_EVENT]) {
+				nodes {
+					__typename
+					... on LabeledEvent { id createdAt label { name } }
+					... on AutoMergeEnabledEvent { id createdAt }
+					... on AddedToMergeQueueEvent { id createdAt }
+				}
+			}
+		}
+	}
+}`;
+
+interface Event {
+	id: string;
+	time: number;
+	/** The label it added, or `null` for auto-merge enabled or a merge-queue entry. */
+	label: string | null;
+}
+
+interface Snapshot {
+	id: string;
+	url: string;
+	state: "OPEN" | "CLOSED" | "MERGED";
+	draft: boolean;
+	body: string;
+	head: string;
+	mergeState: string;
+	queue: boolean;
+	/** Auto-merge is enabled or the PR is in the merge queue. */
+	landing: boolean;
+	/** The `quest:*` labels on the PR. */
+	labels: string[];
+	/** Oldest first. */
+	events: Event[];
+}
+
+/** A session's hold: its label and the token naming the event that added it. */
+export interface Hold {
+	label: string;
+	token: string;
+}
+
+/** Take `pr` for `state`, or swap to it from the label `token` holds. Prints nothing; returns the hold. */
+export async function take(
+	pr: PullRequest,
+	state: State,
+	token: string | undefined,
+	deps: GitHubDependencies,
+): Promise<Hold> {
+	const { hold } = await acquire(new Labels(pr, deps), state, token);
+	return hold;
+}
+
+/**
+ * Take `pr` for ready, then hand it to reviewers: drop its `## Decisions needed`
+ * section and mark a draft ready for review.
+ */
+export async function finish(pr: PullRequest, token: string, deps: GitHubDependencies): Promise<Hold> {
+	const labels = new Labels(pr, deps);
+	const { hold, snapshot } = await acquire(labels, "ready", token);
+	return holding(hold, async () => {
+		if (handedBack(snapshot.body)) {
+			await labels.github.request(`${repositoryPath(pr)}/pulls/${pr.number}`, {
+				method: "PATCH",
+				body: { body: withoutHandBack(snapshot.body) },
+			});
+		}
+		if (snapshot.draft) {
+			await labels.github.graphql(
+				`mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }`,
+				{ id: snapshot.id },
+			);
+		}
+	});
+}
+
+/**
+ * Take `pr` for merge, then land `sha`, which must still be its head: enable
+ * auto-merge bound to it, which enters the merge queue when the base has one,
+ * or merge at once when GitHub would refuse auto-merge because nothing is left to wait for.
+ */
+export async function land(
+	pr: PullRequest,
+	token: string,
+	sha: string,
+	method: Method,
+	deps: GitHubDependencies,
+): Promise<Hold> {
+	const labels = new Labels(pr, deps);
+	const current = (snapshot: Snapshot) => {
+		if (snapshot.head.toLowerCase() !== sha.toLowerCase()) {
+			throw new Refusal(`${snapshot.url} head moved to ${snapshot.head}; check the new head before landing it`);
+		}
+	};
+	// Check the head before swapping labels, so a stale SHA leaves the caller's token valid.
+	const { hold, snapshot } = await acquire(labels, "merge", token, current);
+	return holding(hold, async () => {
+		current(snapshot);
+		if (snapshot.queue && method !== "merge") {
+			deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
+		}
+		const mutation =
+			!snapshot.queue && IMMEDIATE.includes(snapshot.mergeState)
+				? "mergePullRequest"
+				: "enablePullRequestAutoMerge";
+		await labels.github.graphql(
+			`mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) {
+				${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId }
+			}`,
+			{ id: snapshot.id, sha: snapshot.head, method: method.toUpperCase() },
+		);
+	});
+}
+
+/**
+ * Finish `work` under `hold`, which may be a label just swapped in for the caller's.
+ * A failure names the hold, so the caller keeps the token it needs to release or retry.
+ */
+async function holding(hold: Hold, work: () => Promise<void>): Promise<Hold> {
+	try {
+		await work();
+	} catch (error) {
+		const message = `${error instanceof Error ? error.message : String(error)}; this session holds ${hold.label} as token ${hold.token}`;
+		throw error instanceof Refusal ? new Refusal(message) : new Error(message, { cause: error });
+	}
+	return hold;
+}
+
+/** Remove the label `token` holds. A label already gone is released; one added again since is not ours. */
+export async function release(pr: PullRequest, token: string, deps: GitHubDependencies): Promise<string> {
+	const labels = new Labels(pr, deps);
+	const snapshot = await labels.read();
+	const event = snapshot.events.find((candidate) => candidate.id === token && candidate.label !== null);
+	if (!event?.label) throw new Refusal(unknown(snapshot, token));
+	if (!snapshot.labels.includes(event.label)) {
+		deps.warn(`${event.label} is already off ${snapshot.url}`);
+		return event.label;
+	}
+	held(snapshot, token);
+	await labels.remove(event.label);
+	return event.label;
+}
+
+/**
+ * Take `pr` for `state`, refusing while it is merged or closed, while another
+ * session holds a `quest:*` label, or while it is a draft its starter still
+ * holds. With `token`, the label it holds is swapped for this state's.
+ * `check` refuses before any label changes.
+ */
+async function acquire(
+	labels: Labels,
+	state: State,
+	token: string | undefined,
+	check?: (snapshot: Snapshot) => void,
+): Promise<{ hold: Hold; snapshot: Snapshot }> {
+	const label = PREFIX + state;
+	let snapshot = await labels.read();
+	if (snapshot.state !== "OPEN") {
+		throw new Refusal(`${snapshot.url} is ${snapshot.state.toLowerCase()}; a push now would bring its branch back`);
+	}
+	snapshot = await labels.dequeued(snapshot);
+	const mine = token === undefined ? undefined : held(snapshot, token);
+	const other = snapshot.labels.find((name) => name !== mine);
+	if (other !== undefined) throw new Refusal(holder(snapshot, other, labels.deps.now()));
+	check?.(snapshot);
+	if (mine === label) return { hold: { label, token: token! }, snapshot };
+	if (mine === undefined && snapshot.draft && !handedBack(snapshot.body)) {
+		throw new Refusal(
+			`${snapshot.url} is a draft its starter still holds: its body has no ## Decisions needed section, so taking it over is the user's choice`,
+		);
+	}
+
+	await labels.add(label);
+	const after = await labels.read();
+	const ours = latest(after, label);
+	if (!ours) throw new Error(`added ${label} to ${after.url}, but its timeline does not show it`);
+	// Another session took the PR at the same time: the first label added keeps it.
+	const rival = after.labels.find((name) => {
+		if (name === label || name === mine) return false;
+		const added = latest(after, name);
+		return !added || after.events.indexOf(added) < after.events.indexOf(ours);
+	});
+	if (rival !== undefined) {
+		await labels.remove(label);
+		throw new Refusal(holder(after, rival, labels.deps.now()));
+	}
+	if (mine !== undefined) await labels.remove(mine);
+	return { hold: { label, token: ours.id }, snapshot: { ...after, labels: [label] } };
+}
+
+/** The label `token` holds on the PR, or a refusal when it holds none. */
+function held(snapshot: Snapshot, token: string): string {
+	const event = snapshot.events.find((candidate) => candidate.id === token && candidate.label !== null);
+	if (!event?.label) throw new Refusal(unknown(snapshot, token));
+	if (!snapshot.labels.includes(event.label)) {
+		throw new Refusal(
+			`${event.label} is off ${snapshot.url} since ${token} added it, so this session no longer holds it`,
+		);
+	}
+	if (latest(snapshot, event.label) !== event) {
+		throw new Refusal(
+			`${event.label} was added to ${snapshot.url} again after ${token}, so another session holds it`,
+		);
+	}
+	return event.label;
+}
+
+function unknown(snapshot: Snapshot, token: string): string {
+	return `${token} is not an event that added a label to ${snapshot.url} among its last 100`;
+}
+
+/** Who holds `label`, for a person deciding whether to wait or take over a stale hold. */
+function holder(snapshot: Snapshot, label: string, now: number): string {
+	const added = latest(snapshot, label);
+	const since = added ? `, added ${ago(now, added.time)} as token ${added.id}` : "";
+	return `${snapshot.url} is held by ${label}${since}; if it looks stale, ask the user before releasing it`;
+}
+
+/** The latest event that added `label`. */
+function latest(snapshot: Snapshot, label: string): Event | undefined {
+	for (let index = snapshot.events.length - 1; index >= 0; index--) {
+		if (snapshot.events[index].label === label) return snapshot.events[index];
+	}
+	return undefined;
+}
+
+/** `body` without its `## Decisions needed` sections, each running to the next heading of level 1 or 2. */
+export function withoutHandBack(body: string): string {
+	const kept: string[] = [];
+	let skipping = false;
+	for (const line of body.split("\n")) {
+		if (handedBack(line)) skipping = true;
+		else if (/^#{1,2}[ \t]/.test(line)) skipping = false;
+		if (!skipping) kept.push(line);
+	}
+	return kept.join("\n").trimEnd();
+}
+
+/** One PR's labels on GitHub. */
+class Labels {
+	readonly github: GitHub;
+	/** The PR's REST path as an issue, where its labels live. */
+	readonly issue: string;
+
+	constructor(
+		private readonly pr: PullRequest,
+		readonly deps: GitHubDependencies,
+	) {
+		this.github = new GitHub(deps);
+		this.issue = `${repositoryPath(pr)}/issues/${pr.number}`;
+	}
+
+	async read(): Promise<Snapshot> {
+		const data = await this.github.graphql(READ, {
+			owner: this.pr.owner,
+			repo: this.pr.repo,
+			number: this.pr.number,
+		});
+		const repository = data.repository;
+		if (repository === null) {
+			throw new Error(`cannot read ${this.pr.owner}/${this.pr.repo}; check the repository and token`);
+		}
+		const pull = object(repository).pullRequest;
+		if (pull === null) throw new Error(`${this.pr.owner}/${this.pr.repo}#${this.pr.number} is not a pull request`);
+		const row = object(pull);
+		return {
+			id: string(row.id),
+			url: string(row.url),
+			state: string(row.state) as Snapshot["state"],
+			draft: row.isDraft === true,
+			body: typeof row.body === "string" ? row.body : "",
+			head: string(row.headRefOid),
+			mergeState: string(row.mergeStateStatus),
+			queue: row.isMergeQueueEnabled === true,
+			landing: row.autoMergeRequest !== null || row.mergeQueueEntry !== null,
+			labels: array(object(row.labels).nodes)
+				.map((label) => string(label.name))
+				.filter((name) => name.startsWith(PREFIX)),
+			events: array(object(row.timelineItems).nodes).map(event),
+		};
+	}
+
+	async add(label: string): Promise<void> {
+		await this.github.request(`${this.issue}/labels`, { body: { labels: [label] } });
+	}
+
+	/** Remove `label`; one already gone is fine. */
+	async remove(label: string): Promise<void> {
+		await this.github.request(`${this.issue}/labels/${encodeURIComponent(label)}`, {
+			method: "DELETE",
+			allow: [404],
+		});
+	}
+
+	/**
+	 * A PR that left the merge queue unmerged waits on the maintainer again, so
+	 * its `quest:merge` label is spent once a landing started after it was added.
+	 */
+	async dequeued(snapshot: Snapshot): Promise<Snapshot> {
+		const added = latest(snapshot, MERGE);
+		if (!added || snapshot.landing || !snapshot.labels.includes(MERGE)) return snapshot;
+		const landed = snapshot.events.slice(snapshot.events.indexOf(added) + 1).some((later) => later.label === null);
+		if (!landed) return snapshot;
+		await this.remove(MERGE);
+		this.deps.warn(
+			`${snapshot.url} left the merge queue unmerged, so ${MERGE} was removed; it waits on the user again`,
+		);
+		return { ...snapshot, labels: snapshot.labels.filter((name) => name !== MERGE) };
+	}
+}
+
+function event(row: ObjectValue): Event {
+	const labeled = row.__typename === "LabeledEvent";
+	return {
+		id: string(row.id),
+		time: Date.parse(string(row.createdAt)),
+		label: labeled ? string(object(row.label).name) : null,
+	};
+}

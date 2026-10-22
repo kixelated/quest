@@ -11,7 +11,7 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 });
 
 process.exitCode = await main(process.argv.slice(2), {
-	stdout: (text) => process.stdout.write(text),
-	stderr: (text) => process.stderr.write(text),
+	stdout: (text) => void process.stdout.write(text),
+	stderr: (text) => void process.stderr.write(text),
 	terminal: detect(process.stdout.isTTY, process.env),
 });

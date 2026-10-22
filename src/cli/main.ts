@@ -31,6 +31,7 @@ import {
 import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
+import { type Hold, type State, finish, land, release, take } from "./hold";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { init, uninstall } from "./setup";
@@ -57,8 +58,13 @@ class UsageError extends Error {}
 export function main(argv: string[], out: Output): number | Promise<number> {
 	let pending: Promise<number> | undefined;
 	let code = 0;
-	const print = (line: string) => out.stdout(`${line}\n`);
-	const warn = (line: string) => out.stderr(`quest: ${line}\n`);
+	// Block bodies: process.stdout.write returns a boolean, which settle would take for the exit code.
+	const print = (line: string): void => {
+		out.stdout(`${line}\n`);
+	};
+	const warn = (line: string): void => {
+		out.stderr(`quest: ${line}\n`);
+	};
 	const theme = out.terminal ? new Theme(out.terminal) : null;
 
 	const program = new Command("quest")
@@ -385,6 +391,95 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					warn(error instanceof Error ? error.message : String(error));
 					return 1;
 				},
+			);
+		});
+
+	const OWNERSHIP =
+		"Before a session pushes to an existing PR, it takes the PR with iterate, ready, or merge, and hands it " +
+		"back with release. A taken PR carries one quest:<state> label; the command prints a hold token, the ID " +
+		"of the timeline event that added it, since sessions often share an account. A command refuses while a " +
+		"quest:* label it holds no token for is on the PR, including its own state's, and while the PR is merged, " +
+		"closed, or a draft its starter still holds (one whose body has no Decisions needed heading). A refusal " +
+		"names the holder's label, age, and token; releasing a stale hold with that token is the user's choice. " +
+		"Given a token, a command refuses unless the token is still the latest add of the PR's label, then swaps " +
+		"that label for its own; if a later step then fails, the error names the new token. When two sessions add different labels at once, the first label added keeps the " +
+		"PR; GitHub records no event when a label already on the PR is added again, so two takes of one state " +
+		"within the same moment are not told apart. A quest:merge label is removed once the PR leaves the merge " +
+		"queue unmerged.\n\n" +
+		"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 3 when refused, 2 for invalid " +
+		"arguments, and 1 for other failures.";
+	/** A PR state command: take the PR or swap to `state`, then do its step. Prints the hold token. */
+	const ownership = (state: State, summary: string, step: string) =>
+		program
+			.command(state)
+			.summary(summary)
+			.description(`${summary}.${step ? ` ${step}` : ""}\n\n${OWNERSHIP}`)
+			.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+			.argument("[token]", "Hold token of the label this session holds, to swap it or act on it");
+	const printToken = (work: Promise<Hold>) => settle(work, (hold) => print(hold.token));
+
+	ownership("iterate", "Take a PR to settle its decisions, fix CI and review findings, and push", "").action(
+		(value: string, token: string | undefined) => {
+			printToken(take(pullRequest(value, root()), "iterate", token, gitHubDependencies(warn)));
+		},
+	);
+
+	ownership(
+		"ready",
+		"Take a handed-back draft or a PR in review to hand it to reviewers",
+		"--done removes the body's Decisions needed section and marks a draft ready for review.",
+	)
+		.option("--done", "Mark it ready for review; needs the token")
+		.action((value: string, token: string | undefined, options: { done?: boolean }) => {
+			const pr = pullRequest(value, root());
+			if (!options.done) return printToken(take(pr, "ready", token, gitHubDependencies(warn)));
+			if (token === undefined) throw new UsageError("--done needs the hold token");
+			printToken(finish(pr, token, gitHubDependencies(warn)));
+		});
+
+	ownership(
+		"merge",
+		"Take a PR to fix it until it lands",
+		"--land enables auto-merge bound to that full head SHA, which enters the base's merge queue when it has " +
+			"one, or merges at once when nothing is left to wait for. It refuses once the head has moved. It makes a " +
+			"merge commit unless --squash or --rebase picks another method; a merge queue applies its own. The label " +
+			"stays on while the PR is queued or auto-merging, until it merges.",
+	)
+		.option("--land <sha>", "Land this full 40-character head SHA; needs the token")
+		.addOption(new Option("--squash", "Squash and merge").conflicts("rebase"))
+		.option("--rebase", "Rebase and merge")
+		.action(
+			(
+				value: string,
+				token: string | undefined,
+				options: { land?: string; squash?: boolean; rebase?: boolean },
+			) => {
+				const pr = pullRequest(value, root());
+				if (options.land === undefined) {
+					if (options.squash || options.rebase) throw new UsageError("--squash and --rebase need --land");
+					return printToken(take(pr, "merge", token, gitHubDependencies(warn)));
+				}
+				if (token === undefined) throw new UsageError("--land needs the hold token");
+				if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
+				const method = options.squash ? "squash" : options.rebase ? "rebase" : "merge";
+				printToken(land(pr, token, options.land, method, gitHubDependencies(warn)));
+			},
+		);
+
+	program
+		.command("release")
+		.summary("Hand back a PR by removing the label a hold token holds")
+		.description(
+			"Hand back a PR by removing the quest:* label a hold token holds. Refuses when the token is not the " +
+				"latest add of that label, since another session holds it now. A label already off the PR counts as " +
+				"released, with a warning. Unlike the other PR state commands, it works on a merged or closed PR.\n\n" +
+				OWNERSHIP,
+		)
+		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<token>", "Hold token printed when the label was taken")
+		.action((value: string, token: string) => {
+			settle(release(pullRequest(value, root()), token, gitHubDependencies(warn)), (label) =>
+				print(`released ${label}`),
 			);
 		});
 
