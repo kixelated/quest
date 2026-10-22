@@ -542,7 +542,8 @@ export function InboxPage(props: InboxProps) {
 				)}
 				<p class="note-small muted">
 					Lists enrolled projects you maintain, once you open each one's setup page. Runners and accounts are
-					set up with <code>quest runner</code>.
+					set up with <code>quest runner</code>; <a href="/runners">your runners</a> shows them and the order
+					jobs use your accounts in.
 				</p>
 			</section>
 			{props.skipped.length > 0 && (

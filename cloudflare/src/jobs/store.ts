@@ -79,7 +79,8 @@ export type Offer = {
 	limited: boolean;
 };
 
-async function digest(token: string) {
+/** A runner token's stored form: its SHA-256 in lowercase hex. */
+export async function digest(token: string) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
 	return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -93,13 +94,66 @@ export async function createRunner(
 	vm: boolean,
 	now: number,
 ) {
-	const id = crypto.randomUUID();
 	const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-	await db
-		.prepare("INSERT INTO runners(id,owner,name,tokenHash,platform,vm,createdAt) VALUES(?,?,?,?,?,?,?)")
-		.bind(id, owner, name, await digest(token), platform, vm ? 1 : 0, now)
-		.run();
+	const id = await registerRunner(db, owner, name, platform, vm, await digest(token), now);
 	return { id, token };
+}
+
+/**
+ * Register a machine that made its own token and sent only its hash, as
+ * `quest runner login` does, so the token never leaves the machine. Approving
+ * the same hash again returns the same runner; another owner's is refused.
+ */
+export async function registerRunner(
+	db: D1Database,
+	owner: string,
+	name: string,
+	platform: Platform,
+	vm: boolean,
+	tokenHash: string,
+	now: number,
+) {
+	const [, row] = await db.batch([
+		db
+			.prepare(
+				"INSERT INTO runners(id,owner,name,tokenHash,platform,vm,createdAt) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tokenHash) DO NOTHING",
+			)
+			.bind(crypto.randomUUID(), owner, name, tokenHash, platform, vm ? 1 : 0, now),
+		db.prepare("SELECT id,owner FROM runners WHERE tokenHash=?").bind(tokenHash),
+	]);
+	const runner = row!.results[0] as { id: string; owner: string };
+	if (runner.owner !== owner) throw new JobError("This runner is already connected to another account");
+	return runner.id;
+}
+
+/**
+ * Move one of the owner's accounts a place earlier or later in their
+ * preference order, which routing follows across all of their runners.
+ */
+export async function moveAccount(
+	db: D1Database,
+	owner: string,
+	runner: string,
+	account: string,
+	direction: "up" | "down",
+) {
+	const { results } = await db
+		.prepare(
+			"SELECT a.runner,a.id FROM runner_accounts a JOIN runners r ON r.id=a.runner WHERE r.owner=? ORDER BY a.rank,a.runner,a.id",
+		)
+		.bind(owner)
+		.all<{ runner: string; id: string }>();
+	const from = results.findIndex((a) => a.runner === runner && a.id === account);
+	if (from < 0) throw new JobError("Account not found");
+	const to = direction === "up" ? from - 1 : from + 1;
+	if (to < 0 || to >= results.length) return;
+	[results[from], results[to]] = [results[to]!, results[from]!];
+	// Ranks are renumbered in the new order, so ties from concurrent reports cannot hide the move.
+	await db.batch(
+		results.map((a, i) =>
+			db.prepare("UPDATE runner_accounts SET rank=? WHERE runner=? AND id=?").bind(i + 1, a.runner, a.id),
+		),
+	);
 }
 
 export async function authenticate(db: D1Database, token: string): Promise<Runner | null> {

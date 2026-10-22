@@ -1,0 +1,194 @@
+// A job's checkout and the changes it publishes. Each repository is fetched
+// once into a bare clone; each job gets its own worktree, which stays put
+// across the job's attempts on this runner so a paused session resumes where
+// it was. kix publishes, so the runner never pushes: it sends the files that
+// differ from what the job's branch holds, as data.
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+import { save } from "../cli/worktree";
+import type { Job } from "./protocol";
+
+const run = promisify(execFile);
+
+/** One file as `POST /api/runner/publish` takes it. */
+export interface Change {
+	path: string;
+	/** Base64 content, or null to delete. A symlink's content is its target. */
+	content: string | null;
+	executable?: boolean;
+	symlink?: boolean;
+}
+
+/** What the runner remembers of a job's checkout between attempts. */
+interface Record {
+	/** The job branch's head as kix last reported it, or null before the first publication. */
+	head: string | null;
+	/** A local commit whose tree is exactly what that head holds. */
+	base: string;
+}
+
+/** A pending publication: the changes, and the tree they would make the branch hold. */
+export interface Snapshot {
+	tree: string;
+	changes: Change[];
+	/** Paths that cannot be published, such as submodules. */
+	skipped: string[];
+}
+
+export class Workspace {
+	readonly dir: string;
+	#record: Record;
+	readonly #file: string;
+	readonly #git: string;
+
+	private constructor(git: string, dir: string, file: string, record: Record) {
+		this.#git = git;
+		this.dir = dir;
+		this.#file = file;
+		this.#record = record;
+	}
+
+	/** The head the job's branch holds, as the next publication must name it. */
+	get head(): string | null {
+		return this.#record.head;
+	}
+
+	/**
+	 * The job's checkout, ready for an attempt: the existing one when it still
+	 * matches the branch kix reports, or a fresh one at the branch's head (or
+	 * the job's revision before its first publication).
+	 */
+	static async prepare(root: string, job: Job, remote: string): Promise<Workspace> {
+		const git = join(root, "repos", job.owner, `${job.name}.git`);
+		if (!existsSync(join(git, "HEAD"))) {
+			await run("git", ["init", "--quiet", "--bare", git]);
+			await run("git", ["-C", git, "remote", "add", "origin", remote]);
+			// kix publishes the job's work; a push from the checkout has nowhere to go.
+			await run("git", ["-C", git, "config", "remote.origin.pushurl", "kix-publishes-this-job"]);
+		} else {
+			await run("git", ["-C", git, "remote", "set-url", "origin", remote]);
+		}
+		const dir = join(root, "jobs", job.id);
+		const file = join(root, "jobs", `${job.id}.json`);
+		const record = load(file);
+		if (record && record.head === job.head && existsSync(join(dir, ".git")))
+			return new Workspace(git, dir, file, record);
+		await remove(git, dir);
+		const start = job.head ?? job.revision;
+		await fetch(git, start);
+		await run("git", ["-C", git, "worktree", "add", "--quiet", "--detach", dir, start]);
+		const fresh: Record = { head: job.head, base: start };
+		save(file, fresh);
+		return new Workspace(git, dir, file, fresh);
+	}
+
+	/** The worktree's files that differ from what the branch holds, untracked ones included and ignored ones not. */
+	async snapshot(): Promise<Snapshot> {
+		const index = `${this.#file.replace(/\.json$/, "")}.index`;
+		const env = { ...process.env, GIT_INDEX_FILE: index };
+		const git = (args: string[]) =>
+			run("git", ["-C", this.dir, ...args], { env, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" });
+		try {
+			await git(["read-tree", this.#record.base]);
+			await git(["add", "--all", "--", "."]);
+			const tree = (await git(["write-tree"])).stdout.trim();
+			const diff = (await git(["diff-tree", "-r", "-z", "--no-renames", this.#record.base, tree])).stdout;
+			const changes: Change[] = [];
+			const skipped: string[] = [];
+			const fields = diff.split("\0");
+			for (let i = 0; i + 1 < fields.length; i += 2) {
+				const [, mode, , blob, status] = fields[i]!.split(" ");
+				const path = fields[i + 1]!;
+				if (status === "D") changes.push({ path, content: null });
+				else if (mode === "160000") skipped.push(path);
+				else {
+					const content = (
+						await run("git", ["-C", this.dir, "cat-file", "blob", blob!], {
+							encoding: "buffer",
+							maxBuffer: 64 * 1024 * 1024,
+						})
+					).stdout.toString("base64");
+					changes.push({
+						path,
+						content,
+						...(mode === "100755" && { executable: true }),
+						...(mode === "120000" && { symlink: true }),
+					});
+				}
+			}
+			return { tree, changes, skipped };
+		} finally {
+			rmSync(index, { force: true });
+		}
+	}
+
+	/** Record that the branch now holds `snapshot` at `head`, so the next snapshot is relative to it. */
+	async published(head: string | null, snapshot: Snapshot | null): Promise<void> {
+		let base = this.#record.base;
+		if (snapshot && snapshot.changes.length > 0) {
+			const commit = await run(
+				"git",
+				["-C", this.dir, "commit-tree", snapshot.tree, "-p", base, "-m", `kix ${head}`],
+				{
+					encoding: "utf8",
+					env: {
+						...process.env,
+						GIT_AUTHOR_NAME: "kix",
+						GIT_AUTHOR_EMAIL: "kix@localhost",
+						GIT_COMMITTER_NAME: "kix",
+						GIT_COMMITTER_EMAIL: "kix@localhost",
+					},
+				},
+			);
+			base = commit.stdout.trim();
+		}
+		this.#record = { head, base };
+		save(this.#file, this.#record);
+	}
+
+	/** Delete the checkout and its record once the job is done with this runner. */
+	async remove(): Promise<void> {
+		await remove(this.#git, this.dir);
+		rmSync(this.#file, { force: true });
+	}
+}
+
+function load(file: string): Record | undefined {
+	try {
+		return JSON.parse(readFileSync(file, "utf8")) as Record;
+	} catch {
+		return undefined;
+	}
+}
+
+async function remove(git: string, dir: string): Promise<void> {
+	if (existsSync(dir)) {
+		await run("git", ["-C", git, "worktree", "remove", "--force", "--force", dir]).catch(() => {});
+		rmSync(dir, { recursive: true, force: true });
+	}
+	await run("git", ["-C", git, "worktree", "prune"]).catch(() => {});
+}
+
+/**
+ * Fetch one commit by id. GitHub serves any commit in a repository's fork
+ * network this way, so a job branch kix published on its fork is reachable
+ * from the upstream URL.
+ */
+async function fetch(git: string, commit: string): Promise<void> {
+	const present = await run("git", ["-C", git, "cat-file", "-e", `${commit}^{commit}`]).then(
+		() => true,
+		() => false,
+	);
+	if (present) return;
+	try {
+		await run("git", ["-C", git, "fetch", "--quiet", "--no-tags", "origin", commit], {
+			maxBuffer: 16 * 1024 * 1024,
+		});
+	} catch (error) {
+		const stderr = (error as { stderr?: string }).stderr?.trim();
+		throw new Error(`could not fetch ${commit}${stderr ? `: ${stderr}` : ""}`);
+	}
+}

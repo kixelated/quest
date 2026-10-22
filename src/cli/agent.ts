@@ -220,8 +220,12 @@ const STRIPPED = [
 
 /** The agent's environment: the user's, minus `STRIPPED`, plus its one key. */
 export function agentEnvironment(env: NodeJS.ProcessEnv, variable: string, key: string): NodeJS.ProcessEnv {
-	const kept = Object.entries(env).filter(([name]) => !STRIPPED.some((pattern) => pattern.test(name)));
-	return { ...Object.fromEntries(kept), [variable]: key };
+	return { ...strippedEnvironment(env), [variable]: key };
+}
+
+/** The user's environment minus `STRIPPED`, for an agent that brings its own credentials. */
+export function strippedEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	return Object.fromEntries(Object.entries(env).filter(([name]) => !STRIPPED.some((pattern) => pattern.test(name))));
 }
 
 /**
@@ -239,7 +243,7 @@ export function agentDirectory(env = process.env): string {
  * Create `dir` readable only by this user, refusing a symlink or a directory
  * someone else owns, either of which another user could control.
  */
-function privateDirectory(dir: string): string {
+export function privateDirectory(dir: string): string {
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const stat = lstatSync(dir);
 	if (!stat.isDirectory()) throw new Error(`${dir} is a symlink or not a directory`);

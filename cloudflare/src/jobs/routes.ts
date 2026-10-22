@@ -86,6 +86,14 @@ async function machine(c: Context<Bindings>) {
 	const token = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
 	return (token && (await store.authenticate(c.env.DB, token))) || null;
 }
+// The machine a token registered, which `quest runner login` polls until the owner approves it.
+jobs.get("/api/runner", async (c) => {
+	c.header("Cache-Control", "no-store");
+	const runner = await machine(c);
+	if (!runner) return c.json({ error: "Runner token required" }, 401);
+	const { id, name, platform, vm } = runner;
+	return c.json({ id, name, platform, vm: vm === 1 });
+});
 jobs.get("/api/runner/connect", async (c) => {
 	const runner = await machine(c);
 	if (!runner) return c.json({ error: "Runner token required" }, 401);

@@ -1,0 +1,237 @@
+// `quest runner`: one machine's live presence on kix. It reports its accounts,
+// running attempts, and free slots in a `status` whenever they change, takes
+// `assign` and `cancel` pushes, and runs each attempt until it reports.
+import type { Adapter } from "./adapter";
+import { Connection, type Dial, dialWebSocket } from "./connection";
+import type { Account, Login, RunnerHome } from "./home";
+import { Attempt, type Context } from "./job";
+import type { Action, Job, Message, Push } from "./protocol";
+
+/** When the provider does not say when a limit resets, the account sits out this long. */
+export const LIMIT_FALLBACK_MS = 60 * 60_000;
+
+export interface RunnerOptions {
+	home: RunnerHome;
+	login: Login;
+	/** How many jobs run at once. */
+	slots: number;
+	adapter(account: Account): Adapter;
+	shell(job: Job): string[];
+	remote(job: Job): string;
+	env?: NodeJS.ProcessEnv;
+	dial?: Dial;
+	fetch?: typeof fetch;
+	now?(): number;
+	log(line: string): void;
+}
+
+export class Runner {
+	readonly options: RunnerOptions;
+	readonly connection: Connection;
+	/** Each job's current attempt here. */
+	#current = new Map<string, Attempt>();
+	/** Every attempt whose agent may still be running, including superseded ones. */
+	#live = new Set<Attempt>();
+	#status: Promise<void> | null = null;
+	#dirty = false;
+	#closing = false;
+	#wake: ReturnType<typeof setTimeout> | undefined;
+	#stopped: () => void = () => {};
+	/** Settles once the runner shut down or kix replaced its connection. */
+	readonly done: Promise<"stopped" | "replaced">;
+
+	constructor(options: RunnerOptions) {
+		this.options = options;
+		const ws = `${options.login.url.replace(/^http/, "ws").replace(/\/$/, "")}/api/runner/connect`;
+		let resolve!: (value: "stopped" | "replaced") => void;
+		this.done = new Promise((r) => (resolve = r));
+		this.#stopped = () => resolve("stopped");
+		this.connection = new Connection(
+			ws,
+			options.login.token,
+			{
+				open: () => this.status(),
+				push: (push) => this.#push(push),
+				replaced: () => {
+					this.#closing = true;
+					for (const attempt of this.#live) attempt.abandon();
+					this.connection.close();
+					resolve("replaced");
+				},
+				log: options.log,
+			},
+			options.dial ?? dialWebSocket,
+		);
+	}
+
+	start(): void {
+		this.connection.start();
+		this.#schedule();
+	}
+
+	get running(): Attempt[] {
+		return [...this.#live];
+	}
+
+	/**
+	 * Shut down: stop every agent, publish its work to its branch, then tell kix
+	 * none are running so their jobs move to another runner at once.
+	 */
+	async shutdown(): Promise<void> {
+		if (this.#closing) return;
+		this.#closing = true;
+		const attempts = [...this.#live];
+		for (const attempt of attempts) attempt.abandon();
+		await Promise.allSettled(attempts.map((attempt) => attempt.finished));
+		if (this.connection.open)
+			await Promise.race([
+				this.#send({ type: "status", accounts: this.#accounts(), attempts: [], slots: 0 }).catch(() => {}),
+				new Promise((resolve) => setTimeout(resolve, 5000)),
+			]);
+		clearTimeout(this.#wake);
+		this.connection.close();
+		this.#stopped();
+	}
+
+	#now(): number {
+		return this.options.now?.() ?? Date.now();
+	}
+
+	#accounts() {
+		const now = this.#now();
+		return this.options.home.accounts().map((account) => ({
+			id: account.id,
+			provider: this.options.adapter(account).provider,
+			kind: account.kind,
+			label: account.label,
+			limited: (account.limitedUntil ?? 0) > now,
+		}));
+	}
+
+	#send(message: Message) {
+		return this.connection.request(message);
+	}
+
+	/** Send a fresh status, coalescing changes that arrive while one is in flight. */
+	status(): void {
+		if (this.#status) {
+			this.#dirty = true;
+			return;
+		}
+		this.#status = (async () => {
+			do {
+				this.#dirty = false;
+				const listed = [...this.#live].filter((attempt) => attempt.listed);
+				const message: Message = {
+					type: "status",
+					accounts: this.#accounts(),
+					attempts: listed.map(({ job }) => ({ job: job.id, attempt: job.attempt })),
+					slots: this.#closing ? 0 : Math.max(0, this.options.slots - this.#live.size),
+				};
+				try {
+					const reply = await this.#send(message);
+					for (const action of (reply.attempts ?? []) as Action[]) this.#act(action);
+				} catch (error) {
+					this.options.log(`status refused: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			} while (this.#dirty && !this.#closing);
+			this.#status = null;
+		})();
+	}
+
+	#act({ job, attempt, action }: Action): void {
+		const found = [...this.#live].find((a) => a.job.id === job && a.attempt === attempt);
+		if (!found || action === "continue") return;
+		if (action === "cancel") found.cancel();
+		else found.stop();
+	}
+
+	#push(push: Push): void {
+		if (push.type === "cancel") {
+			const attempt = this.#current.get(push.job);
+			if (attempt?.attempt === push.attempt) attempt.cancel();
+			return;
+		}
+		const { job, instructions } = push;
+		const current = this.#current.get(job.id);
+		// The hub resends an assignment until a status lists it.
+		if (current?.attempt === job.attempt) return this.status();
+		if (this.#closing) return;
+		this.options.log(`${job.id}: ${job.workflow} ${job.target} (attempt ${job.attempt})`);
+		// A newer attempt fences out the old one, which must exit before its session resumes.
+		current?.stop();
+		const attempt = new Attempt(this.#context(), job, instructions);
+		this.#current.set(job.id, attempt);
+		this.#live.add(attempt);
+		this.status();
+		attempt.start(current?.finished).finally(() => {
+			this.#live.delete(attempt);
+			if (this.#current.get(job.id) === attempt) this.#current.delete(job.id);
+			if (!this.#closing) this.status();
+		});
+	}
+
+	#context(): Context {
+		const { options } = this;
+		return {
+			root: options.home.dir,
+			accounts: () => options.home.accounts(),
+			home: (account) => options.home.accountHome(account.id),
+			adapter: options.adapter,
+			shell: options.shell,
+			remote: options.remote,
+			env: options.env ?? process.env,
+			request: (message) => this.#send(message),
+			publish: (body) => this.#publish(body),
+			limited: (account, until) => this.#limited(account, until),
+			log: options.log,
+		};
+	}
+
+	async #publish(body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+		const fetcher = this.options.fetch ?? fetch;
+		const response = await fetcher(`${this.options.login.url.replace(/\/$/, "")}/api/runner/publish`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${this.options.login.token}`, "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+		let parsed: Record<string, unknown> = {};
+		try {
+			parsed = (await response.json()) as Record<string, unknown>;
+		} catch {}
+		return { status: response.status, body: parsed };
+	}
+
+	/** Keep a refused account out of routing until it resets, and report the change. */
+	#limited(account: Account, until: number | null): void {
+		const { home } = this.options;
+		const accounts = home.accounts();
+		const found = accounts.find((a) => a.id === account.id);
+		if (!found) return;
+		found.limitedUntil = until && until > this.#now() ? until : this.#now() + LIMIT_FALLBACK_MS;
+		home.saveAccounts(accounts);
+		this.options.log(`${found.label} is limited until ${new Date(found.limitedUntil).toISOString()}`);
+		this.#schedule();
+		this.status();
+	}
+
+	/** Report again when the next limited account resets. */
+	#schedule(): void {
+		clearTimeout(this.#wake);
+		const now = this.#now();
+		const next = Math.min(
+			...this.options.home
+				.accounts()
+				.map((a) => a.limitedUntil ?? 0)
+				.filter((until) => until > now),
+		);
+		if (!Number.isFinite(next)) return;
+		this.#wake = setTimeout(
+			() => {
+				this.status();
+				this.#schedule();
+			},
+			Math.min(next - now + 1000, 2_147_483_647),
+		);
+	}
+}
