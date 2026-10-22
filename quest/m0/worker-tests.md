@@ -17,5 +17,6 @@ Decided 2026-10-22 (user) as a follow-up of
 - Find how state is shared (per-file or per-suite storage, seeded rows,
   module-level fixtures) and make each test set up what it needs, rather than
   fixing tests one at a time as they surface.
-- Prove it by running each Worker test file alone and the suite in a shuffled
-  order, and keep a check in CI that would catch a new order dependence.
+- Prove it by running each Worker test case alone (not just each file, since
+  tests in one file share state too) and the suite in a shuffled order, and
+  keep a check in CI that would catch a new order dependence.
