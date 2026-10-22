@@ -31,7 +31,7 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 
 When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
-Its report lists every open decision and suggested follow-up with a recommendation.
+Its report lists every open decision with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
@@ -42,7 +42,7 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Also offer `/quest-plan` for its suggested follow-ups.
+Once a PR merges, offer `/quest-plan` for the suggested follow-ups its `/quest-merge` sub-agent reported.
 Include quest context, as many quests are concurrently in flight.
 
 Run each selected `/quest-ready`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
@@ -50,15 +50,6 @@ Run selected `/quest-plan` sessions in the foreground.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
-
-## Unattended
-
-With an `afk` argument, the user has stepped away: your recommendation stands in for their pick of `/quest-start`, skip, `/quest-ready`, or `/quest-iterate`, so act on it without asking.
-It also answers each simple decision an agent reports, including when you resume a headless agent.
-Still ask about each `/quest-merge` and `/quest-delete` you recommend, as one simple question with your recommendation first.
-Skip a quest, PR, or reported decision that is not simple, noting why in the summary instead of asking.
-Hold `/quest-plan` sessions, including deprioritizing and suggested follow-ups, for the summary, since planning is an interview.
-The rest of the argument still filters the quests in scope.
 
 ## API keys
 
