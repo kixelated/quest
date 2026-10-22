@@ -1,7 +1,8 @@
 // `quest iterate`, `ready`, `merge`, and `release`: one session owns a PR at a
 // time. It holds one `quest:<state>` label, and the ID of the timeline event
 // that added the label is its hold token, since sessions often share an account.
-import { HAND_BACK, repositoryPath } from "./claims";
+import { handedBack } from "../core";
+import { repositoryPath } from "./claims";
 import { array, GitHub, type GitHubDependencies, object, type ObjectValue, type PullRequest, string } from "./github";
 import { Refusal, ago } from "./start";
 
@@ -82,7 +83,7 @@ export async function finish(pr: PullRequest, token: string, deps: GitHubDepende
 	const labels = new Labels(pr, deps);
 	const { hold, snapshot } = await acquire(labels, "ready", token);
 	return holding(hold, async () => {
-		if (HAND_BACK.test(snapshot.body)) {
+		if (handedBack(snapshot.body)) {
 			await labels.github.request(`${repositoryPath(pr)}/pulls/${pr.number}`, {
 				method: "PATCH",
 				body: { body: withoutHandBack(snapshot.body) },
@@ -187,7 +188,7 @@ async function acquire(
 	if (other !== undefined) throw new Refusal(holder(snapshot, other, labels.deps.now()));
 	check?.(snapshot);
 	if (mine === label) return { hold: { label, token: token! }, snapshot };
-	if (mine === undefined && snapshot.draft && !HAND_BACK.test(snapshot.body)) {
+	if (mine === undefined && snapshot.draft && !handedBack(snapshot.body)) {
 		throw new Refusal(
 			`${snapshot.url} is a draft its starter still holds: its body has no ## Decisions needed section, so taking it over is the user's choice`,
 		);
@@ -252,7 +253,7 @@ export function withoutHandBack(body: string): string {
 	const kept: string[] = [];
 	let skipping = false;
 	for (const line of body.split("\n")) {
-		if (HAND_BACK.test(line)) skipping = true;
+		if (handedBack(line)) skipping = true;
 		else if (/^#{1,2}[ \t]/.test(line)) skipping = false;
 		if (!skipping) kept.push(line);
 	}
