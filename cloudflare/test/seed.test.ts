@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { fakeGitHub } from "../dev/github";
 import { seed, world } from "../dev/seed";
 import { app } from "../src/index";
+import { inboxURL } from "../src/jobs/routes";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
 
@@ -64,15 +65,32 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 	// Claimed and blocked quests, and closed issues, are not offered.
 	for (const text of ["Write the getting-started guide", "Report anonymous crash telemetry", "Old crash on startup"])
 		expect(html).not.toContain(text);
+	// A draft its starter holds is in progress; one handed back with decisions waits on the maintainer.
+	const section = (heading: string) => html.match(new RegExp(`<h2>${heading}</h2>[\\s\\S]*?</ol>`))?.[0] ?? "";
+	expect(section("In progress")).toMatch(/Draft the theme picker<\/a><span class="entry-meta"><span>Claimed draft/);
+	expect(section("Up next")).toContain("Search quest titles");
 
-	// Every seeded decision opens on its own.
-	const items = [...html.matchAll(/href="(\/inbox\?project=[^"]+)"/g)].map((m) => m[1]!.replaceAll("&amp;", "&"));
-	expect(items.length).toBeGreaterThan(5);
-	for (const href of new Set(items)) expect((await request(href, { headers: { Cookie: cookie } })).status).toBe(200);
+	// The board agrees: a held draft claims its quest, a handed-back one is turned in.
+	const board = await (
+		await request("/projects/github/example/rocket/board", { headers: { Cookie: cookie } })
+	).text();
+	const row = (title: string) => board.match(new RegExp(`${title}</a>[\\s\\S]*?</li>`))?.[0] ?? "";
+	expect(row("Support custom color themes")).toContain("Claimed");
+	expect(row("Search across projects")).toContain("Ready to turn in");
+
+	// The items this test checks open on their own. Each inbox page rechecks
+	// GitHub authority, so the inbox tests cover the other threads.
+	const open = async (target: string) => {
+		const response = await request(inboxURL(9101, target), { headers: { Cookie: cookie } });
+		expect(response.status).toBe(200);
+		return response.text();
+	};
+	expect(await open("pulls/17")).toContain("Its starter holds this draft");
+	// GitHub's UNKNOWN on a recorded pull request keeps the clean state it last reported.
+	expect(await open("pulls/19")).toContain("/pulls/19/merge");
 
 	// The clean pull request merges through the fake GitHub.
-	const pull = await request("/inbox?project=9101&item=pulls/12", { headers: { Cookie: cookie } });
-	const head = (await pull.text()).match(
+	const head = (await open("pulls/12")).match(
 		/action="([^"]+\/pulls\/12\/merge)"[\s\S]*?name="head" value="([0-9a-f]{40})"/,
 	);
 	expect(head).not.toBeNull();

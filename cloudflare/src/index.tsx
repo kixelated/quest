@@ -10,6 +10,7 @@ import { type Project, findProject, home } from "./board/project";
 import { DocIndex, DocPage, findDoc } from "./docs";
 import { Home } from "./home";
 import { type Enrollment, GitHubError, GitHubService } from "./github/service";
+import { readActivity } from "./github/state";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
 import * as inbox from "./inbox/model";
@@ -201,19 +202,26 @@ async function liveProject(c: Context<{ Bindings: Env }>, refresh = false) {
 	const github = new GitHubService(c.env);
 	const repo = await github.enrolledProject(c.req.param("owner")!, c.req.param("repository")!, session.user.id);
 	if (!repo) throw new GitHubError("Project is not enrolled");
-	return github.projectState(repo, session.user.id, refresh);
+	return { repo, state: await github.projectState(repo, session.user.id, refresh) };
 }
 app.get("/projects/github/:owner/:repository/state", async (c) => {
-	const state = await liveProject(c);
+	const { repo, state } = await liveProject(c);
+	// The activity log is the one view of closed entities, so it pages.
+	const log = await readActivity(c.env.DB, repo.id, c.req.query("before") ?? null);
 	return page(
 		c,
 		{ title: "Project activity", description: "Observed GitHub project state." },
-		<ProjectStatePage owner={c.req.param("owner")} repository={c.req.param("repository")} state={state} />,
+		<ProjectStatePage
+			owner={c.req.param("owner")}
+			repository={c.req.param("repository")}
+			state={state}
+			log={log}
+		/>,
 	);
 });
 app.get("/projects/github/:owner/:repository/data", async (c) => {
 	c.header("Cache-Control", "no-store");
-	return c.json(await liveProject(c));
+	return c.json((await liveProject(c)).state);
 });
 app.post("/projects/github/:owner/:repository/refresh", async (c) => {
 	await liveProject(c, true);
@@ -335,7 +343,7 @@ app.post("/runners/accounts", async (c) => {
 	return c.redirect("/runners", 303);
 });
 app.get("/projects/github/:owner/:repository/board", async (c) => {
-	const state = await liveProject(c);
+	const { state } = await liveProject(c);
 	if (!state) return c.redirect(`${projectURL(c.req.param("owner"), c.req.param("repository"))}/state`, 303);
 	return page(
 		c,
@@ -347,7 +355,7 @@ app.get("/projects/github/:owner/:repository/board", async (c) => {
 	);
 });
 app.get("/projects/github/:owner/:repository/board/quest/*", async (c) => {
-	const state = await liveProject(c);
+	const { state } = await liveProject(c);
 	if (!state) return c.notFound();
 	let segments: string[];
 	try {

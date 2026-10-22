@@ -44,12 +44,15 @@ function needLabel(item: Item) {
 	if (item.need === "retry") return "Failed";
 	if (item.need === "start")
 		return item.skipped && item.job ? `${kinds[item.kind]} · job ${item.job.state}` : kinds[item.kind];
-	return item.job?.state === "queued" ? "Queued" : "Working";
+	if (!item.job) return "Claimed draft";
+	return item.job.state === "queued" ? "Queued" : "Working";
 }
 
 /** Plainly what the item's job is doing, with the next useful action where there is one. */
 function progress(item: Item, runners: Runners, user: string) {
 	const job = item.job;
+	if (!job && item.need === null)
+		return "Its starter holds this draft. It waits on you once they mark it ready or hand back decisions.";
 	if (!job || item.need === "start") return null;
 	const whose = job.actor === user ? "your" : "the requester's";
 	if (job.state === "queued")
