@@ -16,3 +16,4 @@ additional login providers. This milestone does not gate the first release.
 - [ChatGPT hosted runs](/quest/m1/chatgpt-hosted.md) - conditional on provider approval and current terms
 - [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - resolve hosted-use approval before implementation
 - [Batched inbox reads](/quest/m1/inbox-reads.md) - a fixed number of D1 queries per project on each inbox load
+- [Incremental history](/quest/m1/history-pass.md) - each history pass reads only what changed since the last
