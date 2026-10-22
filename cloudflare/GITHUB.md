@@ -391,15 +391,33 @@ pushes/comments/reviews, and reconciliation all update the same item. Webhooks
 retain identity pointers only, never issue/PR bodies. Authoritative API reads add
 escaped titles, state, comment/review counts, current PR head, that head's check
 rollup, aggregate review decision, and up to 20 latest reviewer records with an
-explicit pagination flag. Raw bodies and individual check logs are not cached.
+explicit pagination flag. Raw bodies and individual check logs are not cached:
+a PR's body is kept only as whether it has a `## Decisions needed` section.
 Unavailable/deleted entities retain their notification identity and are marked
 missing rather than disappearing or presenting old state as current.
+
+GitHub reports `mergeStateStatus` `UNKNOWN` while it computes mergeability and
+may send no event once it has. A read that sees it on a recorded PR at the same
+head keeps the last known merge state, so nothing looks new; at a new head it
+stores `UNKNOWN` but leaves the item's change time, so it becomes news once a
+definite state arrives. A newly seen PR is news either way.
+
+Closed entities only appear in the activity log, so a read that finds an entity
+closed for longer than `RETENTION` (`cloudflare/src/github/state.ts`) deletes its
+row instead of updating it, unless a webhook named it again since. History
+rereads every entity, so a pass prunes every expired row. The board, inbox, jobs
+and `/data` read only open entities and unread webhook pointers, through a
+partial index, and the activity log pages 50 rows at a time, so neither read
+grows with a repository's history.
 
 A PR associates with a quest only when its head branch exactly matches the quest's
 path without `.md` (or an epic's `/README.md`). An unrelated human PR remains in
 activity without a guessed association. Open associated PRs and observed quest
 branch claims exclude that quest from candidate data; branch claims display as
-Claimed on the board. Runner/run associations belong to job coordination.
+Claimed on the board. So does a draft PR its starter still holds, one without a
+`## Decisions needed` section, which the inbox lists as in progress rather than
+as a decision; a ready PR or a handed-back draft is Ready to turn in.
+Runner/run associations belong to job coordination.
 
 Every cached read and refresh proves current maintainer authority, live repository
 identity/public visibility, installation access, and enrollment for that
@@ -414,7 +432,7 @@ observation tied to its commit, **never execution permission**: job coordination
 must validate current eligibility, fresh revision, locks, and PRs before a start.
 Review/check data is similarly descriptive and cannot approve a merge.
 
-The `/data` endpoint exposes the same authenticated snapshot/activity with
+The `/data` endpoint exposes the same authenticated snapshot and open activity with
 `Cache-Control: no-store` for future decision and job consumers. The activity
 page is a secondary read view; the durable decision inbox and its unread/answer
 state belong to the prompts workflow. Neither incoming activity nor refreshing

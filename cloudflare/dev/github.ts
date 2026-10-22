@@ -12,8 +12,10 @@ export type Pull = Issue & {
 	review: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
 	reviews?: { state: string; author: string }[];
 	draft?: boolean;
+	/** A `## Decisions needed` section in it hands a draft back to the maintainer. */
+	body?: string;
 	/** GitHub's mergeStateStatus; only CLEAN merges. Defaults to BLOCKED, or DRAFT for a draft. */
-	merge?: "CLEAN" | "BLOCKED" | "DIRTY" | "UNSTABLE";
+	merge?: "CLEAN" | "BLOCKED" | "DIRTY" | "UNSTABLE" | "UNKNOWN";
 };
 export type Repo = {
 	id: number;
@@ -49,6 +51,7 @@ function entity(repo: Repo, item: Issue) {
 		title: item.title,
 		state: item.closed ? "CLOSED" : "OPEN",
 		updatedAt,
+		closedAt: item.closed ? updatedAt : null,
 		author: { login: item.author },
 		comments: { totalCount: item.comments ?? 0 },
 	};
@@ -59,6 +62,7 @@ function pullNode(repo: Repo, pull: Pull) {
 	const reviews = pull.reviews ?? [];
 	return {
 		...entity(repo, pull),
+		body: pull.body ?? "",
 		headRefName: pull.branch,
 		headRefOid: oid,
 		isDraft: !!pull.draft,

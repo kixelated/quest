@@ -27,8 +27,9 @@ time:
 - A start job claims through the bot exactly as `quest start` does: a draft
   PR. kix treats PRs that local sessions hold as owned, shows that owner on
   the card, and never acts on them: a `quest:*` label, or a draft with no
-  `## Decisions needed` section. A stale one is offered to the maintainer for
-  takeover.
+  `## Decisions needed` section. The inbox already lists such a draft as in
+  progress, with no actions; the label half remains. A stale one is offered
+  to the maintainer for takeover.
 - A PR with no `quest:*` label that is ready, or a draft with
   `## Decisions needed`, is a decision item offering the
   `/quest-complete` actions, one decision per PR: mark ready, merge (the

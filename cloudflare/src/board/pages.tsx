@@ -340,10 +340,17 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 	if (status.kind === "accepted")
 		return (
 			<Panel title="Claimed">
-				<p>
-					A quest branch already claims this work. Review its current GitHub state before starting another
-					implementation.
-				</p>
+				{status.change ? (
+					<p>
+						{status.change.author} is working on this in a <a href={status.change.href}>draft PR</a>. It
+						waits on you once they mark it ready or hand back decisions.
+					</p>
+				) : (
+					<p>
+						A quest branch already claims this work. Review its current GitHub state before starting another
+						implementation.
+					</p>
+				)}
 			</Panel>
 		);
 	if (status.kind === "pending")
