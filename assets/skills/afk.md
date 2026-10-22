@@ -20,4 +20,4 @@ Make no decisions, not even by acting on your own recommendation; skip each one 
 As merges land, recompute the ready quests and start any that newly qualify.
 Finish once every agent has reported, every picked action has landed or needs the user, and no quest remains that starts without asking.
 
-In the final summary, list each quest, PR, and decision you skipped with your recommendation, so the user returns to what needs them.
+Write the final summary so a new session can act on it without this one's context, letting the user start fresh on their return: link each quest and PR, give each skipped decision with its options and your recommendation, and describe every follow-up the agents suggested fully enough to hand to `/quest-plan`.
