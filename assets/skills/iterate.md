@@ -14,8 +14,8 @@ Judge the approach before touching anything: would you take a different one?
 
 Scope the changes this PR needs with the plan skill's interview, starting from the user's feedback, your judgment of the approach, and any review findings that need a decision.
 Skip its quest and PR steps: record the settled decisions in this PR's description as the paper trail, then implement them immediately.
-A sub-agent that cannot prompt picks the recommended option for each decision and lists those decisions in the PR description and its report.
-It stops to ask only when a choice is truly consequential.
+A sub-agent that cannot prompt picks the recommended option only for decisions the repository's instructions don't reserve for the maintainer, and lists those choices in the PR description and its report.
+Reserved decisions, and any truly consequential choice, stay open in the PR with a recommendation.
 
 Fix merge conflicts and failing CI checks.
 Address the automated review findings already posted, without waiting on optional reviewers: fix those you agree with and comment on any you decline.
