@@ -47,5 +47,4 @@ or needs them.
 
 ## Required
 
-- [Runner](/quest/m0/kix/runner.md) - jobs that run the merge skill
 - [PR state commands](/quest/m0/helpers/pr-states.md) - the label contract kix shares with local sessions

@@ -860,6 +860,122 @@ export class GitHubService {
 			),
 		}));
 	}
+	/**
+	 * What a job's agent reads about its issue or pull request, which its
+	 * checkout does not hold: an issue's text and comments, or a pull request's
+	 * text, comments, reviews, unresolved review threads, and checks at its head.
+	 * Everything in it is untrusted GitHub content.
+	 */
+	readTarget(repo: GitHubRepository, userId: string, target: string) {
+		const [, kind, value] = target.match(/^(issues|pulls)\/(\d{1,15})$/) ?? [];
+		if (!kind) throw new GitHubError("Only issue and pull request jobs have a target to read");
+		const permissions: Permissions =
+			kind === "issues" ? { issues: "read" } : { pull_requests: "read", checks: "read", statuses: "read" };
+		const comments = "comments(last: 100) { nodes { author { login } body createdAt } }";
+		const query =
+			kind === "issues"
+				? `issue(number: $number) { number title state body author { login } ${comments} }`
+				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments}
+ reviews(last: 50) { nodes { author { login } state body submittedAt } }
+ reviewThreads(first: 100) { nodes { isResolved isOutdated path line comments(first: 50) { nodes { author { login } body createdAt } } } }
+ commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } } } } } } }`;
+		type Comment = { author: { login: string } | null; body: string; createdAt?: string; submittedAt?: string };
+		type Thread = {
+			isResolved: boolean;
+			isOutdated: boolean;
+			path: string;
+			line: number | null;
+			comments: { nodes: Comment[] };
+		};
+		type Check = {
+			__typename: string;
+			name?: string;
+			status?: string;
+			conclusion?: string | null;
+			detailsUrl?: string | null;
+			context?: string;
+			state?: string;
+			description?: string | null;
+			targetUrl?: string | null;
+		};
+		type Item = {
+			number: number;
+			title: string;
+			state: string;
+			body: string;
+			isDraft?: boolean;
+			author: { login: string } | null;
+			baseRefName?: string;
+			headRefName?: string;
+			headRefOid?: string;
+			comments: { nodes: Comment[] };
+			reviews?: { nodes: (Comment & { state: string })[] };
+			reviewThreads?: { nodes: Thread[] };
+			commits?: {
+				nodes: {
+					commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: Check[] } } | null };
+				}[];
+			};
+		};
+		return this.#authorized(repo, userId, permissions, async (token) => {
+			const result = await this.#api<{
+				data?: { repository: { issue?: Item | null; pullRequest?: Item | null } | null };
+				errors?: unknown[];
+			}>(token, "/graphql", "POST", {
+				query: `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { ${query} } }`,
+				variables: { owner: repo.owner, name: repo.name, number: number(Number(value)) },
+			});
+			const item = result.data?.repository?.[kind === "issues" ? "issue" : "pullRequest"];
+			if (result.errors?.length || !item) throw new GitHubError("This issue or pull request is unavailable");
+			const comment = (c: Comment) => ({
+				author: c.author?.login ?? null,
+				body: c.body,
+				at: c.createdAt ?? c.submittedAt ?? null,
+			});
+			const common = {
+				number: item.number,
+				title: item.title,
+				state: item.state,
+				author: item.author?.login ?? null,
+				body: item.body,
+				comments: item.comments.nodes.map(comment),
+			};
+			if (kind === "issues") return { kind: "issue" as const, ...common };
+			const head = item.commits?.nodes.at(-1)?.commit;
+			return {
+				kind: "pull" as const,
+				...common,
+				draft: item.isDraft ?? false,
+				base: item.baseRefName ?? null,
+				head: { ref: item.headRefName ?? null, oid: item.headRefOid ?? null },
+				reviews: (item.reviews?.nodes ?? []).map((r) => ({ ...comment(r), state: r.state })),
+				// Resolved threads need nothing more; outdated ones may still need an answer.
+				threads: (item.reviewThreads?.nodes ?? [])
+					.filter((t) => !t.isResolved)
+					.map((t) => ({
+						path: t.path,
+						line: t.line,
+						outdated: t.isOutdated,
+						comments: t.comments.nodes.map(comment),
+					})),
+				checks: {
+					commit: head?.oid ?? null,
+					state: head?.statusCheckRollup?.state ?? null,
+					runs: (head?.statusCheckRollup?.contexts.nodes ?? []).map((c) =>
+						c.__typename === "CheckRun"
+							? { name: c.name!, state: c.conclusion ?? c.status ?? null, url: c.detailsUrl ?? null }
+							: {
+									name: c.context!,
+									state: c.state ?? null,
+									url: c.targetUrl ?? null,
+									description: c.description ?? null,
+								},
+					),
+				},
+			};
+		});
+	}
+
 	comment(repo: GitHubRepository, userId: string, issue: number, approvedBody: string) {
 		if (!approvedBody.trim()) throw new GitHubError("Approved comment required");
 		return this.#authorized(repo, userId, { issues: "write" }, (token) =>

@@ -110,6 +110,16 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	return { job, attempt, head: body.head as string | null, session, message, changes, pull };
 }
 
+/**
+ * The publication builds on a head the job's branch has moved past, such as
+ * when the reply to an earlier publication was lost. The runner continues from `head`.
+ */
+export class HeadMoved extends JobError {
+	constructor(readonly head: string | null) {
+		super(`The job's branch is at ${head ?? "no commit yet"}; continue from it`);
+	}
+}
+
 /** A pause on a decision; `asked` is false for a retry of one already asked. */
 type Decision = { decision: string; cancel: boolean; asked: boolean };
 type Published = { head: string | null; pull?: { number: number; url: string; draft: boolean } };
@@ -152,7 +162,7 @@ async function verify(db: D1Database, job: store.Publishing, input: Publication,
 				? `${branch.repository.owner}/${branch.repository.name} already has the branch ${job.branch} from earlier work.`
 				: `The branch ${job.branch} changed outside this job.`,
 		);
-	if (input.head !== head) throw new JobError(`The job's branch is at ${head ?? "no commit yet"}; continue from it`);
+	if (input.head !== head) throw new HeadMoved(head);
 	return head;
 }
 
@@ -230,7 +240,14 @@ export async function restart(
 	job: Omit<store.Job, "result"> & { questions: store.Question[] },
 	question: string,
 ) {
-	const open = job.questions.find((q) => q.id === question && q.answer === null && q.attempt === job.attempt);
+	// The requester may start over in place of another maintainer's answer that awaits approval.
+	const open = job.questions.find(
+		(q) =>
+			q.id === question &&
+			q.approvedAt === null &&
+			(q.answer === null || user === job.actor) &&
+			q.attempt === job.attempt,
+	);
 	const offered = open?.kind === "publication" && (open.prompt as { restart?: unknown } | null)?.restart === true;
 	if (job.state !== "waiting" || job.workflow === "iterate" || !offered)
 		throw new JobError("Only a job whose own branch changed can start over");

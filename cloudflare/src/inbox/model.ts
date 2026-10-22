@@ -19,10 +19,11 @@ export type Read = { repository: number; item: string; seen: string | null; skip
 
 /**
  * What the item asks of the maintainer: answer an agent, pick an account for
- * a limited job, retry a failure, or start work on an issue, PR, or ready
- * quest. `null` is work in progress, which only informs.
+ * a limited job, approve another maintainer's answer to their own job, retry
+ * a failure, or start work on an issue, PR, or ready quest. `null` is work in
+ * progress, which only informs.
  */
-export type Need = "answer" | "account" | "retry" | "start";
+export type Need = "answer" | "account" | "approve" | "retry" | "start";
 export type Kind = "issue" | "pull" | "quest" | "plan" | "devshell";
 
 export type Item = {
@@ -35,7 +36,7 @@ export type Item = {
 	activity: Activity | null;
 	/** The target's latest job. */
 	job: JobView | null;
-	/** The job's open question, and its prompt when an agent asked it. */
+	/** The job's open question, or its answer awaiting approval, and its prompt when an agent asked it. */
 	question: QuestionView | null;
 	prompt: Prompt | null;
 	need: Need | null;
@@ -127,10 +128,16 @@ function fallback(project: Enrollment, target: string): Entity {
 }
 
 /**
- * Build one project's items from its observed `found` entities, its latest
- * jobs, and the maintainer's read state.
+ * Build one project's items for `user` from its observed `found` entities,
+ * its latest jobs, and the maintainer's read state.
  */
-export function decisions(view: ProjectView, found: Map<string, Entity>, jobs: JobView[], reads: Read[]): Item[] {
+export function decisions(
+	view: ProjectView,
+	found: Map<string, Entity>,
+	jobs: JobView[],
+	reads: Read[],
+	user: string,
+): Item[] {
 	const { project } = view;
 	const latest = new Map<string, JobView>();
 	// Jobs arrive newest first.
@@ -147,9 +154,11 @@ export function decisions(view: ProjectView, found: Map<string, Entity>, jobs: J
 		let ended = false;
 		if (job && (job.state === "queued" || job.state === "running")) version = `job:${job.id}`;
 		else if (job?.state === "waiting") {
-			question = job.questions.find((q) => q.attempt === job.attempt && q.answer === null) ?? null;
-			if (question) need = question.kind === "account" ? "account" : "answer";
-			version = `question:${question?.id}`;
+			question = job.questions.find((q) => q.attempt === job.attempt && q.approvedAt === null) ?? null;
+			// Another maintainer's answer waits on the requester alone; others see it as in progress.
+			if (question?.answer != null) need = job.actor === user ? "approve" : null;
+			else if (question) need = question.kind === "account" ? "account" : "answer";
+			version = `question:${question?.id}${question?.answer != null ? ":answered" : ""}`;
 		} else if (job?.state === "failed" && !changed) {
 			need = "retry";
 			version = `job:${job.id}`;
@@ -188,7 +197,7 @@ export function decisions(view: ProjectView, found: Map<string, Entity>, jobs: J
 // Agents blocked on an answer come first, then failures, then new PRs,
 // issues, and ready quests: the loop of reviewing, planning, and spawning.
 const order = (item: Item) =>
-	item.need === "answer" || item.need === "account"
+	item.need === "answer" || item.need === "account" || item.need === "approve"
 		? 0
 		: item.need === "retry"
 			? 1
@@ -213,7 +222,7 @@ async function collect(db: D1Database, user: string, views: ProjectView[]) {
 		db.prepare("SELECT repository,item,seen,skipped FROM inbox_items WHERE user=?").bind(user).all<Read>(),
 		Promise.all(views.map((view, i) => store.listInboxJobs(db, view.project.id, [...found[i]!.keys()]))),
 	]);
-	return views.flatMap((view, i) => decisions(view, found[i]!, jobs[i]!, reads.results));
+	return views.flatMap((view, i) => decisions(view, found[i]!, jobs[i]!, reads.results, user));
 }
 
 /**

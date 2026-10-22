@@ -92,17 +92,19 @@ and moves one branch. Before writing anything it checks, in order:
   identity, visibility, installation, and enrollment are checked live, as for
   every other operation.
 - The branch is where the job left it: absent before the first publication,
-  then the last commit kix published. A `head` that differs gets a reply naming
-  the commit to continue from. A branch changed outside the job, or one that
-  earlier work left on the fork, becomes a decision; publication never
-  overwrites it. On a service fork branch, the decision also offers to start
-  over: at the maintainer's request (`restart: true` in place of an `answer`,
-  after a live authority check), kix replaces the job with a new one at the
-  job's revision, with a new agent session and no recorded pull request, and
-  then force-resets the branch there. Replacing the job first means a
-  concurrent answer or cancel refuses the restart before any commit is
-  discarded. If the reset fails, the new job waits on the same Start over
-  decision. An iterated pull request's head is never reset.
+  then the last commit kix published. A `head` that differs gets a
+  `409 { error, head }` naming the commit to continue from, so a runner whose
+  previous reply was lost continues from what landed instead of failing. A
+  branch changed outside the job, or one that earlier work left on the fork,
+  becomes a decision; publication never overwrites it. On a service fork
+  branch, the decision also offers to start over: at the maintainer's request
+  (`restart: true` in place of an `answer`, after a live authority check), kix
+  replaces the job with a new one at the job's revision, with a new agent
+  session and no recorded pull request, and then force-resets the branch there.
+  Replacing the job first means a concurrent answer or cancel refuses the
+  restart before any commit is discarded. If the reset fails, the new job waits
+  on the same Start over decision. An iterated pull request's head is never
+  reset.
 
 `plan`, `start`, and `bootstrap` jobs write their branch on the service fork
 `GITHUB_FORK_OWNER/<repository>`, whose immediate parent must be the upstream's

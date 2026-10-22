@@ -1,5 +1,6 @@
 // Push notifications for decisions. Only something that waits on a
-// maintainer pushes: an agent's question, an account limit, a stopped job,
+// maintainer pushes: an agent's question, an account limit, another
+// maintainer's answer awaiting the job requester's approval, a stopped job,
 // a new issue, or a pull request ready for review. Each notification names
 // its project and item and opens that item in the inbox, where every answer
 // is made; it carries no answer of its own. One tag per item coalesces
@@ -13,9 +14,10 @@ import { inboxURL } from "../jobs/routes";
 import { type KeyPair, type Subscription, base64url, send } from "./webpush";
 
 /** Why an item pushes, which leads its notification. */
-export type Reason = "question" | "publication" | "account" | "failed" | "issue" | "pull";
+export type Reason = "question" | "publication" | "account" | "approval" | "failed" | "issue" | "pull";
 const reasons: Record<Reason, string> = {
 	question: "Agent question",
+	approval: "Answer to approve",
 	publication: "Publishing decision",
 	account: "Account limit",
 	failed: "Job stopped",

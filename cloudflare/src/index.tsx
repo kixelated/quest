@@ -16,9 +16,10 @@ import { githubWebhooks } from "./github/webhook";
 import * as inbox from "./inbox/model";
 import { InboxPage } from "./inbox/page";
 import { purge, retain } from "./jobs/output";
-import { BootstrapRequired, fromForm, inboxURL, jobs, nextURL, resume, stop } from "./jobs/routes";
-import { JobError, active } from "./jobs/store";
+import { BootstrapRequired, fromForm, hub, inboxURL, jobs, nextURL, resume, stop } from "./jobs/routes";
+import { JobError, active, listRunners, moveAccount, registerRunner } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
+import { RunnersPage, connectRequest } from "./runners";
 import * as push from "./push/notify";
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -296,6 +297,50 @@ app.get("/inbox", async (c) => {
 			notifications={push.keys(c.env)?.publicKey ?? null}
 		/>,
 	);
+});
+// The signed-in user's runners and accounts, and approval of a `quest runner login` link.
+app.get("/runners", async (c) => {
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.redirect(`/sign-in?${new URLSearchParams({ next: here(c) })}`, 303);
+	const owner = session.user.id;
+	const online = new Set(await hub(c.env, owner).online());
+	return page(
+		c,
+		{ title: "Runners", description: "Your runners, their agent accounts, and the order jobs use them in." },
+		<RunnersPage
+			runners={await listRunners(c.env.DB, owner, online)}
+			connect={connectRequest(c.req.query())}
+			connected={c.req.query("connected")}
+		/>,
+	);
+});
+/** The signed-in user behind a runner form, which must come from this site. */
+async function signedIn(c: Context<{ Bindings: Env }>) {
+	if (c.req.header("Origin") !== new URL(c.env.AUTH_URL).origin) throw new GitHubError("Invalid origin");
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) throw new GitHubError("Sign in required");
+	return session.user.id;
+}
+app.post("/runners/connect", async (c) => {
+	const owner = await signedIn(c);
+	const body = await c.req.parseBody();
+	const request = connectRequest(
+		Object.fromEntries(Object.entries(body).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : []))),
+	);
+	if (!request) throw new JobError("Name, platform, and key required");
+	// Logins never declare VM builds; the job sandbox adds that.
+	await registerRunner(c.env.DB, owner, request.name, request.platform, false, request.key, Date.now());
+	return c.redirect(`/runners?${new URLSearchParams({ connected: request.name })}`, 303);
+});
+app.post("/runners/accounts", async (c) => {
+	const owner = await signedIn(c);
+	const { runner, account, move } = await c.req.parseBody();
+	if (typeof runner !== "string" || typeof account !== "string" || (move !== "up" && move !== "down"))
+		throw new JobError("Runner, account, and direction required");
+	await moveAccount(c.env.DB, owner, runner, account, move);
+	// A new order can route queued work that was waiting on another account.
+	await hub(c.env, owner).dispatch(owner);
+	return c.redirect("/runners", 303);
 });
 app.get("/projects/github/:owner/:repository/board", async (c) => {
 	const { state } = await liveProject(c);

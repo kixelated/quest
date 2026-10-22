@@ -15,7 +15,7 @@ official agent CLIs (Claude Code, opencode) with any number of signed-in
 accounts. The GitHub App bot publishes ordinary PRs.
 
 This epic owns an end-to-end test of the whole flow: enroll a project,
-connect two runners, one with two accounts, receive an issue notification,
+connect a Linux and a macOS runner, one with two accounts, receive an issue notification,
 answer planning prompts, publish a draft quest PR, merge through GitHub's
 rules, start a ready quest, follow its summaries, answer an implementation
 question from a push notification, take its runner offline so the job is
@@ -93,12 +93,26 @@ operator-paid-hosting decisions:
   outside the pure quest core. The standalone CLI and versioned quest
   format remain useful without this service.
 
+The live rehearsal also covers what `quest runner` (`src/runner/`) could not
+check locally (it shipped in
+[kixelated/quest#188](https://github.com/kixelated/quest/pull/188)), and
+fixes what it finds:
+
+- On macOS, two accounts in separate `CLAUDE_CONFIG_DIR` homes keep separate
+  Keychain credentials, and `claude auth status --json` reports each one's own
+  `authMethod` and email.
+- `git fetch <upstream> <sha>` reaches a commit kix published on the service
+  fork, which a reassigned job's new runner relies on. If GitHub refuses it,
+  have the hub send the fork's clone URL with `assign`.
+- A rejected `rate_limit_event` and its `resetsAt` arrive when a plan runs
+  out, so the account sits out until its reset instead of the one-hour
+  fallback.
+
 ## Required
 
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
-- [Runner](/quest/m0/kix/runner.md) - `quest runner` on Linux and macOS with Nix devShells, accounts, and the Claude Code adapter
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
