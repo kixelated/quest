@@ -601,7 +601,9 @@ describe("decision inbox", () => {
 	it("encodes quest paths in board links", () => {
 		const enrolled = { owner: "upstream", name: "project" } as Parameters<typeof questHref>[0];
 		expect(questHref(enrolled, "quest/a#b?.md")).toBe("/projects/github/upstream/project/board/quest/a%23b%3F");
-		expect(questHref(enrolled, "quest/epic/README.md")).toBe("/projects/github/upstream/project/board/quest/epic");
+		expect(questHref(enrolled, "quest/epic/README.md")).toBe(
+			"/projects/github/upstream/project/board/quest/epic/README",
+		);
 	});
 
 	it("skips an item until it changes", async () => {

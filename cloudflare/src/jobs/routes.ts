@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import { questBranch } from "quest/core";
 import { createAuth } from "../auth";
 import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
@@ -227,7 +228,7 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState, failed
 	if (workflow === "start") {
 		if (typeof target !== "string" || !startable(state, target, failed && continued(state, failed)))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
-		const branch = target.replace(/(\/README)?\.md$/, "");
+		const branch = questBranch(target);
 		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");
 		return { workflow, target, revision: commit, branch, trusted: true };
 	}

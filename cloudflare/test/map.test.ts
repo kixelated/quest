@@ -41,7 +41,7 @@ describe("quest map", () => {
 
 	it("draws epics and the milestone's own quests as paths in priority order", () => {
 		expect(region.paths.map((path) => path.title)).toEqual(["An epic", "Main path"]);
-		expect(region.paths[0].href).toBe("/repos/demo/quest/m0/epic");
+		expect(region.paths[0].href).toBe("/repos/demo/quest/m0/epic/README");
 	});
 
 	it("orders each path by what it requires, then by priority", () => {
@@ -58,7 +58,7 @@ describe("quest map", () => {
 
 	it("links to the board without a web address", () => {
 		const [offline] = chart(readBoard({ ...project, web: null }));
-		expect(offline.paths[0].href).toBe("/repos/demo/quest/m0/epic");
+		expect(offline.paths[0].href).toBe("/repos/demo/quest/m0/epic/README");
 		expect(offline.paths[1].waypoints[0].href).toBe("/repos/demo/quest/m0/solo");
 	});
 });

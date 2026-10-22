@@ -1,4 +1,4 @@
-import { handedBack, parse, ready } from "quest/core";
+import { branchQuest, handedBack, parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
@@ -132,11 +132,13 @@ function next<T>(connection: Connection<T> | undefined, cursor: Cursor) {
 	return connection.pageInfo.endCursor;
 }
 
-/** A branch convention is evidence of association, never execution authority. */
+/**
+ * The quest `branch` is named for, as `quest start` names it. A branch
+ * convention is evidence of association, never execution authority.
+ */
 export function associatedQuest(branch: string, paths: Set<string>) {
-	const exact = `${branch}.md`;
-	const epic = `${branch}/README.md`;
-	return paths.has(exact) ? exact : paths.has(epic) ? epic : null;
+	const path = branchQuest(branch);
+	return paths.has(path) ? path : null;
 }
 
 function validate(kind: "issue" | "pull", item: Entity) {

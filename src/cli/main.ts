@@ -14,6 +14,7 @@ import {
 	formatFinding,
 	label,
 	lookup,
+	questBranch,
 	renderBlocker,
 	unblocked,
 } from "../core";
@@ -27,7 +28,7 @@ import {
 	removeAccount,
 	runRunner,
 } from "../runner/cli";
-import { held, questBranch, reach, target, upstream, upstreamHead } from "./claims";
+import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
 import { landed } from "./landed";

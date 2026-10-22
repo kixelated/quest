@@ -232,11 +232,21 @@ describe("index", () => {
 			.rejects("quest/m0/epic/one.md: quest path collides with quest/m0/epic/one/README.md");
 	});
 
-	test("a README-named directory has a distinct path from its parent README", () => {
+	// Git cannot hold the epic's `quest/m0/epic/README` branch beside a nested
+	// `quest/m0/epic/README/README` branch, so a README-named directory collides
+	// with its parent epic like any other nested path.
+	test("a README-named directory collides with its parent README", () => {
 		tree()
 			.write("quest/m0/epic/README/README.md", ONE)
 			.append("quest/m0/epic/README.md", "- [Nested](/quest/m0/epic/README/README.md)\n")
-			.accepts();
+			.rejects("quest/m0/epic/README.md: quest path collides with quest/m0/epic/README/README.md");
+	});
+
+	test("a quest collides with any document under its path", () => {
+		tree()
+			.write("quest/m0/epic/one/README.md", ONE)
+			.write("quest/m0/epic/one/README/two.md", ONE)
+			.rejects("quest/m0/epic/one/README.md: quest path collides with quest/m0/epic/one/README/two.md");
 	});
 
 	// A README whose last child merged is the epic's own remaining work: a leaf

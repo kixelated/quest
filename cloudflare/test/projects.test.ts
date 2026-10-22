@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
 import { readBoard } from "../src/board/model";
-import { type ActivityPage, RETENTION, readActivity } from "../src/github/state";
+import { type ActivityPage, associatedQuest, RETENTION, readActivity } from "../src/github/state";
 import { GitHubService } from "../src/github/service";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
@@ -739,6 +739,12 @@ function history(): ActivityPage {
 const event = { installation: { id: 5 }, repository: { id: 10, default_branch: "trunk" } };
 
 describe("enrolled project observations", () => {
+	it("maps a branch to the quest it names, an epic by its README branch", () => {
+		const paths = new Set(["quest/epic/README.md", "quest/epic/child.md"]);
+		expect(associatedQuest("quest/epic/README", paths)).toBe("quest/epic/README.md");
+		expect(associatedQuest("quest/epic/child", paths)).toBe("quest/epic/child.md");
+		expect(associatedQuest("quest/epic", paths)).toBeNull();
+	});
 	async function enrolled() {
 		await github().service.setContributions(repo, "enrollment-test", "enabled");
 	}

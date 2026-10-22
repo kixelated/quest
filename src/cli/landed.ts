@@ -5,7 +5,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { type Finding } from "../core";
+import { type Finding, branchQuest } from "../core";
 
 /**
  * A finding when `branch` (default: the current branch) is a quest's branch
@@ -38,13 +38,10 @@ export function landed(root: string, base: string, branch?: string): Finding[] {
 	];
 }
 
-/**
- * The quest file `branch` names, if it existed at `commit`: the branch plus
- * `.md`, so an epic's branch ends in `/README`.
- */
+/** The quest file `branch` names, if it existed at `commit`. */
 function questAt(root: string, commit: string, branch: string): string | null {
 	if (!branch.startsWith("quest/") || branch.endsWith("/")) return null;
-	const path = `${branch}.md`;
+	const path = branchQuest(branch);
 	return git(root, ["cat-file", "-e", `${commit}:./${path}`]).status === 0 ? path : null;
 }
 
