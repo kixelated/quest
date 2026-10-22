@@ -1,0 +1,22 @@
+---
+description: Keep quest work moving while the user is away, leaving every decision for their return.
+---
+
+Before you begin, run `quest guide`, `quest skill spawn`, and `quest skill complete`, and read their output completely.
+
+The user has stepped away and will not answer.
+Your goal is to keep the work they already agreed to moving, asking nothing, until only work that needs a decision remains.
+Dispatch, limit, and clean up agents as those skills describe; an argument works as it does for `/quest-spawn`, filtering the scope or selecting `api` billing.
+
+Make no decisions, not even by acting on your own recommendation; skip each one and leave it for the user:
+
+- Start every ready quest that `/quest-spawn` starts without asking; leave each quest it would ask about unstarted.
+- Carry on each action the user already picked, such as a `/quest-merge` pick, until it lands or needs the user again.
+- Pick no skip, `/quest-ready`, `/quest-iterate`, `/quest-merge`, or `/quest-delete` that the user has not, so nothing merges or is deleted on your judgment.
+- Answer no decision an agent reports. Its PR stays a draft whose `## Decisions needed` section lists the decision with a recommendation.
+- Hold `/quest-plan` sessions, stale claims, and suggested follow-ups for the user.
+
+As merges land, recompute the ready quests and start any that newly qualify.
+Finish once every agent has reported, every picked action has landed or needs the user, and no quest remains that starts without asking.
+
+In the final summary, list each quest, PR, and decision you skipped with your recommendation, so the user returns to what needs them.

@@ -82,7 +82,7 @@ test("skill lists every skill", () => {
 test("skill rejects an unknown name", () => {
 	const out = run("skill", "nope");
 	expect(out.code).toBe(1);
-	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: audit, /);
+	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: afk, audit, /);
 });
 
 test("usage errors exit 2", () => {
