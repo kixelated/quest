@@ -23,6 +23,6 @@ Record the outcome as a PR comment as a paper-trail.
 
 Also offer to `/quest-plan` any suggested follow-ups as a multi-select.
 
-Once the quest is complete and the user has settled every decision, including choices you made without asking, and the PR reflects them, run `/quest-ready` on it.
+Once the quest is complete and the PR reflects the user's answers, run `/quest-ready` on it; list choices you made without asking in the PR body rather than waiting on them.
 
-A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, running `/quest-ready` only when the quest is complete and it has none.
+A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead, running `/quest-ready` only when the quest is complete and no decision is left for the maintainer.
