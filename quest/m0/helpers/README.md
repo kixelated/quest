@@ -65,7 +65,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 - [Upstream claims](/quest/m0/helpers/claims.md) - claims and readiness read from the upstream tree, ignoring merged branches
 - [Wait gaps](/quest/m0/helpers/wait-gaps.md) - `quest wait` reports every event after its starting point exactly once
-- [Guard in CI](/quest/m0/helpers/ci-guard.md) - pull request CI runs the landed-quest guard
 
 ## Related
 
