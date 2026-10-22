@@ -395,7 +395,9 @@ branch back. The refusal names the holder's label, age, and token, so you can
 decide whether to release a stale hold. When two sessions add different labels
 at once, the first label added keeps the PR and the other backs off.
 
-`--land` needs the full 40-character head SHA and refuses once the head moves.
+`--land` needs the full 40-character head SHA and refuses once the head moves,
+before swapping labels, so the token you passed stays valid. If a step fails
+after a swap, the error names the new token.
 It enables auto-merge bound to that SHA, which enters GitHub's merge queue
 when the base has one, or merges at once when nothing is left to wait for. It
 makes a merge commit; `--squash` or `--rebase` picks another method, and a

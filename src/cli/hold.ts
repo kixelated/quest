@@ -81,19 +81,20 @@ export async function take(
 export async function finish(pr: PullRequest, token: string, deps: GitHubDependencies): Promise<Hold> {
 	const labels = new Labels(pr, deps);
 	const { hold, snapshot } = await acquire(labels, "ready", token);
-	if (HAND_BACK.test(snapshot.body)) {
-		await labels.github.request(`${repositoryPath(pr)}/pulls/${pr.number}`, {
-			method: "PATCH",
-			body: { body: withoutHandBack(snapshot.body) },
-		});
-	}
-	if (snapshot.draft) {
-		await labels.github.graphql(
-			`mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }`,
-			{ id: snapshot.id },
-		);
-	}
-	return hold;
+	return holding(hold, async () => {
+		if (HAND_BACK.test(snapshot.body)) {
+			await labels.github.request(`${repositoryPath(pr)}/pulls/${pr.number}`, {
+				method: "PATCH",
+				body: { body: withoutHandBack(snapshot.body) },
+			});
+		}
+		if (snapshot.draft) {
+			await labels.github.graphql(
+				`mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }`,
+				{ id: snapshot.id },
+			);
+		}
+	});
 }
 
 /**
@@ -109,21 +110,42 @@ export async function land(
 	deps: GitHubDependencies,
 ): Promise<Hold> {
 	const labels = new Labels(pr, deps);
-	const { hold, snapshot } = await acquire(labels, "merge", token);
-	if (snapshot.head.toLowerCase() !== sha.toLowerCase()) {
-		throw new Refusal(`${snapshot.url} head moved to ${snapshot.head}; check the new head before landing it`);
+	const current = (snapshot: Snapshot) => {
+		if (snapshot.head.toLowerCase() !== sha.toLowerCase()) {
+			throw new Refusal(`${snapshot.url} head moved to ${snapshot.head}; check the new head before landing it`);
+		}
+	};
+	// Check the head before swapping labels, so a stale SHA leaves the caller's token valid.
+	const { hold, snapshot } = await acquire(labels, "merge", token, current);
+	return holding(hold, async () => {
+		current(snapshot);
+		if (snapshot.queue && method !== "merge") {
+			deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
+		}
+		const mutation =
+			!snapshot.queue && IMMEDIATE.includes(snapshot.mergeState)
+				? "mergePullRequest"
+				: "enablePullRequestAutoMerge";
+		await labels.github.graphql(
+			`mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) {
+				${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId }
+			}`,
+			{ id: snapshot.id, sha: snapshot.head, method: method.toUpperCase() },
+		);
+	});
+}
+
+/**
+ * Finish `work` under `hold`, which may be a label just swapped in for the caller's.
+ * A failure names the hold, so the caller keeps the token it needs to release or retry.
+ */
+async function holding(hold: Hold, work: () => Promise<void>): Promise<Hold> {
+	try {
+		await work();
+	} catch (error) {
+		const message = `${error instanceof Error ? error.message : String(error)}; this session holds ${hold.label} as token ${hold.token}`;
+		throw error instanceof Refusal ? new Refusal(message) : new Error(message, { cause: error });
 	}
-	if (snapshot.queue && method !== "merge") {
-		deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
-	}
-	const mutation =
-		!snapshot.queue && IMMEDIATE.includes(snapshot.mergeState) ? "mergePullRequest" : "enablePullRequestAutoMerge";
-	await labels.github.graphql(
-		`mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) {
-			${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId }
-		}`,
-		{ id: snapshot.id, sha: snapshot.head, method: method.toUpperCase() },
-	);
 	return hold;
 }
 
@@ -146,11 +168,13 @@ export async function release(pr: PullRequest, token: string, deps: GitHubDepend
  * Take `pr` for `state`, refusing while it is merged or closed, while another
  * session holds a `quest:*` label, or while it is a draft its starter still
  * holds. With `token`, the label it holds is swapped for this state's.
+ * `check` refuses before any label changes.
  */
 async function acquire(
 	labels: Labels,
 	state: State,
 	token: string | undefined,
+	check?: (snapshot: Snapshot) => void,
 ): Promise<{ hold: Hold; snapshot: Snapshot }> {
 	const label = PREFIX + state;
 	let snapshot = await labels.read();
@@ -161,6 +185,7 @@ async function acquire(
 	const mine = token === undefined ? undefined : held(snapshot, token);
 	const other = snapshot.labels.find((name) => name !== mine);
 	if (other !== undefined) throw new Refusal(holder(snapshot, other, labels.deps.now()));
+	check?.(snapshot);
 	if (mine === label) return { hold: { label, token: token! }, snapshot };
 	if (mine === undefined && snapshot.draft && !HAND_BACK.test(snapshot.body)) {
 		throw new Refusal(

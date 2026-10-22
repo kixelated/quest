@@ -273,6 +273,28 @@ describe("merge --land", () => {
 		expect(pull.writes.at(-1)).toBe("add quest:merge");
 	});
 
+	test("refuses a stale head before swapping, so the caller's token stays valid", async () => {
+		const pull = new FakePull();
+		const { token } = await take(PR, "iterate", undefined, pull.deps());
+		pull.head = "b".repeat(40);
+		expect(await refused(land(PR, token, HEAD, "merge", pull.deps()))).toContain("head moved");
+		expect(pull.labels).toEqual(["quest:iterate"]);
+		expect((await land(PR, token, pull.head, "merge", pull.deps())).label).toBe("quest:merge");
+	});
+
+	test("names the swapped-in hold when landing fails after the swap", async () => {
+		const pull = new FakePull();
+		const { token } = await take(PR, "iterate", undefined, pull.deps());
+		pull.beforeAdd = () => {
+			pull.beforeAdd = undefined;
+			pull.head = "b".repeat(40);
+		};
+		const message = await refused(land(PR, token, HEAD, "merge", pull.deps()));
+		expect(message).toContain("head moved");
+		expect(message).toContain("this session holds quest:merge as token LabeledEvent_2");
+		expect(pull.labels).toEqual(["quest:merge"]);
+	});
+
 	test("a PR that left the queue unmerged drops quest:merge and waits on the user", async () => {
 		const pull = new FakePull();
 		const { token } = await take(PR, "merge", undefined, pull.deps());

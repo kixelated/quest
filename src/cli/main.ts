@@ -390,7 +390,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		"closed, or a draft its starter still holds (one whose body has no Decisions needed heading). A refusal " +
 		"names the holder's label, age, and token; releasing a stale hold with that token is the user's choice. " +
 		"Given a token, a command refuses unless the token is still the latest add of the PR's label, then swaps " +
-		"that label for its own. When two sessions add different labels at once, the first label added keeps the " +
+		"that label for its own; if a later step then fails, the error names the new token. When two sessions add different labels at once, the first label added keeps the " +
 		"PR; GitHub records no event when a label already on the PR is added again, so two takes of one state " +
 		"within the same moment are not told apart. A quest:merge label is removed once the PR leaves the merge " +
 		"queue unmerged.\n\n" +
