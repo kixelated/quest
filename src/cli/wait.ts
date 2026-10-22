@@ -17,7 +17,7 @@ const POLL = 5 * 60_000;
 /**
  * The last poll before a timeout starts this long before it, leaving time for its few requests;
  * activity after it is left for the returned cursor. Polling only on the 5-minute schedule left
- * up to 5 minutes before a timeout unread.
+ * up to 5 minutes before a timeout unread. A longer X-Poll-Interval from GitHub still wins.
  */
 const FINAL_POLL = 30_000;
 /** The REST page size. A full last page cannot show by itself that a next page has appeared. */
@@ -386,7 +386,7 @@ async function watch(
 	);
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
 	for (;;) {
-		github.pollInterval = POLL;
+		github.pollInterval = 0;
 		for (const row of await timeline()) {
 			const type = string(row.event);
 			if (type === "committed") {
@@ -468,8 +468,11 @@ async function watch(
 					`${event.point} ${event.type} ${event.actor} ${event.url}${index === unique.length - 1 ? ` ${nextCursor}` : ""}`,
 			);
 		}
+		// GitHub's X-Poll-Interval is a floor: the final poll shortens only the default schedule,
+		// and is skipped when that interval runs past it.
 		const remaining = deadline - deps.now();
-		await github.pause(remaining > FINAL_POLL ? Math.min(github.pollInterval, remaining - FINAL_POLL) : remaining);
+		const next = Math.min(Math.max(POLL, github.pollInterval), remaining - FINAL_POLL);
+		await github.pause(next > 0 && next >= github.pollInterval ? next : remaining);
 	}
 }
 

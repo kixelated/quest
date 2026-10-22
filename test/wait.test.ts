@@ -589,6 +589,13 @@ test("primary rate limit reset and server poll intervals are honored", async () 
 	expect(fixture.sleeps).toEqual([60_000, 600_000]);
 });
 
+test("a server poll interval past the final poll skips it rather than polling early", async () => {
+	// A 600 s X-Poll-Interval outlasts a 540 s timeout, so no final poll runs at 510 s.
+	const fixture = setup([pull(), response([pushed()]), response([], { "x-poll-interval": "600" })]);
+	await expect(waitForActivity(pr, { timeout: 540 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
+	expect(fixture.sleeps).toEqual([540_000]);
+});
+
 test("persistent rate limiting eventually fails loudly instead of masking an error", async () => {
 	const fixture = setup(Array.from({ length: 7 }, () => response({ message: "secondary rate limit" }, {}, 403)));
 	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("rate limit persisted");

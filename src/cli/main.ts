@@ -312,7 +312,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Wait for pull request activity on GitHub")
 		.description(
 			"Wait for a review, comment, review-thread reply, reaction to the PR or a review, push, merge, close, " +
-				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes, and once more 30 seconds before the timeout; rate limits delay requests. No timeout by default.\n\n" +
+				"merge-queue removal, disabled auto-merge, or required CI result. Polls every 5 minutes, and once more 30 seconds before the timeout; rate limits and longer GitHub poll intervals delay requests. No timeout by default.\n\n" +
 				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
 				"Reactions print as reacted:<content>, such as reacted:thumbs_up. " +
 				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
