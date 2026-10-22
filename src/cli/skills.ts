@@ -6,6 +6,7 @@
 // upgrading never rewrites repository files.
 
 import guide from "../../assets/AGENTS.md";
+import afk from "../../assets/skills/afk.md";
 import audit from "../../assets/skills/audit.md";
 import complete from "../../assets/skills/complete.md";
 import del from "../../assets/skills/delete.md";
@@ -65,6 +66,7 @@ export class Skill {
 
 /** Every skill, sorted by name. */
 export const SKILLS: readonly Skill[] = Object.entries({
+	afk,
 	audit,
 	complete,
 	delete: del,
