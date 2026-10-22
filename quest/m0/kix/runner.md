@@ -1,92 +1,41 @@
-# [L] Run jobs on your own machines with quest runner
+# [S] Verify quest runner on live machines
 
 ## Goal
 
-A maintainer runs `quest runner` on any Linux or macOS machine, signs it in
-to kix.quest, and adds any number of agent accounts. The runner shows online
-or offline in the UI, claims routed jobs over HTTPS, runs each one inside the
-project's `nix develop` shell through a CLI adapter, and reports structured
-questions, checkpoint summaries, and results. The Claude Code adapter ships
-here; [opencode](/quest/m0/kix/opencode.md) follows.
+`quest runner` (`src/runner/`) works against the deployed kix.quest on a real
+Linux and macOS machine: a login approved at `/runners`, two Claude Code
+accounts signed in side by side, and a job that checkpoints, asks, resumes,
+delivers its pull request, and continues on another runner after its first one
+goes offline. The opencode adapter follows in
+[opencode](/quest/m0/kix/opencode.md).
 
 ## Plan
 
-Decided 2026-10-15 in the decisions-not-implementations interview,
-replacing the hosted Agent SDK runtime:
+Shipped: `quest runner login|account|run`, the Claude Code adapter
+(`claude -p` stream-json with the kix `checkpoint`, `ask`, and `deliver` tools
+as an HTTP MCP server and AskUserQuestion disabled), per-job checkouts in a
+bare clone, publication of changed files, raw output chunks, account limits
+held until the reported reset, shutdown that publishes running work and gives
+jobs back, the flake's `runner` package pinning Claude Code, and the
+`/runners` page with login approval and account preference order. Verified
+locally on 2026-10-21: a Max plan login runs the unmodified binary headless,
+lists only the kix tools, and resumes a session with an answer.
 
-- `quest runner` is a subcommand of the existing Bun binary, in its own
-  module outside the pure core. It runs in the foreground or as a user
-  service; a tray app can come later. There are no Windows runners.
-- Accounts: each is signed in by the official CLI's own flow in an isolated
-  home (`CLAUDE_CONFIG_DIR` for Claude Code). kix stores only an opaque
-  account ID, provider, and kind (subscription or API key), and never reads,
-  copies, or uploads tokens. Anthropic's terms allow an end user signing in
-  to the unmodified Claude Code binary, and bar a developer routing plan
-  credentials on users' behalf. Use the unmodified binary.
-- Nix only: run every job in the project's `nix develop` shell, with no
-  other dependency installation path. Pin the agent CLIs through the
-  runner's own Nix closure so adapters run tested versions. Keep a persistent
-  local `/nix/store` and honor the flake's `nixConfig` substituters.
-- Adapter interface: start or resume, structured questions, checkpoint
-  summaries, a final result with a required summary, and cancellation. Keep
-  it small and portable; consider the Agent Client Protocol only if it
-  simplifies the adapters. For Claude Code, verify which headless path
-  (Agent SDK or `claude -p` stream-json) runs the unmodified binary with a
-  plan login and routes `AskUserQuestion` to kix.
-- Checkpoints: the agent calls a structured status tool at meaningful
-  steps. The runner sends the summary and a work-in-progress bundle; the
-  service publishes it to the job's fenced branch, so another runner can
-  continue after reassignment. Runners never hold GitHub App credentials.
-- Raw agent output is uploaded as `output` chunks behind the maintainer-only
-  disclosure; it is never streamed to the UI by default. Send each attempt's
-  chunks in order with a contiguous `seq` from 0, batched so an attempt stays
-  under 4096 chunks, and retry a failed chunk with the same `seq` and text. A
-  `truncated` reply means the attempt reached its 64 MiB cap: stop uploading
-  and keep the job running. See the Worker's
-  [raw output notes](/cloudflare/README.md#raw-output).
-- A job that hits an account limit pauses with a decision to switch
-  accounts. The runner never rotates accounts automatically.
-- Use the existing guide and skills as workflow sources. Explicitly load
-  repository instructions, including AGENTS.md. Validate that the requested
-  workflow actually ran; an unknown slash command may be treated as text.
-- Return distinct completed, needs-decision, account-limited, cancelled,
-  and failed outcomes. Never label a CLI-level success as a completed quest
-  without checking its actual result.
-- m0 runners run the owner's own projects only. Until the
-  [sandbox](/quest/m0/kix/sandbox.md) ships, they run only trusted revisions:
-  the default branch, and branches whose commits come from kix jobs or the
-  project's maintainers. A Nix devShell is not an isolation boundary.
-  Sharing a runner with other projects is [later work](/quest/m1/donor-runner.md).
-- Sources:
-  [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
-  [authentication](https://code.claude.com/docs/en/authentication),
-  [SDK input](https://code.claude.com/docs/en/agent-sdk/user-input),
-  and [Agent Client Protocol](https://agentclientprotocol.com/overview/clients).
-- Speak the job protocol in `cloudflare/src/jobs/protocol.ts`: register for a
-  bearer token (`POST /api/runners`) and hold one WebSocket to
-  `/api/runner/connect`. Send `status` messages (accounts, running attempts,
-  free slots) when connecting and whenever they change. Each one must list
-  every attempt still running, since an acknowledged attempt it omits
-  moves. Take `assign` and `cancel` pushes, and stop any attempt the hub
-  says is no longer this runner's or whose `checkpoint` or `question`
-  reply says `cancel`. Acknowledge an `assign` by sending a status that
-  lists it; the hub resends it until then, so treat a repeated assignment
-  as one. Give the agent an assignment's `instructions`, when present,
-  alongside the workflow's skill. Reconnect with backoff; running jobs move after two minutes
-  away. Each account's opaque ID must stay stable across restarts so its
-  preference rank and paused sessions follow it. A CLI sign-in flow and a
-  control to reorder account preference remain here.
-- Publish checkpoints and results with `POST /api/runner/publish` before the
-  `checkpoint` or `result` message: changed files as base64 data on the job's
-  `head`, plus the pull request's title, body, and draft flag on delivery.
-  Fetch the job's branch to continue a reassigned job; a `202` decision reply
-  pauses the attempt like a question. Publication in `cloudflare/GITHUB.md`
-  has the contract.
-- Add a runner and account settings page as a secondary view off the
-  decision inbox: each runner's online state, its accounts, and the
-  preference-order control. Decided 2026-10-18 as a follow-up of the
-  decision inbox (#144), folded here rather than its own quest.
+What remains needs live machines:
+
+- On macOS, check that two accounts in separate `CLAUDE_CONFIG_DIR` homes keep
+  separate Keychain credentials, and that `claude auth status --json` reports
+  each one's own `authMethod` and email.
+- Check that `git fetch <upstream> <sha>` reaches a commit kix published on
+  the service fork, which a reassigned job's new runner relies on. If GitHub
+  refuses it, have the hub send the fork's clone URL with `assign`.
+- Check that a rejected `rate_limit_event` and its `resetsAt` arrive when a
+  plan runs out, so the account sits out until its reset instead of the
+  one-hour fallback.
+- Run the flow above against kix.quest once [deploy](/quest/m0/kix/deploy.md)
+  lands, and fix what it finds.
 
 ## Related
 
-- [Worktree removal](/quest/m0/worktree.md) - removes finished checkouts; reuse `quest worktree run` for supervision, scratch release, and disk admission
+- [Worktree removal](/quest/m0/worktree.md) - `quest worktree run` could supervise each job's agent and admit its disk, on Linux hosts with systemd
+- [Job sandbox](/quest/m0/kix/sandbox.md) - replaces `bypassPermissions` and the trusted-revisions-only rule

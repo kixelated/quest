@@ -113,6 +113,9 @@ export async function login(
 /** Sign a new account in with its CLI's own flow, in its own home. */
 export async function addAccount(io: RunnerIO, options: { console: boolean; label?: string }): Promise<number> {
 	platform();
+	const label = options.label?.trim();
+	if (label !== undefined && (!label || label.length > 100))
+		throw new RunnerInputError("--label must be 1 to 100 characters");
 	const state = home(io);
 	const adapter = adapterFor(io);
 	const { id, home: dir } = state.newAccount();
@@ -125,7 +128,7 @@ export async function addAccount(io: RunnerIO, options: { console: boolean; labe
 			adapter: adapter.name,
 			provider: adapter.provider,
 			kind: signedIn.kind,
-			label: options.label?.trim() || signedIn.label,
+			label: label ?? signedIn.label.slice(0, 100),
 		};
 		state.saveAccounts([...state.accounts(), account]);
 		io.stdout(`Added ${account.label} (${account.kind}) as ${id}.\n`);

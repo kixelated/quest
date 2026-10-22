@@ -23,14 +23,28 @@
       (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            # Claude Code is unfree; the runner package pins it so adapters run a tested version.
+            config.allowUnfreePredicate = pkg: nixpkgs.lib.getName pkg == "claude-code";
+          };
           quest = pkgs.callPackage ./nix/package.nix { };
+          # `quest runner` with the agent CLIs it drives pinned by this flake's lock.
+          runner = pkgs.symlinkJoin {
+            name = "quest-runner-${quest.version}";
+            paths = [ quest ];
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            postBuild = ''
+              wrapProgram $out/bin/quest --set-default QUEST_RUNNER_CLAUDE ${pkgs.lib.getExe pkgs.claude-code}
+            '';
+            meta = quest.meta;
+          };
           # package.json's packageManager pins Bun for CI runners without Nix.
           bunVersion = pkgs.lib.removePrefix "bun@" (pkgs.lib.importJSON ./package.json).packageManager;
         in
         {
           packages = {
-            inherit quest;
+            inherit quest runner;
             default = quest;
           };
           apps.default = flake-utils.lib.mkApp { drv = quest; };

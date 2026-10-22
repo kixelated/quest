@@ -89,9 +89,16 @@ claimed; resuming it dispatches the jobs that waited. Disconnecting a project
 deletes its jobs and their output and tells their runners to stop. Duplicate
 requests return the active job for the same target.
 
-Runners are a user's own machines. Each one registers at `POST /api/runners`
-and gets a bearer token, which kix stores only as a hash. With that token a
-runner opens a WebSocket at `/api/runner/connect`. The connection goes to its
+Runners are a user's own machines. `quest runner login` makes a bearer token
+on the machine and prints a link to `/runners?name=…&platform=…&key=…`, where
+`key` is the token's SHA-256; the signed-in user approves it there
+(`POST /runners/connect`), and the runner polls `GET /api/runner` with its token
+until it is accepted. A script can instead register at `POST /api/runners` and
+get a token back. Either way kix stores only the hash. With that token a
+runner opens a WebSocket at `/api/runner/connect`. `/runners`, linked from the
+decision inbox, lists the user's runners with their presence and accounts, and
+moves an account earlier or later in the preference order
+(`POST /runners/accounts`). The connection goes to its
 owner's `RunnerHub` (`src/jobs/hub.ts`), the one place that owner's jobs are
 routed, and the open connection is the runner's presence.
 

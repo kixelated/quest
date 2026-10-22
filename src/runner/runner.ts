@@ -32,6 +32,8 @@ export class Runner {
 	#current = new Map<string, Attempt>();
 	/** Every attempt whose agent may still be running, including superseded ones. */
 	#live = new Set<Attempt>();
+	/** Attempts that already ran here, as `job.attempt`, so a late resend never runs one again. */
+	#ended = new Set<string>();
 	#status: Promise<void> | null = null;
 	#dirty = false;
 	#closing = false;
@@ -154,8 +156,8 @@ export class Runner {
 		}
 		const { job, instructions } = push;
 		const current = this.#current.get(job.id);
-		// The hub resends an assignment until a status lists it.
-		if (current?.attempt === job.attempt) return this.status();
+		// The hub resends an assignment until a status lists it, which can cross a quick attempt's end.
+		if (current?.attempt === job.attempt || this.#ended.has(`${job.id}.${job.attempt}`)) return this.status();
 		if (this.#closing) return;
 		this.options.log(`${job.id}: ${job.workflow} ${job.target} (attempt ${job.attempt})`);
 		// A newer attempt fences out the old one, which must exit before its session resumes.
@@ -165,6 +167,7 @@ export class Runner {
 		this.#live.add(attempt);
 		this.status();
 		attempt.start(current?.finished).finally(() => {
+			this.#ended.add(`${job.id}.${job.attempt}`);
 			this.#live.delete(attempt);
 			if (this.#current.get(job.id) === attempt) this.#current.delete(job.id);
 			if (!this.#closing) this.status();

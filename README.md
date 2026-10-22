@@ -432,6 +432,43 @@ arguments, 128 plus the signal number when interrupted, and 1 otherwise. `stop`
 signals the agent and waits until its `start` or `resume` has reported.
 `quest agent` does not run on native Windows yet; use WSL.
 
+## Run kix jobs on your machines
+
+`quest runner` turns a Linux or macOS machine with Nix into a
+[kix.quest](https://kix.quest) runner, driving Claude Code with that machine's
+own logins:
+
+```sh
+quest runner login --name laptop  # prints a link to approve while signed in to kix
+quest runner account add          # Claude Code's own sign-in, in an isolated home
+quest runner account add --console --label work
+quest runner account list
+quest runner --slots 2            # runs jobs in the foreground until interrupted
+```
+
+`login` makes a token that never leaves the machine; the link carries only its
+hash, and kix connects the runner once you approve it. Each account signs in
+through `claude auth login` in its own `CLAUDE_CONFIG_DIR`, so kix stores only
+an opaque account id, its kind, and a label. kix.quest/runners shows each
+runner's presence and sets the order jobs use your accounts in.
+
+Every job runs in its own checkout inside the project's `nix develop` shell,
+with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
+job instead. The agent reports through kix tools: `checkpoint` summaries publish
+work in progress to the job's branch, `ask` pauses the job on a decision for you,
+and `deliver` publishes the result and its pull request. kix publishes as its
+GitHub App, so the runner never pushes. A job that hits an account's limit
+pauses for you to pick another account; the runner never switches on its own.
+On SIGINT or SIGTERM, running work is published and its jobs move to another
+runner. Until the job sandbox ships, runners take only trusted revisions, and
+agents run with `--permission-mode bypassPermissions`.
+
+The flake's `runner` package is a `quest` whose Claude Code is pinned by this
+repository's lock (`nix run github:kixelated/quest#runner -- runner`);
+otherwise `claude` comes from `QUEST_RUNNER_CLAUDE` or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
+`$XDG_DATA_HOME/quest/runner`. To keep a runner up, run `quest runner` as a user
+service, such as a systemd user unit with `Restart=on-failure`.
+
 ## Prunable local checkouts
 
 The experimental `quest worktree` commands share one disk budget across this

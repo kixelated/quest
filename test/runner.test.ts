@@ -8,7 +8,7 @@ import { devShell, login } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
-import { OutputUploader, split } from "../src/runner/output";
+import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
 import { formatAnswer, resumePrompt, startPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
@@ -592,6 +592,10 @@ function rig(publishReply?: (body: Sent) => { status: number; body: unknown }): 
 	};
 }
 
+/** A step whose output is large enough to upload at once, telling the test the agent reached it. */
+const ready = { emit: { type: "marker", text: "ready", pad: "x".repeat(FLUSH_BYTES) } };
+const waiting = (r: Rig) => r.hub.next((m) => m.type === "output" && m.text.includes('"text":"ready"'));
+
 /** Wait until the runner has no attempts left, so every report has landed. */
 async function idle(runner: Runner) {
 	while (runner.running.length) await Promise.all(runner.running.map((a) => a.finished.catch(() => {})));
@@ -727,12 +731,12 @@ describe("quest runner", () => {
 				{ write: "a.txt", content: "partial\n" },
 				{ tool: "checkpoint", args: { summary: "Started" } },
 				{ write: "b.txt", content: "more\n" },
+				ready,
 				{ wait: true },
 			],
 		});
 		r.assign(job(r.upstream.commit));
-		await r.hub.next((m) => m.type === "checkpoint");
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await waiting(r);
 		r.hub.socket.deliver({ type: "cancel", job: "job1", attempt: 1 });
 		const result = await r.result();
 		await idle(r.runner);
@@ -817,12 +821,12 @@ describe("quest runner", () => {
 				{ write: "a.txt", content: "wip\n" },
 				{ tool: "checkpoint", args: { summary: "Started" } },
 				{ write: "b.txt", content: "wip\n" },
+				ready,
 				{ wait: true },
 			],
 		});
 		r.assign(job(r.upstream.commit));
-		await r.hub.next((m) => m.type === "checkpoint");
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await waiting(r);
 		await r.runner.shutdown();
 		expect(r.hub.of("result")).toEqual([]);
 		expect(r.publishes.at(-1)!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
