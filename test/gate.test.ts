@@ -1,6 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, readdirSync, renameSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	readdirSync,
+	renameSync,
+	statSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -325,8 +334,6 @@ test("every caller on this host shares one ledger, whatever its environment or s
 	// A home directory shared between machines keeps each host's admissions apart.
 	expect(claimDirectory("/home/u", "a")).toBe(join("/home/u", ".cache", "quest", "admissions", "a"));
 	expect(claimDirectory("/home/u", "b")).not.toBe(claimDirectory("/home/u", "a"));
-	// An account missing from the user database shares a directory keyed by its UID.
-	expect(claimDirectory(null, "a", 1234)).toBe(join("/tmp", "quest-1234", "admissions", "a"));
 	// A login session's runtime directory comes and goes; an overridden HOME is still this
 	// account. Runtimes may read both once at startup, so each caller is a new process.
 	const gate = fileURLToPath(new URL("../src/cli/gate.ts", import.meta.url));
@@ -340,6 +347,25 @@ test("every caller on this host shares one ledger, whatever its environment or s
 	expect(directory({ XDG_RUNTIME_DIR: "/run/user/1000" })).toBe(shared);
 	expect(directory({ XDG_RUNTIME_DIR: undefined })).toBe(shared);
 	expect(directory({ HOME: tempDir() })).toBe(shared);
+});
+
+// An account missing from the user database has a UID, which Windows lacks.
+test.skipIf(process.platform === "win32")("an account without a home shares a private directory by UID", () => {
+	const uid = process.getuid!();
+	const tmp = tempDir();
+	const root = join(tmp, `quest-${uid}`);
+	expect(claimDirectory(null, "a", uid, tmp)).toBe(join(root, "admissions", "a"));
+	expect(statSync(root).mode & 0o777).toBe(0o700);
+	expect(claimDirectory(null, "a", uid, tmp)).toBe(join(root, "admissions", "a"));
+	// Another user may create the name first, writable by them or owned by them.
+	chmodSync(root, 0o777);
+	expect(() => claimDirectory(null, "a", uid, tmp)).toThrow("only UID");
+	chmodSync(root, 0o700);
+	expect(() => claimDirectory(null, "a", uid + 1, tmp)).toThrow("only UID");
+	// Or point it elsewhere.
+	const elsewhere = tempDir();
+	symlinkSync(root, join(elsewhere, `quest-${uid}`));
+	expect(() => claimDirectory(null, "a", uid, elsewhere)).toThrow("only UID");
 });
 
 test("cancelling a waiting caller rejects admission", async () => {

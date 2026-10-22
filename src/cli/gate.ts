@@ -3,7 +3,7 @@
 // descendants and holds nothing while the command runs.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, cpus, hostname, loadavg, totalmem, userInfo } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -178,10 +178,25 @@ export function accountHome(): string | null {
  * environment or login sessions. It is named for the host, since a home
  * directory may be shared between machines. An account missing from the user
  * database, as in arbitrary-UID containers, has no home of its own, so it
- * shares one keyed by its UID.
+ * shares one in `tmp` keyed by its UID.
  */
-export function claimDirectory(home = accountHome(), host = hostname(), uid = process.getuid?.()): string {
-	const root = home === null ? join("/tmp", `quest-${uid}`) : join(home, ".cache", "quest");
+export function claimDirectory(
+	home = accountHome(),
+	host = hostname(),
+	uid = process.getuid?.(),
+	tmp = "/tmp",
+): string {
+	if (home !== null) return join(home, ".cache", "quest", "admissions", host);
+	// Other users can create this name first, so it must be a directory only this UID can write.
+	const root = join(tmp, `quest-${uid}`);
+	try {
+		mkdirSync(root, { mode: 0o700 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	}
+	const stat = lstatSync(root);
+	if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o022) !== 0)
+		throw new Error(`gate cannot trust ${root}: it must be a directory that only UID ${uid} can write`);
 	return join(root, "admissions", host);
 }
 

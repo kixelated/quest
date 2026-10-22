@@ -399,7 +399,8 @@ A user's admissions on one host are recorded under
 `~/.cache/quest/admissions/<hostname>`, whatever the caller's environment or
 login session. The home directory comes from the user database, not `$HOME`;
 an account missing from it, as in arbitrary-UID containers, uses
-`/tmp/quest-<uid>/admissions/<hostname>`.
+`/tmp/quest-<uid>/admissions/<hostname>`, and refuses that directory unless only
+its UID can write it.
 
 Admission is the gate's only job: it holds no slot or lock while the command
 runs and does not track the command's descendants. A nested invocation runs
