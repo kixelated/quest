@@ -146,7 +146,7 @@ describe("quest markdown", () => {
 			"## Plan\n\n[epic](/quest/m0/epic/README.md#goal) [ready](epic/ready.md) [docs](../../docs/a.md) [web](https://example.com)\n",
 			known,
 		);
-		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic#goal"');
+		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic/README#goal"');
 		expect(plan.html).toContain('href="/repos/demo/quest/m0/epic/ready"');
 		expect(plan.html).toContain(`href="https://example.com/acme/demo/blob/${project().commit}/docs/a.md"`);
 		expect(plan.html).toContain('href="https://example.com"');
