@@ -31,7 +31,7 @@ Each agent reports back only when done or blocked.
 Limit the number of active agents to the physical CPU core count.
 
 When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
-Its report lists every open decision and suggested follow-up with a recommendation.
+Its report lists every open decision with a recommendation.
 Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
@@ -42,7 +42,7 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Also offer `/quest-plan` for its suggested follow-ups.
+Once a `/quest-merge` sub-agent reports its PR merged, offer `/quest-plan` for that PR's suggested follow-ups.
 Include quest context, as many quests are concurrently in flight.
 
 Run each selected `/quest-ready`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.

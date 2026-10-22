@@ -38,7 +38,7 @@ the user's choice, since a new head needs fresh approval.
 Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.
 
-As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for its suggested follow-ups.
+As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for the suggested follow-ups of each PR it merged.
 Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.

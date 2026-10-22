@@ -141,7 +141,7 @@ When a quest is complete, mark its PR ready for review, even if you made choices
 Only a decision left for the maintainer, or unfinished work, keeps it a draft: hand it back with a `## Decisions needed` section in the body listing them.
 Tools read only whether that heading is present; a draft without it still belongs to its starter.
 A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
-Include a summary of the changes made and suggest follow-up quests based on issues encountered.
+Include a summary of the changes made and suggest follow-up quests based on issues encountered; `/quest-merge` decides which to plan.
 Add a closing keyword for every issue under `Closes`.
 Fix any merge conflicts.
 

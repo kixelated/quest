@@ -22,7 +22,7 @@ Address the automated review findings already posted, without waiting on optiona
 One round only; never request a review, including by toggling a ready PR to draft and back.
 
 Push your changes to the PR and update its summary.
-Summarize the changes made, and offer `/quest-plan` for follow-ups that belong outside this PR.
+Summarize the changes made.
 
 Mark the PR ready once nothing is unfinished and no decisions need the user.
 Never merge; that is `/quest-merge`, once the user picks it.
