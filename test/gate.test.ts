@@ -1,6 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdirSync, readdirSync, renameSync, utimesSync, writeFileSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, expect, test, vi } from "vitest";
 import {
 	admit,
@@ -11,11 +14,13 @@ import {
 	type Host,
 	hostLimits,
 	linuxMemory,
+	RECENT_MS,
 	run as runCommand,
 	SETTLE_MS,
 } from "../src/cli/gate";
+import { forwards, foregroundStat } from "../src/cli/interrupt";
 import { gateBoundary, main } from "../src/cli/main";
-import { run, tempDir } from "./fixture";
+import { onTerminal, run, tempDir } from "./fixture";
 
 const GiB = 2 ** 30;
 
@@ -30,88 +35,220 @@ test("limits derive from the host's CPUs and memory", () => {
 	expect(hostLimits().load).toBeGreaterThanOrEqual(1);
 });
 
-test("load and memory pressure wait, then admit one caller per settle window", async () => {
-	const events: string[] = [];
-	const taken = new Set([4]); // Another waiter won the first window once the host had room.
-	let now = 2 * SETTLE_MS + 500;
-	let load = 9;
-	let memory = 0;
-	const host: Host = {
-		load: () => load,
-		memory: () => memory,
-		now: () => now,
-		claim: (window) => {
-			events.push(`claim ${window}`);
-			if (taken.has(window)) return false;
-			taken.add(window);
-			return true;
-		},
+/** A real ledger in `directory`, with load, memory, and a clock the test controls. */
+function testHost(
+	directory: string,
+	state: { now: number; load: number; memory: number },
+	events: string[] = [],
+): Host {
+	return {
+		...fileHost(directory, () => state.now),
+		load: () => state.load,
+		memory: () => state.memory,
 		sleep: async (ms) => {
 			events.push(`sleep ${ms}`);
-			now += ms;
-			if (load > 4) load = 3;
-			else memory = GiB;
+			state.now += ms;
 		},
 	};
-	const signal = new AbortController().signal;
+}
+
+const signal = new AbortController().signal;
+
+test("an idle host admits a burst at once, then spaces admissions from the previous one", async () => {
+	const directory = tempDir();
+	const state = { now: 5 * SETTLE_MS - 1, load: 1, memory: Infinity };
+	const limits = { load: 4, memory: GiB };
+	const sleeps = async () => {
+		const events: string[] = [];
+		await admit(limits, testHost(directory, state, events), signal);
+		return events;
+	};
+	// Load 1 plus 0, 1, and 2 recent admissions stays under 4 CPUs.
+	for (let i = 0; i < 3; i++) expect(await sleeps()).toEqual([]);
+	// Now only the raw load has room: one at a time, waking as the interval ends,
+	// even when it crosses what used to be a window boundary.
+	state.now += 1;
+	expect(await sleeps()).toEqual([`sleep ${SETTLE_MS - 1}`]);
+	expect(await sleeps()).toEqual([`sleep ${SETTLE_MS}`]);
+	// Every admission counts as recent for a minute.
+	state.now += RECENT_MS;
+	expect(await sleeps()).toEqual([]);
+});
+
+test("each recent admission takes one command's memory from a shared free-memory sample", async () => {
+	const directory = tempDir();
+	// Memory has not yet reflected the first build, so every caller reads 6 GiB.
+	const state = { now: 0, load: 0, memory: 6 * GiB };
+	const limits = { load: 24, memory: 4 * GiB };
+	const events: string[] = [];
+	await admit(limits, testHost(directory, state, events), signal);
+	expect(events).toEqual([]);
+	await admit(limits, testHost(directory, state, events), signal);
+	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
+});
+
+test("load and memory pressure wait whatever the ledger holds", async () => {
+	const events: string[] = [];
+	const state = { now: 0, load: 9, memory: 0 };
+	const host = testHost(tempDir(), state, events);
+	const sleep = host.sleep;
+	host.sleep = async (ms, signal) => {
+		await sleep(ms, signal);
+		if (state.load > 4) state.load = 3;
+		else state.memory = GiB;
+	};
 	await admit({ load: 4, memory: GiB }, host, signal, (reason) => events.push(reason));
-	expect(events).toEqual([
-		"load",
-		`sleep ${SETTLE_MS - 500}`,
-		"memory",
-		`sleep ${SETTLE_MS}`,
-		"claim 4",
-		`sleep ${SETTLE_MS}`,
-		"claim 5",
+	expect(events).toEqual(["load", `sleep ${SETTLE_MS}`, "memory", `sleep ${SETTLE_MS}`]);
+	expect(host.ledger().admissions).toEqual([{ id: expect.any(String), at: 2 * SETTLE_MS }]);
+});
+
+test("a burst that all read the ledger before any records admits only what the rule allows", async () => {
+	const directory = tempDir();
+	const state = { now: 0, load: 1, memory: Infinity };
+	const limits = { load: 2, memory: GiB };
+	const events: string[] = [];
+	const late = testHost(directory, state, events);
+	const publish = late.publish;
+	let raced = false;
+	late.publish = (base, admissions) => {
+		// Another caller read the same empty ledger and publishes first.
+		if (!raced) {
+			raced = true;
+			const other = testHost(directory, state);
+			expect(other.publish(other.ledger(), [{ id: "other", at: state.now }])).toBe(true);
+		}
+		return publish(base, admissions);
+	};
+	await admit(limits, late, signal);
+	// The late caller saw the other admission once its publish failed, and spaced itself.
+	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
+	expect(late.ledger().admissions.map(({ at }) => at)).toEqual([0, SETTLE_MS]);
+});
+
+test("a stalled caller cannot publish into a version already pruned", () => {
+	const directory = tempDir();
+	const host = fileHost(directory, () => 0);
+	expect(host.publish(host.ledger(), [{ id: "a", at: 0 }])).toBe(true);
+	const stale = host.ledger();
+	for (const id of ["b", "c"]) {
+		const base = host.ledger();
+		expect(host.publish(base, [...base.admissions, { id, at: 0 }])).toBe(true);
+	}
+	expect(readdirSync(directory)).toEqual(["3"]);
+	// Version 2 is free again, but outside the ledger's history.
+	expect(host.publish(stale, [...stale.admissions, { id: "stale", at: 0 }])).toBe(false);
+	expect(readdirSync(directory)).toEqual(["3"]);
+	expect(host.ledger().admissions.map(({ id }) => id)).toEqual(["a", "b", "c"]);
+});
+
+test("a caller that dies mid-admission blocks no one past a minute", async () => {
+	const directory = tempDir();
+	// Drafts age by file time, so this clock is the real one.
+	const state = { now: Date.now(), load: 0, memory: Infinity };
+	const host = testHost(directory, state);
+	// One caller died a minute ago after publishing, another before it could link its draft.
+	expect(host.publish(host.ledger(), [{ id: "dead", at: state.now - RECENT_MS }])).toBe(true);
+	const draft = join(directory, "dead.tmp");
+	writeFileSync(draft, "[");
+	utimesSync(draft, new Date(state.now - 2 * RECENT_MS), new Date(state.now - 2 * RECENT_MS));
+	writeFileSync(join(directory, "live.tmp"), "[");
+	const events: string[] = [];
+	await admit({ load: 1, memory: 1 }, testHost(directory, state, events), signal);
+	expect(events).toEqual([]);
+	// The stale draft is gone; one still being written stays.
+	expect(readdirSync(directory).sort()).toEqual(["2", "live.tmp"]);
+	// A version cut short, as by power loss, reads as empty rather than wedging every caller.
+	writeFileSync(join(directory, "100"), "");
+	expect(host.ledger()).toEqual({ version: 100, admissions: [] });
+});
+
+test("expired admissions do not count, wherever they sit in the ledger", async () => {
+	const directory = tempDir();
+	const now = 10 * RECENT_MS;
+	const host = fileHost(directory, () => now);
+	const ages = [RECENT_MS, 1, RECENT_MS + 1, 2];
+	host.publish(
+		host.ledger(),
+		ages.map((age, i) => ({ id: String(i), at: now - age })),
+	);
+	const events: string[] = [];
+	await admit({ load: 3, memory: 1 }, testHost(directory, { now, load: 0, memory: Infinity }, events), signal);
+	// Two recent admissions plus load 0 stays under 3, so this one starts at once.
+	expect(events).toEqual([]);
+	expect(host.ledger().admissions.map(({ id }) => id)).toEqual(["1", "3", expect.any(String)]);
+});
+
+test("a backward clock step dates future admissions now, and they expire a minute later", async () => {
+	const directory = tempDir();
+	const state = { now: RECENT_MS, load: 0, memory: Infinity };
+	const host = testHost(directory, state);
+	// Admitted just before the clock stepped back by ten minutes.
+	host.publish(host.ledger(), [{ id: "before", at: state.now + 10 * RECENT_MS }]);
+	const events: string[] = [];
+	await admit({ load: 1, memory: 1 }, testHost(directory, state, events), signal);
+	// It still spaces the next admission, from the step rather than from the future.
+	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
+	expect(host.ledger().admissions).toEqual([
+		{ id: "before", at: RECENT_MS },
+		{ id: expect.any(String), at: RECENT_MS + SETTLE_MS },
 	]);
+	state.now += RECENT_MS + SETTLE_MS;
+	events.length = 0;
+	await admit({ load: 1, memory: 1 }, testHost(directory, state, events), signal);
+	expect(events).toEqual([]);
 });
 
-test("a window admits one claim and cleanup never admits an expired sample again", () => {
-	const directory = join(tempDir(), "claims");
-	let now = 5 * SETTLE_MS;
-	const host = fileHost(directory, () => now);
-	expect(host.claim(5)).toBe(true);
-	expect(host.claim(5)).toBe(false);
-	now = 7 * SETTLE_MS;
-	expect(host.claim(7)).toBe(true);
-	expect(existsSync(join(directory, "5"))).toBe(false);
-	// A waiter sampled 5 before descheduling, then resumes after cleanup.
-	expect(host.claim(5)).toBe(false);
-	expect(existsSync(join(directory, "5"))).toBe(false);
-	expect(host.load()).toBeGreaterThanOrEqual(0);
-	expect(host.memory()).toBeGreaterThan(0);
+test("a forward clock step forgets at most the last minute of admissions", async () => {
+	const directory = tempDir();
+	const state = { now: 0, load: 0, memory: Infinity };
+	const limits = { load: 1, memory: 1 };
+	await admit(limits, testHost(directory, state), signal);
+	state.now += 10 * RECENT_MS;
+	const events: string[] = [];
+	// The step expires the earlier admission early, so this one starts at once…
+	await admit(limits, testHost(directory, state, events), signal);
+	expect(events).toEqual([]);
+	// …but admissions after the step count and space as usual.
+	await admit(limits, testHost(directory, state, events), signal);
+	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
 });
 
-test("a claim that crosses rollover during filesystem work does not admit", () => {
-	const directory = join(tempDir(), "claims");
-	const successor = fileHost(directory, () => 6 * SETTLE_MS);
-	let calls = 0;
-	const delayed = fileHost(directory, () => {
-		if (++calls === 1) return 5 * SETTLE_MS;
-		// The pending claim may still admit, so the next window must wait for it.
-		expect(successor.claim(6)).toBe(false);
-		return 6 * SETTLE_MS;
+test("concurrent processes never admit past the headroom", { timeout: 30_000 }, async () => {
+	const directory = tempDir();
+	const ledger = join(directory, "ledger");
+	const go = join(directory, "go");
+	const gate = fileURLToPath(new URL("../src/cli/gate.ts", import.meta.url));
+	// Each caller waits for the others, then races for one of 4 CPUs' headroom until a shared deadline.
+	const script = `
+		const { existsSync, readFileSync } = await import("node:fs");
+		const { admit, fileHost } = await import(${JSON.stringify(gate)});
+		console.log("ready");
+		while (!existsSync(${JSON.stringify(go)})) await new Promise((resolve) => setTimeout(resolve, 2));
+		const deadline = Number(readFileSync(${JSON.stringify(go)}, "utf8"));
+		const host = { ...fileHost(${JSON.stringify(ledger)}), load: () => 0, memory: () => Infinity };
+		const signal = AbortSignal.timeout(Math.max(0, deadline - Date.now()));
+		await admit({ load: 4, memory: 1 }, host, signal).then(() => console.log("admitted"), () => {});
+	`;
+	const callers = Array.from({ length: 12 }, () => {
+		const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+		let stdout = "";
+		child.stdout.setEncoding("utf8");
+		const ready = new Promise<void>((resolve) =>
+			child.stdout.on("data", (data: string) => {
+				stdout += data;
+				if (stdout.includes("ready\n")) resolve();
+			}),
+		);
+		return { ready, exited: once(child, "exit").then(([code]) => ({ code, stdout })) };
 	});
-	expect(delayed.claim(5)).toBe(false);
-	// The expired claim admitted nothing and is gone, so the next window is free.
-	expect(existsSync(join(directory, "5"))).toBe(false);
-	expect(successor.claim(6)).toBe(true);
-});
-
-test("admissions stay a full window apart across a window boundary", () => {
-	const directory = join(tempDir(), "claims");
-	let now = 5 * SETTLE_MS - 1;
-	const host = fileHost(directory, () => now);
-	expect(host.claim(4)).toBe(true);
-	// A waiter at the next boundary, 1 ms later, must not start alongside it.
-	now = 5 * SETTLE_MS;
-	expect(host.claim(5)).toBe(false);
-	// The refused claim is removed: it admitted nothing, so it holds back no one.
-	expect(existsSync(join(directory, "5"))).toBe(false);
-	expect(host.claim(5)).toBe(false);
-	now = 6 * SETTLE_MS;
-	expect(host.claim(6)).toBe(true);
-	expect(existsSync(join(directory, "4"))).toBe(false);
+	await Promise.all(callers.map(({ ready }) => ready));
+	// The next admission is due SETTLE_MS after the last; the deadline comes sooner.
+	writeFileSync(`${go}.tmp`, String(Date.now() + SETTLE_MS / 2));
+	renameSync(`${go}.tmp`, go);
+	const results = await Promise.all(callers.map(({ exited }) => exited));
+	expect(results.map(({ code }) => code)).toEqual(Array(12).fill(0));
+	expect(results.filter(({ stdout }) => stdout.includes("admitted"))).toHaveLength(4);
+	expect(fileHost(ledger).ledger().admissions).toHaveLength(4);
 });
 
 test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s container headroom", (version) => {
@@ -165,22 +302,24 @@ test("Linux memory reads the container cgroup mounted as the root", () => {
 	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
 });
 
-test("admission claims stay on this host", () => {
-	expect(claimDirectory({ XDG_RUNTIME_DIR: "/run/user/1000" }, "/home/u", "a")).toBe(
-		join("/run/user/1000", "quest", "gate"),
-	);
-	// A home directory shared between machines keeps each host's claims apart.
-	expect(claimDirectory({}, "/home/u", "a")).toBe(join("/home/u", ".cache", "quest", "gate", "a"));
-	expect(claimDirectory({}, "/home/u", "b")).not.toBe(claimDirectory({}, "/home/u", "a"));
+test("every caller on this host shares one ledger, whatever its environment or sessions", () => {
+	// A home directory shared between machines keeps each host's admissions apart.
+	expect(claimDirectory("/home/u", "a")).toBe(join("/home/u", ".cache", "quest", "admissions", "a"));
+	expect(claimDirectory("/home/u", "b")).not.toBe(claimDirectory("/home/u", "a"));
+	// A login session's runtime directory comes and goes; an overridden HOME is still this account.
+	const shared = claimDirectory();
+	vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
+	expect(claimDirectory()).toBe(shared);
+	vi.stubEnv("XDG_RUNTIME_DIR", undefined);
+	vi.stubEnv("HOME", tempDir());
+	expect(claimDirectory()).toBe(shared);
 });
 
 test("cancelling a waiting caller rejects admission", async () => {
 	const controller = new AbortController();
 	const busy: Host = {
+		...fileHost(tempDir()),
 		load: () => 9,
-		memory: () => Infinity,
-		now: () => 0,
-		claim: () => true,
 		sleep: async () => controller.abort(new Error("cancelled")),
 	};
 	await expect(admit({ load: 1, memory: 1 }, busy, controller.signal)).rejects.toThrow("cancelled");
@@ -207,9 +346,38 @@ test("a command cancelled before listener registration still stops", async () =>
 // Windows has no POSIX signals to forward; kill() always terminates there.
 test.skipIf(process.platform === "win32")("cancellation forwards the received signal to the command", async () => {
 	const controller = new AbortController();
-	controller.abort("SIGINT");
+	controller.abort("SIGHUP");
 	const result = await runCommand([process.execPath, "-e", "setInterval(() => {}, 1000)"], controller.signal);
-	expect(result).toBe(128 + constants.signals.SIGINT);
+	expect(result).toBe(128 + constants.signals.SIGHUP);
+});
+
+test.skipIf(process.platform === "win32")("only a terminal's own SIGINT is left to reach the child", () => {
+	// Signals that may be sent to Quest alone always pass.
+	expect(forwards("SIGHUP")).toBe(true);
+	expect(forwards("SIGTERM")).toBe(true);
+	// pid (comm with spaces) state ppid pgrp session tty_nr tpgid ...
+	expect(foregroundStat("42 (a ) b) S 1 42 42 34816 42 4194560")).toBe(true);
+	expect(foregroundStat("42 (a ) b) S 1 42 42 34816 77 4194560")).toBe(false);
+	// No controlling terminal.
+	expect(foregroundStat("42 (quest) S 1 42 42 0 -1 4194560")).toBe(false);
+});
+
+test.runIf(process.platform === "linux")("a terminal Ctrl-C reaches the gated command once", async () => {
+	const child = join(tempDir(), "child.js");
+	writeFileSync(
+		child,
+		`let interrupts = 0;
+		process.on("SIGINT", () => interrupts++);
+		console.log("ready");
+		setTimeout(() => console.log("interrupts=" + interrupts), 1000);`,
+	);
+	const bin = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
+	const result = await onTerminal([process.execPath, bin, "gate", process.execPath, child], "\x03", {
+		...process.env,
+		QUEST_GATE_ADMITTED: "1",
+	});
+	expect(result.output).toContain("interrupts=1");
+	expect(result.code).toBe(128 + constants.signals.SIGINT);
 });
 
 test("the gated command keeps its own flags, even ones Quest also parses", () => {

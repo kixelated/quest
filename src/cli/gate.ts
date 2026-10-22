@@ -2,10 +2,24 @@
 // for CPU load and free memory before starting the command. The gate owns no
 // descendants and holds nothing while the command runs.
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem } from "node:os";
+import { randomUUID } from "node:crypto";
+import { linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem, userInfo } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { forwards } from "./interrupt";
+
+/** One admitted command: a unique id and the wall-clock time it was admitted. */
+export interface Admission {
+	id: string;
+	at: number;
+}
+
+/** One version of the host's admission ledger. Versions only grow; 0 is the empty ledger. */
+export interface Ledger {
+	version: number;
+	admissions: Admission[];
+}
 
 /** The machine-wide inputs to load admission, replaceable in tests. */
 export interface Host {
@@ -13,9 +27,15 @@ export interface Host {
 	load(): number;
 	/** Bytes available to a new command without swapping. */
 	memory(): number;
+	/** Wall-clock milliseconds, shared by every process on the host. */
 	now(): number;
-	/** Atomically claim an admission window; false when another caller took it. */
-	claim(window: number): boolean;
+	/** The newest ledger. */
+	ledger(): Ledger;
+	/**
+	 * Atomically publish `admissions` as the version after `base`. False when another caller
+	 * published since `base` was read, so the caller reads the ledger again and decides afresh.
+	 */
+	publish(base: Ledger, admissions: Admission[]): boolean;
 	sleep(ms: number, signal: AbortSignal): Promise<void>;
 }
 
@@ -29,10 +49,16 @@ export interface Limits {
 export type Waiting = "load" | "memory";
 
 /**
- * Admissions across all callers are at least this far apart. The load average
- * lags new work, so waiters that all see it fall must not start together.
+ * Admissions that only fit the host's raw load and memory, not its headroom,
+ * start at least this far apart, so each one's load can begin to show.
  */
 export const SETTLE_MS = 5000;
+
+/**
+ * How long an admission counts against the host's headroom. The 1-minute load
+ * average and available memory take about this long to reflect a new command.
+ */
+export const RECENT_MS = 60_000;
 
 /** The memory one gated build or test stack is assumed to need. */
 export const COMMAND_MEMORY = 4 * 2 ** 30;
@@ -124,19 +150,74 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 	return { total, available };
 }
 
-/**
- * Claims belong to this host, since a home directory may be shared between
- * machines: the user's runtime directory where one exists, otherwise a
- * per-host cache directory.
- */
-export function claimDirectory(env = process.env, home = homedir(), host = hostname()): string {
-	return env.XDG_RUNTIME_DIR
-		? join(env.XDG_RUNTIME_DIR, "quest", "gate")
-		: join(home, ".cache", "quest", "gate", host);
+/** The account's home directory from the user database, not `$HOME`, which callers may override. */
+function accountHome(): string {
+	try {
+		return userInfo().homedir;
+	} catch {
+		return homedir(); // An account missing from the user database, as in some containers.
+	}
 }
 
-/** Claims are empty files, named by window, in one per-user, per-host directory. */
+/**
+ * Every caller of one user on one host shares this directory, whatever its
+ * environment or login sessions. It is named for the host, since a home
+ * directory may be shared between machines.
+ */
+export function claimDirectory(home = accountHome(), host = hostname()): string {
+	return join(home, ".cache", "quest", "admissions", host);
+}
+
+/** A version cut short, as by power loss, is read as empty: its commands ended with the host. */
+function parse(text: string): Admission[] {
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return [];
+	}
+	const valid =
+		Array.isArray(value) &&
+		value.every((entry: Partial<Admission>) => typeof entry?.id === "string" && Number.isFinite(entry?.at));
+	return valid ? (value as Admission[]) : [];
+}
+
+/** Remove a file that another caller may already have removed, or on Windows may still hold open. */
+function remove(file: string) {
+	try {
+		rmSync(file, { force: true });
+	} catch (error) {
+		if (!["EPERM", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+	}
+}
+
+/**
+ * The ledger is a directory of numbered versions, each the JSON list of recent
+ * admissions. A caller publishes version N + 1 by linking a complete draft to
+ * that name, which only one caller can create. No lock is held, so a caller
+ * that dies at any point leaves nothing that blocks the others.
+ */
 export function fileHost(directory: string, now = Date.now): Host {
+	const path = (version: number) => join(directory, String(version));
+	const ledger = (): Ledger => {
+		for (;;) {
+			let names: string[];
+			try {
+				names = readdirSync(directory);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 0, admissions: [] };
+				throw error;
+			}
+			const version = names.reduce((max, name) => (/^\d+$/.test(name) ? Math.max(max, Number(name)) : max), 0);
+			if (version === 0) return { version, admissions: [] };
+			try {
+				return { version, admissions: parse(readFileSync(path(version), "utf8")) };
+			} catch (error) {
+				// Superseded and pruned since the listing.
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+		}
+	};
 	return {
 		load: () => loadavg()[0],
 		// macOS counts reclaimable cache as used, so only its load is gated.
@@ -147,28 +228,42 @@ export function fileHost(directory: string, now = Date.now): Host {
 					? linuxMemory().available
 					: process.availableMemory(),
 		now,
-		claim(window) {
-			if (window !== Math.floor(now() / SETTLE_MS)) return false;
+		ledger,
+		publish(base, admissions) {
 			mkdirSync(directory, { recursive: true });
-			const file = join(directory, String(window));
+			const version = base.version + 1;
+			const draft = join(directory, `${randomUUID()}.tmp`);
+			writeFileSync(draft, JSON.stringify(admissions));
 			try {
-				closeSync(openSync(file, "wx"));
+				linkSync(draft, path(version));
 			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+				// EEXIST: another caller published first. ENOENT: a prune took the draft after a clock step.
+				if (["EEXIST", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
 				throw error;
+			} finally {
+				remove(draft);
 			}
-			// The previous window's claim may have admitted a command moments ago,
-			// so admissions stay a full window apart. Only an admitted claim removes
-			// older ones, and none can be admitted while this one exists, so that
-			// claim is still here. A descheduled caller may also have created an old
-			// claim after cleanup; it must not admit work from that expired sample.
-			// A refused claim is removed, so it never holds back the next window.
-			if (existsSync(join(directory, String(window - 1))) || window !== Math.floor(now() / SETTLE_MS)) {
-				rmSync(file, { force: true });
+			// A caller that stalled after reading can recreate a version already pruned below the
+			// newest. That copy is outside the ledger's history, so it admitted no one.
+			const newest = ledger();
+			const added = admissions.filter((admission) => !base.admissions.some(({ id }) => id === admission.id));
+			const kept =
+				newest.version === version ||
+				(added.length > 0 &&
+					added.every((admission) => newest.admissions.some(({ id }) => id === admission.id)));
+			if (!kept) {
+				remove(path(version));
 				return false;
 			}
+			// Older versions, and drafts left by callers that died before publishing.
 			for (const name of readdirSync(directory)) {
-				if (Number(name) < window) rmSync(join(directory, name), { force: true });
+				const file = join(directory, name);
+				try {
+					if (/^\d+$/.test(name) ? Number(name) < newest.version : statSync(file).mtimeMs < now() - RECENT_MS)
+						remove(file);
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+				}
 			}
 			return true;
 		},
@@ -177,19 +272,53 @@ export function fileHost(directory: string, now = Date.now): Host {
 }
 
 /**
- * Wait until the host has room for a command and this caller wins the current
- * window. No fairness promise, adaptive scheduler, or admission timeout.
+ * Wait until the host has room for a command, then record its admission. The
+ * load average and available memory lag new work, so each admission from the
+ * last minute counts as one more unit of load and as one command's memory
+ * taken from available memory:
+ *
+ * 1. While load and memory have room even counting those, admit at once.
+ * 2. While only the raw load and memory have room, admit one command at a
+ *    time, SETTLE_MS after the previous admission.
+ * 3. Otherwise wait.
+ *
+ * Each caller decides against the newest ledger and publishes its admission
+ * atomically, so concurrent callers never exceed the rule and one always wins
+ * while it has room. No fairness promise or admission timeout.
  */
 export async function admit(limits: Limits, host: Host, signal: AbortSignal, waiting?: (reason: Waiting) => void) {
+	const id = randomUUID();
 	for (;;) {
 		signal.throwIfAborted();
+		const ledger = host.ledger();
+		// Sampled after the read, so only a backward clock step dates an admission in the future.
 		const now = host.now();
-		const window = Math.floor(now / SETTLE_MS);
-		if (host.load() > limits.load) waiting?.("load");
-		else if (host.memory() < limits.memory) waiting?.("memory");
-		else if (host.claim(window)) return;
-		// Waiters wake together at the boundary, and exactly one claims the window.
-		await host.sleep((window + 1) * SETTLE_MS - now, signal);
+		const recent = ledger.admissions.filter((admission) => admission.at > now - RECENT_MS);
+		if (recent.some((admission) => admission.at > now)) {
+			// Date those now, so they still count and space admissions but expire a minute after
+			// the step. A forward step can only expire admissions up to a minute early.
+			host.publish(
+				ledger,
+				recent.map((admission) => ({ id: admission.id, at: Math.min(admission.at, now) })),
+			);
+			continue;
+		}
+		const load = host.load();
+		const memory = host.memory();
+		let wait = SETTLE_MS;
+		if (load > limits.load) waiting?.("load");
+		else if (memory < limits.memory) waiting?.("memory");
+		else {
+			const headroom =
+				load + recent.length < limits.load && memory - recent.length * limits.memory >= limits.memory;
+			const last = Math.max(-Infinity, ...recent.map((admission) => admission.at));
+			wait = headroom ? 0 : last + SETTLE_MS - now;
+			if (wait <= 0) {
+				if (host.publish(ledger, [...recent, { id, at: now }])) return;
+				continue;
+			}
+		}
+		await host.sleep(wait, signal);
 	}
 }
 
@@ -198,8 +327,9 @@ const ADMITTED = "QUEST_GATE_ADMITTED";
 
 /**
  * Run a command in place, with inherited streams and its exact exit status.
- * Aborting with a signal name forwards that signal, so the command's own
- * handling of it runs; any other reason sends SIGTERM.
+ * Aborting with a signal name forwards that signal unless the command already
+ * has it (see `forwards`), so the command's own handling of it runs; any other
+ * reason sends SIGTERM.
  */
 export function run(command: string[], signal: AbortSignal): Promise<number> {
 	return new Promise((resolve, reject) => {
@@ -207,12 +337,11 @@ export function run(command: string[], signal: AbortSignal): Promise<number> {
 			env: { ...process.env, [ADMITTED]: "1" },
 			stdio: "inherit",
 		});
-		const cancel = () =>
-			child.kill(
-				typeof signal.reason === "string" && signal.reason in constants.signals
-					? (signal.reason as NodeJS.Signals)
-					: "SIGTERM",
-			);
+		const cancel = () => {
+			const name = signal.reason;
+			if (typeof name !== "string" || !(name in constants.signals)) child.kill("SIGTERM");
+			else if (forwards(name as NodeJS.Signals)) child.kill(name as NodeJS.Signals);
+		};
 		signal.addEventListener("abort", cancel, { once: true });
 		if (signal.aborted) cancel();
 		child.once("error", (error) => {

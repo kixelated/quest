@@ -36,9 +36,6 @@ live and refuses a checkout that still holds anything not already preserved.
   calling `systemctl --user stop` directly. A stale inspection-failure reason
   on a checkout is cleared by the next successful inspection, rather than
   lingering until the next successful release.
-- Out of scope: terminal Ctrl-C reaches the command twice (once from the
-  terminal, once forwarded by the supervisor). It is shared with `quest gate`
-  and planned separately in [Gate headroom](/quest/m0/gate-headroom.md).
 - Measured 2026-10-21 on this repository: a fresh checkout is 2.9 MB, 394 MB
   after installing dependencies and building, and 2.9 MB once `run` released
   it. A suspended job keeps the same released footprint until it is restored.
