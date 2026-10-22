@@ -3,8 +3,8 @@
 ## Goal
 
 Pull requests in this repository land as squash merges, and no pull request
-merges with changes no review covered, other than merges from its base or a
-reviewer's own suggested patch applied unchanged.
+merges with changes no review covered, other than conflict-free merges from
+its base or a reviewer's own suggested patch applied unchanged.
 
 ## Plan
 
@@ -27,9 +27,13 @@ through this plan.
   fails instead of landing. Rejected: either one alone.
 - **Re-review (user).** Tighten the guide's Reviews section in
   `assets/AGENTS.md`: "trivial changes since the last review" means only
-  merges from the base or a reviewer's suggested patch applied unchanged.
-  Any other change waits for a review of the head; if none arrives within
-  the merge skill's wait bound, the agent asks the user instead of merging.
-  Rejected: re-review on every head, and leaving "trivial" to the agent.
+  conflict-free merges from the base or a reviewer's suggested patch applied
+  unchanged. A base merge that needed a hand-resolved conflict is reviewed
+  like any other change (narrowed by the user from Codex's review of
+  [#195](https://github.com/kixelated/quest/pull/195)). Any other change
+  waits for a review of the head; if none arrives within the merge skill's
+  wait bound, the agent asks the user instead of merging. Rejected:
+  re-review on every head, exempting every base merge, and leaving
+  "trivial" to the agent.
 - Ranked first in the epic: prose and one setting, and it stops unreviewed
   merges now.
