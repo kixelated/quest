@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, readdirSync, renameSync, utimesSync, writeFileSync } from "node:fs";
 import { constants } from "node:os";
@@ -123,6 +123,25 @@ test("a burst that all read the ledger before any records admits only what the r
 	// The late caller saw the other admission once its publish failed, and spaced itself.
 	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
 	expect(late.ledger().admissions.map(({ at }) => at)).toEqual([0, SETTLE_MS]);
+});
+
+test("a caller stalled after sampling the host decides again and records when it published", async () => {
+	const directory = tempDir();
+	const state = { now: 0, load: 0, memory: Infinity };
+	const limits = { load: 1, memory: 1 };
+	const stalled = testHost(directory, state);
+	let stalls = 1;
+	stalled.memory = () => {
+		// Descheduled between reading the clock and publishing.
+		if (stalls-- > 0) state.now += SETTLE_MS;
+		return state.memory;
+	};
+	await admit(limits, stalled, signal);
+	expect(stalled.ledger().admissions).toEqual([{ id: expect.any(String), at: SETTLE_MS }]);
+	// The next caller spaces itself from the publication, not from the stale sample.
+	const events: string[] = [];
+	await admit(limits, testHost(directory, state, events), signal);
+	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
 });
 
 test("a stalled caller cannot publish into a version already pruned", () => {
@@ -306,13 +325,21 @@ test("every caller on this host shares one ledger, whatever its environment or s
 	// A home directory shared between machines keeps each host's admissions apart.
 	expect(claimDirectory("/home/u", "a")).toBe(join("/home/u", ".cache", "quest", "admissions", "a"));
 	expect(claimDirectory("/home/u", "b")).not.toBe(claimDirectory("/home/u", "a"));
-	// A login session's runtime directory comes and goes; an overridden HOME is still this account.
+	// An account missing from the user database shares a directory keyed by its UID.
+	expect(claimDirectory(null, "a", 1234)).toBe(join("/tmp", "quest-1234", "admissions", "a"));
+	// A login session's runtime directory comes and goes; an overridden HOME is still this
+	// account. Runtimes may read both once at startup, so each caller is a new process.
+	const gate = fileURLToPath(new URL("../src/cli/gate.ts", import.meta.url));
+	const script = `const { claimDirectory } = await import(${JSON.stringify(gate)}); console.log(claimDirectory());`;
+	const directory = (env: NodeJS.ProcessEnv) =>
+		spawnSync(process.execPath, ["-e", script], {
+			env: { ...process.env, ...env },
+			encoding: "utf8",
+		}).stdout.trim();
 	const shared = claimDirectory();
-	vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
-	expect(claimDirectory()).toBe(shared);
-	vi.stubEnv("XDG_RUNTIME_DIR", undefined);
-	vi.stubEnv("HOME", tempDir());
-	expect(claimDirectory()).toBe(shared);
+	expect(directory({ XDG_RUNTIME_DIR: "/run/user/1000" })).toBe(shared);
+	expect(directory({ XDG_RUNTIME_DIR: undefined })).toBe(shared);
+	expect(directory({ HOME: tempDir() })).toBe(shared);
 });
 
 test("cancelling a waiting caller rejects admission", async () => {

@@ -390,7 +390,9 @@ test runs on an idle host starts together. Once only the raw load and memory
 have room, commands start one at a time, 5 seconds after the previous admission.
 A user's admissions on one host are recorded under
 `~/.cache/quest/admissions/<hostname>`, whatever the caller's environment or
-login session.
+login session. The home directory comes from the user database, not `$HOME`;
+an account missing from it, as in arbitrary-UID containers, uses
+`/tmp/quest-<uid>/admissions/<hostname>`.
 
 Admission is the gate's only job: it holds no slot or lock while the command
 runs and does not track the command's descendants. A nested invocation runs

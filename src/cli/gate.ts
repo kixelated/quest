@@ -1,10 +1,10 @@
 // Host-wide command admission, sized from the host itself: every platform waits
 // for CPU load and free memory before starting the command. The gate owns no
 // descendants and holds nothing while the command runs.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { availableParallelism, constants, cpus, homedir, hostname, loadavg, totalmem, userInfo } from "node:os";
+import { availableParallelism, constants, cpus, hostname, loadavg, totalmem, userInfo } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { forwards } from "./interrupt";
@@ -150,22 +150,39 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 	return { total, available };
 }
 
-/** The account's home directory from the user database, not `$HOME`, which callers may override. */
-function accountHome(): string {
-	try {
-		return userInfo().homedir;
-	} catch {
-		return homedir(); // An account missing from the user database, as in some containers.
-	}
+/**
+ * The account's home directory from the user database, not `$HOME`, which
+ * callers may override; null for an account missing from it. Bun's `userInfo()`
+ * prefers `$HOME`, so a child without one looks the account up.
+ */
+export function accountHome(): string | null {
+	if (process.platform === "win32") return userInfo().homedir;
+	const script = `try {
+		process.stdout.write(require("node:os").userInfo().homedir);
+	} catch (error) {
+		if (error.code !== "ENOENT") throw error;
+	}`;
+	// A compiled Quest runs the script as Bun would. The root holds no project config.
+	const lookup = spawnSync(process.execPath, ["-e", script], {
+		cwd: "/",
+		env: { BUN_BE_BUN: "1" },
+		encoding: "utf8",
+	});
+	if (lookup.error) throw lookup.error;
+	if (lookup.status !== 0) throw new Error(`gate cannot look up the account's home: ${lookup.stderr.trim()}`);
+	return lookup.stdout || null;
 }
 
 /**
  * Every caller of one user on one host shares this directory, whatever its
  * environment or login sessions. It is named for the host, since a home
- * directory may be shared between machines.
+ * directory may be shared between machines. An account missing from the user
+ * database, as in arbitrary-UID containers, has no home of its own, so it
+ * shares one keyed by its UID.
  */
-export function claimDirectory(home = accountHome(), host = hostname()): string {
-	return join(home, ".cache", "quest", "admissions", host);
+export function claimDirectory(home = accountHome(), host = hostname(), uid = process.getuid?.()): string {
+	const root = home === null ? join("/tmp", `quest-${uid}`) : join(home, ".cache", "quest");
+	return join(root, "admissions", host);
 }
 
 /** A version cut short, as by power loss, is read as empty: its commands ended with the host. */
@@ -314,7 +331,10 @@ export async function admit(limits: Limits, host: Host, signal: AbortSignal, wai
 			const last = Math.max(-Infinity, ...recent.map((admission) => admission.at));
 			wait = headroom ? 0 : last + SETTLE_MS - now;
 			if (wait <= 0) {
-				if (host.publish(ledger, [...recent, { id, at: now }])) return;
+				// A caller descheduled since sampling would record a stale time, which lets the
+				// next one skip its spacing; decide again once the stall reaches that interval.
+				const at = host.now();
+				if (at - now < SETTLE_MS && host.publish(ledger, [...recent, { id, at }])) return;
 				continue;
 			}
 		}
