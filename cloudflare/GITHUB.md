@@ -97,9 +97,12 @@ and moves one branch. Before writing anything it checks, in order:
   earlier work left on the fork, becomes a decision; publication never
   overwrites it. On a service fork branch, the decision also offers to start
   over: at the maintainer's request (`restart: true` in place of an `answer`,
-  after a live authority check), kix force-resets the branch to the job's
-  revision and replaces the job with a new one there, with a new agent session
-  and no recorded pull request. An iterated pull request's head is never reset.
+  after a live authority check), kix replaces the job with a new one at the
+  job's revision, with a new agent session and no recorded pull request, and
+  then force-resets the branch there. Replacing the job first means a
+  concurrent answer or cancel refuses the restart before any commit is
+  discarded. If the reset fails, the new job waits on the same Start over
+  decision. An iterated pull request's head is never reset.
 
 `plan`, `start`, and `bootstrap` jobs write their branch on the service fork
 `GITHUB_FORK_OWNER/<repository>`, whose immediate parent must be the upstream's

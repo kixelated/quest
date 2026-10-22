@@ -114,6 +114,8 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 type Decision = { decision: string; cancel: boolean; asked: boolean };
 type Published = { head: string | null; pull?: { number: number; url: string; draft: boolean } };
 
+const DECISION = "Publishing this work needs a maintainer's decision";
+
 /** Pause the attempt on a decision the maintainer must make before this can publish. */
 async function decide(db: D1Database, runner: Runner, input: Publication, prompt: unknown): Promise<Decision> {
 	const { question, cancel, asked } = await store.ask(
@@ -123,7 +125,7 @@ async function decide(db: D1Database, runner: Runner, input: Publication, prompt
 		input.attempt,
 		{
 			kind: "publication",
-			summary: "Publishing this work needs a maintainer's decision",
+			summary: DECISION,
 			session: input.session,
 			prompt,
 		},
@@ -217,9 +219,9 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 
 /**
  * Start a job over after a publication found its service fork branch changed
- * or left by earlier work: reset the branch to the job's revision, then
- * replace the job with a fresh one there. The new job's delivery adopts the
- * branch's pull request if it is still open, and otherwise opens another.
+ * or left by earlier work: replace the job with a fresh one at its revision,
+ * then reset the branch there. The new job's delivery adopts the branch's
+ * pull request if it is still open, and otherwise opens another.
  */
 export async function restart(
 	env: Env,
@@ -232,7 +234,29 @@ export async function restart(
 	const offered = open?.kind === "publication" && (open.prompt as { restart?: unknown } | null)?.restart === true;
 	if (job.state !== "waiting" || job.workflow === "iterate" || !offered)
 		throw new JobError("Only a job whose own branch changed can start over");
-	// The answering maintainer's authority is rechecked before the reset.
-	await new GitHubService(env).contribute(upstream, user, job, (branch) => branch.reset(job.revision));
-	return store.restart(env.DB, job.id, question, user, job.revision, Date.now());
+	// The answering maintainer's authority is rechecked before anything changes.
+	return new GitHubService(env).contribute(upstream, user, job, async (branch) => {
+		// Claim the decision before the reset discards commits, so a concurrent answer or cancel wins cleanly.
+		const created = await store.restart(env.DB, job.id, question, user, job.revision, Date.now());
+		try {
+			await branch.reset(job.revision);
+		} catch (error) {
+			// The new job waits to start over again; one a runner already took finds the branch changed when it publishes.
+			await store.hold(
+				env.DB,
+				created,
+				{
+					summary: DECISION,
+					prompt: {
+						type: "publication",
+						blocked: `Starting over did not reset the branch ${job.branch}.`,
+						restart: true,
+					},
+				},
+				Date.now(),
+			);
+			throw error;
+		}
+		return created;
+	});
 }

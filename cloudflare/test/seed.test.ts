@@ -3,9 +3,10 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
-import { commitOf, fakeGitHub, headOf } from "../dev/github";
+import { commitOf, fakeGitHub, headOf, type World } from "../dev/github";
 import { seed, world } from "../dev/seed";
 import { app } from "../src/index";
+import { cancel } from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
 
@@ -37,7 +38,50 @@ async function seeded() {
 		origin,
 		secret: env.GITHUB_WEBHOOK_SECRET,
 	});
-	return { data, request, cookie };
+	// The first project's inbox items and job forms, as the signed-in maintainer.
+	const rocket = data.repos[0]!;
+	const page = async (item: string) =>
+		(
+			await request(`/inbox?project=${rocket.id}&item=${encodeURIComponent(item)}`, {
+				headers: { Cookie: cookie },
+			})
+		).text();
+	const post = (path: string, fields: Record<string, string>) =>
+		request(`/projects/github/${rocket.owner}/${rocket.name}${path}`, {
+			method: "POST",
+			redirect: "manual",
+			headers: { Cookie: cookie, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams(fields).toString(),
+		});
+	return { data, request, cookie, rocket, page, post };
+}
+
+const latest = (target: string) =>
+	db
+		.prepare("SELECT id,state,head,pull,continues FROM jobs WHERE target=? ORDER BY createdAt DESC LIMIT 1")
+		.bind(target)
+		.first<{ id: string; state: string; head: string; pull: number | null; continues: string | null }>();
+
+/** Start over on the seeded job whose branch changed, returning its open question. */
+async function startOver(page: (item: string) => Promise<string>) {
+	const blocked = await page("quest/m1/themes.md");
+	expect(blocked).toContain("Start over");
+	return blocked.match(/name="question" value="([^"]+)"/)![1]!;
+}
+
+/** Run `before` once, ahead of the first request to GitHub matching `when`. */
+function intercept(data: World, when: (url: URL, method: string) => boolean, before: () => Promise<Response | void>) {
+	const github = fakeGitHub(data);
+	let done = false;
+	vi.mocked(globalThis.fetch).mockImplementation(async function (this: unknown, input, init) {
+		const request = new Request(input, init);
+		if (!done && when(new URL(request.url), request.method)) {
+			done = true;
+			const response = await before();
+			if (response) return response;
+		}
+		return github.call(this, input, init);
+	});
 }
 
 it("seeds a representative inbox through the Worker's own routes", async () => {
@@ -92,27 +136,7 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 });
 
 it("gets failed and blocked jobs moving again from the inbox", async () => {
-	const { data, request, cookie } = await seeded();
-	const rocket = data.repos[0]!;
-	const page = async (item: string) =>
-		(
-			await request(`/inbox?project=${rocket.id}&item=${encodeURIComponent(item)}`, {
-				headers: { Cookie: cookie },
-			})
-		).text();
-	const post = (path: string, fields: Record<string, string>) =>
-		request(path, {
-			method: "POST",
-			redirect: "manual",
-			headers: { Cookie: cookie, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams(fields).toString(),
-		});
-	const project = `/projects/github/${rocket.owner}/${rocket.name}`;
-	const latest = (target: string) =>
-		db
-			.prepare("SELECT state,head,pull,continues FROM jobs WHERE target=? ORDER BY createdAt DESC LIMIT 1")
-			.bind(target)
-			.first();
+	const { rocket, page, post } = await seeded();
 
 	// The failed job opened pull request 17 without recording it; that claim does not block its retry.
 	const failed = await page("quest/m0/import.md");
@@ -121,13 +145,13 @@ it("gets failed and blocked jobs moving again from the inbox", async () => {
 		/name="target" value="quest\/m0\/import.md"[\s\S]*?name="revision" value="([0-9a-f]{40})"/,
 	);
 	expect(form).not.toBeNull();
-	const retried = await post(`${project}/jobs`, {
+	const retried = await post("/jobs", {
 		workflow: "start",
 		target: "quest/m0/import.md",
 		revision: form![1]!,
 	});
 	expect(retried.status).toBe(303);
-	expect(await latest("quest/m0/import.md")).toEqual({
+	expect(await latest("quest/m0/import.md")).toMatchObject({
 		state: "queued",
 		head: headOf(
 			rocket,
@@ -138,22 +162,63 @@ it("gets failed and blocked jobs moving again from the inbox", async () => {
 	});
 
 	// A branch changed outside its job starts over from the job's revision.
-	const blocked = await page("quest/m1/themes.md");
-	expect(blocked).toContain("Start over");
-	const question = blocked.match(/name="question" value="([^"]+)"/)![1]!;
-	const restarted = await post(`${project}/jobs/seed-start-themes/answer`, { question, restart: "1" });
+	const question = await startOver(page);
+	const restarted = await post("/jobs/seed-start-themes/answer", { question, restart: "1" });
 	expect(restarted.status).toBe(303);
 	expect(rocket.fork["quest/m1/themes"]).toBe(commitOf(rocket));
 	expect(await db.prepare("SELECT state FROM jobs WHERE id='seed-start-themes'").first()).toEqual({
 		state: "cancelled",
 	});
-	expect(await latest("quest/m1/themes.md")).toEqual({
+	expect(await latest("quest/m1/themes.md")).toMatchObject({
 		state: "queued",
 		head: commitOf(rocket),
 		pull: null,
 		continues: null,
 	});
 	// The decision is spent, so a repeated Start over is refused.
-	const again = await post(`${project}/jobs/seed-start-themes/answer`, { question, restart: "1" });
+	const again = await post("/jobs/seed-start-themes/answer", { question, restart: "1" });
 	expect(again.status).not.toBe(303);
+});
+
+it("never resets the branch for a Start over that a concurrent cancel beat", async () => {
+	const { data, rocket, page, post } = await seeded();
+	const question = await startOver(page);
+	// Another maintainer cancels the job after this request read it, while it rechecks GitHub.
+	intercept(
+		data,
+		(url) => url.pathname === `/repos/${data.forks}/${rocket.name}`,
+		() => cancel(db, "seed-start-themes", "another-maintainer", Date.now()),
+	);
+	const restarted = await post("/jobs/seed-start-themes/answer", { question, restart: "1" });
+	expect(restarted.status).toBe(409);
+	expect(rocket.fork["quest/m1/themes"]).toBe("f".repeat(40));
+	expect(await latest("quest/m1/themes.md")).toMatchObject({ id: "seed-start-themes", state: "cancelled" });
+});
+
+it("leaves a Start over whose reset failed waiting to start over again", async () => {
+	const { data, rocket, page, post } = await seeded();
+	const question = await startOver(page);
+	intercept(
+		data,
+		(url, method) => method === "PATCH" && url.pathname.startsWith(`/repos/${data.forks}/${rocket.name}/git/refs/`),
+		async () => Response.json({ message: "Server Error" }, { status: 502 }),
+	);
+	const restarted = await post("/jobs/seed-start-themes/answer", { question, restart: "1" });
+	expect(restarted.status).not.toBe(303);
+	expect(rocket.fork["quest/m1/themes"]).toBe("f".repeat(40));
+	// The claim stands: the old job ended, and its replacement waits on the same decision instead of running.
+	expect(await db.prepare("SELECT state FROM jobs WHERE id='seed-start-themes'").first()).toEqual({
+		state: "cancelled",
+	});
+	const held = await latest("quest/m1/themes.md");
+	expect(held).toMatchObject({ state: "waiting", head: commitOf(rocket), continues: null });
+
+	// Starting the replacement over resets the branch once GitHub accepts it.
+	vi.mocked(globalThis.fetch).mockImplementation(fakeGitHub(data));
+	const retry = await startOver(page);
+	expect(retry).not.toBe(question);
+	const again = await post(`/jobs/${held!.id}/answer`, { question: retry, restart: "1" });
+	expect(again.status).toBe(303);
+	expect(rocket.fork["quest/m1/themes"]).toBe(commitOf(rocket));
+	expect(await latest("quest/m1/themes.md")).toMatchObject({ state: "queued", head: commitOf(rocket) });
 });

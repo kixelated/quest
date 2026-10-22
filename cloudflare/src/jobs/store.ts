@@ -779,7 +779,7 @@ export const RESTART = { restart: true } as const;
 /**
  * Answer a waiting job's publication decision by starting over: the job ends,
  * and a new one on the same target and revision queues from `head`, the
- * commit its branch was reset to, with a new agent session and none of the
+ * commit its branch is then reset to, with a new agent session and none of the
  * old job's answers. The new job's later creation also means a pull request
  * closed before now is not mistaken for one it delivered.
  */
@@ -804,6 +804,26 @@ export async function restart(db: D1Database, job: string, question: string, use
 	]);
 	if (update!.meta.changes !== 1) throw new JobError("Question is no longer open");
 	return id;
+}
+
+/**
+ * Pause a queued job that has not run yet on a publication decision, such as
+ * a restart whose branch reset failed. A job a runner already took is left alone.
+ */
+export async function hold(db: D1Database, job: string, input: { summary: string; prompt: unknown }, now: number) {
+	const id = crypto.randomUUID();
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO job_questions(id,job,attempt,kind,prompt,askedAt) SELECT ?,id,attempt,'publication',?,? FROM jobs WHERE id=? AND attempt=0 AND state='queued' AND cancel=0",
+			)
+			.bind(id, JSON.stringify(input.prompt), now, job),
+		db
+			.prepare(
+				"UPDATE jobs SET state='waiting',summary=?,updatedAt=? WHERE id=? AND state='queued' AND EXISTS(SELECT 1 FROM job_questions WHERE id=?)",
+			)
+			.bind(input.summary, now, job, id),
+	]);
 }
 
 /**
