@@ -39,6 +39,7 @@ function pull(
 					reviewDecision: "REVIEW_REQUIRED",
 					autoMergeRequest: null,
 					mergeQueueEntry: null,
+					timelineItems: { nodes: [] },
 					reactions: { nodes: reactions },
 					commits: {
 						nodes: [
@@ -158,6 +159,7 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 		"review-decision review_required",
 		"auto-merge -",
 		"merge-queue -",
+		"landing-stopped -",
 		"checks failure passed=2 failing=3 pending=2",
 		"check failing required failure https://github.com/example/project/actions/runs/1/job/lint lint",
 		"check failing optional cancelled https://github.com/example/project/actions/runs/1/job/docs docs",
@@ -190,7 +192,7 @@ test("a queued PR with auto-merge and no checks reports both, and JSON is determ
 		threads: page([]),
 	});
 	const status = await pullRequestStatus(pr, setup([body]).deps);
-	expect(statusLines(status).slice(2, 10)).toEqual([
+	expect(statusLines(status).slice(2, 11)).toEqual([
 		"draft true",
 		`head ${A}`,
 		"mergeable mergeable",
@@ -198,10 +200,34 @@ test("a queued PR with auto-merge and no checks reports both, and JSON is determ
 		"review-decision -",
 		"auto-merge squash kixelated 2026-10-07T12:00:00Z",
 		"merge-queue awaiting_checks 2 2026-10-07T12:01:00Z",
+		"landing-stopped -",
 		"checks - passed=0 failing=0 pending=0",
 	]);
 	expect(JSON.stringify(await pullRequestStatus(pr, setup([body]).deps))).toBe(JSON.stringify(status));
 	expect(status.mergeQueue).toEqual({ state: "awaiting_checks", position: 2, enqueuedAt: "2026-10-07T12:01:00Z" });
+});
+
+test("reports why the latest landing stopped, from a merge queue or auto-merge", async () => {
+	const stopped = async (node: Node) => {
+		const body = pull({ checks: null, reviews: page([]), threads: page([]), timelineItems: { nodes: [node] } });
+		return statusLines(await pullRequestStatus(pr, setup([body]).deps)).find((line) =>
+			line.startsWith("landing-stopped "),
+		);
+	};
+	expect(
+		await stopped({
+			createdAt: "2026-10-07T12:00:00Z",
+			reason: "MERGE_CONFLICT",
+			actor: { login: "github-merge-queue" },
+		}),
+	).toBe("landing-stopped merge_conflict github-merge-queue 2026-10-07T12:00:00Z");
+	expect(
+		await stopped({
+			createdAt: "2026-10-07T12:01:00Z",
+			reasonCode: "manually_disabled",
+			actor: { login: "kixelated" },
+		}),
+	).toBe("landing-stopped manually_disabled kixelated 2026-10-07T12:01:00Z");
 });
 
 test("long lists page only the connections that have more, keeping the first page's PR fields", async () => {

@@ -317,8 +317,8 @@ class Labels {
 	}
 
 	/**
-	 * A PR that left the merge queue unmerged waits on the maintainer again, so
-	 * its `quest:merge` label is spent once a landing started after it was added.
+	 * A landing that ended unmerged ends the merge session's hold, so a
+	 * `quest:merge` label is spent once a landing started after it was added.
 	 */
 	async dequeued(snapshot: Snapshot): Promise<Snapshot> {
 		const added = latest(snapshot, MERGE);
@@ -327,7 +327,7 @@ class Labels {
 		if (!landed) return snapshot;
 		await this.remove(MERGE);
 		this.deps.warn(
-			`${snapshot.url} left the merge queue unmerged, so ${MERGE} was removed; it waits on the user again`,
+			`${snapshot.url} left the merge queue unmerged, so ${MERGE} was removed; quest status shows why under landing-stopped`,
 		);
 		return { ...snapshot, labels: snapshot.labels.filter((name) => name !== MERGE) };
 	}

@@ -369,8 +369,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"Print a pull request's head, checks, merge state, reviews, reactions, and unresolved review threads " +
 				"in one call. It reports facts; it does not decide whether the PR is ready or whose review counts.\n\n" +
 				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
-				"url, state, draft, head, mergeable, merge-state, review-decision, auto-merge, merge-queue, and checks; " +
-				"then a check line per failing or pending check, marked required or optional; a review line per " +
+				"url, state, draft, head, mergeable, merge-state, review-decision, auto-merge, merge-queue, " +
+				"landing-stopped, and checks; landing-stopped is the latest exit from the merge queue or auto-merge, " +
+				"with GitHub's reason (such as merge_conflict, failed_checks, manual, or manually_disabled), " +
+				"actor, and time. Then " +
+				"a check line per failing or pending check, marked required or optional; a review line per " +
 				"reviewer's latest review, marked current or stale against the head; a reacted:<content> line per " +
 				"reaction on the PR or a review; and a thread line per unresolved review thread, led by its node ID. " +
 				"A missing value prints as -. --json prints the same facts as one deterministic object.\n\n" +

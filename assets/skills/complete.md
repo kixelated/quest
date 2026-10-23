@@ -20,6 +20,8 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 
 Include a brief summary of each PR.
 Act on a PR only after the user picks its action in this session, including PRs found on a later refresh.
+GitHub auto-merge is that pick: enabling it takes write access, and GitHub disables it when anyone without write access pushes.
+Do not ask about a PR with auto-merge enabled; watch it like an enqueued PR, and dispatch `/quest-merge` only when a conflict, failing check, or review finding stalls it.
 A pick covers the PR until it lands or needs the user: when its push draws new review findings, send the agent back without asking, and apply the merge skill's design checkpoint across those rounds.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
@@ -33,9 +35,10 @@ Limit the number of active agents to the CPU core count.
 Tell each merge sub-agent that you watch its merge queue, so it reports once
 auto-merge is enabled. Wait on each such PR with `quest wait`, as `quest skill merge`
 describes, until it merges.
-If it leaves the queue unmerged or auto-merge is disabled, confirm with
-`quest status <pr>`, then ask about the PR again; never dispatch `/quest-merge` without
-the user's choice, since a new head needs fresh approval.
+If it leaves the queue unmerged or auto-merge is disabled, read `landing-stopped` from
+`quest status <pr>`. After `merge_conflict` or `failed_checks`, the pick still holds:
+dispatch `/quest-merge` again. Any other reason, such as a person removing it, is the
+user's call, so ask about the PR again.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.

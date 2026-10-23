@@ -54,6 +54,7 @@ It makes a merge commit; add `--squash` or `--rebase` when the repository's root
 The `quest:merge` label stays on while the PR is queued or auto-merging.
 If your caller said it watches the merge queue, report once it is landing.
 Otherwise wait until the PR merges. If it leaves the queue unmerged or auto-merge
-is disabled, confirm with `quest status <pr>`, release the PR, then report why
-instead of landing it again; a new head needs the user's approval.
+is disabled, read `landing-stopped` from `quest status <pr>`. After `merge_conflict`
+or `failed_checks`, take the PR again, fix it, and land it; any other reason, such as
+a person removing it, is the user's call, so report why instead of landing it again.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.
