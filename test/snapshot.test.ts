@@ -40,7 +40,9 @@ function fixture() {
 	return { tree, head, pin, module: join(tree.path, "dependency") };
 }
 
-describe("committed submodule links", () => {
+// Cases run up to ~35 real Git processes. Process creation on the Windows ARM runner
+// costs ~80-250 ms while other test files start, so the 5 s unit-test default is too short.
+describe("committed submodule links", { timeout: 20_000 }, () => {
 	test("snapshot validation resolves links inside an initialized gitlink", () => {
 		const { tree, head } = fixture();
 		tree.accepts();
