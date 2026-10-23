@@ -295,7 +295,7 @@ describe("merge --land", () => {
 		expect(pull.labels).toEqual(["quest:merge"]);
 	});
 
-	test("a PR that left the queue unmerged drops quest:merge and waits on the user", async () => {
+	test("a PR that left the queue unmerged drops quest:merge", async () => {
 		const pull = new FakePull();
 		const { token } = await take(PR, "merge", undefined, pull.deps());
 		await land(PR, token, HEAD, "merge", pull.deps());
@@ -304,7 +304,7 @@ describe("merge --land", () => {
 		const warnings: string[] = [];
 		expect(await refused(land(PR, token, HEAD, "merge", pull.deps(warnings)))).toContain("no longer holds it");
 		expect(warnings).toEqual([
-			`${URL_} left the merge queue unmerged, so quest:merge was removed; it waits on the user again`,
+			`${URL_} left the merge queue unmerged, so quest:merge was removed; quest status shows why under landing-stopped`,
 		]);
 		expect(pull.labels).toEqual([]);
 		expect((await take(PR, "iterate", undefined, pull.deps())).label).toBe("quest:iterate");

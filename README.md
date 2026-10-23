@@ -345,6 +345,7 @@ merge-state dirty
 review-decision -
 auto-merge -
 merge-queue -
+landing-stopped -
 checks success passed=14 failing=0 pending=0
 review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
 review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
@@ -360,6 +361,7 @@ comes last, and a missing value prints as `-`:
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `auto-merge` | Method, who enabled it, and when. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
+| `landing-stopped` | GitHub's reason the latest merge-queue entry or auto-merge ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when. |
 | `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
@@ -371,7 +373,7 @@ The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 is one branch protection or a ruleset requires for this PR. `--json` prints the
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
-`checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
+`landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
 `threads`. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.

@@ -22,6 +22,10 @@ const STATUS = `query($owner: String!, $repo: String!, $number: Int!,
 			url state isDraft headRefOid mergeable mergeStateStatus reviewDecision
 			autoMergeRequest { enabledAt mergeMethod enabledBy { login } }
 			mergeQueueEntry { state position enqueuedAt }
+			timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT, AUTO_MERGE_DISABLED_EVENT]) { nodes {
+				... on RemovedFromMergeQueueEvent { createdAt reason actor { login } }
+				... on AutoMergeDisabledEvent { createdAt reasonCode actor { login } }
+			} }
 			reactions(last: 100) { nodes { ...reaction } }
 			commits(last: 1) { nodes { commit { oid statusCheckRollup { state
 				contexts(first: 100, after: $checks) @include(if: $moreChecks) {
@@ -100,6 +104,8 @@ export interface Status {
 	reviewDecision: string | null;
 	autoMerge: { method: string; enabledBy: string; enabledAt: string } | null;
 	mergeQueue: { state: string; position: number; enqueuedAt: string } | null;
+	/** The latest exit from the merge queue or auto-merge, and GitHub's reason for it. */
+	landingStopped: { reason: string; actor: string; at: string } | null;
 	checks: { state: string | null; passed: number; failing: Check[]; pending: Check[] };
 	/** Each reviewer's latest submitted review, oldest first. */
 	reviews: Review[];
@@ -229,6 +235,7 @@ function summarize(
 
 	const autoMerge = pull.autoMergeRequest === null ? null : object(pull.autoMergeRequest);
 	const queue = pull.mergeQueueEntry === null ? null : object(pull.mergeQueueEntry);
+	const stopped = array(object(pull.timelineItems).nodes).at(-1);
 	return {
 		url,
 		state: lower(pull.state) as Status["state"],
@@ -249,6 +256,14 @@ function summarize(
 			queue === null
 				? null
 				: { state: lower(queue.state), position: Number(queue.position), enqueuedAt: string(queue.enqueuedAt) },
+		landingStopped:
+			stopped === undefined
+				? null
+				: {
+						reason: lower(stopped.reason ?? stopped.reasonCode),
+						actor: actor(stopped.actor),
+						at: string(stopped.createdAt),
+					},
 		checks,
 		reviews: [...latest.values()],
 		reactions,
@@ -298,6 +313,9 @@ export function statusLines(status: Status): string[] {
 		status.mergeQueue === null
 			? "merge-queue -"
 			: `merge-queue ${status.mergeQueue.state} ${status.mergeQueue.position} ${status.mergeQueue.enqueuedAt}`,
+		status.landingStopped === null
+			? "landing-stopped -"
+			: `landing-stopped ${status.landingStopped.reason} ${status.landingStopped.actor} ${status.landingStopped.at}`,
 		`checks ${dash(status.checks.state)} passed=${status.checks.passed} failing=${status.checks.failing.length} pending=${status.checks.pending.length}`,
 		...status.checks.failing.map((c) => check("failing", c)),
 		...status.checks.pending.map((c) => check("pending", c)),

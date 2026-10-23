@@ -35,9 +35,10 @@ Limit the number of active agents to the CPU core count.
 Tell each merge sub-agent that you watch its merge queue, so it reports once
 auto-merge is enabled. Wait on each such PR with `quest wait`, as `quest skill merge`
 describes, until it merges.
-If it leaves the queue unmerged or auto-merge is disabled, confirm with
-`quest status <pr>`, then ask about the PR again; never dispatch `/quest-merge` without
-the user's choice, since a new head needs fresh approval.
+If it leaves the queue unmerged or auto-merge is disabled, read `landing-stopped` from
+`quest status <pr>`. After `merge_conflict` or `failed_checks`, the pick still holds:
+dispatch `/quest-merge` again. Any other reason, such as a person removing it, is the
+user's call, so ask about the PR again.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.
