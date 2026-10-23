@@ -23,9 +23,11 @@ finished quests' lines while a branch inserts a new quest next to them.
   run`, a shell outside the dev shell). A driver that is not found exits
   non-zero with the file left as ours and no markers, which reads as
   resolved. The registered command is a `sh -c` wrapper that runs
-  `quest resolve` when `command -v quest` finds it and otherwise
-  `git merge-file -L ours -L base -L theirs %A %O %B`, so a missing binary
-  degrades to today's conflict markers. Rejected: persisting an absolute
+  `quest resolve` when `quest resolve --help` succeeds and otherwise
+  `git merge-file -L ours -L base -L theirs %A %O %B`, so a missing binary,
+  or an older one without `resolve` during a staggered upgrade, degrades to
+  today's conflict markers. `%A`, `%O`, and `%B` are git's temporary file
+  names, so only `%P`, if the driver takes it, needs quoting. Rejected: persisting an absolute
   path, which a version bump or Nix store change leaves stale.
 - **Three-way list merge, not union.** Git's built-in `merge=union` was
   rejected after the same replay: in nearly every one of 47 resolved merges it
