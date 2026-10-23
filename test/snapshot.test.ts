@@ -1,0 +1,113 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { describe, expect, test } from "vitest";
+
+import { snapshot } from "../src/cli/tree";
+import { check, formatFinding } from "../src/core";
+import { Tree, tempDir } from "./fixture";
+
+function git(root: string, ...args: string[]): string {
+	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
+}
+
+function init(root: string): void {
+	git(root, "init", "-q", "-b", "main");
+	git(root, "config", "user.name", "Test");
+	git(root, "config", "user.email", "test@example.com");
+	git(root, "config", "commit.gpgsign", "false");
+}
+
+function commit(root: string): string {
+	git(root, "add", ".");
+	git(root, "commit", "-q", "-m", "fixture");
+	return git(root, "rev-parse", "HEAD");
+}
+
+function fixture() {
+	const dependency = tempDir();
+	init(dependency);
+	writeFileSync(join(dependency, "README.md"), "# Dependency\n");
+	const pin = commit(dependency);
+	const tree = Tree.baseline().append(
+		"quest/m0/epic/one.md",
+		"\n## Related\n\n- [Dependency](../../../dependency/README.md) - the committed source\n",
+	);
+	init(tree.path);
+	git(tree.path, "-c", "protocol.file.allow=always", "submodule", "add", "-q", dependency, "dependency");
+	const head = commit(tree.path);
+	return { tree, head, pin, module: join(tree.path, "dependency") };
+}
+
+describe("committed submodule links", () => {
+	test("snapshot validation resolves links inside an initialized gitlink", () => {
+		const { tree, head } = fixture();
+		tree.accepts();
+		const at = snapshot(tree.path, head);
+		expect(check(at.docs, at.exists).map(formatFinding)).toEqual([]);
+		expect(at.exists("dependency")).toBe(true);
+		expect(at.exists("dependency/missing.md")).toBe(false);
+		tree.append("quest/m0/epic/one.md", "\nMissing [source](../../../dependency/missing.md).\n");
+		const missing = snapshot(tree.path, commit(tree.path));
+		expect(check(missing.docs, missing.exists).map(formatFinding)).toEqual([
+			"quest/m0/epic/one.md:11: link does not resolve: ../../../dependency/missing.md",
+		]);
+	});
+
+	test("uses the snapshot's pin rather than a different or dirty checkout", () => {
+		const { tree, head, module } = fixture();
+		git(module, "config", "user.name", "Test");
+		git(module, "config", "user.email", "test@example.com");
+		git(module, "config", "commit.gpgsign", "false");
+		rmSync(join(module, "README.md"));
+		writeFileSync(join(module, "later.md"), "# Later\n");
+		commit(module);
+		writeFileSync(join(module, "dirty.md"), "# Local only\n");
+		const at = snapshot(tree.path, head);
+		expect(at.exists("dependency/README.md")).toBe(true);
+		expect(at.exists("dependency/later.md")).toBe(false);
+		expect(at.exists("dependency/dirty.md")).toBe(false);
+		expect(check(at.docs, at.exists)).toEqual([]);
+	});
+
+	test("resolves nested gitlinks without importing their quests", () => {
+		const { tree, module } = fixture();
+		const nested = tempDir();
+		init(nested);
+		mkdirSync(join(nested, "quest"));
+		writeFileSync(join(nested, "quest", "README.md"), "not a valid quest\n");
+		writeFileSync(join(nested, "README.md"), "# Nested\n");
+		commit(nested);
+		git(module, "config", "user.name", "Test");
+		git(module, "config", "user.email", "test@example.com");
+		git(module, "config", "commit.gpgsign", "false");
+		git(module, "-c", "protocol.file.allow=always", "submodule", "add", "-q", nested, "nested");
+		commit(module);
+		const head = commit(tree.path);
+		const at = snapshot(tree.path, head);
+		expect(at.exists("dependency/nested/README.md")).toBe(true);
+		expect(at.exists("dependency/nested/missing.md")).toBe(false);
+		expect(check(at.docs, at.exists)).toEqual([]);
+	});
+
+	test("refuses an unavailable object database instead of trusting checkout files", () => {
+		const { tree, head, module, pin } = fixture();
+		rmSync(join(module, ".git"));
+		const at = snapshot(tree.path, head);
+		expect(() => at.exists("dependency/README.md")).toThrow(`submodule dependency at ${pin}`);
+		expect(() => at.exists("dependency/README.md")).toThrow("git submodule update --init --recursive");
+	});
+
+	test("refuses a pinned commit absent from an initialized submodule", () => {
+		const { tree, module } = fixture();
+		const upstream = git(module, "remote", "get-url", "origin");
+		writeFileSync(join(upstream, "new.md"), "# Not fetched\n");
+		const pin = commit(upstream);
+		git(tree.path, "update-index", "--cacheinfo", `160000,${pin},dependency`);
+		git(tree.path, "commit", "-q", "-m", "pin newer source");
+		const at = snapshot(tree.path, git(tree.path, "rev-parse", "HEAD"));
+		expect(() => at.exists("dependency/README.md")).toThrow(`submodule dependency at ${pin}`);
+		expect(() => at.exists("dependency/new.md")).toThrow("git submodule update --init --recursive");
+	});
+});
