@@ -20,6 +20,8 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 
 Include a brief summary of each PR.
 Act on a PR only after the user picks its action in this session, including PRs found on a later refresh.
+GitHub auto-merge is that pick: enabling it takes write access, and GitHub disables it when anyone without write access pushes.
+Do not ask about a PR with auto-merge enabled; watch it like an enqueued PR, and dispatch `/quest-merge` only when a conflict, failing check, or review finding stalls it.
 A pick covers the PR until it lands or needs the user: when its push draws new review findings, send the agent back without asking, and apply the merge skill's design checkpoint across those rounds.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
