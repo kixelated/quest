@@ -22,6 +22,8 @@ const POLL = 5 * 60_000;
 const FINAL_POLL = 30_000;
 /** The REST page size. A full last page cannot show by itself that a next page has appeared. */
 const PAGE = 100;
+/** How often setup rereads repository activity while GitHub has yet to list the head's push. */
+const LISTING_POLL = 15_000;
 const SHA = /^[a-f\d]{7,40}$/i;
 /** The timeline records a force push a few seconds after repository activity (1-2s observed). */
 const TIMELINE_LAG = 60_000;
@@ -149,6 +151,11 @@ async function watch(
 	started: number,
 	progress: { resume?: string },
 ): Promise<string[]> {
+	// Cursors are case-sensitive base64url; a recased one would otherwise be misreported as a bad timestamp.
+	if (options.since && /^q1\./i.test(options.since) && !options.since.startsWith("q1."))
+		throw new GitHubInputError(
+			"invalid --since cursor: cursors start with lower-case q1.; pass it exactly as printed",
+		);
 	if (options.since && !options.since.startsWith("q1.") && !SHA.test(options.since)) {
 		try {
 			timestamp(options.since);
@@ -196,23 +203,30 @@ async function watch(
 		const point = options.since ?? currentSha;
 		const shaPoint = SHA.test(point);
 		const time = shaPoint ? undefined : timestamp(point);
-		const activities: ObjectValue[] = [];
+		const isPoint = (row: ObjectValue) => string(row.after).startsWith(point.toLowerCase());
+		let activities: ObjectValue[] = [];
 		if (head.repo !== null) {
 			const headRepo = object(head.repo);
 			const fullName = string(headRepo.full_name);
 			if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) throw new Error("invalid GitHub head repository");
-			let path: string | undefined =
-				`/repos/${fullName}/activity?ref=${encodeURIComponent(string(head.ref))}&per_page=100`;
-			while (path) {
-				const { rows, response } = await github.list(path);
-				activities.push(...rows);
-				if (
-					shaPoint
-						? rows.some((row) => string(row.after).startsWith(point.toLowerCase()))
-						: rows.some((row) => timestamp(string(row.timestamp)) <= time!)
-				)
-					break;
-				path = link(response, "next");
+			let warned = false;
+			for (;;) {
+				activities = [];
+				let path: string | undefined =
+					`/repos/${fullName}/activity?ref=${encodeURIComponent(string(head.ref))}&per_page=100`;
+				while (path) {
+					const { rows, response } = await github.list(path);
+					activities.push(...rows);
+					if (shaPoint ? rows.some(isPoint) : rows.some((row) => timestamp(string(row.timestamp)) <= time!))
+						break;
+					path = link(response, "next");
+				}
+				// The head was pushed, but GitHub lists a push seconds to minutes later (14s-6min observed),
+				// so a wait started right after pushing reads the listing again until the push appears.
+				if (!shaPoint || activities.some(isPoint) || !currentSha.startsWith(point.toLowerCase())) break;
+				if (!warned) deps.warn(`GitHub has not listed the push of ${point} yet; waiting for it`);
+				warned = true;
+				await github.pause(LISTING_POLL);
 			}
 		} else if (shaPoint) {
 			throw new Error("head repository was deleted; pass a timestamp with --since");
@@ -220,7 +234,7 @@ async function watch(
 		const pushed = activities.filter((row) =>
 			["push", "force_push", "branch_creation"].includes(string(row.activity_type)),
 		);
-		const match = shaPoint ? pushed.find((row) => string(row.after).startsWith(point.toLowerCase())) : undefined;
+		const match = shaPoint ? pushed.find(isPoint) : undefined;
 		if (shaPoint && !match) throw new Error(`cannot resolve push time for ${point}; pass a timestamp with --since`);
 		const since = time ?? timestamp(string(match!.timestamp));
 		// An explicit timestamp includes its own instant; a SHA point excludes its own push.
@@ -387,6 +401,7 @@ async function watch(
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
 	for (;;) {
 		github.pollInterval = 0;
+		const labels: Activity[] = [];
 		for (const row of await timeline()) {
 			const type = string(row.event);
 			if (type === "committed") {
@@ -416,12 +431,13 @@ async function watch(
 					)
 				)
 					continue;
-				if (fresh("timeline", event)) found.timeline.push(event);
+				if (fresh("timeline", event)) (LABELS.includes(type) ? labels : found.timeline).push(event);
 			}
 		}
 		const replies = await comments();
 		const { viewer, events } = await reactions();
-		// The waiter's own replies and reactions never wake it.
+		// The waiter's own label changes, replies, and reactions never wake it.
+		found.timeline.push(...labels.filter((event) => event.actor !== viewer));
 		for (const row of replies) {
 			// A thread's first comment belongs to a review, which the timeline reports.
 			if (row.in_reply_to_id === undefined || row.in_reply_to_id === null) continue;
@@ -477,7 +493,10 @@ async function watch(
 }
 
 // A dequeue or a disabled auto-merge needs the agent. A merge also leaves the queue, a second before "merged".
+// A label-driven queue dequeues by removing its label.
+const LABELS = ["labeled", "unlabeled"];
 const WAKES = [
+	...LABELS,
 	"reviewed",
 	"commented",
 	"merged",
@@ -493,6 +512,10 @@ function timelineActivities(row: ObjectValue, prUrl: string): Activity[] {
 		return array(row.comments).map((comment) => timedActivity(comment, type, "created_at", prUrl));
 	}
 	if (!WAKES.includes(type)) return [];
+	if (LABELS.includes(type)) {
+		const event = timedActivity(row, type, "created_at", prUrl);
+		return [{ ...event, type: `${type}:${string(object(row.label).name).replace(/\s/g, "_")}` }];
+	}
 	return [timedActivity(row, type, type === "reviewed" ? "submitted_at" : "created_at", prUrl)];
 }
 

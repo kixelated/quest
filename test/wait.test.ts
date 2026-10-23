@@ -314,6 +314,32 @@ test("force pushes, comments, inline comments, merges, closes and dequeues are p
 	]);
 });
 
+test("label changes wake the waiter by label name, except the waiter's own", async () => {
+	const label = (event: string, id: number, name: string, login: string) => ({
+		event,
+		id,
+		created_at: POINT,
+		actor: { login },
+		label: { name, color: "ffffff" },
+	});
+	const fixture = setup([
+		pull(),
+		response([pushed()]),
+		response([label("labeled", 1, "merge", "waiter")], { etag: '"t"' }),
+		response([
+			label("labeled", 1, "merge", "waiter"),
+			label("unlabeled", 2, "merge", "github-actions[bot]"),
+			label("labeled", 3, "needs review", "person"),
+		]),
+	]);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines.map((line) => line.split(" ").slice(0, 4).join(" "))).toEqual([
+		"2026-10-07T12:00:00Z unlabeled:merge github-actions[bot] https://github.com/example/project/pull/1",
+		"2026-10-07T12:00:00Z labeled:needs_review person https://github.com/example/project/pull/1",
+	]);
+	expect(fixture.sleeps).toEqual([300_000]);
+});
+
 test("a resume cursor catches same-second activity without replaying events or commits", async () => {
 	const first = setup([pull(), response([pushed()]), response([committed(A), reviewed(1)])]);
 	const point = cursor(await waitForActivity(pr, {}, first.deps));
@@ -483,8 +509,8 @@ test("all initial timeline pages are read, and the last known page is polled bef
 });
 
 test("a full last page is reread whole, since a 304 cannot show that a next page appeared", async () => {
-	const labeled = Array.from({ length: 99 }, (_, id) => ({ event: "labeled", id, created_at: POINT }));
-	const full = [committed(A), ...labeled];
+	const subscribed = Array.from({ length: 99 }, (_, id) => ({ event: "subscribed", id, created_at: POINT }));
+	const full = [committed(A), ...subscribed];
 	const page2 = `https://api.github.com${timeline}&page=2`;
 	const fixture = setup([
 		pull(),
@@ -624,6 +650,28 @@ test("timeout is distinct and limits both poll sleeps and rate-limit waits", asy
 	});
 });
 
+test("a head GitHub has yet to list is waited for, then starts at its listed push time", async () => {
+	const fixture = setup([
+		pull(),
+		response([pushed(B, "2026-10-07T11:50:00Z")]),
+		response([pushed(B, "2026-10-07T11:50:00Z")]),
+		response([pushed(), pushed(B, "2026-10-07T11:50:00Z")]),
+		response([committed(A), reviewed(1, "2026-10-07T11:55:00Z"), reviewed(2)]),
+	]);
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toContain("pullrequestreview-2 q1.");
+	expect(fixture.sleeps).toEqual([15_000, 15_000]);
+	expect(fixture.warnings).toEqual([`GitHub has not listed the push of ${A} yet; waiting for it`]);
+});
+
+test("a timeout while GitHub has yet to list the head resumes from that head", async () => {
+	const fixture = setup([pull(), response([]), response([])]);
+	const timeout = await waitForActivity(pr, { timeout: 20 }, fixture.deps).catch((error: unknown) => error);
+	expect(timeout).toBeInstanceOf(WaitTimeout);
+	expect(timeout).toMatchObject({ cursor: A });
+});
+
 test("unresolvable pushed SHA fails with a timestamp recommendation", async () => {
 	const fixture = setup([pull(), response([pushed()])]);
 	await expect(waitForActivity(pr, { since: B }, fixture.deps)).rejects.toThrow("pass a timestamp with --since");
@@ -673,6 +721,11 @@ test("malformed and wrong-PR cursors fail without requests", async () => {
 		);
 		expect(fixture.calls).toEqual([]);
 	}
+	const recased = setup([]);
+	await expect(waitForActivity(pr, { since: `Q1.${other.slice(3)}` }, recased.deps)).rejects.toThrow(
+		"cursors start with lower-case q1.",
+	);
+	expect(recased.calls).toEqual([]);
 });
 
 test("PR URL parsing and timeout usage fail before authentication", () => {

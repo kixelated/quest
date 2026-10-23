@@ -262,8 +262,10 @@ quest wait 101 --since abcdef0123456789abcdef0123456789abcdef01
 A number uses the repository's `origin`; a URL works from any directory.
 Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`.
 Without `--since`, the point is the current head's push time, so an existing
-review on that head is included. A SHA must have been a pushed tip; if its push
-time cannot be found, pass an ISO timestamp instead. Forks use the head
+review on that head is included. GitHub lists a push seconds to minutes after
+it lands, so for the current head the wait rereads the listing every 15 seconds
+until the push appears, warning once. Any other SHA must be a listed pushed tip;
+otherwise pass an ISO timestamp instead. Forks use the head
 repository's activity. Deleted head repositories require a timestamp.
 The initial PR commit listing must match the resolved head; a racing push or
 GitHub's 250-commit listing limit fails clearly instead of guessing membership.
@@ -278,7 +280,10 @@ commit SHAs, regardless of git author dates. Force pushes come from the PR
 timeline, excluding the one that created the starting head. A merge through
 the queue prints `removed_from_merge_queue` about a second before `merged`, so a
 poll can catch the removal alone; check `quest status` before treating it as a
-failed merge. Actors are printed without deciding
+failed merge. A label change prints as `labeled:<name>` or `unlabeled:<name>`
+(spaces as `_`), so a queue that dequeues by removing its label wakes the
+waiter; the authenticated account's own label changes are ignored. Actors are
+printed without deciding
 whose review counts. Edits to existing comments or reviews are outside this
 command's scope.
 
