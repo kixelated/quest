@@ -44,9 +44,11 @@ finished quests' lines while a branch inserts a new quest next to them.
   `.gitattributes` and sets `merge.quest.driver` in the clone's local git
   config. Any other `quest` command adds the config line when it is missing,
   so fresh clones, worktrees, and new agents get it without a dev-shell hook.
-  It does so only inside a git work tree whose `.gitattributes` names
-  `merge=quest`, and a failed write never fails the command, so `guide`,
-  `skill`, `gate`, and `--root` runs outside a repository are unaffected.
+  Every config write, `init`'s included, happens only inside a git work
+  tree (the self-healing one also needs `.gitattributes` to name
+  `merge=quest`), and a failed write never fails the command, so `guide`,
+  `skill`, `gate`, `--root` runs outside a repository, and `init` before
+  `git init` are unaffected.
   `quest uninstall` removes both. Git ignores drivers named only in
   `.gitattributes`, and GitHub's own merges ignore drivers entirely, so a PR
   still shows as conflicting until a local merge from its base is pushed.
