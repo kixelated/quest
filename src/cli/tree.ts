@@ -71,23 +71,10 @@ export function checkout(root: string): Snapshot {
  * paths relative to `root` as on disk. A symbolic link is a path, not a quest.
  */
 export function snapshot(root: string, commit: string): Snapshot {
-	const paths = new Set<string>();
-	const quests: { path: string; oid: string }[] = [];
-	// `<mode> <type> <oid>\t<path>`; run in `root`, git lists only its subtree, relative to it.
-	for (const entry of git(root, ["ls-tree", "-r", "-z", commit]).toString("utf8").split("\0")) {
-		if (entry === "") continue;
-		const tab = entry.indexOf("\t");
-		const [mode, type, oid] = entry.slice(0, tab).split(" ");
-		const path = entry.slice(tab + 1);
-		paths.add(path);
-		for (let dir = path; dir.includes("/");) {
-			dir = dir.slice(0, dir.lastIndexOf("/"));
-			paths.add(dir);
-		}
-		if (type === "blob" && mode !== "120000" && path.startsWith("quest/") && isQuest(path)) {
-			quests.push({ path, oid });
-		}
-	}
+	const tree = committed(root, commit);
+	const quests = tree.entries.filter(
+		({ mode, type, path }) => type === "blob" && mode !== "120000" && path.startsWith("quest/") && isQuest(path),
+	);
 	if (quests.length === 0) throw new Error(`no quest documents found under ${under(root, "quest")} at ${commit}`);
 
 	// One `cat-file --batch` reads every document: `<oid> blob <size>\n<content>\n` each, in input order.
@@ -102,7 +89,61 @@ export function snapshot(root: string, commit: string): Snapshot {
 	});
 	return {
 		docs: docs.sort((a, b) => comparePaths(a.path, b.path)).map((source) => parse(source.path, source.text)),
-		exists: (path) => paths.has(path),
+		exists: tree.exists,
+	};
+}
+
+interface Entry {
+	mode: string;
+	type: string;
+	oid: string;
+	path: string;
+}
+
+/** Committed paths, descending into a gitlink only when a link needs its contents. */
+function committed(root: string, commit: string): { entries: Entry[]; exists(path: string): boolean } {
+	const entries: Entry[] = [];
+	const paths = new Set<string>();
+	const modules = new Map<string, string>();
+	const loaded = new Map<string, ReturnType<typeof committed>>();
+	// `<mode> <type> <oid>\t<path>`; run in `root`, git lists only its subtree, relative to it.
+	for (const entry of git(root, ["ls-tree", "-r", "-z", commit]).toString("utf8").split("\0")) {
+		if (entry === "") continue;
+		const tab = entry.indexOf("\t");
+		const [mode, type, oid] = entry.slice(0, tab).split(" ");
+		const path = entry.slice(tab + 1);
+		entries.push({ mode, type, oid, path });
+		paths.add(path);
+		for (let dir = path; dir.includes("/");) {
+			dir = dir.slice(0, dir.lastIndexOf("/"));
+			paths.add(dir);
+		}
+		if (type === "commit") modules.set(path, oid);
+	}
+	return {
+		entries,
+		exists(path) {
+			if (paths.has(path)) return true;
+			for (const [module, oid] of modules) {
+				if (!path.startsWith(`${module}/`)) continue;
+				let tree = loaded.get(module);
+				if (!tree) {
+					const dir = join(root, module);
+					try {
+						// Without its own gitdir, `git -C` would silently read the parent repository.
+						if (!existsSync(join(dir, ".git"))) throw new Error("submodule is not initialized");
+						tree = committed(dir, oid);
+					} catch (error) {
+						throw new Error(
+							`cannot read submodule ${module} at ${oid}: ${(error as Error).message}; run git submodule update --init --recursive and ensure that commit is available`,
+						);
+					}
+					loaded.set(module, tree);
+				}
+				return tree.exists(path.slice(module.length + 1));
+			}
+			return false;
+		},
 	};
 }
 
