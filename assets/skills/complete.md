@@ -20,6 +20,7 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 
 Include a brief summary of each PR.
 Act on a PR only after the user picks its action in this session, including PRs found on a later refresh.
+The exception is a PR that changes only files under `quest/`: when you recommend `/quest-merge`, dispatch it without asking, every time it comes up, and list it in the summary.
 A pick covers the PR until it lands or needs the user: when its push draws new review findings, send the agent back without asking, and apply the merge skill's design checkpoint across those rounds.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
@@ -34,8 +35,8 @@ Tell each merge sub-agent that you watch its merge queue, so it reports once
 auto-merge is enabled. Wait on each such PR with `quest wait`, as `quest skill merge`
 describes, until it merges.
 If it leaves the queue unmerged or auto-merge is disabled, confirm with
-`quest status <pr>`, then ask about the PR again; never dispatch `/quest-merge` without
-the user's choice, since a new head needs fresh approval.
+`quest status <pr>`, then ask about the PR again; outside the `quest/`-only exception,
+never dispatch `/quest-merge` without the user's choice, since a new head needs fresh approval.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
 Before finishing, refresh the open PR list and process any new PRs in scope.
