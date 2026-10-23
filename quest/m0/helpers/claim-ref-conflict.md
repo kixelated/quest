@@ -19,14 +19,16 @@ asking, and auto mode then blocked it; another pushed its claim to a
 non-standard `quest/m1/mesh-gossip-topology`, which other agents can't see as
 a claim.
 
-- Guide rule: only quest claims use the `quest/` prefix. Branches for
-  `/quest-plan`, `/quest-audit`, and other skill PRs use a prefix of their
-  own, such as `quest-plan/<slug>`.
+- Guide rule: only quest claims use the `quest` namespace, both the
+  `quest/` prefix and a branch named exactly `quest`, which would block every
+  claim beneath it. Branches for `/quest-plan`, `/quest-audit`, and other
+  skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
 - `quest start` (`src/cli/start.ts`): on a push refused by a ref conflict,
   find the conflicting ref (an ancestor path of the claim branch, or a
   descendant of it), say whether it is a merged PR's head
-  (`src/cli/claims.ts` already reads that), and exit non-zero with that
-  message. It never deletes or renames the ref.
+  (`src/cli/claims.ts` already reads that on GitHub; on other remotes, say
+  that is unknown), and exit non-zero with that message. It never deletes or
+  renames the ref.
 - Rejected: flattening claim branches so none can nest, which touches every
   skill and existing claim.
 - Regression test: a claim under a remote that holds the parent path as a
