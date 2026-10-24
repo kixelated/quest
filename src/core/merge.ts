@@ -122,7 +122,7 @@ export function resolveLists(path: string, merged: Chunk[]): Chunk[] {
  * For the document with every conflict taken from `side`, the entries each
  * conflict holds on that side, keyed by the conflict's index. A conflict is
  * missing when its lines are anything but whole entries of one link list,
- * each opening with a link.
+ * each opening with an inline link.
  */
 function lists(path: string, merged: Chunk[], side: Side): Map<number, Item[]> {
 	const lines: string[] = [];
@@ -156,12 +156,20 @@ function lists(path: string, merged: Chunk[], side: Side): Map<number, Item[]> {
 			return ok;
 		});
 		if (!valid || next !== last + 1) continue;
-		out.set(
-			index,
-			entries.map((entry) => ({ key: entry.target!, lines: lines.slice(entry.line - 1, entry.end) })),
-		);
+		const items = entries.map((entry) => ({ key: entry.target!, lines: lines.slice(entry.line - 1, entry.end) }));
+		if (items.every((item) => selfContained(path, item))) out.set(index, items);
 	}
 	return out;
+}
+
+/**
+ * Whether an entry's own lines name its destination. A reference-style link
+ * takes it from a definition outside the conflict, which the clean regions
+ * show only as merged, so a side that re-targeted the entry there would look
+ * unchanged.
+ */
+function selfContained(path: string, item: Item): boolean {
+	return parse(path, item.lines.join("\n")).entries[0]?.target === item.key;
 }
 
 /** The merged entries' lines, or `null` when the sides disagree on an entry or reorder the ones they share. */

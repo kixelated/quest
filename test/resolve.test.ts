@@ -89,6 +89,18 @@ describe("resolve", () => {
 		});
 	}
 
+	test("keeps markers for an entry whose reference definition one side changed", () => {
+		// The definition merges cleanly, so the conflict alone cannot tell that theirs re-targeted a.
+		const doc = (required: string[], target: string) =>
+			`${quest(required)}\n## Related\n\n${item("r")}\n\n[a]: ${target}\n`;
+		const base = doc(["- [a][a] - a", item("b")], "/quest/m1/a.md");
+		const ours = doc([item("b")], "/quest/m1/a.md");
+		const theirs = doc(["- [a][a] - a", item("x"), item("b")], "/quest/m1/replacement.md");
+		const { text, conflicts } = merge(base, ours, theirs);
+		expect(conflicts).toBe(1);
+		expect(text).toContain("[a]: /quest/m1/replacement.md\n");
+	});
+
 	test("keeps a conflict whose sides reorder the entries they share", () => {
 		const lines = (names: string[]) => names.map((n) => item(n));
 		const conflict = { ours: lines(["b", "a"]), base: lines(["a", "b"]), theirs: lines(["a", "b", "c"]) };
