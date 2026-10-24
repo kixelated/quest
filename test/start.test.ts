@@ -486,6 +486,28 @@ describe("start on GitHub", () => {
 		expect(tip(bare, "quest/m0/epic/three")).toBe("");
 	});
 
+	test("names a branch named after the epic's directory, says whether it merged, and leaves it", async () => {
+		const bare = upstream();
+		// A planning PR's branch named after the epic: git cannot also hold the child's claim beneath it.
+		git(bare, "branch", "quest/m0/epic", "main");
+		const blocker = tip(bare, "quest/m0/epic");
+		const github = new FakeGitHub();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const refusal = (state: string) =>
+			new Refusal(
+				`${ONE} cannot be claimed: git cannot hold ${BRANCH} on origin beside a branch named after its directory or inside it:\n` +
+					`- quest/m0/epic: ${state}\n` +
+					"Stop and report this; do not delete or rename a branch in the way.",
+			);
+
+		await expect(start(work, github)).rejects.toThrow(refusal("not a merged PR's head"));
+		const pull = github.closed("example/project", "quest/m0/epic", blocker, true);
+		await expect(start(work, github)).rejects.toThrow(refusal(`the head of ${pull.html_url}, which merged`));
+		expect(tip(bare, "quest/m0/epic")).toBe(blocker);
+		expect(tip(bare)).toBe("");
+		expect(github.open_("example/project")).toEqual([]);
+	});
+
 	test("release deletes the empty claim branch and closes its PR", async () => {
 		const bare = upstream();
 		const github = new FakeGitHub();
@@ -581,6 +603,16 @@ describe("start on another forge", () => {
 		expect(out.code).toBe(3);
 		expect(out.stderr).toContain("quest: quest/m0/epic/two.md is blocked;");
 		expect(tip(bare, "quest/m0/epic/two")).toBe("");
+	});
+
+	test.each(["quest", `${BRANCH}/extra`])("refuses with exit 3 while branch %s is in the way", async (blocker) => {
+		const { bare, work } = plain();
+		git(bare, "branch", blocker, "main");
+		const out = await cli("--root", work, "start", ONE);
+		expect(out.code).toBe(3);
+		expect(out.stderr).toContain(`\n- ${blocker}: whether it is a merged PR's head is unknown off GitHub\n`);
+		// The blocker stays, and no claim branch was pushed.
+		expect(git(bare, "for-each-ref", "--format=%(refname:short)", "refs/heads/")).toBe(`main\n${blocker}`);
 	});
 
 	test("releases the claim", async () => {
