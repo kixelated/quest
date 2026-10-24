@@ -18,7 +18,7 @@ const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const db = env.DB;
 async function user(id: string) {
 	await db
-		.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
+		.prepare("INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
 		.bind(id, id, `${id}@example.test`)
 		.run();
 }
@@ -63,13 +63,6 @@ async function run(slots: Record<string, number>, now: number, owner = "owner", 
 }
 
 beforeEach(async () => {
-	await db.batch([
-		db.prepare("DELETE FROM jobs"),
-		db.prepare("DELETE FROM runners"),
-		db.prepare("DELETE FROM github_projects"),
-		db.prepare("DELETE FROM github_installations"),
-		db.prepare("DELETE FROM output_cleanup"),
-	]);
 	await user("owner");
 	await user("other");
 	await project(10, "owner");
