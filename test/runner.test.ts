@@ -1304,6 +1304,34 @@ describe("quest runner", () => {
 		await r.runner.shutdown();
 	});
 
+	posix("reads a new plan's request and reports the follow-ups it suggests", async () => {
+		const r = rig();
+		r.steps({
+			start: [
+				{ tool: "context", args: {} },
+				{ tool: "deliver", args: { summary: "Planned", title: "plan", body: "Body", followups: [7] } },
+				{
+					tool: "deliver",
+					args: { summary: "Planned", title: "plan", body: "Body", followups: [" Cache the parser "] },
+				},
+			],
+		});
+		const plan = "0".repeat(8) + "-0000-4000-8000-" + "0".repeat(12);
+		r.assign(job(r.upstream.commit, { workflow: "plan", target: `plans/${plan}`, branch: "plan/00000000" }));
+		const result = await r.result();
+		await idle(r.runner);
+		expect(r.contexts).toHaveLength(1);
+		const launch = r.calls().find((c) => c.argv)!;
+		expect(launch.stdin).toContain(
+			"Start a new planning interview. Read what it starts from with the `context` tool",
+		);
+		// A malformed list is the agent's to fix; nothing was published for it.
+		const [refused] = r.calls().filter((c) => c.tool === "deliver");
+		expect(refused.reply.isError).toBe(true);
+		expect(result).toMatchObject({ outcome: "completed", result: { followups: ["Cache the parser"] } });
+		await r.runner.shutdown();
+	});
+
 	posix("refuses to resume with an answer its owner has not approved", async () => {
 		const r = rig();
 		r.steps({ start: [{ tool: "deliver", args: { summary: "Done", title: "t", body: "b" } }] });

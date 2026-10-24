@@ -122,7 +122,6 @@ fixes what it finds:
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
-- [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Seeded GitHub fake](/quest/m0/kix/github-fake.md) - the local server runs publication end to end, and tests share its fake
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

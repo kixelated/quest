@@ -282,7 +282,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"quest check rejects, which can hide a blocker. Refuses a blocked quest, one missing from the " +
 				"upstream default branch, and one already held: a branch upstream or an open PR from that branch in " +
 				"any repository. A branch whose tip is a merged PR's head holds nothing, and the claim replaces it " +
-				"with a lease on that tip. A rejected push means someone else pushed the branch first. When two PRs " +
+				"with a lease on that tip. A rejected push means someone else pushed the branch first. A branch named after the claim " +
+				"branch's directory, or inside it, refuses the claim too, since git cannot hold both; the refusal names it " +
+				"and whether it is a merged PR's head, and leaves it in place. When two PRs " +
 				"race, as from forks, the earliest open PR keeps the claim; a later one is closed and its branch " +
 				"deleted.\n\n" +
 				"The remote's upstream holds claims: a GitHub fork pushes the branch to itself and opens the PR on its " +
@@ -291,7 +293,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
-				"(blocked, held, or work on the branch), 2 for invalid arguments, and 1 for other failures.",
+				"(blocked, held, a branch in the way, or work on the branch), 2 for invalid arguments, and 1 for other " +
+				"failures.",
 		)
 		.argument("<quest>", "Quest to claim, as /quest/..., quest/..., or a filesystem path")
 		.option("--release", "Release the claim instead: delete the empty claim branch and close its PR")
