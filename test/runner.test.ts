@@ -4,11 +4,21 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSyn
 import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
+import type { AdapterName } from "../src/runner/adapter";
 import { Claude, jobEnvironment, streamReader } from "../src/runner/claude";
-import { devShell, login } from "../src/runner/cli";
+import { addAccount, devShell, login, RunnerInputError } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
+import {
+	accountDirectories,
+	credentials,
+	environment,
+	Opencode,
+	retryLimit,
+	signedIn,
+	turnExit,
+} from "../src/runner/opencode";
 import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
 import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
@@ -402,6 +412,80 @@ describe("Claude Code output", () => {
 	});
 });
 
+describe("opencode", () => {
+	test("labels an account by the providers its home signed in to", () => {
+		const home = tempDir();
+		expect(credentials(home)).toEqual([]);
+		const data = join(accountDirectories(home).XDG_DATA_HOME, "opencode");
+		mkdirSync(data, { recursive: true });
+		writeFileSync(
+			join(data, "auth.json"),
+			JSON.stringify({ openai: { type: "oauth", access: "a" }, "opencode-go": { type: "api", key: "k" } }),
+		);
+		expect(signedIn(credentials(home))).toEqual({
+			provider: "openai",
+			kind: "subscription",
+			label: "ChatGPT, OpenCode Go (opencode)",
+		});
+		expect(signedIn([{ provider: "wafer.ai", type: "api" }])).toEqual({
+			provider: "wafer-ai",
+			kind: "api-key",
+			label: "wafer.ai API key (opencode)",
+		});
+		expect(signedIn([])).toBeNull();
+	});
+
+	test("keeps the user's provider credentials and opencode settings from the account", () => {
+		const kept = environment({
+			PATH: "/bin",
+			CLOUDFLARE_API_KEY: "k",
+			AWS_SECRET_ACCESS_KEY: "s",
+			OPENCODE_CONFIG: "c",
+		});
+		expect(kept).toEqual({ PATH: "/bin" });
+	});
+
+	test("reads account limits from retries and errors, not brief rate limits", () => {
+		const retry = { type: "retry" as const, attempt: 1, next: 1_900_000_000_000 };
+		expect(
+			retryLimit({
+				...retry,
+				message: "Go limit reached",
+				action: { reason: "account_rate_limit", provider: "opencode-go", title: "", message: "", label: "" },
+			}),
+		).toEqual({ until: 1_900_000_000_000 });
+		expect(retryLimit({ ...retry, message: "The usage limit has been reached" })).toEqual({ until: null });
+		expect(retryLimit({ ...retry, message: "Rate limit reached for requests" })).toBeNull();
+		expect(retryLimit({ type: "busy" })).toBeNull();
+
+		const now = 1_000_000;
+		const api = (message: string, responseBody?: string, responseHeaders?: Record<string, string>) =>
+			({
+				role: "assistant",
+				error: { name: "APIError", data: { message, isRetryable: false, responseBody, responseHeaders } },
+			}) as never;
+		expect(
+			turnExit(
+				api("Too many", JSON.stringify({ error: { type: "usage_limit_reached", resets_at: 1_900_000 } })),
+				[],
+				null,
+				now,
+			).limited,
+		).toEqual({ until: 1_900_000_000 });
+		expect(turnExit(api("Quota exceeded.", "", { "retry-after": "60" }), [], null, now).limited).toEqual({
+			until: now + 60_000,
+		});
+		expect(turnExit(api("Bad request"), [], null, now)).toEqual({
+			limited: null,
+			failed: true,
+			reply: "Bad request",
+		});
+		expect(
+			turnExit({ role: "assistant" } as never, [{ type: "text", text: "All done" } as never], null, now),
+		).toEqual({ limited: null, failed: false, reply: "All done" });
+	});
+});
+
 describe("kix tools", () => {
 	test("speak MCP over HTTP to the attempt's agent only", async () => {
 		const server = await serveTools([
@@ -528,6 +612,45 @@ describe("prompts", () => {
 				answer: "retry",
 			}),
 		).toContain("(branch moved). The maintainer replied: retry");
+	});
+});
+
+describe("account add", () => {
+	posix("signs an opencode account in with its own flow in its own home", async () => {
+		const dir = tempDir();
+		const bin = join(dir, "bin");
+		mkdirSync(bin);
+		// opencode's sign-in stores the credential under its XDG data home.
+		writeFileSync(
+			join(bin, "opencode"),
+			`#!/bin/sh\nmkdir -p "$XDG_DATA_HOME/opencode"\necho '{"opencode-go":{"type":"api","key":"k"}}' > "$XDG_DATA_HOME/opencode/auth.json"\n`,
+		);
+		chmodSync(join(bin, "opencode"), 0o755);
+		const out: string[] = [];
+		const io = {
+			stdout: (text: string) => out.push(text),
+			stderr: () => {},
+			env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, QUEST_RUNNER_HOME: join(dir, "home") },
+		};
+		await expect(addAccount(io, { cli: "opencode", console: true })).rejects.toThrow(RunnerInputError);
+		await expect(addAccount(io, { cli: "opencode", console: false, model: "gpt" })).rejects.toThrow(
+			RunnerInputError,
+		);
+		expect(await addAccount(io, { cli: "opencode", console: false, model: "opencode-go/kimi-k3" })).toBe(0);
+		const home = new RunnerHome(join(dir, "home"));
+		const [account] = home.accounts();
+		expect(account).toMatchObject({
+			adapter: "opencode",
+			provider: "opencode-go",
+			kind: "subscription",
+			label: "OpenCode Go (opencode)",
+		});
+		const config = join(
+			accountDirectories(home.accountHome(account!.id)).XDG_CONFIG_HOME,
+			"opencode",
+			"opencode.json",
+		);
+		expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ model: "opencode-go/kimi-k3" });
 	});
 });
 
@@ -665,6 +788,82 @@ async function rpc(method, params) {
 })();
 `;
 
+/**
+ * A fake `opencode serve` that runs the same steps as the fake `claude` on
+ * each prompt: it checks the password, streams events, and ends a waiting
+ * turn when the session is aborted.
+ */
+const FAKE_OPENCODE = `
+const fs = require("node:fs");
+const { join } = require("node:path");
+const http = require("node:http");
+const argv = process.argv.slice(2);
+const logFile = join(__dirname, "..", "calls.log");
+const log = (value) => fs.appendFileSync(logFile, JSON.stringify(value) + "\\n");
+const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
+const auth = "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_SERVER_PASSWORD).toString("base64");
+const kix = config.mcp.kix;
+const streams = [];
+const send = (event) => { for (const s of streams) s.write("data: " + JSON.stringify(event) + "\\n\\n"); };
+let aborted = () => {};
+let sessions = 0;
+let id = 0;
+async function rpc(method, params) {
+	const response = await fetch(kix.url, {
+		method: "POST",
+		headers: { ...kix.headers, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
+	});
+	return (await response.json()).result;
+}
+const body = (request) => new Promise((resolve) => {
+	let text = "";
+	request.on("data", (chunk) => (text += chunk));
+	request.on("end", () => resolve(text ? JSON.parse(text) : {}));
+});
+const json = (response, value) => response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
+async function prompt(session, input) {
+	const steps = JSON.parse(fs.readFileSync(join(__dirname, "..", "steps.json"), "utf8"));
+	const resume = fs.existsSync(logFile) && fs.readFileSync(logFile, "utf8").includes('"prompted":"' + session + '"');
+	log({
+		argv, cwd: process.cwd(), stdin: input.parts[0].text, system: input.system, session, prompted: session,
+		xdg: process.env.XDG_DATA_HOME, devShell: process.env.IN_DEVSHELL ?? null, gh: process.env.GH_TOKEN ?? null, config,
+	});
+	await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "0" } });
+	for (const step of steps[resume ? "resume" : "start"] ?? []) {
+		if (step.write) fs.writeFileSync(step.write, step.content);
+		if (step.remove) fs.rmSync(step.remove);
+		if (step.emit) send({ ...step.emit, properties: { ...step.emit.properties, sessionID: session } });
+		if (step.tool) log({ tool: step.tool, reply: await rpc("tools/call", { name: step.tool, arguments: step.args }) });
+		if (step.wait) {
+			await new Promise((resolve) => (aborted = resolve));
+			log({ aborted: session });
+			return { info: { role: "assistant", error: { name: "MessageAbortedError", data: { message: "Aborted" } } }, parts: [] };
+		}
+	}
+	return { info: { role: "assistant", finish: "stop" }, parts: [{ type: "text", text: "done" }] };
+}
+const server = http.createServer(async (request, response) => {
+	if (request.headers.authorization !== auth) return response.writeHead(401).end();
+	const path = new URL(request.url, "http://x").pathname;
+	if (path === "/event") {
+		response.writeHead(200, { "Content-Type": "text/event-stream" });
+		streams.push(response);
+		return response.write("data: " + JSON.stringify({ type: "server.connected", properties: {} }) + "\\n\\n");
+	}
+	if (path === "/session") return json(response, { id: "ses_" + ++sessions + "_" + process.pid });
+	const message = /^\\/session\\/([^/]+)\\/message$/.exec(path);
+	if (message) return json(response, await prompt(message[1], await body(request)));
+	if (/\\/abort$/.test(path)) {
+		aborted();
+		return json(response, true);
+	}
+	response.writeHead(404).end();
+});
+process.on("SIGTERM", () => process.exit(143));
+server.listen(0, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + server.address().port));
+`;
+
 /** A fake `nix` whose `print-dev-env` prints a one-line devShell. */
 const FAKE_NIX = `
 const fs = require("node:fs");
@@ -694,11 +893,12 @@ function rig(
 		body: Sent,
 		upstream: { dir: string; commit: string },
 	) => { status: number; body: unknown } | undefined,
+	cli: AdapterName = "claude",
 ): Rig {
 	const dir = tempDir();
 	const bin = join(dir, "bin");
 	mkdirSync(bin);
-	for (const [name, body] of Object.entries({ claude: FAKE_CLAUDE, nix: FAKE_NIX })) {
+	for (const [name, body] of Object.entries({ claude: FAKE_CLAUDE, opencode: FAKE_OPENCODE, nix: FAKE_NIX })) {
 		writeFileSync(join(bin, name), `#!${process.execPath}\n${body}`);
 		chmodSync(join(bin, name), 0o755);
 	}
@@ -707,12 +907,18 @@ function rig(
 	const home = new RunnerHome(join(dir, "home"));
 	const account: Account = {
 		id: "acct1",
-		adapter: "claude",
-		provider: "anthropic",
+		adapter: cli,
+		provider: cli === "claude" ? "anthropic" : "openai",
 		kind: "subscription",
 		label: "me@example.test",
 	};
 	home.saveAccounts([account]);
+	if (cli === "opencode") {
+		const data = join(accountDirectories(home.accountHome("acct1")).XDG_DATA_HOME, "opencode");
+		mkdirSync(data, { recursive: true });
+		writeFileSync(join(data, "auth.json"), JSON.stringify({ openai: { type: "oauth", access: "secret" } }));
+		Opencode.setModel(home.accountHome("acct1"), "openai/gpt-5.5");
+	}
 	const hub = new FakeHub();
 	const publishes: Sent[] = [];
 	const contexts: string[] = [];
@@ -729,7 +935,8 @@ function rig(
 		home,
 		login: { url: "http://kix.test", token: "token", id: "r1", name: "laptop" },
 		slots: 2,
-		adapter: () => new Claude(join(bin, "claude"), env),
+		adapter: () =>
+			cli === "claude" ? new Claude(join(bin, "claude"), env) : new Opencode(join(bin, "opencode"), env),
 		devShell: (job, repository) => devShell(job, repository, env),
 		remote: () => source.dir,
 		env,
@@ -953,6 +1160,104 @@ describe("quest runner", () => {
 		await r.runner.shutdown();
 	});
 
+	posix("drives opencode serve through a question and a resume in the same session", async () => {
+		const r = rig(undefined, "opencode");
+		r.steps({
+			start: [
+				{ write: "a.txt", content: "draft\n" },
+				{ tool: "checkpoint", args: { summary: "Drafted" } },
+				{
+					tool: "ask",
+					args: { summary: "Need a choice", questions: [{ question: "Which?", options: [{ label: "A" }] }] },
+				},
+			],
+			resume: [{ tool: "deliver", args: { summary: "Went with A", title: "feat: a", body: "Body" } }],
+		});
+		r.assign(job(r.upstream.commit), "Extra rule.");
+		const question = await r.hub.next((m) => m.type === "question");
+		await idle(r.runner);
+		expect(r.hub.of("checkpoint")).toMatchObject([{ summary: "Drafted", session: question.session }]);
+		const [nix, first] = r.calls();
+		expect(nix.nix.slice(0, 3)).toEqual(["print-dev-env", "--accept-flake-config", "--no-write-lock-file"]);
+		const home = r.home.accountHome("acct1");
+		// The account's XDG home applies to opencode alone, set inside the devShell built from the revision.
+		expect(first.argv).toEqual(["serve", "--hostname=127.0.0.1", "--port=0"]);
+		expect(first.devShell).toBe("1");
+		expect(first.xdg).toBe(join(home, "data"));
+		expect(first.gh).toBeNull();
+		expect(first.stdin).toContain("kix adds for this job: Extra rule.");
+		expect(first.system).toContain("checkpoint");
+		expect(first.config).toMatchObject({
+			model: "openai/gpt-5.5",
+			enabled_providers: ["openai"],
+			permission: { "*": "allow", question: "deny" },
+			mcp: { kix: { type: "remote", headers: { Authorization: expect.stringMatching(/^Bearer /) } } },
+		});
+		expect(first.config.plugin[0][1].env.XDG_DATA_HOME).not.toContain(home);
+		// Events stream as raw output.
+		expect(
+			r.hub
+				.of("output")
+				.map((o) => o.text)
+				.join(""),
+		).toContain("opencode server listening");
+
+		r.assign(
+			job(r.upstream.commit, {
+				attempt: 2,
+				session: question.session,
+				head: "0".repeat(39) + "1",
+				questions: [
+					{
+						id: "q1",
+						attempt: 1,
+						kind: "agent",
+						prompt: question.prompt,
+						answer: { answers: [{ choices: ["A"] }] },
+						approvedAt: 1,
+					},
+				],
+			}),
+		);
+		const result = await r.result();
+		await idle(r.runner);
+		expect(result).toMatchObject({ attempt: 2, outcome: "completed", summary: "Went with A" });
+		const resumed = r.calls().filter((c) => c.prompted);
+		expect(resumed).toHaveLength(2);
+		// The kix session maps to the opencode session that asked.
+		expect(resumed[1].session).toBe(first.session);
+		expect(resumed[1].stdin).toContain("Q: Which?\nA: A");
+		await r.runner.shutdown();
+	});
+
+	posix("aborts opencode on a cancel or an account limit", async () => {
+		const r = rig(undefined, "opencode");
+		r.steps({ start: [{ write: "a.txt", content: "partial\n" }, ready, { wait: true }] });
+		r.assign(job(r.upstream.commit));
+		await waiting(r);
+		r.hub.socket.deliver({ type: "cancel", job: "job1", attempt: 1 });
+		const cancelled = await r.result();
+		await idle(r.runner);
+		expect(cancelled).toMatchObject({ outcome: "cancelled" });
+		expect(r.calls().some((c) => c.aborted)).toBe(true);
+
+		const resets = Date.now() + 3_600_000;
+		const status = {
+			type: "retry",
+			attempt: 1,
+			message: "Go limit",
+			next: resets,
+			action: { reason: "account_rate_limit" },
+		};
+		r.steps({ start: [{ emit: { type: "session.status", properties: { status } } }, { wait: true }] });
+		r.assign(job(r.upstream.commit, { id: "job2" }));
+		const limited = await r.hub.next((m) => m.type === "result" && m.job === "job2");
+		await idle(r.runner);
+		expect(limited).toMatchObject({ outcome: "limited" });
+		expect(r.home.accounts()[0]!.limitedUntil).toBe(resets);
+		await r.runner.shutdown();
+	});
+
 	posix("cancels on request, publishing the partial work", async () => {
 		const r = rig();
 		r.steps({
@@ -1134,6 +1439,34 @@ describe("quest runner", () => {
 		// A quest's job has its quest in the checkout and gets no such tool.
 		const launch = r.calls().find((c) => c.argv)!;
 		expect(launch.stdin).toContain("Read it with the `context` tool first");
+		await r.runner.shutdown();
+	});
+
+	posix("reads a new plan's request and reports the follow-ups it suggests", async () => {
+		const r = rig();
+		r.steps({
+			start: [
+				{ tool: "context", args: {} },
+				{ tool: "deliver", args: { summary: "Planned", title: "plan", body: "Body", followups: [7] } },
+				{
+					tool: "deliver",
+					args: { summary: "Planned", title: "plan", body: "Body", followups: [" Cache the parser "] },
+				},
+			],
+		});
+		const plan = "0".repeat(8) + "-0000-4000-8000-" + "0".repeat(12);
+		r.assign(job(r.upstream.commit, { workflow: "plan", target: `plans/${plan}`, branch: "plan/00000000" }));
+		const result = await r.result();
+		await idle(r.runner);
+		expect(r.contexts).toHaveLength(1);
+		const launch = r.calls().find((c) => c.argv)!;
+		expect(launch.stdin).toContain(
+			"Start a new planning interview. Read what it starts from with the `context` tool",
+		);
+		// A malformed list is the agent's to fix; nothing was published for it.
+		const [refused] = r.calls().filter((c) => c.tool === "deliver");
+		expect(refused.reply.isError).toBe(true);
+		expect(result).toMatchObject({ outcome: "completed", result: { followups: ["Cache the parser"] } });
 		await r.runner.shutdown();
 	});
 

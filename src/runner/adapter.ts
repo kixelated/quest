@@ -1,10 +1,39 @@
-// How a runner drives one agent CLI. The interface stays small so another
-// CLI (opencode) fits it: sign an account in, start or resume a session with
-// the kix tools attached, stream its raw output, stop it, and read how it ended.
+// How a runner drives one agent CLI, Claude Code or opencode. The interface
+// stays small: sign an account in, start or resume a session with the kix
+// tools attached, stream its raw output, stop it, and read how it ended.
 // Questions, checkpoints, and delivery reach kix through those tools, not
 // through anything CLI-specific.
+import { strippedEnvironment } from "../cli/agent";
 import type { AccountKind } from "./home";
 import type { Sandbox } from "./sandbox";
+
+/** The agent CLIs a runner drives. */
+export type AdapterName = "claude" | "opencode";
+
+/** How long a stopped agent has to exit before it is killed. */
+export const STOP_GRACE_MS = 10_000;
+
+/**
+ * Signal the process group a detached CLI leads, so stopping it also stops
+ * the devShell and every tool it started.
+ */
+export function signalGroup(pid: number | undefined, name: NodeJS.Signals): void {
+	if (pid === undefined) return;
+	try {
+		process.kill(-pid, name);
+	} catch {}
+}
+
+/**
+ * The user's environment for an account's CLI, without other harnesses'
+ * state, keys, or GitHub tokens: kix publishes, and the agent never pushes.
+ */
+export function baseEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const kept = strippedEnvironment(env);
+	delete kept.GH_TOKEN;
+	delete kept.GITHUB_TOKEN;
+	return kept;
+}
 
 export interface Launch {
 	/** The job's checkout, where the agent works. */
@@ -43,16 +72,16 @@ export interface Running {
 }
 
 export interface SignedIn {
+	/** The provider kix shows for the account, such as anthropic or openai. */
+	provider: string;
 	kind: AccountKind;
 	/** A label for the account, such as its email. */
 	label: string;
 }
 
 export interface Adapter {
-	readonly name: "claude";
-	/** The provider kix shows for this adapter's accounts. */
-	readonly provider: string;
-	/** Run the CLI's own interactive sign-in in `home`. */
+	readonly name: AdapterName;
+	/** Run the CLI's own interactive sign-in in `home`. `console` picks Claude Code's Console billing. */
 	login(home: string, options: { console: boolean }): Promise<void>;
 	/** Whether `home` holds a signed-in account, and what kind. */
 	status(home: string): Promise<SignedIn | null>;

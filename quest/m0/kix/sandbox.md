@@ -4,7 +4,8 @@
 
 Jobs on PR heads containing non-maintainer commits route to Linux runners,
 which build the PR's devShell in a per-job VM before its commands run in the
-OS sandbox every job already uses. kix classifies PR heads whose commits all
+OS sandbox every Claude Code job already uses. opencode jobs' commands run in
+that sandbox too. kix classifies PR heads whose commits all
 come from maintainers or kix jobs as trusted, so those run on any runner. The
 sandbox is verified on macOS, and the owner's approval of another
 maintainer's answer is lifted once it is.
@@ -65,7 +66,18 @@ Shipped in [kixelated/quest#212](https://github.com/kixelated/quest/pull/212)
   revision's commands reach no network host. The answer-approval gate stays
   until the sandbox is verified on macOS.
 
-Remaining verification:
+Remaining work:
+
+- opencode has no native sandbox, and its jobs' commands still run unconfined
+  on the host (in the revision's devShell, with the attempt's private HOME).
+  Decided 2026-10-15: run `opencode serve` under Anthropic's sandbox-runtime
+  with the runner's `Sandbox` policy (`src/runner/sandbox.ts`). The runner
+  reaches the server on localhost, and opencode needs its providers' hosts,
+  so check both under sandbox-runtime's network isolation. Keep the account's
+  login out of what the commands can read: verify how much of its XDG home the
+  wrapped process exposes, and deny reads of every other account home.
+  Commands also inherit the per-turn `OPENCODE_SERVER_PASSWORD`, and the kix
+  tools' bearer token in `OPENCODE_CONFIG_CONTENT`; keep both out of reach.
 
 - On macOS, sandboxed commands cannot reach the account's Keychain item
   (`security find-generic-password`), `/private/var/folders`, or another

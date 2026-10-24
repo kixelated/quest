@@ -34,6 +34,8 @@ export type Item = {
 	title: string;
 	href: string;
 	activity: Activity | null;
+	/** A "plan these?" decision's suggested follow-ups, untrusted agent text. */
+	followups?: string[];
 	/** The target's latest job. */
 	job: JobView | null;
 	/** The job's open question, or its answer awaiting approval, and its prompt when an agent asked it. */
@@ -70,7 +72,39 @@ export function questHref(project: Enrollment, path: string) {
 	return `${projectURL(project.owner, project.name)}/board/${encodePath(questBranch(path))}`;
 }
 
-export type Entity = Pick<Item, "kind" | "title" | "href" | "activity" | "version" | "at">;
+export type Entity = Pick<Item, "kind" | "title" | "href" | "activity" | "version" | "at" | "followups">;
+
+/** What a target names in a sentence, such as `issue #4`. */
+function describe(target: string) {
+	const [, kind, number] = target.match(/^(issues|pulls)\/(\d+)$/) ?? [];
+	if (kind) return `${kind === "issues" ? "issue" : "pull request"} #${number}`;
+	return target.startsWith("plans/") ? "a plan" : target;
+}
+
+/**
+ * A finished job's suggested follow-ups as a "plan these?" decision. Its
+ * target is the interview that plans them, `plans/<job>`, so the decision,
+ * that interview, and its questions stay one item.
+ */
+export function followupEntity(project: Enrollment, job: store.Followups): Entity {
+	const web = `https://github.com/${project.owner}/${project.name}`;
+	return {
+		kind: "plan",
+		title: `Follow-ups from ${describe(job.target)}`,
+		href: job.pull ? `${web}/pull/${job.pull}` : web,
+		activity: null,
+		version: `followups:${job.id}`,
+		at: job.updatedAt,
+		followups: job.followups,
+	};
+}
+
+/** A plan's title: the first line of the maintainer's idea. */
+function planTitle(idea: string | null) {
+	const line = idea?.trim().split("\n")[0]?.trim();
+	if (!line) return "New plan";
+	return line.length <= 80 ? line : `${line.slice(0, 79)}…`;
+}
 
 /** The open issues, open pull requests, and ready quests a maintainer can act on, by job target. */
 export function entities(project: Enrollment, state: ProjectState | null) {
@@ -178,8 +212,10 @@ export function decisions(
 			try {
 				prompt = parsePrompt(question.prompt);
 			} catch {}
+		const shown = entity ?? fallback(project, target);
 		items.push({
-			...(entity ?? fallback(project, target)),
+			...shown,
+			...(shown.kind === "plan" && !entity && { title: planTitle(job?.idea ?? null) }),
 			project,
 			target,
 			job,
@@ -219,6 +255,10 @@ export type Runners = Awaited<ReturnType<typeof store.listRunners>>;
 /** Every project's items, from its observations, its jobs, and the maintainer's read state. */
 async function collect(db: D1Database, user: string, views: ProjectView[]) {
 	const found = views.map((view) => entities(view.project, view.state));
+	// Finished jobs' suggested follow-ups wait as "plan these?" decisions until planned.
+	const followups = await Promise.all(views.map((view) => store.listFollowups(db, view.project.id)));
+	for (const [i, list] of followups.entries())
+		for (const job of list) found[i]!.set(`plans/${job.id}`, followupEntity(views[i]!.project, job));
 	const [reads, jobs] = await Promise.all([
 		db.prepare("SELECT repository,item,seen,skipped FROM inbox_items WHERE user=?").bind(user).all<Read>(),
 		Promise.all(views.map((view, i) => store.listInboxJobs(db, view.project.id, [...found[i]!.keys()]))),
@@ -242,6 +282,13 @@ export async function unread(env: Env, user: string) {
 
 /** What a notification calls an item: its issue, pull request, or quest title, as the inbox shows it. */
 export async function title(db: D1Database, project: Enrollment, target: string) {
+	if (target.startsWith("plans/")) {
+		const job = await db
+			.prepare("SELECT idea FROM jobs WHERE repository=? AND target=? ORDER BY createdAt DESC,id LIMIT 1")
+			.bind(project.id, target)
+			.first<{ idea: string | null }>();
+		return planTitle(job?.idea ?? null);
+	}
 	const state = await readState(db, project);
 	return (entities(project, state).get(target) ?? fallback(project, target)).title;
 }
@@ -270,7 +317,9 @@ export async function load(env: Env, user: string) {
 		collect(env.DB, user, readable),
 		Promise.all(readable.map((view) => store.listActivityJobs(env.DB, view.project.id, openPulls(view)))),
 	]);
+	// The user's own runners are where the jobs they request run.
 	const actors = [
+		user,
 		...items.flatMap((item) => (item.job ? [item.job.actor] : [])),
 		...activity.flat().map((j) => j.actor),
 	];

@@ -8,8 +8,9 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
-import type { Adapter } from "./adapter";
+import type { Adapter, AdapterName } from "./adapter";
 import { Claude } from "./claude";
+import { Opencode } from "./opencode";
 import { type Account, type Login, RunnerHome, defaultHome } from "./home";
 import type { Job } from "./protocol";
 import { Runner } from "./runner";
@@ -47,24 +48,31 @@ export function which(name: string, env: NodeJS.ProcessEnv): string | undefined 
 	return undefined;
 }
 
+const CLIS: Record<AdapterName, { binary: string; variable: string; product: string }> = {
+	claude: { binary: "claude", variable: "QUEST_RUNNER_CLAUDE", product: "Claude Code" },
+	opencode: { binary: "opencode", variable: "QUEST_RUNNER_OPENCODE", product: "opencode" },
+};
+
 /**
- * The Claude Code binary: `QUEST_RUNNER_CLAUDE`, or `claude` on PATH. It is
- * resolved before any devShell is entered, so a project cannot substitute
- * its own `claude` for the one the account signed in with.
+ * An agent CLI's binary: its `QUEST_RUNNER_*` variable, or the CLI on PATH.
+ * It is resolved before any devShell is entered, so a project cannot
+ * substitute its own CLI for the one the account signed in with.
  */
-export function claudeBinary(env: NodeJS.ProcessEnv): string {
-	const configured = env.QUEST_RUNNER_CLAUDE;
+export function cliBinary(name: AdapterName, env: NodeJS.ProcessEnv): string {
+	const { binary, variable, product } = CLIS[name];
+	const configured = env[variable];
 	if (configured) {
-		if (!isAbsolute(configured)) throw new RunnerInputError("QUEST_RUNNER_CLAUDE must be an absolute path");
+		if (!isAbsolute(configured)) throw new RunnerInputError(`${variable} must be an absolute path`);
 		return configured;
 	}
-	const found = which("claude", env);
-	if (!found) throw new RunnerInputError("claude is not installed; install Claude Code or set QUEST_RUNNER_CLAUDE");
+	const found = which(binary, env);
+	if (!found) throw new RunnerInputError(`${binary} is not installed; install ${product} or set ${variable}`);
 	return found;
 }
 
-function adapterFor(io: RunnerIO): Adapter {
-	return new Claude(claudeBinary(io.env), io.env);
+export function adapterFor(name: AdapterName, env: NodeJS.ProcessEnv): Adapter {
+	const binary = cliBinary(name, env);
+	return name === "opencode" ? new Opencode(binary, env) : new Claude(binary, env);
 }
 
 function home(io: RunnerIO): RunnerHome {
@@ -114,22 +122,33 @@ export async function login(
 }
 
 /** Sign a new account in with its CLI's own flow, in its own home. */
-export async function addAccount(io: RunnerIO, options: { console: boolean; label?: string }): Promise<number> {
+export async function addAccount(
+	io: RunnerIO,
+	options: { cli: AdapterName; console: boolean; label?: string; model?: string },
+): Promise<number> {
 	platform();
 	const label = options.label?.trim();
 	if (label !== undefined && (!label || label.length > 100))
 		throw new RunnerInputError("--label must be 1 to 100 characters");
+	if (options.console && options.cli !== "claude")
+		throw new RunnerInputError("--console is for Claude Code; opencode asks how to sign in");
+	const model = options.model?.trim();
+	if (model !== undefined && options.cli !== "opencode")
+		throw new RunnerInputError("--model is for opencode; Claude Code picks its own");
+	if (model !== undefined && !/^[^/\s]+\/\S+$/.test(model))
+		throw new RunnerInputError("--model must be provider/model, such as openai/gpt-5.5");
 	const state = home(io);
-	const adapter = adapterFor(io);
+	const adapter = adapterFor(options.cli, io.env);
 	const { id, home: dir } = state.newAccount();
 	try {
 		await adapter.login(dir, { console: options.console });
 		const signedIn = await adapter.status(dir);
 		if (!signedIn) throw new Error("the account did not finish signing in");
+		if (model) Opencode.setModel(dir, model);
 		const account: Account = {
 			id,
 			adapter: adapter.name,
-			provider: adapter.provider,
+			provider: signedIn.provider,
 			kind: signedIn.kind,
 			label: label ?? signedIn.label.slice(0, 100),
 		};
@@ -192,8 +211,12 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 	const state = home(io);
 	const current = state.login();
 	if (!current) throw new RunnerInputError("this machine is not signed in; run `quest runner login` first");
-	if (!state.accounts().length) throw new RunnerInputError("no accounts; add one with `quest runner account add`");
-	const adapter = adapterFor(io);
+	const accounts = state.accounts();
+	if (!accounts.length) throw new RunnerInputError("no accounts; add one with `quest runner account add`");
+	// Only the CLIs some account uses, each resolved once, before any job enters a devShell.
+	const adapters = new Map<AdapterName, Adapter>();
+	for (const account of accounts)
+		if (!adapters.has(account.adapter)) adapters.set(account.adapter, adapterFor(account.adapter, io.env));
 	if (!which("nix", io.env))
 		throw new RunnerInputError("nix is not installed; every job runs in its project's devShell");
 	// Claude Code's sandbox needs both on Linux; macOS has Seatbelt built in.
@@ -215,7 +238,12 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		home: state,
 		login: current,
 		slots: options.slots,
-		adapter: () => adapter,
+		// An account added while the runner runs uses a CLI resolved then.
+		adapter: (account) => {
+			let adapter = adapters.get(account.adapter);
+			if (!adapter) adapters.set(account.adapter, (adapter = adapterFor(account.adapter, io.env)));
+			return adapter;
+		},
 		devShell: (job, repository) => devShell(job, repository, io.env),
 		remote: (job) => `https://github.com/${job.owner}/${job.name}.git`,
 		env: io.env,
