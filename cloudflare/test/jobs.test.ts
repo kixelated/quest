@@ -1070,6 +1070,97 @@ describe("job routes", () => {
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(201);
 	});
 
+	it("holds a pull request picked for merge until its job stops, unless another session holds it", async () => {
+		const created = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({
+			workflow: "merge",
+			state: "queued",
+			revision: head,
+			head,
+			branch: "contributor/fix",
+			trusted: 0,
+			hold: "LE_1",
+		});
+		// Picking it again finds the same job, which already holds the pull request.
+		expect(await (await post("", { workflow: "merge", target: "pulls/2" })).json()).toEqual({ id, created: false });
+		expect(github.events).toHaveLength(1);
+		// Stopping the job gives the pull request back.
+		expect((await post(`/${id}/cancel`, {})).status).toBe(204);
+		expect(github.labels).toEqual([]);
+		expect(await state(id)).toMatchObject({ state: "cancelled", hold: null });
+
+		// A local session's hold refuses the pick and leaves no job behind.
+		github.labels = ["quest:iterate"];
+		github.events.push({ id: "LOCAL", label: "quest:iterate" });
+		const refused = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(refused.status).toBe(403);
+		expect(await refused.json()).toEqual({
+			error: "Another session holds this pull request with quest:iterate; pick it again once it is released",
+		});
+		expect(github.labels).toEqual(["quest:iterate"]);
+		expect(await store.active(db, 10, "pulls/2")).toBe(false);
+
+		// A merge label whose landing ended unmerged is spent, so the pick takes the pull request.
+		github.labels = ["quest:merge"];
+		github.events = [
+			{ id: "QUEUED", label: "quest:merge" },
+			{ id: "AUTO", label: null },
+		];
+		const again = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(again.status).toBe(201);
+		const { id: next } = (await again.json()) as { id: string };
+		expect(await state(next)).toMatchObject({ hold: "LE_3" });
+		expect(github.labels).toEqual(["quest:merge"]);
+	});
+
+	it("gives a merge job's pull request back once its landing ends unmerged", async () => {
+		const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+		const machine = await runner(maintainer, "machine", "linux", true);
+		await connected(machine, [account("main")]);
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
+		const dequeued = {
+			action: "dequeued",
+			installation: { id: 5 },
+			repository: { id: 10 },
+			pull_request: { id: 21, number: 2 },
+		};
+		// A running job keeps its hold whatever GitHub says.
+		await delivery("pull_request", dequeued, undefined, {}, testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		// The job started a landing, which keeps the hold while it is queued.
+		github.landing = true;
+		github.events.push({ id: "AUTO", label: null });
+		await store.finish(
+			db,
+			machine,
+			id,
+			1,
+			{ outcome: "completed", summary: "Landing", result: undefined },
+			Date.now(),
+		);
+		await delivery("pull_request", { ...dequeued, action: "auto_merge_enabled" }, undefined, {}, testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({ hold: "LE_1" });
+		// It left the queue unmerged: the bot removes the label.
+		github.landing = false;
+		await delivery("pull_request", dequeued, undefined, {}, testEnv);
+		expect(github.labels).toEqual([]);
+		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it("refuses to merge a draft", async () => {
+		await db
+			.prepare("UPDATE github_project_activity SET data=json_set(data,'$.isDraft',json('true')) WHERE id='21'")
+			.run();
+		const refused = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(refused.status).toBe(409);
+		expect(await refused.json()).toEqual({ error: "Mark the draft ready for review before merging it" });
+		expect(github.labels).toEqual([]);
+	});
+
 	it("refuses to iterate on a pull request head without a flake", async () => {
 		github.pullFlake = false;
 		const refused = await post("", { workflow: "iterate", target: "pulls/2" });

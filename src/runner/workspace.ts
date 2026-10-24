@@ -104,7 +104,8 @@ export class Workspace {
 			await git(["read-tree", this.#record.base]);
 			await git(["add", "--all", "--", "."]);
 			const tree = (await git(["write-tree"])).stdout.trim();
-			const diff = (await git(["diff-tree", "-r", "-z", "--no-renames", merge ?? this.#record.base, tree])).stdout;
+			const diff = (await git(["diff-tree", "-r", "-z", "--no-renames", merge ?? this.#record.base, tree]))
+				.stdout;
 			const changes: Change[] = [];
 			const skipped: string[] = [];
 			const fields = diff.split("\0");
@@ -141,9 +142,13 @@ export class Workspace {
 	 */
 	async #merged(): Promise<string | null> {
 		const base = this.#record.base;
-		const listed = await run("git", ["-C", this.dir, "rev-list", "--merges", "--parents", "-n", "1", `${base}..HEAD`], {
-			encoding: "utf8",
-		});
+		const listed = await run(
+			"git",
+			["-C", this.dir, "rev-list", "--merges", "--parents", "-n", "1", `${base}..HEAD`],
+			{
+				encoding: "utf8",
+			},
+		);
 		const merged = listed.stdout.trim().split(" ")[2];
 		if (!merged) return null;
 		const held = await run("git", ["-C", this.dir, "merge-base", "--is-ancestor", merged, base]).then(

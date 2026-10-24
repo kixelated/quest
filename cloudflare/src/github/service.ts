@@ -1001,12 +1001,12 @@ export class GitHubService {
 		return this.#authorized(
 			upstream,
 			userId,
-			pulled ? { contents: "read", pull_requests: "read" } : { contents: "read" },
+			pulled ? { contents: "read", pull_requests: "read" } : {},
 			async (token, current, installation) => {
 				this.#public(current);
 				if ((await this.#state(upstream, installation)) === null)
 					throw new GitHubError("Project is not enrolled for this installation");
-				// A merge commit may only bring in what the branch's upstream base already holds.
+				// A merge commit may only bring in what the pull request's upstream base already holds.
 				const based = (base: string) => async (commit: string) => {
 					try {
 						const ref = base.split("/").map(encodeURIComponent).join("/");
@@ -1020,9 +1020,10 @@ export class GitHubService {
 						throw error;
 					}
 				};
+				// A job's own branch starts from the default branch's current commit, so it merges nothing in.
 				if (!pulled)
 					return this.#fork(upstream, upstream.name, { contents: "write" }, (forkToken, fork) =>
-						action(this.#branch(forkToken, fork, job.branch, based(current.default_branch))),
+						action(this.#branch(forkToken, fork, job.branch, async () => false)),
 					);
 				const pull = await this.#api<PullHead>(
 					token,
@@ -1286,7 +1287,9 @@ export class GitHubService {
 
 	/** As a webhook would, mark observations stale so the inbox stops offering a pull request that merged or is landing. */
 	async #invalidate(repo: GitHubRepository) {
-		await this.#env.DB.prepare("UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=?")
+		await this.#env.DB.prepare(
+			"UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=?",
+		)
 			.bind(repo.id)
 			.run();
 	}
@@ -1407,10 +1410,16 @@ export class GitHubService {
 			if (holds.head !== sha(input.head))
 				throw new PublicationBlocked("The pull request's head moved outside this job.");
 			const mutation =
-				!holds.queue && IMMEDIATE.includes(holds.mergeState) ? "mergePullRequest" : "enablePullRequestAutoMerge";
+				!holds.queue && IMMEDIATE.includes(holds.mergeState)
+					? "mergePullRequest"
+					: "enablePullRequestAutoMerge";
 			const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
 				query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId } }`,
-				variables: { id: holds.id, sha: input.head, method: (input.method ?? mergeMethod(current)).toUpperCase() },
+				variables: {
+					id: holds.id,
+					sha: input.head,
+					method: (input.method ?? mergeMethod(current)).toUpperCase(),
+				},
 			});
 			if (result.errors?.length) {
 				const reason = result.errors[0]?.message;

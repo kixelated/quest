@@ -375,7 +375,8 @@ export class Attempt {
 								},
 							},
 							call: async (args) => {
-								const minutes = typeof args.minutes === "number" && args.minutes > 0 ? args.minutes : 30;
+								const minutes =
+									typeof args.minutes === "number" && args.minutes > 0 ? args.minutes : 30;
 								const waited = await waitForChange(() => this.ctx.context(job.id, job.attempt), {
 									since: this.#seen,
 									until: Date.now() + Math.min(minutes * 60_000, WAIT_LIMIT),

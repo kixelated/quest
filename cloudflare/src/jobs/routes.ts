@@ -253,9 +253,11 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState, failed
 	}
 	if (workflow === "iterate" || workflow === "merge") {
 		const pull = open("pull", "pulls");
-		if (!pull) throw new JobError(workflow === "merge" ? "Merge an open pull request" : "Iterate on an open pull request");
+		if (!pull)
+			throw new JobError(workflow === "merge" ? "Merge an open pull request" : "Iterate on an open pull request");
 		const data = pull.data as Pull;
-		if (workflow === "merge" && data.isDraft) throw new JobError("Mark the draft ready for review before merging it");
+		if (workflow === "merge" && data.isDraft)
+			throw new JobError("Mark the draft ready for review before merging it");
 		// Until the sandbox classifies commit authors, every PR head is untrusted
 		// and routes only to Linux runners that build its devShell in a VM.
 		return {
@@ -390,7 +392,7 @@ jobs.post(`${base}/:job/cancel`, async (c) => {
 	await store.cancel(c.env.DB, job.id, user, Date.now());
 	await hub(c.env, job.actor).dispatch(job.actor);
 	// A running attempt reports its cancellation later, which releases its hold then.
-	c.executionCtx.waitUntil(landing.ended(c.env, job.id));
+	await landing.ended(c.env, job.id);
 	return reply(c, fromForm(c) ? {} : null, "stop", null);
 });
 

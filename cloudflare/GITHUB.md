@@ -12,7 +12,7 @@ and installation tokens stay inside the Worker; agents receive neither.
 | --------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Metadata: read        | Resolve repository identity and maintainer authority                        | Every operation                                                |
 | Contents: write       | Read quest files, write job branches on service forks and iterated PR heads | Read for quest reads; write only for that publication or merge |
-| Issues: write         | Read native issues and publish approved comments                            | Read or write for that operation                               |
+| Issues: write         | Read native issues, publish approved comments, label merge jobs' PRs        | Read or write for that operation                               |
 | Pull requests: write  | Observe, open and update job PRs, explicitly merge an exact head            | Read or write for that operation                               |
 | Checks: read          | Observe checks on a commit                                                  | Check reads only                                               |
 | Commit statuses: read | Observe legacy CI status contexts                                           | Check reads only                                               |
@@ -83,7 +83,7 @@ and moves one branch. Before writing anything it checks, in order:
   absolute path, backslash, or control character. Each workflow publishes
   only its own changes: `plan` only quest documents under `quest/` (Markdown
   other than `AGENTS.md` and `CLAUDE.md`), `bootstrap` only `flake.nix` and
-  `flake.lock`, `start` and `iterate` their task's changes. No workflow changes
+  `flake.lock`, `start`, `iterate`, and `merge` their task's changes. No workflow changes
   `.github/workflows/`, because the App does not request the workflows
   permission. A refused change pauses the job with a `publication` decision
   listing each path and reason, instead of being dropped; the maintainer's
@@ -108,7 +108,7 @@ and moves one branch. Before writing anything it checks, in order:
 
 `plan`, `start`, and `bootstrap` jobs write their branch on the service fork
 `GITHUB_FORK_OWNER/<repository>`, whose immediate parent must be the upstream's
-repository ID. An `iterate` job writes its pull request's actual head: an
+repository ID. An `iterate` or `merge` job writes its pull request's actual head: an
 upstream branch through an upstream-scoped token, or a service fork branch.
 GitHub gives an installation no write access to a contributor's fork, so that
 case pauses with a decision reporting the blocked update; kix never opens a
@@ -162,9 +162,41 @@ merges only an exact head a maintainer explicitly chose, with the first method
 the repository allows: squash, then a merge commit, then rebase. GitHub's
 branch rules and refusals stand, and an agent's recommendation is never
 approval. The decision inbox offers it on a pull request item only when
-GitHub reports the PR's merge state as `CLEAN` or `HAS_HOOKS` and no job holds
-the PR. The form binds the head on screen. A moved head asks for another look,
-GitHub's refusal is shown in its own words, and neither is retried.
+GitHub reports the PR's merge state as `CLEAN` or `HAS_HOOKS` and no job or
+session holds the PR. The form binds the head on screen. A moved head asks for
+another look, GitHub's refusal is shown in its own words, and neither is
+retried.
+
+### Merge jobs
+
+On any other open, non-draft pull request that nothing holds, the inbox's
+merge button starts a `merge` job instead. Picking it covers the job's own
+fixes for conflicts, failing checks, and review findings; a head moved by
+anyone else, a design change, and the merge skill's design checkpoint pause it
+on a decision.
+
+- The job holds the PR with the `quest:merge` label, under the contract
+  `quest merge --help` states for local sessions: the bot adds it when the job
+  is created, and refuses the pick while another `quest:*` label holds the PR.
+  A `quest:merge` whose landing already ended unmerged is spent, and removed
+  first. The job keeps the timeline event that added the label as its `hold`.
+- The job's agent resolves conflicts by merging the base branch with Git. A
+  publication may name that `merge` commit, which kix accepts only when the
+  PR's upstream base branch already holds it; kix then publishes a merge
+  commit whose files are the changes applied to the merged commit's.
+- Landing is a publication with `land`: kix verifies the published head and
+  the job's hold, then enables auto-merge bound to that head, entering the
+  merge queue when the base has one, or merges it at once when GitHub would
+  refuse auto-merge because nothing is left to wait for. It uses the method the
+  job names, else the first the repository allows. A refusal pauses the job on
+  a decision, in GitHub's words.
+- The label stays while the job runs or waits, and while the PR is queued or
+  auto-merging. When the job ends without a landing in progress, or a
+  `pull_request` webhook arrives and GitHub shows the landing ended unmerged,
+  the App removes its own label. The PR is then an idle decision item again.
+
+Labels need `issues: write` on the upstream; landing needs `contents: write`
+and `pull_requests: write` there, as a direct merge does.
 
 Fork pull requests do not make privileged CI safe. Workflows that run a pull
 request's code with secrets or write tokens, such as `pull_request_target` or
@@ -178,8 +210,8 @@ Installation grants are broader than any one publication: `contents: write`
 and `pull_requests: write` cover every installed repository. Each token names
 one repository ID and only the permissions that step needs. Fork writes get
 `contents: write` on the fork alone, pull request delivery gets
-`pull_requests: write` on the upstream alone, and only an iteration on an
-upstream head gets upstream `contents: write`. That token could write any
+`pull_requests: write` on the upstream alone, and only an iteration or merge
+job on an upstream head gets upstream `contents: write`. That token could write any
 unprotected upstream branch; the service restricts it to the pull request's
 head and refuses the default branch, and repositories should still protect
 their default branch.

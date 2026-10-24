@@ -25,14 +25,19 @@ export async function release(env: Env, repository: number, target: string) {
 				await store.released(env.DB, id, hold);
 		} catch (error) {
 			// The next event on the pull request tries again.
-			console.error({ event: "merge_hold_release_failed", name: error instanceof Error ? error.name : "unknown" });
+			console.error({
+				event: "merge_hold_release_failed",
+				name: error instanceof Error ? error.name : "unknown",
+			});
 		}
 	}
 }
 
 /** Release a job's hold once it ended, if it is a merge job that holds one. */
 export async function ended(env: Env, job: string) {
-	const row = await env.DB.prepare("SELECT repository,target FROM jobs WHERE id=? AND workflow='merge' AND hold IS NOT NULL")
+	const row = await env.DB.prepare(
+		"SELECT repository,target FROM jobs WHERE id=? AND workflow='merge' AND hold IS NOT NULL",
+	)
 		.bind(job)
 		.first<{ repository: number; target: string }>();
 	if (row) await release(env, row.repository, row.target);
