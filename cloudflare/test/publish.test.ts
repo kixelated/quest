@@ -18,6 +18,16 @@ const upstream = { owner: "upstream", name: "project", id: 10 };
 type Request = { method: string; path: string; body: any; token: string | null };
 type Commit = { parents: string[]; tree: string; message: string };
 
+function thread(path: string, line: number, body: string, isResolved: boolean) {
+	return {
+		isResolved,
+		isOutdated: false,
+		path,
+		line,
+		comments: { nodes: [{ author: { login: "bot" }, body, createdAt: "t" }] },
+	};
+}
+
 /** A stateful stand-in for the parts of GitHub's API that publication uses. */
 function fakeGitHub() {
 	let next = 1;
@@ -46,7 +56,15 @@ function fakeGitHub() {
 		now: 0,
 		/** Runs while a branch is created, as if the job changed meanwhile. */
 		onCreate: null as null | (() => Promise<unknown>),
+		/** The iterated pull request's review threads, read 100 at a time. */
+		threads: [thread("a.ts", 1, "Done already", true), thread("b.ts", 7, "Handle null", false)],
 	};
+	function threadPage(after: string | null) {
+		const start = after ? Number(after) : 0;
+		const nodes = fake.threads.slice(start, start + 100);
+		const end = start + nodes.length;
+		return { nodes, pageInfo: { hasNextPage: end < fake.threads.length, endCursor: String(end) } };
+	}
 	const repos: Record<string, any> = {
 		"upstream/project": { id: 10, fork: false, default_branch: "main" },
 		"quest-bot-forks/project": { id: 20, fork: true, default_branch: "main" },
@@ -120,28 +138,7 @@ function fakeGitHub() {
 							reviews: {
 								nodes: [{ author: { login: "bot" }, state: "COMMENTED", body: "", submittedAt: "t" }],
 							},
-							reviewThreads: {
-								nodes: [
-									{
-										isResolved: true,
-										isOutdated: false,
-										path: "a.ts",
-										line: 1,
-										comments: {
-											nodes: [{ author: { login: "bot" }, body: "Done already", createdAt: "t" }],
-										},
-									},
-									{
-										isResolved: false,
-										isOutdated: false,
-										path: "b.ts",
-										line: 7,
-										comments: {
-											nodes: [{ author: { login: "bot" }, body: "Handle null", createdAt: "t" }],
-										},
-									},
-								],
-							},
+							reviewThreads: threadPage(body.variables.threads),
 							commits: {
 								nodes: [
 									{
@@ -1271,6 +1268,26 @@ describe("job context", () => {
 		});
 		expect(github.requests).toEqual([]);
 		expect((await read(id, 2)).status).toBe(409);
+	});
+
+	it("reads every review thread of a busy pull request", async () => {
+		github.threads = Array.from({ length: 250 }, (_, i) =>
+			thread(`f${i}.ts`, i, "Fix this", ![0, 150, 249].includes(i)),
+		);
+		const id = await running({
+			workflow: "iterate",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		const body = (await (await read(id, 1)).json()) as Record<string, any>;
+		expect(body.threads.map((t: { path: string }) => t.path)).toEqual(["f0.ts", "f150.ts", "f249.ts"]);
+		expect(github.requests.filter((r) => r.path === "/graphql").map((r) => r.body.variables.threads)).toEqual([
+			null,
+			"100",
+			"200",
+		]);
 	});
 
 	it("has nothing to read for a quest's job", async () => {
