@@ -23,14 +23,11 @@ async function state() {
 
 beforeEach(async () => {
 	await env.DB.batch([
-		env.DB.prepare("DELETE FROM github_deliveries"),
-		env.DB.prepare("DELETE FROM github_projects"),
-		env.DB.prepare("DELETE FROM github_installations"),
 		env.DB.prepare(
-			"INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('app-test','Tester','app-test@example.com',1,0,0)",
+			"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('app-test','Tester','app-test@example.com',1,0,0)",
 		),
 		env.DB.prepare(
-			"INSERT OR IGNORE INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('app-test-account','7','github','app-test',0,0)",
+			"INSERT INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('app-test-account','7','github','app-test',0,0)",
 		),
 	]);
 });
