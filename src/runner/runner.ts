@@ -39,7 +39,7 @@ export class Runner {
 	#closing = false;
 	#wake: ReturnType<typeof setTimeout> | undefined;
 	#stopped: () => void = () => {};
-	/** Settles once the runner shut down or kix replaced its connection. */
+	/** Settles once the runner shut down or kix replaced its connection, and its agents exited. */
 	readonly done: Promise<"stopped" | "replaced">;
 
 	constructor(options: RunnerOptions) {
@@ -56,10 +56,14 @@ export class Runner {
 				push: (push) => this.#push(push),
 				replaced: () => {
 					this.#closing = true;
-					for (const attempt of this.#live) attempt.abandon();
+					const attempts = [...this.#live];
+					for (const attempt of attempts) attempt.abandon();
 					clearTimeout(this.#wake);
 					this.connection.close();
-					resolve("replaced");
+					// The runner keeps its home until its agents exit, so none outlives its hold on their checkouts.
+					void Promise.allSettled(attempts.map((attempt) => attempt.finished)).then(() =>
+						resolve("replaced"),
+					);
 				},
 				log: options.log,
 			},
@@ -104,7 +108,7 @@ export class Runner {
 		const now = this.#now();
 		return this.options.home.accounts().map((account) => ({
 			id: account.id,
-			provider: this.options.adapter(account).provider,
+			provider: account.provider,
 			kind: account.kind,
 			label: account.label,
 			limited: (account.limitedUntil ?? 0) > now,

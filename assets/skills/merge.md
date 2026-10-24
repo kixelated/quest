@@ -14,8 +14,11 @@ Read the PR's head, checks, merge state, reviews by head, and unresolved threads
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
 Automated reviewers often find something new on every push, so keep fixing their findings without asking, but checkpoint the design.
-Every fourth review round since the PR's last design change (one that reshapes the approach; fixing a finding is not one), stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
+A review round is one pushed head that drew reviews; count rounds from the PR, not your session, since its last design change (one that reshapes the approach; fixing a finding is not one).
+`quest status` shows only each reviewer's latest review, so read the full history with `gh pr view <pr> --json reviews,comments`.
+Every fourth round, stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
 Report that judgment and what remains unresolved, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
+Record each design change, including a rethink the user picks, in a PR comment that starts with `Design change:`; the next agent counts rounds from it.
 Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.

@@ -5,6 +5,7 @@ import {
 	type Progress,
 	type Quest,
 	type Status,
+	boardHref,
 	milestoneAnchor,
 	flatten,
 } from "./board/model";
@@ -71,7 +72,7 @@ export function chart(board: Board): Region[] {
 				},
 			];
 		});
-		return { milestone, href: `/repos/${board.project.name}#${milestoneAnchor(milestone)}`, paths };
+		return { milestone, href: `${boardHref(board.project)}#${milestoneAnchor(milestone)}`, paths };
 	});
 }
 
@@ -99,28 +100,35 @@ function tooltip(quest: Quest): string {
 	return `${line}\nRequired: ${status.requires.map((ref) => ref.title).join(", ")}`;
 }
 
-function Stop(props: { quest: Quest }) {
-	const { quest } = props;
+/** A waypoint, and what its agent is doing when one works on it. */
+function Stop(props: { quest: Quest; agent: string | undefined }) {
+	const { quest, agent } = props;
 	const kind = quest.status.kind;
 	const size = quest.size ? ` ql-${quest.size.toLowerCase()}` : "";
-	// Screen readers hear the title first, then the size and status.
-	const name = `${quest.title}, size ${quest.size ?? "unknown"}, ${text(quest.status)}`;
+	// Screen readers hear the title first, then the size, status, and agent.
+	const name = `${quest.title}, size ${quest.size ?? "unknown"}, ${text(quest.status)}${agent ? `, agent: ${agent}` : ""}`;
 	return (
-		<li class={`waypoint${size} waypoint-${kind}`}>
-			<a href={quest.href} title={tooltip(quest)} aria-label={name}>
+		<li class={`waypoint${size} waypoint-${kind}${agent ? " waypoint-agent" : ""}`}>
+			<a
+				href={quest.href}
+				title={agent ? `${tooltip(quest)}\nAgent: ${agent}` : tooltip(quest)}
+				aria-label={name}
+			>
 				<span class="waypoint-node">
 					<span class="waypoint-size">{quest.size ?? "?"}</span>
 				</span>
 				<span class="waypoint-text">
 					<span class="waypoint-title">{quest.title}</span>
 					<span class={`waypoint-status ql-${kind}`}>{text(quest.status)}</span>
+					{agent && <span class="waypoint-status waypoint-agent-status">Agent: {agent}</span>}
 				</span>
 			</a>
 		</li>
 	);
 }
 
-export function QuestMap(props: { board: Board }) {
+/** The map; `agents` highlights the quests agents work on, saying what each is doing. */
+export function QuestMap(props: { board: Board; agents?: Map<string, string> }) {
 	const { board } = props;
 	const web = board.project.web;
 	const regions = chart(board);
@@ -152,7 +160,7 @@ export function QuestMap(props: { board: Board }) {
 									</p>
 									<ol class="trail" role="list">
 										{path.waypoints.map((quest) => (
-											<Stop quest={quest} />
+											<Stop quest={quest} agent={props.agents?.get(quest.path)} />
 										))}
 									</ol>
 								</li>
@@ -170,6 +178,7 @@ export function QuestMap(props: { board: Board }) {
 				</p>
 				<p class="muted">
 					A solid waypoint is ready or in review; a dashed one is blocked.{" "}
+					{props.agents && "A ringed one has an agent on it. "}
 					{web && (
 						<>
 							Charted from <a href={`${web}/tree/${board.project.commit}/quest`}>quest/</a> on{" "}

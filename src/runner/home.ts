@@ -1,13 +1,15 @@
 // A runner's state on disk: its kix sign-in, its agent accounts, the
 // repositories it fetched, and its jobs' checkouts. Everything lives in one
 // user-only directory, so two runners on one machine just use two homes.
-import { randomBytes } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { privateDirectory } from "../cli/agent";
+import { type Owner, alive, currentOwner } from "../cli/supervise";
 import { save } from "../cli/worktree";
+import type { AdapterName } from "./adapter";
 
 /** The runner's kix sign-in, from `quest runner login`. */
 export interface Login {
@@ -25,8 +27,8 @@ export type AccountKind = "subscription" | "api-key";
 export interface Account {
 	/** Opaque and stable across restarts, so kix keeps its preference rank and paused sessions. */
 	id: string;
-	/** The CLI that drives it. Only Claude Code ships so far. */
-	adapter: "claude";
+	/** The CLI that drives it. */
+	adapter: AdapterName;
 	provider: string;
 	kind: AccountKind;
 	label: string;
@@ -89,6 +91,35 @@ export class RunnerHome {
 		this.saveAccounts(accounts.filter((account) => account !== found));
 		rmSync(join(this.dir, "accounts", id), { recursive: true, force: true });
 		return found;
+	}
+
+	/**
+	 * Take this home for one `quest runner` process until `release`, so no two
+	 * runners reuse one job checkout. The process records itself before looking
+	 * for others, so of two that start at once at least one sees the other and
+	 * refuses; neither ever works alongside the other. A record whose process
+	 * has exited, such as one that crashed, is removed instead.
+	 */
+	hold(): { release(): void } {
+		const dir = privateDirectory(join(this.dir, "running"));
+		const record = join(dir, `${randomUUID()}.json`);
+		save(record, currentOwner());
+		const release = () => rmSync(record, { force: true });
+		for (const name of readdirSync(dir)) {
+			const other = join(dir, name);
+			if (other === record || !name.endsWith(".json")) continue;
+			const owner = load<Owner>(other);
+			if (owner === undefined) continue;
+			if (!alive(owner)) {
+				rmSync(other, { force: true });
+				continue;
+			}
+			release();
+			throw new Error(
+				`another \`quest runner\` is running in ${this.dir} (process ${owner.pid} on ${owner.host}); stop it first`,
+			);
+		}
+		return { release };
 	}
 
 	/** Where fetched repositories and job checkouts live. */

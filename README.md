@@ -172,16 +172,20 @@ fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
 another claimer got there first, and when two PRs race, the earliest open one
 keeps the claim and the later one is closed. A branch left at a merged PR's
-head is replaced, with a lease on that tip. Off GitHub, it pushes the branch
-without a PR.
+head is replaced, with a lease on that tip. A branch named after the claim
+branch's directory, such as `quest/m1/epic` for `quest/m1/epic/one`, or inside
+it, refuses the claim, since git cannot hold both; the refusal names it and
+whether it is a merged PR's head, and leaves it in place. Off GitHub, it pushes
+the branch without a PR.
 
 `--release` deletes the branch, with a lease on its tip, and closes its PR, but
 only while the tip is still an empty commit. Once work is on the branch, hand
 the draft back instead: a `## Decisions needed` section in its body marks it as
 waiting on the maintainer.
 
-`quest start` exits 0 when done, 3 when it refuses (blocked, held, or work on
-the branch), 2 for invalid arguments, and 1 for other failures. On GitHub it
+`quest start` exits 0 when done, 3 when it refuses (blocked, held, a branch in
+the way, or work on the branch), 2 for invalid arguments, and 1 for other
+failures. On GitHub it
 uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
 Draft claims are placeholders, so CI can skip them. This repository runs its
@@ -495,40 +499,49 @@ signals the agent and waits until its `start` or `resume` has reported.
 ## Run kix jobs on your machines
 
 `quest runner` turns a Linux or macOS machine with Nix into a
-[kix.quest](https://kix.quest) runner, driving Claude Code with that machine's
-own logins:
+[kix.quest](https://kix.quest) runner, driving Claude Code or opencode with
+that machine's own logins:
 
 ```sh
 quest runner login --name laptop  # prints a link to approve while signed in to kix
 quest runner account add          # Claude Code's own sign-in, in an isolated home
 quest runner account add --console --label work
+quest runner account add opencode # opencode's sign-in: OpenCode Go, ChatGPT, or an API key
+quest runner account add opencode --model openai/gpt-5.5
 quest runner account list
 quest runner --slots 2            # runs jobs in the foreground until interrupted
 ```
 
 `login` makes a token that never leaves the machine; the link carries only its
 hash, and kix connects the runner once you approve it. Each account signs in
-through `claude auth login` in its own `CLAUDE_CONFIG_DIR`, so kix stores only
-an opaque account id, its kind, and a label. kix.quest/runners shows each
-runner's presence and sets the order jobs use your accounts in.
+through its CLI's own flow in its own home: `claude auth login` in a
+`CLAUDE_CONFIG_DIR`, or `opencode auth login` in a set of XDG directories, so
+kix stores only an opaque account id, its kind, and a label. An opencode
+account uses only the providers it signed in to, with `--model` or opencode's
+default. Use Claude Code for Claude subscriptions, since opencode cannot sign
+in to them. kix.quest/runners shows each runner's presence and sets the order
+jobs use your accounts in.
 
 Every job runs in its own checkout inside the project's `nix develop` shell,
 with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
 job instead. The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
-and `deliver` publishes the result and its pull request. A job on an issue or
+and `deliver` publishes the result and its pull request, listing any suggested
+follow-ups, which the inbox offers you to plan. A job on an issue or
 pull request reads it through `context`, since the runner holds no GitHub
-token. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
+token; a new plan reads your idea and pasted context there. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
 runner. Until the job sandbox ships, runners take only trusted revisions,
-agents run with `--permission-mode bypassPermissions`, and a job resumes with
-another maintainer's answer only once you approve it in the inbox.
+agents run with every tool allowed (Claude Code's `bypassPermissions`), and a
+job resumes with another maintainer's answer only once you approve it in the
+inbox. opencode runs as `opencode serve` on localhost behind a password made for each turn.
 
-The flake's `runner` package is a `quest` whose Claude Code is pinned by this
-repository's lock (`nix run github:kixelated/quest#runner -- runner`);
-otherwise `claude` comes from `QUEST_RUNNER_CLAUDE` or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
-`$XDG_DATA_HOME/quest/runner`. To keep a runner up, run `quest runner` as a user
+The flake's `runner` package is a `quest` whose Claude Code and opencode are
+pinned by this repository's lock (`nix run github:kixelated/quest#runner -- runner`);
+otherwise `claude` and `opencode` come from `QUEST_RUNNER_CLAUDE` and
+`QUEST_RUNNER_OPENCODE`, or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
+`$XDG_DATA_HOME/quest/runner`; one `quest runner` runs in a home at a time. To keep a runner up, run `quest runner` as a user
 service, such as a systemd user unit with `Restart=on-failure`.
 
 ## Prunable local checkouts
