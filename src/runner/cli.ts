@@ -75,6 +75,30 @@ export function adapterFor(name: AdapterName, env: NodeJS.ProcessEnv): Adapter {
 	return name === "opencode" ? new Opencode(binary, env) : new Claude(binary, env);
 }
 
+/**
+ * The adapters a running runner launches jobs with, each resolved once, the
+ * first time an account needs it. Claude Code sandboxes its jobs' commands,
+ * which on Linux needs bubblewrap and socat, so they are checked then; macOS
+ * has Seatbelt built in. opencode runs unsandboxed, so it needs neither.
+ */
+export function runnerAdapters(env: NodeJS.ProcessEnv): (name: AdapterName) => Adapter {
+	const adapters = new Map<AdapterName, Adapter>();
+	return (name) => {
+		let adapter = adapters.get(name);
+		if (adapter) return adapter;
+		const missing =
+			name === "claude" && process.platform === "linux"
+				? ["bwrap", "socat"].filter((tool) => !which(tool, env))
+				: [];
+		if (missing.length)
+			throw new RunnerInputError(
+				`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not installed; Claude Code jobs run in an OS sandbox (install bubblewrap and socat, or use the flake's runner package)`,
+			);
+		adapters.set(name, (adapter = adapterFor(name, env)));
+		return adapter;
+	};
+}
+
 function home(io: RunnerIO): RunnerHome {
 	return new RunnerHome(defaultHome(io.env));
 }
@@ -188,7 +212,12 @@ export function removeAccount(io: RunnerIO, id: string): number {
  * runs nothing from it; the shellHook runs inside the sandbox. A project
  * without a flake is bootstrapped in the runner's own environment.
  */
-export async function devShell(job: Job, repository: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+export async function devShell(
+	job: Job,
+	repository: string,
+	env: NodeJS.ProcessEnv,
+	signal?: AbortSignal,
+): Promise<string | null> {
 	if (job.workflow === "bootstrap") return null;
 	const url = `git+file://${repository.split("/").map(encodeURIComponent).join("/")}?rev=${job.revision}`;
 	try {
@@ -197,6 +226,7 @@ export async function devShell(job: Job, repository: string, env: NodeJS.Process
 			env,
 			encoding: "utf8",
 			maxBuffer: 64 * 1024 * 1024,
+			signal,
 		});
 		return stdout;
 	} catch (error) {
@@ -213,18 +243,11 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 	if (!current) throw new RunnerInputError("this machine is not signed in; run `quest runner login` first");
 	const accounts = state.accounts();
 	if (!accounts.length) throw new RunnerInputError("no accounts; add one with `quest runner account add`");
-	// Only the CLIs some account uses, each resolved once, before any job enters a devShell.
-	const adapters = new Map<AdapterName, Adapter>();
-	for (const account of accounts)
-		if (!adapters.has(account.adapter)) adapters.set(account.adapter, adapterFor(account.adapter, io.env));
+	// Only the CLIs some account uses, resolved before any job enters a devShell.
+	const adapter = runnerAdapters(io.env);
+	for (const account of accounts) adapter(account.adapter);
 	if (!which("nix", io.env))
 		throw new RunnerInputError("nix is not installed; every job runs in its project's devShell");
-	// Claude Code's sandbox needs both on Linux; macOS has Seatbelt built in.
-	const missing = process.platform === "linux" ? ["bwrap", "socat"].filter((name) => !which(name, io.env)) : [];
-	if (missing.length)
-		throw new RunnerInputError(
-			`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not installed; every job runs in an OS sandbox (install bubblewrap and socat, or use the flake's runner package)`,
-		);
 	try {
 		execFileSync("git", ["--version"], { stdio: "ignore" });
 	} catch {
@@ -238,13 +261,9 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		home: state,
 		login: current,
 		slots: options.slots,
-		// An account added while the runner runs uses a CLI resolved then.
-		adapter: (account) => {
-			let adapter = adapters.get(account.adapter);
-			if (!adapter) adapters.set(account.adapter, (adapter = adapterFor(account.adapter, io.env)));
-			return adapter;
-		},
-		devShell: (job, repository) => devShell(job, repository, io.env),
+		// An account added while the runner runs uses a CLI resolved, and a sandbox checked, then.
+		adapter: (account) => adapter(account.adapter),
+		devShell: (job, repository, signal) => devShell(job, repository, io.env, signal),
 		remote: (job) => `https://github.com/${job.owner}/${job.name}.git`,
 		env: io.env,
 		fetch: fetcher,

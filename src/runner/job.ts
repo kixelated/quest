@@ -27,9 +27,9 @@ export interface Context {
 	/**
 	 * The job's devShell as a script for its sandboxed commands to source,
 	 * evaluated from the job's revision in the bare clone `repository`, or
-	 * null to run in the runner's own environment.
+	 * null to run in the runner's own environment. `signal` aborts its build.
 	 */
-	devShell(job: Job, repository: string): Promise<string | null>;
+	devShell(job: Job, repository: string, signal: AbortSignal): Promise<string | null>;
 	/** Where to fetch the job's repository from. */
 	remote(job: Job): string;
 	env: NodeJS.ProcessEnv;
@@ -90,6 +90,8 @@ export class Attempt {
 	#session: string;
 	#workspace: Workspace | undefined;
 	#agent: Running | undefined;
+	/** Aborts the devShell build, which runs before there is an agent to stop. */
+	#preparing = new AbortController();
 	#publishing: Promise<unknown> = Promise.resolve();
 	#delivered: Delivery | undefined;
 	#cancelled = false;
@@ -121,18 +123,23 @@ export class Attempt {
 	/** The maintainer asked to stop: report a cancelled result with the partial work. */
 	cancel(): void {
 		this.#cancelled = true;
-		this.#agent?.stop();
+		this.#halt();
 	}
 
 	/** The job is not this attempt's anymore: stop without reporting. */
 	stop(): void {
 		this.#stopped = true;
-		this.#agent?.stop();
+		this.#halt();
 	}
 
 	/** The runner is shutting down: preserve the work on the branch, then let the job move. */
 	abandon(): void {
 		this.#abandoned = true;
+		this.#halt();
+	}
+
+	#halt(): void {
+		this.#preparing.abort();
 		this.#agent?.stop();
 	}
 
@@ -164,9 +171,16 @@ export class Attempt {
 			const account = ctx.accounts().find((a) => a.id === job.account);
 			if (!account)
 				return await this.#finish("failed", `The account ${job.account} is no longer on this runner.`);
+			// Before any checkout: an account added while the runner runs may lack its CLI or sandbox.
+			const adapter = ctx.adapter(account);
 			this.#workspace = await Workspace.prepare(ctx.root, job, ctx.remote(job));
 			if (this.#ended()) return await this.#conclude(null, account);
-			const devShell = await ctx.devShell(job, this.#workspace.repository);
+			const devShell = await ctx
+				.devShell(job, this.#workspace.repository, this.#preparing.signal)
+				.catch((error: unknown) => {
+					if (this.#ended()) return null;
+					throw error;
+				});
 			if (this.#ended()) return await this.#conclude(null, account);
 			const resume = job.session !== null;
 			const output = new OutputUploader(
@@ -184,7 +198,7 @@ export class Attempt {
 					devShell,
 					trusted: Boolean(job.trusted),
 				});
-				this.#agent = ctx.adapter(account).launch({
+				this.#agent = adapter.launch({
 					cwd: this.#workspace.dir,
 					home: ctx.home(account),
 					session: this.#session,

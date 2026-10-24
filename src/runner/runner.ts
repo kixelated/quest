@@ -16,7 +16,7 @@ export interface RunnerOptions {
 	/** How many jobs run at once. */
 	slots: number;
 	adapter(account: Account): Adapter;
-	devShell(job: Job, repository: string): Promise<string | null>;
+	devShell(job: Job, repository: string, signal: AbortSignal): Promise<string | null>;
 	remote(job: Job): string;
 	env?: NodeJS.ProcessEnv;
 	dial?: Dial;

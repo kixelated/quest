@@ -30,7 +30,7 @@
           };
           quest = pkgs.callPackage ./nix/package.nix { };
           # `quest runner` with the agent CLIs it drives pinned by this flake's lock, and on
-          # Linux the bubblewrap and socat Claude Code's sandbox runs every job's commands in.
+          # Linux the bubblewrap and socat Claude Code's sandbox runs its jobs' commands in.
           runner = pkgs.symlinkJoin {
             name = "quest-runner-${quest.version}";
             paths = [ quest ];

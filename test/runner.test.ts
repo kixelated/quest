@@ -6,7 +6,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { AdapterName } from "../src/runner/adapter";
 import { Claude, jobEnvironment, streamReader } from "../src/runner/claude";
-import { addAccount, devShell, login, RunnerInputError } from "../src/runner/cli";
+import { addAccount, devShell, login, RunnerInputError, runnerAdapters } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
@@ -654,6 +654,30 @@ describe("account add", () => {
 	});
 });
 
+describe("runner adapters", () => {
+	test.skipIf(process.platform !== "linux")(
+		"need bubblewrap and socat on Linux only once a Claude Code account needs them",
+		() => {
+			const bin = join(tempDir(), "bin");
+			mkdirSync(bin);
+			const install = (...names: string[]) => {
+				for (const name of names) {
+					writeFileSync(join(bin, name), "#!/bin/sh\n");
+					chmodSync(join(bin, name), 0o755);
+				}
+			};
+			install("claude", "opencode");
+			const adapter = runnerAdapters({ PATH: bin });
+			// An opencode-only runner starts without them.
+			expect(adapter("opencode")).toBeInstanceOf(Opencode);
+			expect(() => adapter("claude")).toThrow(/bwrap and socat are not installed/);
+			// A Claude Code account added while the runner runs is checked then.
+			install("bwrap", "socat");
+			expect(adapter("claude")).toBeInstanceOf(Claude);
+		},
+	);
+});
+
 describe("login", () => {
 	posix("connects once the owner approves the link, keeping the token local", async () => {
 		const home = tempDir();
@@ -864,12 +888,21 @@ process.on("SIGTERM", () => process.exit(143));
 server.listen(0, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + server.address().port));
 `;
 
-/** A fake `nix` whose `print-dev-env` prints a one-line devShell. */
+/** A fake `nix` whose `print-dev-env` prints a one-line devShell, or builds until killed when the steps say `nix`. */
 const FAKE_NIX = `
 const fs = require("node:fs");
+const { join } = require("node:path");
 const argv = process.argv.slice(2);
-fs.appendFileSync(require("node:path").join(__dirname, "..", "calls.log"), JSON.stringify({ nix: argv }) + "\\n");
-process.stdout.write("export IN_DEVSHELL=1\\n");
+const log = (value) => fs.appendFileSync(join(__dirname, "..", "calls.log"), JSON.stringify(value) + "\\n");
+const steps = join(__dirname, "..", "steps.json");
+if (fs.existsSync(steps) && JSON.parse(fs.readFileSync(steps, "utf8")).nix) {
+	process.on("SIGTERM", () => { log({ nixTerminated: true }); process.exit(143); });
+	setInterval(() => {}, 1000);
+	log({ nix: argv });
+} else {
+	log({ nix: argv });
+	process.stdout.write("export IN_DEVSHELL=1\\n");
+}
 `;
 
 interface Rig {
@@ -937,7 +970,7 @@ function rig(
 		slots: 2,
 		adapter: () =>
 			cli === "claude" ? new Claude(join(bin, "claude"), env) : new Opencode(join(bin, "opencode"), env),
-		devShell: (job, repository) => devShell(job, repository, env),
+		devShell: (job, repository, signal) => devShell(job, repository, env, signal),
 		remote: () => source.dir,
 		env,
 		dial: hub.dial,
@@ -1278,6 +1311,25 @@ describe("quest runner", () => {
 		expect(r.publishes.at(-1)!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
 		expect(r.calls().some((c) => c.terminated)).toBe(true);
 		await r.runner.shutdown();
+	});
+
+	posix("a cancel or shutdown kills a devShell build before the agent starts", async () => {
+		const r = rig();
+		r.steps({ nix: [true] });
+		const building = (count: number) =>
+			vi.waitFor(() => expect(r.calls().filter((c) => c.nix)).toHaveLength(count), { timeout: 10_000 });
+		r.assign(job(r.upstream.commit));
+		await building(1);
+		r.hub.socket.deliver({ type: "cancel", job: "job1", attempt: 1 });
+		expect(await r.result()).toMatchObject({ outcome: "cancelled", summary: "The maintainer stopped this job." });
+		await idle(r.runner);
+
+		r.assign(job(r.upstream.commit, { id: "job2" }));
+		await building(2);
+		await r.runner.shutdown();
+		expect(r.hub.of("result").filter((m) => m.job === "job2")).toEqual([]);
+		expect(r.calls().filter((c) => c.nixTerminated)).toHaveLength(2);
+		expect(r.calls().filter((c) => c.argv)).toHaveLength(0);
 	});
 
 	posix("pauses a limited account until it resets, never switching accounts", async () => {
