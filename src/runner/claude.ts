@@ -3,6 +3,11 @@
 // in an isolated `CLAUDE_CONFIG_DIR` per account; the runner never reads its
 // tokens. The kix tools attach as an HTTP MCP server, and AskUserQuestion is
 // disabled so every question goes through kix's `ask` tool instead.
+//
+// Claude Code's own sandbox confines every shell command, and permission
+// rules confine its file tools, which the sandbox does not cover. Only the
+// runner's settings apply: the checkout's own settings could add hooks that
+// run outside the sandbox, so neither they nor its CLAUDE.md are loaded.
 import { execFile, spawn } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { constants } from "node:os";
@@ -20,6 +25,7 @@ import {
 	signalGroup,
 	STOP_GRACE_MS,
 } from "./adapter";
+import type { Sandbox } from "./sandbox";
 import { WAIT_LIMIT } from "./wait";
 
 const run = promisify(execFile);
@@ -30,6 +36,54 @@ export const TOOL_TIMEOUT_MS = WAIT_LIMIT + 5 * 60_000;
 /** The environment for an account's Claude Code, with the account's own home. */
 export function accountEnvironment(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
 	return { ...baseEnvironment(env), CLAUDE_CONFIG_DIR: home };
+}
+
+/**
+ * The variables a job's agent keeps from the runner's environment. Its
+ * commands inherit them, so anything else, such as a cloud credential, stays out.
+ */
+const KEPT =
+	/^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LANGUAGE|LC_\w+|TZ|TERM|(HTTPS?|ALL|NO)_PROXY|(https?|all|no)_proxy|SSL_CERT_(FILE|DIR)|NIX_SSL_CERT_FILE|NODE_EXTRA_CA_CERTS|__CF_USER_TEXT_ENCODING)$/;
+
+/**
+ * A job's environment: the account's home, the sandbox's temporary directory
+ * and per-command script, and little else. Not CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:
+ * it covers files such as `.env` and `package.json` with mount points that stay
+ * behind in the checkout as empty files, which kix would then publish.
+ */
+export function jobEnvironment(env: NodeJS.ProcessEnv, home: string, sandbox: Sandbox): NodeJS.ProcessEnv {
+	const kept = Object.fromEntries(Object.entries(env).filter(([name]) => KEPT.test(name)));
+	return {
+		...kept,
+		CLAUDE_CONFIG_DIR: home,
+		TMPDIR: sandbox.tmp,
+		CLAUDE_ENV_FILE: sandbox.env,
+	};
+}
+
+/**
+ * Claude Code settings for a job. In `dontAsk` mode anything not allowed is
+ * refused: shell commands run only inside the sandbox, the file tools edit
+ * only the checkout and read only the checkout (outside it Claude Code would
+ * ask), and WebFetch, which would run outside the sandbox, is off.
+ */
+export function claudeSettings(sandbox: Sandbox): Record<string, unknown> {
+	return {
+		sandbox: {
+			enabled: true,
+			failIfUnavailable: true,
+			allowUnsandboxedCommands: false,
+			autoAllowBashIfSandboxed: true,
+			filesystem: {
+				denyRead: sandbox.deny,
+				allowRead: [sandbox.cwd, sandbox.repository, sandbox.tmp],
+				allowWrite: [sandbox.tmp],
+			},
+			network: { allowedDomains: sandbox.domains, strictAllowlist: true },
+		},
+		// A leading `//` makes a rule's path absolute.
+		permissions: { allow: ["Bash", `Edit(/${sandbox.cwd}/**)`, "WebSearch", "mcp__kix"] },
+	};
 }
 
 function json(line: string): Record<string, unknown> | undefined {
@@ -84,10 +138,9 @@ export function streamReader() {
 export class Claude implements Adapter {
 	readonly name = "claude";
 
-	/** `binary` is an absolute path, resolved before entering a devShell that could shadow it. */
+	/** `binary` is an absolute path, so a devShell's PATH cannot substitute another `claude`. */
 	constructor(
 		readonly binary: string,
-		readonly permissionMode = "bypassPermissions",
 		readonly env: NodeJS.ProcessEnv = process.env,
 	) {}
 
@@ -138,29 +191,37 @@ export class Claude implements Adapter {
 		// The bearer token stays out of the command line, which other users can read, in the account's private home.
 		const config = join(launch.home, `kix-tools-${launch.session}.json`);
 		writeFileSync(config, JSON.stringify(mcp), { mode: 0o600 });
+		const settings = join(launch.home, `kix-settings-${launch.session}.json`);
+		writeFileSync(settings, JSON.stringify(claudeSettings(launch.sandbox)), { mode: 0o600 });
+		const cleanup = () => {
+			rmSync(config, { force: true });
+			rmSync(settings, { force: true });
+		};
 		const argv = [
-			...launch.shell,
-			this.binary,
 			"-p",
 			"--output-format",
 			"stream-json",
 			"--verbose",
 			...(launch.resume ? ["--resume", launch.session] : ["--session-id", launch.session]),
 			"--permission-mode",
-			this.permissionMode,
+			"dontAsk",
+			"--settings",
+			settings,
+			"--setting-sources",
+			"user",
 			"--mcp-config",
 			config,
 			"--strict-mcp-config",
 			"--append-system-prompt",
 			launch.system,
 			"--disallowedTools",
-			"AskUserQuestion",
+			"AskUserQuestion,WebFetch",
 		];
-		const child = spawn(argv[0]!, argv.slice(1), {
+		const child = spawn(this.binary, argv, {
 			cwd: launch.cwd,
-			env: { ...accountEnvironment(launch.env, launch.home) },
+			env: jobEnvironment(launch.env, launch.home, launch.sandbox),
 			stdio: ["pipe", "pipe", "pipe"],
-			// Its own process group, so stopping it also stops the devShell and every tool it started.
+			// Its own process group, so stopping it also stops every tool it started.
 			detached: true,
 		});
 		const reader = streamReader();
@@ -181,11 +242,11 @@ export class Claude implements Adapter {
 		let killer: ReturnType<typeof setTimeout> | undefined;
 		const done = new Promise<Exit>((resolve) => {
 			child.once("error", (error: NodeJS.ErrnoException) => {
-				rmSync(config, { force: true });
-				resolve({ limited: null, failed: true, reply: `could not start ${argv[0]}: ${error.message}` });
+				cleanup();
+				resolve({ limited: null, failed: true, reply: `could not start ${this.binary}: ${error.message}` });
 			});
 			child.once("close", (code, name) => {
-				rmSync(config, { force: true });
+				cleanup();
 				clearTimeout(killer);
 				lines.end();
 				resolve(reader.exit(code ?? (name ? 128 + constants.signals[name] : 1), stderr));

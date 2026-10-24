@@ -57,6 +57,11 @@ export class Workspace {
 		this.#record = record;
 	}
 
+	/** The bare clone the checkout belongs to, which holds the job's revision. */
+	get repository(): string {
+		return this.#git;
+	}
+
 	/** The head the job's branch holds, as the next publication must name it. */
 	get head(): string | null {
 		return this.#record.head;
@@ -80,6 +85,8 @@ export class Workspace {
 			} else {
 				await run("git", ["-C", git, "remote", "set-url", "origin", remote]);
 			}
+			// The devShell is evaluated from the job's revision, never from the checkout.
+			await fetch(git, job.revision);
 			const record = load(file);
 			if (record && record.head === job.head && existsSync(join(dir, ".git")))
 				return new Workspace(git, dir, file, record);

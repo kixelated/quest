@@ -49,7 +49,7 @@ export interface Job {
 	/** The commit the job builds on, such as the default branch when it was authorized. */
 	revision: string;
 	branch: string;
-	/** Trusted revisions only, until the job sandbox ships. */
+	/** Trusted revisions only, until runners build untrusted heads' devShells in a VM. */
 	trusted: number;
 	account: string | null;
 	/** The agent session to resume on this runner and account. */

@@ -5,8 +5,8 @@ import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import type { AdapterName } from "../src/runner/adapter";
-import { Claude, streamReader, TOOL_TIMEOUT_MS } from "../src/runner/claude";
-import { addAccount, devShell, login, RunnerInputError } from "../src/runner/cli";
+import { Claude, jobEnvironment, streamReader, TOOL_TIMEOUT_MS } from "../src/runner/claude";
+import { addAccount, devShell, login, RunnerInputError, runnerAdapters } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
@@ -20,9 +20,10 @@ import {
 	turnExit,
 } from "../src/runner/opencode";
 import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
-import { formatAnswer, resumePrompt, startPrompt } from "../src/runner/prompt";
+import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
+import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
 import { fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
@@ -331,7 +332,7 @@ describe("workspace", () => {
 	});
 
 	posix("lists the submodules a merge changes, which its changes cannot carry", async () => {
-		const { dir, commit } = upstream();
+		const { dir } = upstream();
 		const module = join(tempDir(), "module");
 		mkdirSync(module);
 		git(module, "init", "-q", "-b", "main");
@@ -373,6 +374,79 @@ describe("workspace", () => {
 		for (const workspace of workspaces) expect(existsSync(join(workspace.dir, "AGENTS.md"))).toBe(true);
 		await Promise.all(workspaces.map((workspace) => workspace.remove()));
 		for (const workspace of workspaces) expect(existsSync(workspace.dir)).toBe(false);
+	});
+});
+
+describe("sandbox", () => {
+	posix("hides every account home, the runner's state, and shared temporary files", () => {
+		const runnerHome = tempDir();
+		const linux = openSandbox({
+			cwd: "/w",
+			repository: "/r.git",
+			runnerHome,
+			devShell: null,
+			trusted: true,
+			platform: "linux",
+			home: "/home/me",
+		});
+		try {
+			expect(linux.deny).toEqual(["/home", "/root", "/tmp", "/var/tmp", "/run/user", "/home/me", runnerHome]);
+			expect(linux.domains).toEqual(REGISTRIES);
+			// A bootstrap job runs in the runner's own environment: only the private HOME is set.
+			expect(readFileSync(linux.env, "utf8")).toBe(`export HOME='${linux.tmp}/home'\n`);
+			// Short enough for the sandbox's bridge sockets inside it.
+			expect(linux.tmp.length).toBeLessThan(40);
+		} finally {
+			closeSandbox(linux);
+		}
+		expect(existsSync(linux.tmp)).toBe(false);
+		const mac = openSandbox({
+			cwd: "/w",
+			repository: "/r.git",
+			runnerHome,
+			devShell: "export A=1\n",
+			trusted: false,
+			platform: "darwin",
+			home: "/Users/me",
+		});
+		try {
+			expect(mac.deny).toEqual(expect.arrayContaining(["/Users", "/private/tmp", "/private/var/folders"]));
+			expect(readFileSync(join(mac.tmp, "devshell.sh"), "utf8")).toBe("export A=1\n");
+			// An untrusted revision's commands reach no host.
+			expect(mac.domains).toEqual([]);
+		} finally {
+			closeSandbox(mac);
+		}
+	});
+
+	test("tells the agent which hosts its commands reach", () => {
+		expect(systemPrompt(REGISTRIES)).toContain("reach only these package registries (registry.npmjs.org, ");
+		expect(systemPrompt([])).toContain("reach no network host");
+	});
+
+	test("keeps only the agent's own variables in a job's environment", () => {
+		const sandbox = { tmp: "/tmp/quest-job-x", env: "/tmp/quest-job-x/env.sh" } as Sandbox;
+		const env = jobEnvironment(
+			{
+				PATH: "/bin",
+				HOME: "/home/me",
+				LANG: "C",
+				HTTPS_PROXY: "p",
+				AWS_SECRET_ACCESS_KEY: "s",
+				SSH_AUTH_SOCK: "a",
+			},
+			"/acct",
+			sandbox,
+		);
+		expect(env).toEqual({
+			PATH: "/bin",
+			HOME: "/home/me",
+			LANG: "C",
+			HTTPS_PROXY: "p",
+			CLAUDE_CONFIG_DIR: "/acct",
+			TMPDIR: "/tmp/quest-job-x",
+			CLAUDE_ENV_FILE: "/tmp/quest-job-x/env.sh",
+		});
 	});
 });
 
@@ -609,6 +683,18 @@ describe("prompts", () => {
 		expect(prompt).toContain("- `cloudflare/AGENTS.md`\n- `cloudflare/src/AGENTS.md`");
 	});
 
+	posix("carry CLAUDE.md, which the sandboxed CLI does not load, but never through a symlink", () => {
+		const dir = tempDir();
+		const secret = join(tempDir(), "id_ed25519");
+		writeFileSync(secret, "PRIVATE KEY\n");
+		symlinkSync(secret, join(dir, "AGENTS.md"));
+		writeFileSync(join(dir, "CLAUDE.md"), "Prefer small diffs.\n");
+		const prompt = startPrompt(job("a".repeat(40)), null, dir);
+		expect(prompt).toContain("## CLAUDE.md\n\nPrefer small diffs.");
+		expect(prompt).not.toContain("PRIVATE KEY");
+		expect(prompt).not.toContain("## AGENTS.md");
+	});
+
 	test("send plan and iterate jobs to the context tool", () => {
 		const plan = startPrompt(job("a".repeat(40), { workflow: "plan", target: "issues/4" }), null, tempDir());
 		expect(plan).toContain("Plan issue #4 of owner/repo. Read it with the `context` tool first");
@@ -699,6 +785,30 @@ describe("account add", () => {
 	});
 });
 
+describe("runner adapters", () => {
+	test.skipIf(process.platform !== "linux")(
+		"need bubblewrap and socat on Linux only once a Claude Code account needs them",
+		() => {
+			const bin = join(tempDir(), "bin");
+			mkdirSync(bin);
+			const install = (...names: string[]) => {
+				for (const name of names) {
+					writeFileSync(join(bin, name), "#!/bin/sh\n");
+					chmodSync(join(bin, name), 0o755);
+				}
+			};
+			install("claude", "opencode");
+			const adapter = runnerAdapters({ PATH: bin });
+			// An opencode-only runner starts without them.
+			expect(adapter("opencode")).toBeInstanceOf(Opencode);
+			expect(() => adapter("claude")).toThrow(/bwrap and socat are not installed/);
+			// A Claude Code account added while the runner runs is checked then.
+			install("bwrap", "socat");
+			expect(adapter("claude")).toBeInstanceOf(Claude);
+		},
+	);
+});
+
 describe("login", () => {
 	posix("connects once the owner approves the link, keeping the token local", async () => {
 		const home = tempDir();
@@ -777,17 +887,33 @@ describe("runner home", () => {
 	});
 });
 
-/** A fake `claude` that runs the steps the test wrote for a new or resumed session. */
+/**
+ * A fake `claude` that runs the steps the test wrote for a new or resumed
+ * session. Its log and steps sit beside its directory, since a job's
+ * environment keeps none of the test's variables.
+ */
 const FAKE_CLAUDE = `
 const fs = require("node:fs");
+const { join } = require("node:path");
 const argv = process.argv.slice(2);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
 const resume = argv.includes("--resume");
 const session = resume ? at("--resume") : at("--session-id");
 const stdin = fs.readFileSync(0, "utf8");
-const log = (value) => fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(value) + "\\n");
 const kix = JSON.parse(fs.readFileSync(at("--mcp-config"), "utf8")).mcpServers.kix;
-log({ argv, stdin, cwd: process.cwd(), home: process.env.CLAUDE_CONFIG_DIR, gh: process.env.GH_TOKEN ?? null, timeout: kix.timeout });
+const log = (value) => fs.appendFileSync(join(__dirname, "..", "calls.log"), JSON.stringify(value) + "\\n");
+log({
+	argv,
+	stdin,
+	cwd: process.cwd(),
+	home: process.env.CLAUDE_CONFIG_DIR,
+	gh: process.env.GH_TOKEN ?? null,
+	secret: process.env.AWS_SECRET_ACCESS_KEY ?? null,
+	tmp: process.env.TMPDIR,
+	envFile: fs.readFileSync(process.env.CLAUDE_ENV_FILE, "utf8"),
+	settings: JSON.parse(fs.readFileSync(at("--settings"), "utf8")),
+	timeout: kix.timeout,
+});
 const out = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 out({ type: "system", subtype: "init", session_id: session });
 let id = 0;
@@ -801,7 +927,7 @@ async function rpc(method, params) {
 }
 (async () => {
 	await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "0" } });
-	const steps = JSON.parse(fs.readFileSync(process.env.FAKE_STEPS, "utf8"))[resume ? "resume" : "start"] ?? [];
+	const steps = JSON.parse(fs.readFileSync(join(__dirname, "..", "steps.json"), "utf8"))[resume ? "resume" : "start"] ?? [];
 	for (const step of steps) {
 		if (step.write) fs.writeFileSync(step.write, step.content);
 		if (step.remove) fs.rmSync(step.remove);
@@ -825,9 +951,11 @@ async function rpc(method, params) {
  */
 const FAKE_OPENCODE = `
 const fs = require("node:fs");
+const { join } = require("node:path");
 const http = require("node:http");
 const argv = process.argv.slice(2);
-const log = (value) => fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(value) + "\\n");
+const logFile = join(__dirname, "..", "calls.log");
+const log = (value) => fs.appendFileSync(logFile, JSON.stringify(value) + "\\n");
 const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
 const auth = "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_SERVER_PASSWORD).toString("base64");
 const kix = config.mcp.kix;
@@ -851,11 +979,11 @@ const body = (request) => new Promise((resolve) => {
 });
 const json = (response, value) => response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
 async function prompt(session, input) {
-	const steps = JSON.parse(fs.readFileSync(process.env.FAKE_STEPS, "utf8"));
-	const resume = fs.existsSync(process.env.FAKE_LOG) && fs.readFileSync(process.env.FAKE_LOG, "utf8").includes('"prompted":"' + session + '"');
+	const steps = JSON.parse(fs.readFileSync(join(__dirname, "..", "steps.json"), "utf8"));
+	const resume = fs.existsSync(logFile) && fs.readFileSync(logFile, "utf8").includes('"prompted":"' + session + '"');
 	log({
 		argv, cwd: process.cwd(), stdin: input.parts[0].text, system: input.system, session, prompted: session,
-		xdg: process.env.XDG_DATA_HOME, gh: process.env.GH_TOKEN ?? null, config,
+		xdg: process.env.XDG_DATA_HOME, devShell: process.env.IN_DEVSHELL ?? null, gh: process.env.GH_TOKEN ?? null, config,
 	});
 	await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "0" } });
 	for (const step of steps[resume ? "resume" : "start"] ?? []) {
@@ -892,14 +1020,21 @@ process.on("SIGTERM", () => process.exit(143));
 server.listen(0, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + server.address().port));
 `;
 
-/** A fake `nix` that runs `develop ... --command <argv>` in place. */
+/** A fake `nix` whose `print-dev-env` prints a one-line devShell, or builds until killed when the steps say `nix`. */
 const FAKE_NIX = `
 const fs = require("node:fs");
+const { join } = require("node:path");
 const argv = process.argv.slice(2);
-fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ nix: argv.slice(0, argv.indexOf("--command")) }) + "\\n");
-const [command, ...args] = argv.slice(argv.indexOf("--command") + 1);
-const result = require("node:child_process").spawnSync(command, args, { stdio: "inherit" });
-process.exit(result.status ?? 1);
+const log = (value) => fs.appendFileSync(join(__dirname, "..", "calls.log"), JSON.stringify(value) + "\\n");
+const steps = join(__dirname, "..", "steps.json");
+if (fs.existsSync(steps) && JSON.parse(fs.readFileSync(steps, "utf8")).nix) {
+	process.on("SIGTERM", () => { log({ nixTerminated: true }); process.exit(143); });
+	setInterval(() => {}, 1000);
+	log({ nix: argv });
+} else {
+	log({ nix: argv });
+	process.stdout.write("export IN_DEVSHELL=1\\n");
+}
 `;
 
 interface Rig {
@@ -956,9 +1091,8 @@ function rig(
 	const env = {
 		...process.env,
 		PATH: `${bin}:${process.env.PATH}`,
-		FAKE_LOG: log,
-		FAKE_STEPS: stepsFile,
 		GH_TOKEN: "secret",
+		AWS_SECRET_ACCESS_KEY: "secret",
 	};
 	const logs: string[] = [];
 	const source = upstream();
@@ -967,10 +1101,8 @@ function rig(
 		login: { url: "http://kix.test", token: "token", id: "r1", name: "laptop" },
 		slots: 2,
 		adapter: () =>
-			cli === "claude"
-				? new Claude(join(bin, "claude"), "bypassPermissions", env)
-				: new Opencode(join(bin, "opencode"), env),
-		shell: devShell,
+			cli === "claude" ? new Claude(join(bin, "claude"), env) : new Opencode(join(bin, "opencode"), env),
+		devShell: (job, repository, signal) => devShell(job, repository, env, signal),
 		remote: () => source.dir,
 		env,
 		dial: hub.dial,
@@ -1068,9 +1200,27 @@ describe("quest runner", () => {
 			["old.txt", true],
 		]);
 		const [nix, launch] = r.calls();
-		expect(nix).toEqual({ nix: ["develop", "--accept-flake-config", "--no-write-lock-file"] });
+		// The devShell comes from the job's revision in the bare clone, not from the checkout.
+		const repository = r.home.path("repos", "owner", "repo.git");
+		expect(nix).toEqual({
+			nix: [
+				"print-dev-env",
+				"--accept-flake-config",
+				"--no-write-lock-file",
+				`git+file://${repository}?rev=${r.upstream.commit}`,
+			],
+		});
 		expect(launch.argv).toEqual(expect.arrayContaining(["-p", "--output-format", "stream-json", "--session-id"]));
-		expect(launch.argv.slice(-2)).toEqual(["--disallowedTools", "AskUserQuestion"]);
+		expect(launch.argv).toEqual(
+			expect.arrayContaining([
+				"--permission-mode",
+				"dontAsk",
+				"--setting-sources",
+				"user",
+				"--strict-mcp-config",
+			]),
+		);
+		expect(launch.argv.slice(-2)).toEqual(["--disallowedTools", "AskUserQuestion,WebFetch"]);
 		expect(launch.home).toBe(r.home.accountHome("acct1"));
 		// The tools' bearer token never appears on the command line.
 		expect(JSON.stringify(launch.argv)).not.toContain("Bearer");
@@ -1078,6 +1228,27 @@ describe("quest runner", () => {
 		// Tool calls may outlast Claude Code's 60s first-response limit for HTTP servers, up to the longest wait.
 		expect(launch.timeout).toBe(TOOL_TIMEOUT_MS);
 		expect(TOOL_TIMEOUT_MS).toBeGreaterThan(WAIT_LIMIT);
+		expect(launch.secret).toBeNull();
+		// Commands run sandboxed in the checkout, with a private temporary directory and the devShell sourced first.
+		const checkout = r.home.path("jobs", "job1");
+		expect(launch.cwd).toBe(checkout);
+		expect(launch.tmp).toMatch(/^\/.*quest-job-/);
+		expect(launch.envFile).toContain(`export HOME='${launch.tmp}/home'`);
+		expect(launch.envFile).toContain(`. '${launch.tmp}/devshell.sh' >/dev/null`);
+		expect(launch.settings.sandbox).toMatchObject({
+			enabled: true,
+			failIfUnavailable: true,
+			allowUnsandboxedCommands: false,
+			filesystem: { allowRead: [checkout, repository, launch.tmp], allowWrite: [launch.tmp] },
+			// A trusted revision's commands reach the package registries and nothing else.
+			network: { allowedDomains: REGISTRIES, strictAllowlist: true },
+		});
+		expect(launch.argv[launch.argv.indexOf("--append-system-prompt") + 1]).toContain("registry.npmjs.org");
+		expect(launch.settings.sandbox.filesystem.denyRead).toEqual(expect.arrayContaining([r.home.dir]));
+		expect(launch.settings.permissions.allow).toEqual(["Bash", `Edit(/${checkout}/**)`, "WebSearch", "mcp__kix"]);
+		// The attempt's temporary directory and settings are gone once it ends.
+		expect(existsSync(launch.tmp)).toBe(false);
+		expect(existsSync(launch.argv[launch.argv.indexOf("--settings") + 1])).toBe(false);
 		expect(launch.stdin).toContain("Always run the tests.");
 		expect(launch.stdin).toContain("kix adds for this job: Extra rule.");
 		// Raw output arrives as numbered chunks, and the checkout is gone once the job completed.
@@ -1175,10 +1346,11 @@ describe("quest runner", () => {
 		await idle(r.runner);
 		expect(r.hub.of("checkpoint")).toMatchObject([{ summary: "Drafted", session: question.session }]);
 		const [nix, first] = r.calls();
-		expect(nix).toEqual({ nix: ["develop", "--accept-flake-config", "--no-write-lock-file"] });
+		expect(nix.nix.slice(0, 3)).toEqual(["print-dev-env", "--accept-flake-config", "--no-write-lock-file"]);
 		const home = r.home.accountHome("acct1");
-		// The account's XDG home applies to opencode alone, set inside the devShell.
+		// The account's XDG home applies to opencode alone, set inside the devShell built from the revision.
 		expect(first.argv).toEqual(["serve", "--hostname=127.0.0.1", "--port=0"]);
+		expect(first.devShell).toBe("1");
 		expect(first.xdg).toBe(join(home, "data"));
 		expect(first.gh).toBeNull();
 		expect(first.stdin).toContain("kix adds for this job: Extra rule.");
@@ -1274,6 +1446,25 @@ describe("quest runner", () => {
 		expect(r.publishes.at(-1)!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
 		expect(r.calls().some((c) => c.terminated)).toBe(true);
 		await r.runner.shutdown();
+	});
+
+	posix("a cancel or shutdown kills a devShell build before the agent starts", async () => {
+		const r = rig();
+		r.steps({ nix: [true] });
+		const building = (count: number) =>
+			vi.waitFor(() => expect(r.calls().filter((c) => c.nix)).toHaveLength(count), { timeout: 10_000 });
+		r.assign(job(r.upstream.commit));
+		await building(1);
+		r.hub.socket.deliver({ type: "cancel", job: "job1", attempt: 1 });
+		expect(await r.result()).toMatchObject({ outcome: "cancelled", summary: "The maintainer stopped this job." });
+		await idle(r.runner);
+
+		r.assign(job(r.upstream.commit, { id: "job2" }));
+		await building(2);
+		await r.runner.shutdown();
+		expect(r.hub.of("result").filter((m) => m.job === "job2")).toEqual([]);
+		expect(r.calls().filter((c) => c.nixTerminated)).toHaveLength(2);
+		expect(r.calls().filter((c) => c.argv)).toHaveLength(0);
 	});
 
 	posix("pauses a limited account until it resets, never switching accounts", async () => {
@@ -1514,8 +1705,8 @@ describe("quest runner", () => {
 				home,
 				login: { url: "http://kix.test", token: "token", id: "r1", name: "laptop" },
 				slots: 1,
-				adapter: () => new Claude("claude", "bypassPermissions", {}),
-				shell: devShell,
+				adapter: () => new Claude("claude", {}),
+				devShell: async () => null,
 				remote: () => "",
 				dial: hub.dial,
 				log: () => {},
