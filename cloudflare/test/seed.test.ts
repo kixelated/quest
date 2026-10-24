@@ -3,11 +3,11 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
-import { commitOf, fakeGitHub, headOf, type World } from "../dev/github";
+import { commitOf, fakeGitHub, headOf, intercept, type World } from "../dev/github";
 import { seed, world } from "../dev/seed";
 import { app } from "../src/index";
 import { inboxURL } from "../src/jobs/routes";
-import { cancel } from "../src/jobs/store";
+import { cancel, createJob, createRunner, dispatch, report } from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
 
@@ -32,7 +32,7 @@ async function seeded() {
 		await waitOnExecutionContext(ctx);
 		return response;
 	};
-	const { cookie } = await seed({
+	const { user, cookie } = await seed({
 		fetch: request,
 		db,
 		world: data,
@@ -50,7 +50,7 @@ async function seeded() {
 			headers: { Cookie: cookie, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams(fields).toString(),
 		});
-	return { data, request, cookie, rocket, page, post };
+	return { data, request, user, cookie, rocket, page, post };
 }
 
 const latest = (target: string) =>
@@ -66,19 +66,11 @@ async function startOver(page: (item: string) => Promise<string>) {
 	return blocked.match(/name="question" value="([^"]+)"/)![1]!;
 }
 
-/** Run `before` once, ahead of the first request to GitHub matching `when`. */
-function intercept(data: World, when: (url: URL, method: string) => boolean, before: () => Promise<Response | void>) {
-	const github = fakeGitHub(data);
-	let done = false;
-	vi.mocked(globalThis.fetch).mockImplementation(async function (this: unknown, input, init) {
-		const request = new Request(input, init);
-		if (!done && when(new URL(request.url), request.method)) {
-			done = true;
-			const response = await before();
-			if (response) return response;
-		}
-		return github.call(this, input, init);
-	});
+/** Run `run` once, ahead of the first request to GitHub matching `when`; a response it returns answers that request. */
+function meanwhile(data: World, when: (url: URL, method: string) => boolean, run: () => Promise<Response | void>) {
+	vi.mocked(globalThis.fetch).mockImplementation(
+		intercept(fakeGitHub(data), when, async (next) => (await run()) ?? next()),
+	);
 }
 
 it("seeds a representative inbox through the Worker's own routes", async () => {
@@ -198,7 +190,7 @@ it("never resets the branch for a Start over that a concurrent cancel beat", asy
 	const { data, rocket, page, post } = await seeded();
 	const question = await startOver(page);
 	// Another maintainer cancels the job after this request read it, while it rechecks GitHub.
-	intercept(
+	meanwhile(
 		data,
 		(url) => url.pathname === `/repos/${data.forks}/${rocket.name}`,
 		() => cancel(db, "seed-start-fonts", "another-maintainer", Date.now()),
@@ -212,7 +204,7 @@ it("never resets the branch for a Start over that a concurrent cancel beat", asy
 it("leaves a Start over whose reset failed waiting to start over again", async () => {
 	const { data, rocket, page, post } = await seeded();
 	const question = await startOver(page);
-	intercept(
+	meanwhile(
 		data,
 		(url, method) => method === "PATCH" && url.pathname.startsWith(`/repos/${data.forks}/${rocket.name}/git/refs/`),
 		async () => Response.json({ message: "Server Error" }, { status: 502 }),
@@ -235,4 +227,70 @@ it("leaves a Start over whose reset failed waiting to start over again", async (
 	expect(again.status).toBe(303);
 	expect(rocket.fork["quest/m1/fonts"]).toBe(commitOf(rocket));
 	expect(await latest("quest/m1/fonts.md")).toMatchObject({ state: "queued", head: commitOf(rocket) });
+});
+
+it("publishes jobs' work end to end, through the fork branch to the pull request", async () => {
+	const { request, user, rocket } = await seeded();
+	const now = Date.now();
+	// A retry of the failed import job continues from the branch and pull request it left.
+	const retry = await createJob(
+		db,
+		{
+			repository: rocket.id,
+			actor: user,
+			workflow: "start",
+			target: "quest/m0/import.md",
+			revision: commitOf(rocket),
+			branch: "quest/m0/import",
+			trusted: true,
+		},
+		now,
+	);
+	const { id, token } = await createRunner(db, user, "test", "linux", true, now);
+	const machine = { id, owner: user, name: "test", platform: "linux" as const, vm: 1 };
+	await report(
+		db,
+		machine,
+		[{ id: "main", provider: "anthropic", kind: "subscription", label: "main", limited: false }],
+		[],
+		now,
+	);
+	await dispatch(db, user, new Map([[id, 2]]), now);
+	const publish = async (body: Record<string, unknown>) => {
+		const text = JSON.stringify({ attempt: 1, ...body });
+		const response = await request("/api/runner/publish", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				"Content-Length": String(new TextEncoder().encode(text).length),
+			},
+			body: text,
+		});
+		expect(response.status).toBe(200);
+		return (await response.json()) as { head: string; pull?: { number: number; draft: boolean } };
+	};
+	const pull = { title: "Keep working offline", body: "Queues edits while offline." };
+
+	// The queued job commits on a new fork branch, then opens a draft pull request from it.
+	const first = await publish({
+		job: "seed-start-offline",
+		head: null,
+		message: "feat: queue offline edits",
+		changes: [{ path: "src/offline.ts", content: Buffer.from("export {};\n").toString("base64") }],
+	});
+	expect(rocket.fork["quest/m1/offline"]).toBe(first.head);
+	expect(rocket.commits[first.head]!.parents).toEqual([commitOf(rocket)]);
+	const opened = await publish({ job: "seed-start-offline", head: first.head, pull });
+	expect(opened.pull).toMatchObject({ number: 21, draft: true });
+	expect(rocket.pulls.at(-1)).toMatchObject({ number: 21, branch: "quest/m1/offline", fork: true, draft: true });
+	// Finished work marks it ready for review.
+	await publish({ job: "seed-start-offline", head: first.head, pull: { ...pull, draft: false } });
+	expect(rocket.pulls.at(-1)!.draft).toBe(false);
+
+	const continued = await latest("quest/m0/import.md");
+	expect(continued).toMatchObject({ id: retry.id, state: "running", head: rocket.fork["quest/m0/import"] });
+	const adopted = await publish({ job: retry.id, head: continued!.head, pull: { title: "Import", body: "Done" } });
+	expect(adopted.pull).toMatchObject({ number: 20 });
+	expect(rocket.pulls.filter((p) => p.branch === "quest/m0/import")).toHaveLength(1);
 });
