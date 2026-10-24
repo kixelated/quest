@@ -273,9 +273,9 @@ export class Opencode implements Adapter {
 		};
 		// The account's XDG directories apply to opencode alone: the devShell's nix reads the user's.
 		const xdg = Object.entries(accountDirectories(launch.home)).map(([name, dir]) => `${name}=${dir}`);
-		// The sandbox's script sets the private HOME and enters the devShell before opencode starts.
+		// The sandbox's script sets the private HOME and enters the devShell, in bash's syntax, before opencode starts.
 		const argv = [
-			"/bin/sh",
+			"bash",
 			"-c",
 			'. "$0" && exec "$@"',
 			launch.sandbox.env,
