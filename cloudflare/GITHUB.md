@@ -464,6 +464,10 @@ branch claims exclude that quest from candidate data; branch claims display as
 Claimed on the board. So does a draft PR its starter still holds, one without a
 `## Decisions needed` section, which the inbox lists as in progress rather than
 as a decision; a ready PR or a handed-back draft is Ready to turn in.
+As in the CLI, a `quest/` branch whose tip is the head of a merged PR from it
+claims nothing, since its work landed; one whose PR closed unmerged, or with
+commits pushed after the merge, still does. A push to an existing branch does
+not invalidate candidates, so such a push shows on the next occupancy pass.
 Runner/run associations belong to job coordination.
 
 Every cached read and refresh proves current maintainer authority, live repository
