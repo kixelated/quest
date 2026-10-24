@@ -87,7 +87,11 @@ const mf = new Miniflare(
 				// Every outbound request goes to the fake; nothing reaches the network.
 				outboundService: async (request) => {
 					const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.text();
-					const response = await github(request.url, { method: request.method, body });
+					const response = await github(request.url, {
+						method: request.method,
+						headers: [...request.headers],
+						body,
+					});
 					return new MiniflareResponse(await response.arrayBuffer(), {
 						status: response.status,
 						headers: [...response.headers],
