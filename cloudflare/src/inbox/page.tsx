@@ -3,6 +3,7 @@ import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { type Done, PLAN_LIMITS, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker, Notifications } from "../layout";
 import { projectURL } from "../projects";
+import { type Card, PHASES, ago } from "./activity";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
 
 // The decision inbox, phone first: one active decision thread, then what is
@@ -21,6 +22,9 @@ export type InboxProps = {
 	working: Item[];
 	skipped: Item[];
 	runners: Map<string, Runners>;
+	/** What each agent job is doing, beside the decisions. */
+	cards: Card[];
+	now: number;
 	/** The VAPID public key, or null where notifications are not configured. */
 	notifications: string | null;
 };
@@ -173,7 +177,7 @@ function Approval(props: { item: Item }) {
 	);
 }
 
-function jobsURL(item: Item) {
+function jobsURL(item: Pick<Item, "project">) {
 	return `${projectURL(item.project.owner, item.project.name)}/jobs`;
 }
 
@@ -634,76 +638,162 @@ function Project(props: { view: ProjectView; runners: Runners }) {
 	);
 }
 
+const workflows = { plan: "Planning", start: "Implementing", iterate: "Iterating", bootstrap: "Adding a devShell" };
+
+/**
+ * One agent job: its target, state, runner and account, and the agent's latest
+ * summary, as escaped text. Raw output loads only when a maintainer opens its
+ * disclosure, and the server rechecks their authority on every read.
+ */
+function AgentCard(props: { card: Card; runners: Runners; user: string; now: number }) {
+	const { card, now } = props;
+	const { job, item } = card;
+	// Another maintainer's answer waits on the requester's approval, not on this viewer.
+	const label = card.phase === "waiting" && item?.need === null ? "Awaiting approval" : PHASES[card.phase];
+	const status = item && progress(item, props.runners, props.user);
+	const when = ago(now, card.at);
+	const output = `${jobsURL(card)}/${job.id}/output`;
+	return (
+		<li class={`agent agent-${card.phase}`}>
+			<p class="ql-eyebrow">
+				{card.project.owner}/{card.project.name} · {label}
+			</p>
+			<h3>
+				<a href={card.href}>{card.title}</a>
+			</h3>
+			<p class="entry-meta decision-meta">
+				<span>{workflows[job.workflow]}</span>
+				{card.runner && (
+					<span>
+						{card.runner}
+						{card.account && ` · ${card.account}`}
+					</span>
+				)}
+				{card.pull && <a href={card.pull.href}>Pull request #{card.pull.number}</a>}
+				{item && <a href={inboxURL(card.project.id, job.target)}>Details</a>}
+			</p>
+			{status && <p>{status}</p>}
+			{job.summary ? (
+				<p class="agent-summary">{job.summary}</p>
+			) : (
+				<p class="muted">The agent has not written a summary yet.</p>
+			)}
+			<p class="note-small muted">
+				<time datetime={new Date(card.at).toISOString()}>
+					{card.quiet ? `No update since ${when}` : job.summary ? `Updated ${when}` : `Requested ${when}`}
+				</time>
+			</p>
+			<details class="agent-output" data-output={output}>
+				<summary>Raw output</summary>
+				<p class="note-small muted" data-output-status>
+					Only the project's current maintainers can read it. It loads when opened.
+				</p>
+				<pre hidden></pre>
+				<button type="button" class="button quiet" data-output-more hidden>
+					Load more
+				</button>
+				<noscript>
+					<a href={output}>Read the raw output</a>
+				</noscript>
+			</details>
+		</li>
+	);
+}
+
 export function InboxPage(props: InboxProps) {
 	const { active } = props;
 	const view = active && props.projects.find((v) => v.project.id === active.project.id);
 	const unread = props.decisions.filter((item) => item.unread).length;
 	const next = props.decisions.filter((item) => item !== active);
+	// Agent cards stand in for the in-progress rows of the jobs they show.
+	const carded = new Set(props.cards.map((card) => card.item));
+	const working = props.working.filter((item) => !carded.has(item));
 	return (
 		<section class="wrap inbox">
-			<h1>Decisions</h1>
-			<p class="muted">
-				{props.decisions.length
-					? `${props.decisions.length} waiting on you${unread ? `, ${unread} new` : ""}.`
-					: "Nothing needs a decision right now."}
-			</p>
-			{props.done && Object.hasOwn(recorded, props.done) && (
-				<p class="note" role="status">
-					{recorded[props.done as Done]}
+			<div class="inbox-main">
+				<h1>Decisions</h1>
+				<p class="muted">
+					{props.decisions.length
+						? `${props.decisions.length} waiting on you${unread ? `, ${unread} new` : ""}.`
+						: "Nothing needs a decision right now."}
 				</p>
-			)}
-			<Notifications publicKey={props.notifications} compact />
-			{props.missing && (
-				<p class="note" role="status">
-					That decision is no longer open. It may have been answered or changed on GitHub.
-				</p>
-			)}
-			{active && (
-				<Thread
-					item={active}
-					view={view ?? undefined}
-					runners={props.runners.get(active.job?.actor ?? "") ?? []}
-					user={props.user}
-				/>
-			)}
-			{next.length > 0 && (
-				<section>
-					<h2>Up next</h2>
-					<List items={next} active={active} />
-				</section>
-			)}
-			{props.working.length > 0 && (
-				<section>
-					<h2>In progress</h2>
-					<List items={props.working} active={active} />
-				</section>
-			)}
-			<section>
-				<h2>Projects</h2>
-				{props.projects.length ? (
-					<ul class="log">
-						{props.projects.map((view) => (
-							<Project view={view} runners={props.runners.get(props.user) ?? []} />
-						))}
-					</ul>
-				) : (
-					<p>
-						No enrolled projects yet. <a href="/projects">Enroll a project</a>, or open one a co-maintainer
-						enrolled, to get its issues, pull requests, and ready quests here.
+				{props.done && Object.hasOwn(recorded, props.done) && (
+					<p class="note" role="status">
+						{recorded[props.done as Done]}
 					</p>
 				)}
-				<p class="note-small muted">
-					Lists enrolled projects you maintain, once you open each one's setup page. Runners and accounts are
-					set up with <code>quest runner</code>; <a href="/runners">your runners</a> shows them and the order
-					jobs use your accounts in.
-				</p>
-			</section>
-			{props.skipped.length > 0 && (
-				<details class="skipped">
-					<summary>Skipped and finished ({props.skipped.length})</summary>
-					<List items={props.skipped} active={active} />
-				</details>
-			)}
+				<Notifications publicKey={props.notifications} compact />
+				{props.missing && (
+					<p class="note" role="status">
+						That decision is no longer open. It may have been answered or changed on GitHub.
+					</p>
+				)}
+				{active && (
+					<Thread
+						item={active}
+						view={view ?? undefined}
+						runners={props.runners.get(active.job?.actor ?? "") ?? []}
+						user={props.user}
+					/>
+				)}
+				{next.length > 0 && (
+					<section>
+						<h2>Up next</h2>
+						<List items={next} active={active} />
+					</section>
+				)}
+			</div>
+			<aside class="agents" aria-labelledby="agents-title">
+				<h2 id="agents-title">Agents</h2>
+				{props.cards.length ? (
+					<ol class="log">
+						{props.cards.map((card) => (
+							<AgentCard
+								card={card}
+								runners={props.runners.get(card.job.actor) ?? []}
+								user={props.user}
+								now={props.now}
+							/>
+						))}
+					</ol>
+				) : (
+					<p class="muted">No agent is working on your projects right now.</p>
+				)}
+			</aside>
+			<div class="inbox-rest">
+				{working.length > 0 && (
+					<section>
+						<h2>In progress</h2>
+						<List items={working} active={active} />
+					</section>
+				)}
+				<section>
+					<h2>Projects</h2>
+					{props.projects.length ? (
+						<ul class="log">
+							{props.projects.map((view) => (
+								<Project view={view} runners={props.runners.get(props.user) ?? []} />
+							))}
+						</ul>
+					) : (
+						<p>
+							No enrolled projects yet. <a href="/projects">Enroll a project</a>, or open one a
+							co-maintainer enrolled, to get its issues, pull requests, and ready quests here.
+						</p>
+					)}
+					<p class="note-small muted">
+						Lists enrolled projects you maintain, once you open each one's setup page. Runners and accounts
+						are set up with <code>quest runner</code>; <a href="/runners">your runners</a> shows them and
+						the order jobs use your accounts in.
+					</p>
+				</section>
+				{props.skipped.length > 0 && (
+					<details class="skipped">
+						<summary>Skipped and finished ({props.skipped.length})</summary>
+						<List items={props.skipped} active={active} />
+					</details>
+				)}
+			</div>
 		</section>
 	);
 }

@@ -67,5 +67,4 @@ Earlier guidance:
 
 ## Required
 
-- [Agent activity](/quest/m0/kix/activity.md) - how maintainers follow running work
 - [Job sandbox](/quest/m0/kix/sandbox.md) - safe iteration on PRs with contributors' commits
