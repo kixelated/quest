@@ -62,6 +62,48 @@ for (const form of document.querySelectorAll('form[action="/sign-out"]')) {
 	);
 }
 
+// A job's raw output loads only when a maintainer opens its disclosure, a page
+// at a time, and the server rechecks their authority on every page. It is
+// shown as text, never markup.
+for (const details of document.querySelectorAll("details[data-output]")) {
+	const output = details.querySelector("pre");
+	const status = details.querySelector("[data-output-status]");
+	const more = details.querySelector("[data-output-more]");
+	let next = null;
+	let started = false;
+	async function load() {
+		more.disabled = true;
+		try {
+			const url = new URL(details.dataset.output, location.href);
+			if (next) url.searchParams.set("after", `${next.attempt}.${next.seq}`);
+			const response = await fetch(url, { headers: { Accept: "application/json" } });
+			const page = await response.json().catch(() => null);
+			if (!response.ok) throw new Error(page?.error || "The raw output could not be read.");
+			output.append(page.output.map((chunk) => chunk.text).join(""));
+			output.hidden = !output.textContent;
+			next = page.next;
+			more.hidden = !next;
+			status.textContent = !output.textContent
+				? "No raw output is stored for this job."
+				: page.truncated.length
+					? "Some output was dropped at the size limit."
+					: "";
+		} catch (error) {
+			status.textContent = error.message || "Something went wrong.";
+			// Opening the disclosure again retries a first page that failed.
+			if (!output.textContent) started = false;
+		} finally {
+			more.disabled = false;
+		}
+	}
+	details.addEventListener("toggle", () => {
+		if (!details.open || started) return;
+		started = true;
+		load();
+	});
+	more.addEventListener("click", load);
+}
+
 // Whether the server notifies this browser's subscription for whoever is
 // signed in. It forgets one when a session signs out, and never hands one to
 // another user, so the browser's own subscription is not enough to show "on".

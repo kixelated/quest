@@ -2,6 +2,7 @@ import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 import { type Doc, entries, rooted } from "quest/core";
 import { type Crumb, Difficulty, Marker, Paste, SignIn, Token, type User } from "../layout";
+import { QuestMap } from "../map";
 import { render } from "./markdown";
 import {
 	type Board,
@@ -191,7 +192,11 @@ function Tally(props: { board: Board; show: Status["kind"] | null }) {
 	);
 }
 
-export function BoardPage(props: { board: Board; show: Status["kind"] | null }) {
+/**
+ * A project's quest log. An enrolled project's also charts its tree as the
+ * quest map, highlighting the quests `agents` work on.
+ */
+export function BoardPage(props: { board: Board; show: Status["kind"] | null; agents?: Map<string, string> }) {
 	const { board, show } = props;
 	const { project } = board;
 	const recent = board.finished.slice(0, 8);
@@ -222,6 +227,8 @@ export function BoardPage(props: { board: Board; show: Status["kind"] | null }) 
 					</p>
 				)}
 			</header>
+
+			{props.agents && <QuestMap board={board} agents={props.agents} />}
 
 			{milestones.map(({ milestone, items }) => (
 				<MilestoneSection milestone={milestone} items={items} />

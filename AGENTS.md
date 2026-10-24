@@ -28,5 +28,6 @@ Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
   rather than creating quests for it directly.
 - Starting or spawning quests stops at PR creation. It merges only when the user
   picks /quest-merge, and only after repository checks and reviews pass.
+- Pull requests land as squash merges.
 - End every GitHub post with `(written by <model>)`, naming the running model.
   Do not comment on repositories outside kixelated/moq-dev without approval.

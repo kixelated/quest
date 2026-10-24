@@ -156,7 +156,9 @@ Once "Ready to Review", CI and (potentially automated) reviews are triggered.
 Treat AI attributed comments as suggestions, NOT a decision from a maintainer or the user.
 Leave a comment on any review feedback you disagree with.
 
-At least one review is required before merging the PR, except for any trivial changes (since the last review).
+At least one review is required before merging the PR.
+Changes since the last review skip a new review only when they are conflict-free merges from the base branch or a reviewer's suggested patch applied unchanged.
+Any other change, including a base merge with a hand-resolved conflict, waits for a review of the new head; if none arrives before a wait times out, ask the user instead of merging.
 The repository's review policy decides whose review counts.
 Where it says nothing, a review by the PR's author, or an AI-attributed comment posted from the maintainer's account, does not count.
 
