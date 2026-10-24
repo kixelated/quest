@@ -1,6 +1,6 @@
 import { type Pull, continued, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
-import { type Done, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
+import { type Done, PLAN_LIMITS, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker, Notifications } from "../layout";
 import { projectURL } from "../projects";
 import type { Item, ProjectView, QuestionView, Runners } from "./model";
@@ -44,8 +44,10 @@ function needLabel(item: Item) {
 	if (item.need === "account") return "Account limited";
 	if (item.need === "approve") return "Answer to approve";
 	if (item.need === "retry") return "Failed";
-	if (item.need === "start")
-		return item.skipped && item.job ? `${kinds[item.kind]} · job ${item.job.state}` : kinds[item.kind];
+	if (item.need === "start") {
+		if (item.skipped && item.job) return `${kinds[item.kind]} · job ${item.job.state}`;
+		return item.followups ? "Follow-ups to plan" : kinds[item.kind];
+	}
 	if (!item.job) return "Claimed draft";
 	if (item.job.state === "waiting") return "Awaiting approval";
 	return item.job.state === "queued" ? "Queued" : "Working";
@@ -67,7 +69,8 @@ function progress(item: Item, runners: Runners, user: string) {
 		const runner = runners.find((r) => r.id === job.runner);
 		if (job.lease !== null || !runner?.online)
 			return "Runner offline. The job moves to another runner if it stays away for two minutes.";
-		return `Working on ${runner.name}.`;
+		const account = runner.accounts.find((a) => a.id === job.account);
+		return `Working on ${runner.name}${account ? ` with ${account.label}` : ""}.`;
 	}
 	if (item.need === "account")
 		return "The job's account hit its limit. Choose an account to continue; kix never switches accounts on its own.";
@@ -190,21 +193,24 @@ function AgentForm(props: { item: Item; prompt: Prompt }) {
 						{ask.header && <span class="ql-eyebrow">{ask.header}</span>}
 						{ask.question}
 					</legend>
-					{ask.options.map((option, j) => (
-						<label class="choice" for={`q${i}-${j}`}>
-							<input
-								id={`q${i}-${j}`}
-								type={ask.multiple ? "checkbox" : "radio"}
-								name={`q${i}`}
-								value={option.label}
-							/>
-							<span>
-								<strong>{option.label}</strong>
-								{option.recommended && <span class="tag">Recommended</span>}
-								{option.description && <span class="choice-why">{option.description}</span>}
-							</span>
-						</label>
-					))}
+					{/* The recommendation comes first, but is never chosen for the maintainer. */}
+					{[...ask.options.filter((o) => o.recommended), ...ask.options.filter((o) => !o.recommended)].map(
+						(option, j) => (
+							<label class="choice" for={`q${i}-${j}`}>
+								<input
+									id={`q${i}-${j}`}
+									type={ask.multiple ? "checkbox" : "radio"}
+									name={`q${i}`}
+									value={option.label}
+								/>
+								<span>
+									<strong>{option.label}</strong>
+									{option.recommended && <span class="tag">Recommended</span>}
+									{option.description && <span class="choice-why">{option.description}</span>}
+								</span>
+							</label>
+						),
+					)}
 					<label class="free" for={`q${i}-text`}>
 						{ask.options.length ? "Or answer in your own words" : "Your answer"}
 					</label>
@@ -342,8 +348,14 @@ function work(item: Item, view: ProjectView) {
 		};
 	if (item.kind === "issue")
 		return { workflow: "plan", target: item.target, revision: commit, label: "Plan this issue" };
-	// Only a failed interview is an item, so this retries it on the same target.
-	if (item.kind === "plan") return { workflow: "plan", target: item.target, revision: commit, label: "Try again" };
+	// A plan item is a failed interview, retried on the same target, or a finished job's follow-ups.
+	if (item.kind === "plan")
+		return {
+			workflow: "plan",
+			target: item.target,
+			revision: commit,
+			label: item.followups ? "Plan these follow-ups" : "Try again",
+		};
 	if (item.kind === "devshell") return { workflow: "bootstrap", revision: commit, label: "Add a devShell" };
 	return { workflow: "start", target: item.target, revision: commit, label: "Start this quest" };
 }
@@ -443,6 +455,40 @@ function Thread(props: { item: Item; view: ProjectView | undefined; runners: Run
 					<p>{item.job.summary}</p>
 				</section>
 			)}
+			{item.job?.idea && (
+				<details class="history">
+					<summary>What this plan starts from</summary>
+					<p>{item.job.idea}</p>
+					{item.job.context && (
+						<>
+							<p class="muted">Pasted context, which the agent reads as untrusted:</p>
+							<p>{item.job.context}</p>
+						</>
+					)}
+				</details>
+			)}
+			{item.job?.pull && (
+				<p class="decision-meta">
+					{item.kind === "plan" ? "Its draft proposal: " : "Its pull request: "}
+					<a href={`https://github.com/${item.project.owner}/${item.project.name}/pull/${item.job.pull}`}>
+						#{item.job.pull}
+					</a>
+				</p>
+			)}
+			{item.followups && (
+				<section class="summary">
+					<h3>Suggested follow-ups</h3>
+					<ul>
+						{item.followups.map((followup) => (
+							<li>{followup}</li>
+						))}
+					</ul>
+					<p class="note-small muted">
+						An agent suggested these when its job finished. Planning them starts an interview, which reads
+						them as untrusted context.
+					</p>
+				</section>
+			)}
 			<History item={item} />
 			{item.need === "approve" && <Approval item={item} />}
 			{(item.need === "answer" || item.need === "account" || item.need === "approve") &&
@@ -495,7 +541,66 @@ function List(props: { items: Item[]; active: Item | null }) {
 	);
 }
 
-function Project(props: { view: ProjectView }) {
+/**
+ * A compact choice of where a new job runs: automatic by default, following
+ * the user's account preference order, or one of their runners' accounts.
+ */
+function Pin(props: { runners: Runners; id: string }) {
+	const choices = props.runners.flatMap((runner) => runner.accounts.map((account) => ({ runner, account })));
+	if (!choices.length) return null;
+	return (
+		<details class="pin">
+			<summary>Runner and account: automatic unless you choose</summary>
+			<label class="free" for={props.id}>
+				Run on
+			</label>
+			<select id={props.id} name="pin">
+				<option value="">Automatic, in your account preference order</option>
+				{choices.map(({ runner, account }) => (
+					<option value={`${runner.id}:${account.id}`}>
+						{account.label} on {runner.name}
+						{runner.online ? "" : " (offline)"}
+						{account.limited ? " (limited)" : ""}
+					</option>
+				))}
+			</select>
+		</details>
+	);
+}
+
+/**
+ * The new plan box: the maintainer's idea, plus an optional pasted block,
+ * such as an email or call notes, that the agent reads as untrusted context.
+ */
+function NewPlan(props: { project: ProjectView["project"]; commit: string; runners: Runners }) {
+	const { project } = props;
+	const base = projectURL(project.owner, project.name);
+	const id = `plan-${project.id}`;
+	return (
+		<details class="entry-meta new-plan">
+			<summary>Plan something new</summary>
+			<form method="post" action={`${base}/jobs`} class="decision-form">
+				<input type="hidden" name="workflow" value="plan" />
+				<input type="hidden" name="revision" value={props.commit} />
+				<fieldset class="ask">
+					<label class="free" for={`${id}-idea`}>
+						What should the plan cover?
+					</label>
+					<textarea id={`${id}-idea`} name="idea" rows={3} maxlength={PLAN_LIMITS.idea} required />
+					<label class="free" for={`${id}-context`}>
+						Paste context, such as an email, call notes, or findings (optional). The agent reads it as
+						untrusted context, like an issue's text.
+					</label>
+					<textarea id={`${id}-context`} name="context" rows={4} maxlength={PLAN_LIMITS.context} />
+					<Pin runners={props.runners} id={`${id}-pin`} />
+				</fieldset>
+				<button class="button primary">Start the interview</button>
+			</form>
+		</details>
+	);
+}
+
+function Project(props: { view: ProjectView; runners: Runners }) {
 	const { project, state, error } = props.view;
 	const base = projectURL(project.owner, project.name);
 	return (
@@ -520,14 +625,10 @@ function Project(props: { view: ProjectView }) {
 			{!error && (
 				<span class="entry-meta project-actions">
 					<Refresh project={project} />
-					{project.state === "enabled" && state?.project.available && (
-						<form method="post" action={`${base}/jobs`}>
-							<input type="hidden" name="workflow" value="plan" />
-							<input type="hidden" name="revision" value={state.project.commit} />
-							<button class="button quiet">Start a planning interview</button>
-						</form>
-					)}
 				</span>
+			)}
+			{!error && project.state === "enabled" && state?.project.available && (
+				<NewPlan project={project} commit={state.project.commit} runners={props.runners} />
 			)}
 		</li>
 	);
@@ -582,7 +683,7 @@ export function InboxPage(props: InboxProps) {
 				{props.projects.length ? (
 					<ul class="log">
 						{props.projects.map((view) => (
-							<Project view={view} />
+							<Project view={view} runners={props.runners.get(props.user) ?? []} />
 						))}
 					</ul>
 				) : (

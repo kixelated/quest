@@ -103,6 +103,9 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 		"Export a project as a ZIP archive",
 		"Settings page loses unsaved changes when the session expires",
 		"Keep working offline",
+		// A new plan named by its idea, and a finished job's follow-ups to plan.
+		"Let people share a read-only link to a project",
+		"Follow-ups from quest/m0/cli.md",
 		// The paused project.
 		"example/archive",
 	])

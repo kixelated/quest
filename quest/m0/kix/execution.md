@@ -35,8 +35,9 @@ time:
   `/quest-complete` actions, one decision per PR: mark ready, merge (the
   [merge job](/quest/m0/kix/merge-job.md)), iterate, skip, or delete. Owned
   PRs never push a notification.
-- Each job's suggested follow-ups become a "plan these?" decision feeding
-  [web planning](/quest/m0/kix/planning.md).
+- Each job's suggested follow-ups become a "plan these?" decision: the
+  runner's `deliver` tool reports them, and the inbox offers a planning
+  interview on them. Start and iterate jobs report theirs the same way.
 
 Earlier guidance:
 
@@ -66,6 +67,5 @@ Earlier guidance:
 
 ## Required
 
-- [Web planning](/quest/m0/kix/planning.md) - the complete decision/session/publication path
 - [Agent activity](/quest/m0/kix/activity.md) - how maintainers follow running work
 - [Job sandbox](/quest/m0/kix/sandbox.md) - safe iteration on PRs with contributors' commits
