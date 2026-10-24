@@ -11,7 +11,7 @@ import type { Account } from "./home";
 import type { Tool } from "./mcp";
 import { serveTools } from "./mcp";
 import { OutputUploader } from "./output";
-import { resumePrompt, startPrompt, SYSTEM } from "./prompt";
+import { resumePrompt, startPrompt, systemPrompt } from "./prompt";
 import { type Job, type Message, type Outcome, clip } from "./protocol";
 import { type Sandbox, closeSandbox, openSandbox } from "./sandbox";
 import { Workspace } from "./workspace";
@@ -169,6 +169,7 @@ export class Attempt {
 					repository: this.#workspace.repository,
 					runnerHome: ctx.root,
 					devShell,
+					trusted: Boolean(job.trusted),
 				});
 				this.#agent = ctx.adapter(account).launch({
 					cwd: this.#workspace.dir,
@@ -176,7 +177,7 @@ export class Attempt {
 					session: this.#session,
 					resume,
 					prompt: resume ? resumePrompt(job) : startPrompt(job, this.instructions, this.#workspace.dir),
-					system: SYSTEM,
+					system: systemPrompt(sandbox.domains),
 					tools: { url: tools.url, token: tools.token },
 					sandbox,
 					env: ctx.env,

@@ -1,8 +1,9 @@
 // The OS sandbox every job's commands run in: bubblewrap on Linux, Seatbelt
 // on macOS, through the agent CLI's own sandbox. Commands write only to the
 // job's checkout and a private temporary directory, read no account home,
-// runner state, or shared temporary files, reach no network host, and have
-// no Nix daemon. The project's devShell is evaluated by the runner from the
+// runner state, or shared temporary files, and have no Nix daemon. A trusted
+// revision's commands reach only the package registries; an untrusted one's
+// reach no network host. The project's devShell is evaluated by the runner from the
 // job's revision, never the checkout an agent edited, and its environment,
 // shellHook included, is sourced inside the sandbox before each command.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -20,9 +21,25 @@ export interface Sandbox {
 	env: string;
 	/** Paths commands cannot read: every account home, the runner's state, and shared temporary directories. */
 	deny: string[];
-	/** Hosts commands may reach. None: kix publishes, and the devShell is built before the job runs. */
+	/** Hosts commands may reach: the package registries for a trusted revision, otherwise none. */
 	domains: string[];
 }
+
+/**
+ * The package registries a trusted revision's commands may reach, so its
+ * checks can install dependencies: npm (also under yarn's name), crates.io's
+ * index and downloads, and PyPI. Nothing else needs the network: kix
+ * publishes, and the runner builds the devShell before the job runs.
+ * crates.io's own host, which serves only its publishing API, stays out.
+ */
+export const REGISTRIES = [
+	"registry.npmjs.org",
+	"registry.yarnpkg.com",
+	"index.crates.io",
+	"static.crates.io",
+	"pypi.org",
+	"files.pythonhosted.org",
+];
 
 /** Where other users' and this user's private files live, per platform. */
 function hidden(platform: NodeJS.Platform): string[] {
@@ -34,7 +51,7 @@ function hidden(platform: NodeJS.Platform): string[] {
 /**
  * Make an attempt's sandbox. `devShell` is the script `nix print-dev-env`
  * printed for the job's revision, or null to run in the runner's own
- * environment. The temporary directory sits directly under /tmp, since the
+ * environment. Only a `trusted` revision's commands reach the registries. The temporary directory sits directly under /tmp, since the
  * sandbox's bridge sockets live in it and a socket path is at most 104 bytes.
  */
 export function openSandbox(options: {
@@ -42,6 +59,7 @@ export function openSandbox(options: {
 	repository: string;
 	runnerHome: string;
 	devShell: string | null;
+	trusted: boolean;
 	platform?: NodeJS.Platform;
 	home?: string;
 }): Sandbox {
@@ -59,7 +77,8 @@ export function openSandbox(options: {
 	const env = join(tmp, "env.sh");
 	writeFileSync(env, `${lines.join("\n")}\n`);
 	const deny = [...new Set([...hidden(platform), options.home ?? homedir(), options.runnerHome])];
-	return { cwd: options.cwd, repository: options.repository, tmp, env, deny, domains: [] };
+	const domains = options.trusted ? [...REGISTRIES] : [];
+	return { cwd: options.cwd, repository: options.repository, tmp, env, deny, domains };
 }
 
 export function closeSandbox(sandbox: Sandbox): void {

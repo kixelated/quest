@@ -10,10 +10,10 @@ import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
 import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
-import { formatAnswer, resumePrompt, startPrompt } from "../src/runner/prompt";
+import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
-import { type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
+import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -306,12 +306,13 @@ describe("sandbox", () => {
 			repository: "/r.git",
 			runnerHome,
 			devShell: null,
+			trusted: true,
 			platform: "linux",
 			home: "/home/me",
 		});
 		try {
 			expect(linux.deny).toEqual(["/home", "/root", "/tmp", "/var/tmp", "/run/user", "/home/me", runnerHome]);
-			expect(linux.domains).toEqual([]);
+			expect(linux.domains).toEqual(REGISTRIES);
 			// A bootstrap job runs in the runner's own environment: only the private HOME is set.
 			expect(readFileSync(linux.env, "utf8")).toBe(`export HOME='${linux.tmp}/home'\n`);
 			// Short enough for the sandbox's bridge sockets inside it.
@@ -325,15 +326,23 @@ describe("sandbox", () => {
 			repository: "/r.git",
 			runnerHome,
 			devShell: "export A=1\n",
+			trusted: false,
 			platform: "darwin",
 			home: "/Users/me",
 		});
 		try {
 			expect(mac.deny).toEqual(expect.arrayContaining(["/Users", "/private/tmp", "/private/var/folders"]));
 			expect(readFileSync(join(mac.tmp, "devshell.sh"), "utf8")).toBe("export A=1\n");
+			// An untrusted revision's commands reach no host.
+			expect(mac.domains).toEqual([]);
 		} finally {
 			closeSandbox(mac);
 		}
+	});
+
+	test("tells the agent which hosts its commands reach", () => {
+		expect(systemPrompt(REGISTRIES)).toContain("reach only these package registries (registry.npmjs.org, ");
+		expect(systemPrompt([])).toContain("reach no network host");
 	});
 
 	test("keeps only the agent's own variables in a job's environment", () => {
@@ -856,8 +865,10 @@ describe("quest runner", () => {
 			failIfUnavailable: true,
 			allowUnsandboxedCommands: false,
 			filesystem: { allowRead: [checkout, repository, launch.tmp], allowWrite: [launch.tmp] },
-			network: { allowedDomains: [], strictAllowlist: true },
+			// A trusted revision's commands reach the package registries and nothing else.
+			network: { allowedDomains: REGISTRIES, strictAllowlist: true },
 		});
+		expect(launch.argv[launch.argv.indexOf("--append-system-prompt") + 1]).toContain("registry.npmjs.org");
 		expect(launch.settings.sandbox.filesystem.denyRead).toEqual(expect.arrayContaining([r.home.dir]));
 		expect(launch.settings.permissions.allow).toEqual(["Bash", `Edit(/${checkout}/**)`, "WebSearch", "mcp__kix"]);
 		// The attempt's temporary directory and settings are gone once it ends.

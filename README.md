@@ -519,7 +519,11 @@ Claude Code's sandbox (bubblewrap on Linux, Seatbelt on macOS) confines every
 command the agent runs, the devShell's shellHook included: commands write only
 to the checkout and a private temporary directory that is also their `HOME`,
 cannot read account homes, the runner's state, or shared temporary
-directories, and reach no network host or Nix daemon. The agent's file tools
+directories, and have no Nix daemon. A trusted revision's commands reach only
+the npm, crates.io, and PyPI package registries, so its checks can install
+dependencies; an untrusted one's reach no network host. npm's registry also
+accepts publishes, so a prompt-injected agent holding someone's npm token could
+publish the checkout there. The agent's file tools
 edit only the checkout, WebFetch is off, and the checkout's own `.claude`
 settings, hooks, and MCP servers are never loaded. Claude Code itself runs
 outside the sandbox with a minimal environment, so its login stays out of the

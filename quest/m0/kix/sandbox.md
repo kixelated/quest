@@ -53,11 +53,17 @@ Shipped in [kixelated/quest#212](https://github.com/kixelated/quest/pull/212)
   revision in the bare clone, never the edited checkout, and Claude Code
   sources it through `CLAUDE_ENV_FILE` inside the sandbox, shellHook
   included.
-- Commands have no network and no Nix daemon: on Linux the sandbox's seccomp
-  filter refuses Unix sockets, and allowing them all would expose every
-  socket on the filesystem, while a trusted Nix user could reach the
-  daemon's root-level options. `nix build` and `nix flake check` run in CI
-  instead.
+- Commands have no Nix daemon: on Linux the sandbox's seccomp filter
+  refuses Unix sockets, and allowing them all would expose every socket on
+  the filesystem, while a trusted Nix user could reach the daemon's
+  root-level options. `nix build` and `nix flake check` run in CI instead.
+- Decided 2026-10-24 on
+  [kixelated/quest#212](https://github.com/kixelated/quest/pull/212): a
+  trusted revision's commands reach a fixed list of package registries
+  (npm, crates.io's index and downloads, PyPI), since most repositories
+  cannot run their checks without installing dependencies. An untrusted
+  revision's commands reach no network host. The answer-approval gate stays
+  until the sandbox is verified on macOS.
 
 Remaining verification:
 
