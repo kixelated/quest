@@ -758,6 +758,25 @@ export async function listInboxJobs(db: D1Database, repository: number, observed
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
 
+/**
+ * The jobs agent cards show, newest first: each target's latest job while it
+ * is queued, running, or waiting, or once ended while the pull request it
+ * delivered is one of the `open` ones and no later job works on that pull request.
+ */
+export async function listActivityJobs(db: D1Database, repository: number, open: number[]) {
+	const rows = await db
+		.prepare(
+			`SELECT id FROM jobs j WHERE repository=?1
+				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
+				AND (state IN ('queued','running','waiting') OR (pull IN (SELECT value FROM json_each(?2))
+					AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target='pulls/'||j.pull AND n.id<>j.id AND n.createdAt>=j.createdAt)))
+			ORDER BY createdAt DESC,id`,
+		)
+		.bind(repository, JSON.stringify(open))
+		.all<{ id: string }>();
+	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+}
+
 type Pin = { runner: string; account: string };
 
 /** The account an account decision chose. */
