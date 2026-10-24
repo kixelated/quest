@@ -9,24 +9,23 @@ import { constants } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { boundedLines, LINE_LIMIT, strippedEnvironment } from "../cli/agent";
-import type { Adapter, Exit, Launch, Running, SignedIn } from "./adapter";
+import { boundedLines, LINE_LIMIT } from "../cli/agent";
+import {
+	type Adapter,
+	baseEnvironment,
+	type Exit,
+	type Launch,
+	type Running,
+	type SignedIn,
+	signalGroup,
+	STOP_GRACE_MS,
+} from "./adapter";
 
 const run = promisify(execFile);
 
-/** How long a stopped agent has to exit before it is killed. */
-export const STOP_GRACE_MS = 10_000;
-
-/**
- * The environment for an account's CLI: the user's, without other harnesses'
- * state, keys, or GitHub tokens (kix publishes; the agent never pushes), and
- * with the account's own home.
- */
+/** The environment for an account's Claude Code, with the account's own home. */
 export function accountEnvironment(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
-	const kept = strippedEnvironment(env);
-	delete kept.GH_TOKEN;
-	delete kept.GITHUB_TOKEN;
-	return { ...kept, CLAUDE_CONFIG_DIR: home };
+	return { ...baseEnvironment(env), CLAUDE_CONFIG_DIR: home };
 }
 
 function json(line: string): Record<string, unknown> | undefined {
@@ -80,7 +79,6 @@ export function streamReader() {
 
 export class Claude implements Adapter {
 	readonly name = "claude";
-	readonly provider = "anthropic";
 
 	/** `binary` is an absolute path, resolved before entering a devShell that could shadow it. */
 	constructor(
@@ -117,7 +115,7 @@ export class Claude implements Adapter {
 		const email = typeof status.email === "string" ? status.email : undefined;
 		const plan = typeof status.subscriptionType === "string" ? status.subscriptionType : undefined;
 		const label = [email ?? "Claude Code", plan && `(${plan})`].filter(Boolean).join(" ");
-		return { kind, label };
+		return { provider: "anthropic", kind, label };
 	}
 
 	launch(launch: Launch): Running {
@@ -172,11 +170,7 @@ export class Claude implements Adapter {
 		});
 		child.stdin.on("error", () => {});
 		child.stdin.end(launch.prompt);
-		const signal = (name: NodeJS.Signals) => {
-			try {
-				process.kill(-child.pid!, name);
-			} catch {}
-		};
+		const signal = (name: NodeJS.Signals) => signalGroup(child.pid, name);
 		let killer: ReturnType<typeof setTimeout> | undefined;
 		const done = new Promise<Exit>((resolve) => {
 			child.once("error", (error: NodeJS.ErrnoException) => {

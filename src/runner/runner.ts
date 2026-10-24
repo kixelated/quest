@@ -104,7 +104,7 @@ export class Runner {
 		const now = this.#now();
 		return this.options.home.accounts().map((account) => ({
 			id: account.id,
-			provider: this.options.adapter(account).provider,
+			provider: account.provider,
 			kind: account.kind,
 			label: account.label,
 			limited: (account.limitedUntil ?? 0) > now,

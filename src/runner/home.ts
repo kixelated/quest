@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { privateDirectory } from "../cli/agent";
 import { save } from "../cli/worktree";
+import type { AdapterName } from "./adapter";
 
 /** The runner's kix sign-in, from `quest runner login`. */
 export interface Login {
@@ -25,8 +26,8 @@ export type AccountKind = "subscription" | "api-key";
 export interface Account {
 	/** Opaque and stable across restarts, so kix keeps its preference rank and paused sessions. */
 	id: string;
-	/** The CLI that drives it. Only Claude Code ships so far. */
-	adapter: "claude";
+	/** The CLI that drives it. */
+	adapter: AdapterName;
 	provider: string;
 	kind: AccountKind;
 	label: string;

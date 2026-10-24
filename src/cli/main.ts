@@ -3,7 +3,7 @@
 import { realpathSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
-import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
+import { Argument, Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
 import { description, version } from "../../package.json";
 import {
@@ -28,6 +28,7 @@ import {
 	removeAccount,
 	runRunner,
 } from "../runner/cli";
+import type { AdapterName } from "../runner/adapter";
 import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
@@ -705,7 +706,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"Turn this Linux or macOS machine into a kix runner. `quest runner login` connects it to your kix " +
 				"account, `quest runner account add` signs agent accounts in with their own CLIs, and `quest runner` " +
 				"runs routed jobs in the foreground until interrupted.\n\n" +
-				"Each account signs in through Claude Code's own flow in an isolated home (CLAUDE_CONFIG_DIR); kix " +
+				"Each account signs in through its CLI's own flow, Claude Code or opencode, in an isolated home; kix " +
 				"stores only an opaque account id, its kind, and its label, and never sees its tokens. Every job runs " +
 				"inside its project's `nix develop` shell. State lives in $QUEST_RUNNER_HOME, by default " +
 				"$XDG_DATA_HOME/quest/runner.",
@@ -730,11 +731,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const account = runner.command("account").description("Add, list, and remove this runner's agent accounts");
 	account
 		.command("add")
-		.description("Sign a Claude Code account in with `claude auth login` in a new isolated home")
-		.option("--console", "Sign in with an Anthropic Console account (API billing) instead of a subscription")
-		.option("--label <label>", "The name kix shows for the account (default: its email and plan)")
-		.action((options: { console?: boolean; label?: string }) =>
-			runnerAction(() => addAccount(runnerIO(), { console: !!options.console, label: options.label })),
+		.description(
+			"Sign an account in with its CLI's own flow in a new isolated home: `claude auth login` for Claude " +
+				"Code, or `opencode auth login` for an OpenCode Go plan, a ChatGPT plan, or any provider's API key",
+		)
+		.addArgument(new Argument("[cli]", "The agent CLI").choices(["claude", "opencode"]).default("claude"))
+		.option("--console", "Claude Code: sign in with an Anthropic Console account (API billing)")
+		.option("--model <provider/model>", "opencode: the model this account's jobs use (default: opencode's)")
+		.option("--label <label>", "The name kix shows for the account (default: its email or providers)")
+		.action((cli: AdapterName, options: { console?: boolean; model?: string; label?: string }) =>
+			runnerAction(() =>
+				addAccount(runnerIO(), { cli, console: !!options.console, model: options.model, label: options.label }),
+			),
 		);
 	account
 		.command("list")
