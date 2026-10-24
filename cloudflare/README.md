@@ -216,6 +216,20 @@ awaits a decision, and any other whose issue, pull request, or quest is still
 observed, so finished work stays set aside. Retrying a failed planning
 interview keeps its `plans/<id>` target.
 
+Beside the decisions (below them on a phone), an Agents card shows each job
+on the maintainer's projects (`src/inbox/activity.ts`): every target's latest
+job while it is queued, running, or waiting, and an ended one while the pull
+request it delivered is open and no later job works on that pull request. A
+card names the job's target and state (queued, working, runner offline,
+waiting on you, account limited, PR open, or stopped), its runner and account,
+the agent's latest checkpoint or result summary as escaped text, and how long
+ago it wrote it. A working job silent for 15 minutes says "No update since"
+instead of guessing. Each card stands in for its job's in-progress row. Raw
+output stays behind the card's disclosure: `/app.js` fetches the output route
+above only once a maintainer opens it, and shows it as text. An enrolled
+project's quest log also charts its tree as the quest map, ringing the quests
+those same jobs work on.
+
 A user's projects are those in `github_project_members`. Enrolling a project
 adds its enroller, and any other user joins by passing the maintainer check on
 one of its pages, such as its setup page; no extra GitHub calls list

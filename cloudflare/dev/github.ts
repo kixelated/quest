@@ -148,8 +148,12 @@ const issueTarget = (item: Issue) => ({
 });
 
 /** A pull request with its discussion, reviews, threads, and checks, as a job's agent reads it. */
-function pullTarget(repo: Repo, pull: Pull) {
+function pullTarget(repo: Repo, pull: Pull, after: unknown) {
 	const oid = headOf(repo, pull);
+	// Review threads are read 100 at a time, each page `after` the cursor of the one before.
+	const threads = pull.threads ?? [];
+	const start = typeof after === "string" ? Number(after) : 0;
+	const end = Math.min(start + 100, threads.length);
 	return {
 		...issueTarget(pull),
 		isDraft: !!pull.draft,
@@ -165,7 +169,8 @@ function pullTarget(repo: Repo, pull: Pull) {
 			})),
 		},
 		reviewThreads: {
-			nodes: (pull.threads ?? []).map((t) => ({
+			pageInfo: { hasNextPage: end < threads.length, endCursor: String(end) },
+			nodes: threads.slice(start, end).map((t) => ({
 				isResolved: !!t.resolved,
 				isOutdated: !!t.outdated,
 				path: t.path,
@@ -230,7 +235,10 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 		if (query.includes(`${field}(number: $number)`)) {
 			const pull = repo.pulls.find((p) => p.number === variables.number);
 			const issue = repo.issues.find((i) => i.number === variables.number);
-			const found = field === "pullRequest" ? pull && pullTarget(repo, pull) : issue && issueTarget(issue);
+			const found =
+				field === "pullRequest"
+					? pull && pullTarget(repo, pull, variables.threads)
+					: issue && issueTarget(issue);
 			result[field] = found ?? null;
 			if (!found) errors.push({ type: "NOT_FOUND", path: ["repository", field] });
 		}

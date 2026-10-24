@@ -1121,6 +1121,29 @@ describe("job context", () => {
 		});
 	});
 
+	it("reads every review thread of a busy pull request", async () => {
+		project.pulls[0]!.threads = Array.from({ length: 250 }, (_, i) => ({
+			path: `f${i}.ts`,
+			line: i,
+			resolved: ![0, 150, 249].includes(i),
+			comments: [{ author: "bot", body: "Fix this", at }],
+		}));
+		const id = await running({
+			workflow: "iterate",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		const body = (await (await read(id, 1)).json()) as Record<string, any>;
+		expect(body.threads.map((t: { path: string }) => t.path)).toEqual(["f0.ts", "f150.ts", "f249.ts"]);
+		expect(
+			requests()
+				.filter((r) => r.path === "/graphql")
+				.map((r) => r.body.variables.threads),
+		).toEqual([null, "100", "200"]);
+	});
+
 	it("has nothing to read for a quest's job", async () => {
 		const id = await running();
 		const response = await read(id, 1);
