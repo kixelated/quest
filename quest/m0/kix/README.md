@@ -107,6 +107,13 @@ fixes what it finds:
 - A rejected `rate_limit_event` and its `resetsAt` arrive when a plan runs
   out, so the account sits out until its reset instead of the one-hour
   fallback.
+- opencode accounts (shipped with stubbed servers and a free model) sign in
+  to an OpenCode Go plan and a ChatGPT plan, the latter through its headless
+  method on a remote runner, and run a job on opencode's default model or
+  `--model`. Their limits pause the account until the reset: OpenCode Go's
+  `account_rate_limit` retry, and ChatGPT's `usage_limit_reached` error with
+  `resets_at`. If ChatGPT plans fall short through opencode, plan the Codex
+  adapter the 2026-10-15 decision allows.
 
 ## Required
 
@@ -115,7 +122,6 @@ fixes what it finds:
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
 - [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
-- [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
 - [Agent activity](/quest/m0/kix/activity.md) - agent cards and map highlights built from checkpoint summaries
 - [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
