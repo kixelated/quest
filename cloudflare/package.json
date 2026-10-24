@@ -14,19 +14,19 @@
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"@better-auth/passkey": "1.7.8",
-		"better-auth": "1.7.8",
+		"@better-auth/passkey": "1.7.10",
+		"better-auth": "1.7.10",
 		"hono": "4.13.13",
-		"marked": "18.1.0",
+		"marked": "18.1.1",
 		"quest": "file:.."
 	},
 	"devDependencies": {
-		"@cloudflare/vitest-plugin": "1.4.2",
+		"@cloudflare/vitest-plugin": "1.4.4",
 		"@types/node": "26.6.5",
 		"miniflare": "5.20261012.0-beta",
-		"prettier": "3.9.9",
+		"prettier": "3.9.10",
 		"typescript": "7.0.2",
-		"vitest": "5.0.3",
-		"wrangler": "4.151.0"
+		"vitest": "5.0.5",
+		"wrangler": "4.151.1"
 	}
 }
