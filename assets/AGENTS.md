@@ -138,7 +138,13 @@ The PR that finishes a quest deletes its file and every link to it.
 A PR that leaves work rewrites the quest to what remains, rather than noting it only in the PR body.
 `quest check --base <ref>` flags a quest branch whose diff does neither.
 
+Do read-only discovery from context you already have, or a checkout you already own, rather than allocating a new one.
+Reuse a suitable checkout you own for active work.
+Run expensive builds and test suites through `quest gate <command>`, which waits until the host has room for them; never poll the load average or cap agents by core count yourself.
+
 Run the repository's checks locally while the PR is a draft; CI may run only on PRs ready for review.
+Before ending with a blocking decision or a finished handoff, commit and push a checkpoint of the meaningful source changes, and record in the PR body what remains unresolved and which checks passed or were not run.
+Leave disposable scratch, such as logs, build output, and helper scripts, out of checkpoints, and preserve source changes when work is cancelled.
 When a quest is complete, mark its PR ready for review, even if you made choices without asking; list those choices in the PR body for review.
 Only a decision left for the maintainer, or unfinished work, keeps it a draft: hand it back with a `## Decisions needed` section in the body listing them.
 Tools read only whether that heading is present; a draft without it still belongs to its starter.
