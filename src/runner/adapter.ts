@@ -4,6 +4,7 @@
 // Questions, checkpoints, and delivery reach kix through those tools, not
 // through anything CLI-specific.
 import type { AccountKind } from "./home";
+import type { Sandbox } from "./sandbox";
 
 export interface Launch {
 	/** The job's checkout, where the agent works. */
@@ -19,8 +20,8 @@ export interface Launch {
 	system: string;
 	/** The kix tools' MCP endpoint and bearer token. */
 	tools: { url: string; token: string };
-	/** A command prefix the CLI runs under, such as entering the project's Nix devShell. */
-	shell: string[];
+	/** The OS sandbox every command the agent runs is confined to. */
+	sandbox: Sandbox;
 	env: NodeJS.ProcessEnv;
 	/** Receives each line of the CLI's raw output. */
 	output(line: string): void;

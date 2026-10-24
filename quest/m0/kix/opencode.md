@@ -18,6 +18,12 @@ jobs in the UI: questions, checkpoint summaries, and results.
 - Give each account its own isolated opencode config/data home. opencode
   dropped Claude subscription login in March 2026, so Claude subscriptions
   stay on the Claude Code adapter.
+- Decided 2026-10-15 for the [job sandbox](/quest/m0/kix/sandbox.md):
+  opencode has no native sandbox, so run its commands under Anthropic's
+  sandbox-runtime with the runner's `Sandbox` policy (`src/runner/sandbox.ts`).
+  Keep the account's login outside what those commands can read: verify how
+  much of its home the wrapped process exposes, and deny reads of every other
+  account home.
 - Verify that structured questions, the checkpoint status tool, resume, and
   cancellation map onto the shared adapter interface without
   provider-specific behavior leaking into the service.

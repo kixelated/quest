@@ -16,7 +16,7 @@ export interface RunnerOptions {
 	/** How many jobs run at once. */
 	slots: number;
 	adapter(account: Account): Adapter;
-	shell(job: Job): string[];
+	devShell(job: Job, repository: string): Promise<string | null>;
 	remote(job: Job): string;
 	env?: NodeJS.ProcessEnv;
 	dial?: Dial;
@@ -182,7 +182,7 @@ export class Runner {
 			accounts: () => options.home.accounts(),
 			home: (account) => options.home.accountHome(account.id),
 			adapter: options.adapter,
-			shell: options.shell,
+			devShell: options.devShell,
 			remote: options.remote,
 			env: options.env ?? process.env,
 			request: (message) => this.#send(message),

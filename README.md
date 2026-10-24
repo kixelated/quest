@@ -512,21 +512,37 @@ through `claude auth login` in its own `CLAUDE_CONFIG_DIR`, so kix stores only
 an opaque account id, its kind, and a label. kix.quest/runners shows each
 runner's presence and sets the order jobs use your accounts in.
 
-Every job runs in its own checkout inside the project's `nix develop` shell,
-with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
-job instead. The agent reports through kix tools: `checkpoint` summaries publish
+Every job runs in its own checkout with the project's devShell, which the
+runner builds with `nix print-dev-env` from the job's revision, honoring the
+flake's `nixConfig`; a project without a flake gets a bootstrap job instead.
+Claude Code's sandbox (bubblewrap on Linux, Seatbelt on macOS) confines every
+command the agent runs, the devShell's shellHook included: commands write only
+to the checkout and a private temporary directory that is also their `HOME`,
+cannot read account homes, the runner's state, or shared temporary
+directories, and reach no network host or Nix daemon. The agent's file tools
+edit only the checkout, WebFetch is off, and the checkout's own `.claude`
+settings, hooks, and MCP servers are never loaded. Claude Code itself runs
+outside the sandbox with a minimal environment, so its login stays out of the
+commands' reach. This is an OS sandbox, not a VM, and it narrows rather than
+removes the risk of running agent commands on your machine.
+
+On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
+pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
+AppArmor allows them only for programs with a profile granting `userns`.
+The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request. A job on an issue or
 pull request reads it through `context`, since the runner holds no GitHub
 token. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
-runner. Until the job sandbox ships, runners take only trusted revisions,
-agents run with `--permission-mode bypassPermissions`, and a job resumes with
-another maintainer's answer only once you approve it in the inbox.
+runner. Runners take only trusted revisions until they can build untrusted
+heads' devShells in a VM, and a job resumes with another maintainer's answer
+only once you approve it in the inbox.
 
-The flake's `runner` package is a `quest` whose Claude Code is pinned by this
-repository's lock (`nix run github:kixelated/quest#runner -- runner`);
+The flake's `runner` package is a `quest` whose Claude Code (and on Linux,
+bubblewrap and socat) is pinned by this repository's lock
+(`nix run github:kixelated/quest#runner -- runner`);
 otherwise `claude` comes from `QUEST_RUNNER_CLAUDE` or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
 `$XDG_DATA_HOME/quest/runner`. To keep a runner up, run `quest runner` as a user
 service, such as a systemd user unit with `Restart=on-failure`.
