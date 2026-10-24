@@ -33,6 +33,10 @@ export type Pull = Issue & {
 	contributor?: string;
 	/** A `## Decisions needed` section in it hands a draft back to the maintainer. */
 	body?: string;
+	/** Closed by merging it; set with `closed`. */
+	merged?: boolean;
+	/** The commit it ended at, when its branch has moved on since it closed; defaults to the branch's tip. */
+	head?: string;
 	/** GitHub's mergeStateStatus; only CLEAN merges. Defaults to BLOCKED, or DRAFT for a draft. */
 	merge?: "CLEAN" | "BLOCKED" | "DIRTY" | "UNSTABLE" | "UNKNOWN";
 	/** When it was opened, in milliseconds; defaults to the world's fixed update time. */
@@ -54,7 +58,7 @@ export type Repo = {
 	/**
 	 * Upstream branches and their commits. A pull request's branch that is not
 	 * listed is at a commit derived from its number; a `quest/*` branch with no
-	 * pull request is a claim.
+	 * open pull request is a claim, unless it is still at a merged one's head.
 	 */
 	branches: Record<string, string>;
 	/** Branches on the repository's service fork, `<forks>/<name>`, and their commits. */
@@ -89,8 +93,9 @@ export const blob = (content: string | Uint8Array) => {
 /** The default branch's commit. */
 export const commitOf = (repo: Repo) => sha1(`commit ${repo.owner}/${repo.name}`);
 const treeOf = (repo: Repo) => sha1(`tree ${repo.owner}/${repo.name}`);
-/** A pull request's head commit: its branch's tip, where the world lists one. */
+/** A pull request's head commit: the one it ended at, or its branch's tip where the world lists one. */
 export const headOf = (repo: Repo, pull: Pull) =>
+	pull.head ??
 	(pull.fork ? repo.fork : pull.contributor ? {} : repo.branches)[pull.branch] ??
 	sha1(`head ${repo.owner}/${repo.name}#${pull.number}`);
 // GitHub's database IDs differ from numbers; derive stable ones per repository.
@@ -105,7 +110,7 @@ function entity(repo: Repo, item: Issue) {
 		databaseId: databaseId(repo, item.number),
 		number: item.number,
 		title: item.title,
-		state: item.closed ? "CLOSED" : "OPEN",
+		state: (item as Pull).merged ? "MERGED" : item.closed ? "CLOSED" : "OPEN",
 		updatedAt,
 		closedAt: item.closed ? updatedAt : null,
 		author: { login: item.author },
@@ -223,10 +228,28 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 	if (/(?<!:)pullRequests\(/.test(query)) result.pullRequests = page(repo.pulls.map((pull) => pullNode(repo, pull)));
 	if (query.includes("open:pullRequests(")) result.open = page(open.map((pull) => pullNode(repo, pull)));
 	if (query.includes("refs(")) {
-		const branches = [...Object.keys(repo.branches), ...upstreamPulls(repo).map((p) => p.branch)];
+		// Quest branches at their tips, with the pull requests from them that merged, newest first.
+		const tips = new Map<string, string>();
+		for (const pull of upstreamPulls(repo)) tips.set(pull.branch, headOf(repo, pull));
+		for (const [branch, oid] of Object.entries(repo.branches)) tips.set(branch, oid);
+		const merged = (branch: string) =>
+			repo.pulls
+				.filter((pull) => pull.merged && !pull.fork && !pull.contributor && pull.branch === branch)
+				.reverse();
 		result.refs = page(
-			[...new Set(branches.filter((b) => b.startsWith("quest/")).map((b) => b.slice("quest/".length)))].map(
-				(name) => ({ name, prefix: "refs/heads/quest/" }),
+			[...tips].flatMap(([branch, oid]) =>
+				branch.startsWith("quest/")
+					? [
+							{
+								name: branch.slice("quest/".length),
+								prefix: "refs/heads/quest/",
+								target: { oid },
+								associatedPullRequests: page(
+									merged(branch).map((pull) => ({ headRefOid: headOf(repo, pull) })),
+								),
+							},
+						]
+					: [],
 			),
 		);
 	}
@@ -526,6 +549,7 @@ export function fakeGitHub(world: World) {
 			if (body.sha !== headOf(repo, pull)) return json({ message: "Head branch was modified" }, 409);
 			if (pull.merge !== "CLEAN") return json({ message: "Pull Request is not mergeable" }, 405);
 			pull.closed = true;
+			pull.merged = true;
 			return json({ sha: commitOf(repo), merged: true, message: "Pull Request successfully merged" });
 		}
 		if (tail.startsWith("/contents/")) {
