@@ -9,7 +9,15 @@ import { addAccount, devShell, login, RunnerInputError } from "../src/runner/cli
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
-import { accountDirectories, credentials, Opencode, retryLimit, signedIn, turnExit } from "../src/runner/opencode";
+import {
+	accountDirectories,
+	credentials,
+	environment,
+	Opencode,
+	retryLimit,
+	signedIn,
+	turnExit,
+} from "../src/runner/opencode";
 import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
 import { formatAnswer, resumePrompt, startPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
@@ -350,6 +358,16 @@ describe("opencode", () => {
 			label: "wafer.ai API key (opencode)",
 		});
 		expect(signedIn([])).toBeNull();
+	});
+
+	test("keeps the user's provider credentials and opencode settings from the account", () => {
+		const kept = environment({
+			PATH: "/bin",
+			CLOUDFLARE_API_KEY: "k",
+			AWS_SECRET_ACCESS_KEY: "s",
+			OPENCODE_CONFIG: "c",
+		});
+		expect(kept).toEqual({ PATH: "/bin" });
 	});
 
 	test("reads account limits from retries and errors, not brief rate limits", () => {
@@ -751,6 +769,7 @@ function rig(
 		const data = join(accountDirectories(home.accountHome("acct1")).XDG_DATA_HOME, "opencode");
 		mkdirSync(data, { recursive: true });
 		writeFileSync(join(data, "auth.json"), JSON.stringify({ openai: { type: "oauth", access: "secret" } }));
+		Opencode.setModel(home.accountHome("acct1"), "openai/gpt-5.5");
 	}
 	const hub = new FakeHub();
 	const publishes: Sent[] = [];
@@ -984,6 +1003,7 @@ describe("quest runner", () => {
 		expect(first.stdin).toContain("kix adds for this job: Extra rule.");
 		expect(first.system).toContain("checkpoint");
 		expect(first.config).toMatchObject({
+			model: "openai/gpt-5.5",
 			enabled_providers: ["openai"],
 			permission: { "*": "allow", question: "deny" },
 			mcp: { kix: { type: "remote", headers: { Authorization: expect.stringMatching(/^Bearer /) } } },

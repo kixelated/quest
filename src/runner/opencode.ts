@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -51,9 +51,36 @@ export function accountDirectories(home: string): Record<keyof typeof XDG, strin
 	};
 }
 
-/** The user's environment for opencode, without the user's own opencode settings. */
-function environment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	return Object.fromEntries(Object.entries(baseEnvironment(env)).filter(([name]) => !name.startsWith("OPENCODE_")));
+/**
+ * Variables opencode would read in place of the account's own sign-in: the
+ * user's opencode settings, and provider credentials, which some providers
+ * prefer over a stored key. Matched by name, since every provider names its own.
+ */
+const UNSET = [
+	/^OPENCODE_/,
+	/_(API_KEY|API_TOKEN|AUTH_TOKEN|ACCESS_KEY(_ID)?|SECRET_ACCESS_KEY|SESSION_TOKEN)$/,
+	/BEARER_TOKEN/,
+];
+
+/** The user's environment for opencode, so only the account's sign-in pays for its jobs. */
+export function environment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	return Object.fromEntries(
+		Object.entries(baseEnvironment(env)).filter(([name]) => !UNSET.some((pattern) => pattern.test(name))),
+	);
+}
+
+/** The model the account picked with `--model`, from its own opencode config. */
+function accountModel(home: string): string | undefined {
+	try {
+		const { model } = JSON.parse(readFileSync(modelConfig(home), "utf8")) as { model?: unknown };
+		return typeof model === "string" ? model : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function modelConfig(home: string): string {
+	return join(accountDirectories(home).XDG_CONFIG_HOME, "opencode", "opencode.json");
 }
 
 /**
@@ -209,9 +236,9 @@ export class Opencode implements Adapter {
 
 	/** Pick the account's model in its own opencode config, which applies to every job it runs. */
 	static setModel(home: string, model: string): void {
-		const dir = join(accountDirectories(home).XDG_CONFIG_HOME, "opencode");
-		mkdirSync(dir, { recursive: true, mode: 0o700 });
-		writeFileSync(join(dir, "opencode.json"), `${JSON.stringify({ model }, null, "\t")}\n`, { mode: 0o600 });
+		const file = modelConfig(home);
+		mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+		writeFileSync(file, `${JSON.stringify({ model }, null, "\t")}\n`, { mode: 0o600 });
 	}
 
 	launch(launch: Launch): Running {
@@ -220,7 +247,10 @@ export class Opencode implements Adapter {
 		const sessions = join(launch.home, "kix-sessions");
 		const plugin = join(launch.home, `kix-${launch.session}.js`);
 		writeFileSync(plugin, PLUGIN, { mode: 0o600 });
+		const model = accountModel(launch.home);
 		const config = {
+			// The account's pick outranks a project's own opencode.json, which loads after the account's config.
+			...(model && { model }),
 			autoupdate: false,
 			share: "disabled",
 			// Only what the account signed in to, not keys the user's environment happens to hold.
