@@ -2,6 +2,7 @@ import { createScheduledController, runDurableObjectAlarm } from "cloudflare:tes
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { app } from "../src/index";
+import * as landing from "../src/jobs/landing";
 import * as output from "../src/jobs/output";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
@@ -295,7 +296,7 @@ describe("job coordination", () => {
 		await expect(store.ask(db, old, id, 1, { summary: "?", session: "s", prompt: {} }, late)).rejects.toThrow(
 			"no longer current",
 		);
-		expect(await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], late)).toEqual([
+		expect((await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], late)).attempts).toEqual([
 			{ job: id, attempt: 1, action: "stop" },
 		]);
 		const done = { outcome: "completed", summary: "Done", result: { pr: 1 } } as const;
@@ -318,7 +319,7 @@ describe("job coordination", () => {
 		await run({}, 1);
 		expect((await state(id)).lease).toBe(1 + GRACE);
 		const listed = [{ job: id, attempt: 1 }];
-		expect(await store.report(db, machine, [account("main")], listed, 2)).toEqual([
+		expect((await store.report(db, machine, [account("main")], listed, 2)).attempts).toEqual([
 			{ job: id, attempt: 1, action: "continue" },
 		]);
 		await run({ [machine.id]: 0 }, 3);
@@ -447,9 +448,9 @@ describe("job coordination", () => {
 		await run({ [machine.id]: 1 }, 3);
 		await store.cancel(db, running, "owner", 4);
 		expect((await run({ [machine.id]: 0 }, 5)).cancel).toEqual([{ job: running, attempt: 1, runner: machine.id }]);
-		expect(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], 5)).toEqual([
-			{ job: running, attempt: 1, action: "cancel" },
-		]);
+		expect(
+			(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], 5)).attempts,
+		).toEqual([{ job: running, attempt: 1, action: "cancel" }]);
 		expect(await store.checkpoint(db, machine, running, 1, "Stopping", null, 6)).toEqual({ cancel: true });
 		const stopped = { outcome: "cancelled", summary: "Stopped after the parser", result: undefined } as const;
 		await store.finish(db, machine, running, 1, stopped, 7);
@@ -1207,6 +1208,35 @@ describe("job routes", () => {
 		await delivery("pull_request", dequeued, undefined, {}, testEnv);
 		expect(github.labels).toEqual([]);
 		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it("gives a merge job's pull request back once an attempt it asked to stop is abandoned", async () => {
+		const machine = await runner(maintainer, "machine", "linux", true);
+		await connected(machine, [account("main")]);
+		const pick = async () =>
+			((await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string }).id;
+		const now = Date.now();
+
+		// The runner disconnects after the stop, so its attempt reports no result; the lease expiring cancels it.
+		const lost = await pick();
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), now);
+		await store.report(db, machine, [account("main")], [{ job: lost, attempt: 1 }], now);
+		expect((await post(`/${lost}/cancel`, {})).status).toBe(204);
+		expect(github.labels).toEqual(["quest:merge"]);
+		await store.dispatch(db, maintainer, new Map(), now);
+		expect((await store.dispatch(db, maintainer, new Map(), now + 2 * GRACE)).ended).toEqual([lost]);
+		await landing.ended(testEnv, lost);
+		expect(github.labels).toEqual([]);
+		expect(await state(lost)).toMatchObject({ state: "cancelled", hold: null });
+
+		// A status that omits an acknowledged attempt asked to stop cancels it too.
+		const omitted = await pick();
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), now);
+		await store.report(db, machine, [account("main")], [{ job: omitted, attempt: 1 }], now);
+		expect((await post(`/${omitted}/cancel`, {})).status).toBe(204);
+		expect((await store.report(db, machine, [account("main")], [], now)).ended).toEqual([omitted]);
+		await landing.ended(testEnv, omitted);
+		expect(github.labels).toEqual([]);
 	});
 
 	it("refuses to merge a draft", async () => {

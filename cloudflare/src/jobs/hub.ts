@@ -121,13 +121,15 @@ export class RunnerHub extends DurableObject<Env> {
 			const reported = (ws.deserializeAttachment() as Attachment).slots;
 			if (reported !== null) slots.set(runner, reported);
 		}
-		const { assign, cancel, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
+		const { assign, cancel, ended, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
 		for (const { runner, job } of assign) {
 			const message = { type: "assign", job, instructions: instructions(job.workflow) };
 			connections.get(runner)?.send(JSON.stringify(message));
 		}
 		for (const { runner, job, attempt } of cancel)
 			connections.get(runner)?.send(JSON.stringify({ type: "cancel", job, attempt }));
+		// An abandoned attempt that was asked to cancel reports no result, so its hold is released here.
+		for (const job of ended) this.ctx.waitUntil(landing.ended(this.env, job));
 		if (wake === null) await this.ctx.storage.deleteAlarm();
 		else await this.ctx.storage.setAlarm(wake);
 	}
@@ -138,7 +140,8 @@ export class RunnerHub extends DurableObject<Env> {
 		const now = Date.now();
 		switch (message.type) {
 			case "status": {
-				const attempts = await store.report(db, runner, message.accounts, message.attempts, now);
+				const { attempts, ended } = await store.report(db, runner, message.accounts, message.attempts, now);
+				for (const job of ended) this.ctx.waitUntil(landing.ended(this.env, job));
 				attachment.slots = message.slots;
 				ws.serializeAttachment(attachment);
 				return { attempts };

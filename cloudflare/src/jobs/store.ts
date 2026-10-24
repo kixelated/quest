@@ -204,6 +204,16 @@ export async function listRunners(db: D1Database, owner: string, online: Set<str
 	}));
 }
 
+/** What a statement that may end jobs returns, for `ended`. */
+const ending = "id,workflow,state,hold";
+
+/** The merge jobs a statement `RETURNING ${ending}` ended while they still held their pull request. */
+function ended(result: D1Result): string[] {
+	return (result.results as Pick<Job, "id" | "workflow" | "state" | "hold">[])
+		.filter((job) => job.workflow === "merge" && job.hold !== null && job.state === "cancelled")
+		.map((job) => job.id);
+}
+
 const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? AND state='running')";
 
 /**
@@ -211,7 +221,8 @@ const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? A
  * running. Listing an attempt acknowledges its assignment. Says which
  * reported attempts to continue, cancel, or stop because they are no longer
  * this runner's. An acknowledged attempt the status omits was lost, so it
- * moves now; an unacknowledged one may still be on its way.
+ * moves now; an unacknowledged one may still be on its way. Also returns
+ * the merge jobs this cancelled that still hold their pull request.
  */
 export async function report(
 	db: D1Database,
@@ -243,7 +254,7 @@ export async function report(
 			.bind(runner.id, runner.owner, reported),
 		db
 			.prepare(
-				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE runner=? AND state='running' AND delivered=1 AND NOT ${listed}`,
+				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE runner=? AND state='running' AND delivered=1 AND NOT ${listed} RETURNING ${ending}`,
 			)
 			.bind(now, runner.id, running),
 		db
@@ -256,11 +267,14 @@ export async function report(
 			.bind(running),
 	]);
 	const rows = results.at(-1)!.results as Pick<Job, "id" | "attempt" | "runner" | "state" | "cancel">[];
-	return attempts.map(({ job, attempt }) => {
-		const row = rows.find((r) => r.id === job);
-		const owned = row && row.attempt === attempt && row.runner === runner.id && row.state === "running";
-		return { job, attempt, action: !owned ? "stop" : row.cancel ? "cancel" : "continue" } as const;
-	});
+	return {
+		attempts: attempts.map(({ job, attempt }) => {
+			const row = rows.find((r) => r.id === job);
+			const owned = row && row.attempt === attempt && row.runner === runner.id && row.state === "running";
+			return { job, attempt, action: !owned ? "stop" : row.cancel ? "cancel" : "continue" } as const;
+		}),
+		ended: ended(results[3]!),
+	};
 }
 
 /**
@@ -290,14 +304,15 @@ export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner
  * Reconcile an owner's jobs with their connected runners and free slots.
  * A running job has a lease exactly while its runner is disconnected; an
  * expired lease moves the job. Then queued work is assigned. Returns what to
- * send each runner and when to run again. Every assignment its runner has
+ * send each runner, the merge jobs it cancelled that still hold their pull
+ * request, and when to run again. Every assignment its runner has
  * not acknowledged is sent again, since a delivery can be lost after the
  * claim commits. Until acknowledged, an assignment holds one of the runner's
  * reported free slots, which it could not count yet.
  */
 export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
 	const connected = JSON.stringify([...slots.keys()]);
-	const [, , , , candidates, offers, cancels, pending] = await db.batch([
+	const [, , cancelled, , candidates, offers, cancels, pending] = await db.batch([
 		db
 			.prepare(
 				"UPDATE jobs SET lease=NULL WHERE actor=? AND state='running' AND lease IS NOT NULL AND runner IN (SELECT value FROM json_each(?))",
@@ -311,7 +326,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		// An abandoned attempt that was asked to cancel stops rather than moving.
 		db
 			.prepare(
-				"UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND cancel=1 AND lease<=?",
+				`UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND cancel=1 AND lease<=? RETURNING ${ending}`,
 			)
 			.bind(now, owner, now),
 		db
@@ -393,6 +408,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 	return {
 		assign,
 		cancel: cancels!.results as (Attempt & { runner: string })[],
+		ended: ended(cancelled!),
 		wake: wake?.at ?? null,
 	};
 }
