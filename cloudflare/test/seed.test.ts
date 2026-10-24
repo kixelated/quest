@@ -95,6 +95,9 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 		"Export a project as a ZIP archive",
 		"Settings page loses unsaved changes when the session expires",
 		"Keep working offline",
+		// A new plan named by its idea, and a finished job's follow-ups to plan.
+		"Let people share a read-only link to a project",
+		"Follow-ups from quest/m0/cli.md",
 		// The paused project.
 		"example/archive",
 	])
@@ -184,6 +187,16 @@ it("gets failed and blocked jobs moving again from the inbox", async () => {
 	// The decision is spent, so a repeated Start over is refused.
 	const again = await post("/jobs/seed-start-fonts/answer", { question, restart: "1" });
 	expect(again.status).not.toBe(303);
+
+	// A finished job's follow-ups start their interview from the form the inbox shows.
+	const followups = "plans/00000000-5eed-4000-8000-000000000002";
+	const offer = (await page(followups)).match(
+		/name="target" value="([^"]+)"[\s\S]*?name="revision" value="([0-9a-f]{40})"[\s\S]*?Plan these follow-ups/,
+	);
+	expect(offer?.[1]).toBe(followups);
+	const planned = await post("/jobs", { workflow: "plan", target: followups, revision: offer![2]! });
+	expect(planned.status).toBe(303);
+	expect(await latest(followups)).toMatchObject({ state: "queued" });
 });
 
 it("never resets the branch for a Start over that a concurrent cancel beat", async () => {

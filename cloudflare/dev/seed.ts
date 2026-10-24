@@ -349,12 +349,17 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 		target: string;
 		revision: string;
 		branch: string;
-		state: "queued" | "running" | "waiting" | "failed";
+		state: "queued" | "running" | "waiting" | "failed" | "completed";
 		/** The commit the job last published to its branch. */
 		head?: string;
 		runner?: string;
 		account?: string;
 		summary?: string;
+		/** What a completed job reported, such as its suggested follow-ups. */
+		result?: unknown;
+		/** A new plan's request: the maintainer's idea and what they pasted with it. */
+		idea?: string;
+		context?: string;
 		question?: { kind: "agent" | "account" | "publication"; prompt: unknown };
 	};
 	const list: Job[] = [
@@ -494,6 +499,50 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			summary: "Reproducing the lost settings in a background tab.",
 		},
 		{
+			id: "00000000-5eed-4000-8000-000000000001",
+			workflow: "plan",
+			target: "plans/00000000-5eed-4000-8000-000000000001",
+			revision: commit,
+			branch: "plan/00000000",
+			state: "waiting",
+			runner: "workstation",
+			account: "claude-max",
+			idea: "Let people share a read-only link to a project",
+			context: "From the call with the design team:\n- links should expire\n- no sign-in to view",
+			summary: "Read the call notes and the project pages. One choice decides the quests.",
+			question: {
+				kind: "agent",
+				prompt: {
+					kind: "decision",
+					questions: [
+						{
+							header: "Expiry",
+							question: "How long should a shared link last?",
+							options: [
+								{ label: "Until revoked" },
+								{ label: "30 days", description: "Matches the call notes.", recommended: true },
+							],
+						},
+					],
+				},
+			},
+		},
+		{
+			id: "00000000-5eed-4000-8000-000000000002",
+			workflow: "start",
+			target: "quest/m0/cli.md",
+			revision: commit,
+			branch: "quest/m0/cli",
+			state: "completed",
+			runner: "workstation",
+			account: "claude-max",
+			summary: "Added the command-line entry point and its tests.",
+			result: {
+				head: null,
+				followups: ["Shell completions for bash, zsh, and fish", "A --json flag on every listing command"],
+			},
+		},
+		{
 			id: "seed-start-offline",
 			workflow: "start",
 			target: "quest/m1/offline.md",
@@ -524,7 +573,7 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			return [
 				db
 					.prepare(
-						"INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,state,attempt,runner,account,delivered,summary,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+						"INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,state,attempt,runner,account,delivered,summary,result,idea,context,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 					)
 					.bind(
 						job.id,
@@ -542,6 +591,9 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 						job.account ?? null,
 						attempt,
 						job.summary ?? null,
+						job.result === undefined ? null : JSON.stringify(job.result),
+						job.idea ?? null,
+						job.context ?? null,
 						at,
 						now,
 					),
