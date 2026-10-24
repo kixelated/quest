@@ -334,11 +334,12 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 				"UPDATE jobs SET state='queued',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND lease<=?",
 			)
 			.bind(now, owner, now),
-		// A paused project starts and continues nothing new.
+		// A paused project starts and continues nothing new, and a merge job starts once it holds its pull request.
 		db
 			.prepare(
 				`SELECT j.* FROM jobs j JOIN github_projects p ON p.id=j.repository
- WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' ORDER BY j.createdAt,j.id`,
+ WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' AND (j.workflow<>'merge' OR j.hold IS NOT NULL)
+ ORDER BY j.createdAt,j.id`,
 			)
 			.bind(owner),
 		db

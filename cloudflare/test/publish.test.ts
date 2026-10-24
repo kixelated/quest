@@ -1099,6 +1099,8 @@ describe("merge jobs", () => {
 		});
 		project.branches["contributor/fix"] = prHead;
 		await store.held(db, id, await new GitHubService(testEnv).holdPullRequest(upstream, user, 2));
+		// A merge job starts once it holds its pull request.
+		await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
 		return id;
 	}
 

@@ -1210,6 +1210,28 @@ describe("job routes", () => {
 		expect(await state(id)).toMatchObject({ hold: null });
 	});
 
+	it("starts a merge job only once it holds its pull request", async () => {
+		const machine = await runner(maintainer, "machine", "linux", true);
+		await connected(machine, [account("main")]);
+		const { id } = await store.createJob(
+			db,
+			{
+				repository: 10,
+				actor: maintainer,
+				workflow: "merge",
+				target: "pulls/2",
+				revision: head,
+				branch: "contributor/fix",
+				trusted: false,
+			},
+			0,
+		);
+		const slots = new Map([[machine.id, 1]]);
+		expect((await store.dispatch(db, maintainer, slots, 0)).assign).toEqual([]);
+		await store.held(db, id, "LE_1");
+		expect((await store.dispatch(db, maintainer, slots, 0)).assign.map((a) => a.job.id)).toEqual([id]);
+	});
+
 	it("gives a merge job's pull request back once an attempt it asked to stop is abandoned", async () => {
 		const machine = await runner(maintainer, "machine", "linux", true);
 		await connected(machine, [account("main")]);
