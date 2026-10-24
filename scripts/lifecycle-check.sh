@@ -14,8 +14,11 @@ esac
 work=$(mktemp -d "${TMPDIR:-/tmp}/quest-lifecycle.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-# The shared lifecycle is also run directly by native Windows CI.
-bun "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle-check.mjs" "$binary"
+# The shared lifecycle is also run directly by native Windows CI. It runs the
+# binary in place, so give it a path with spaces.
+mkdir "$work/tool bin"
+cp "$binary" "$work/tool bin/"
+bun "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle-check.mjs" "$work/tool bin/$(basename -- "$binary")"
 
 # A reader that closes stdout early, like `quest unblocked | head -1`, ends the
 # command quietly. The writer waits on a FIFO until the reader has closed, so
