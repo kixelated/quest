@@ -81,9 +81,15 @@ export function cards(
 				const own = runners.get(job.actor) ?? [];
 				const runner = own.find((r) => r.id === job.runner);
 				const entity = found.get(job.target) ?? fallback(project, job.target);
-				const quest = entity.kind === "quest" ? job.target : null;
+				const kind = entity.kind;
+				// A pull request on a quest's branch works on that quest, so the map keeps it highlighted.
+				const number = kind === "pull" ? Number(job.target.split("/")[1]) : null;
+				const quest =
+					kind === "quest"
+						? job.target
+						: (state?.project.changes.find((change) => change.number === number)?.quest ?? null);
 				// A claimed quest is no longer an observed entity, so its title comes from the tree.
-				const document = quest ? state?.project.documents.find((d) => d.path === quest) : undefined;
+				const document = kind === "quest" ? state?.project.documents.find((d) => d.path === quest) : undefined;
 				const summaries = job.events.filter((e) => e.kind === "summary" || e.kind === "result");
 				const at = summaries.at(-1)?.at ?? job.createdAt;
 				const current = phase(job, own);

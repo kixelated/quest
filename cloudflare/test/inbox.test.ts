@@ -854,5 +854,15 @@ describe("agent cards", () => {
 		await running();
 		html = await board();
 		expect(html).toMatch(/waypoint-agent[\s\S]*First[\s\S]*Agent: Runner offline/);
+		// Iterating on the quest's pull request keeps the quest highlighted.
+		await db.prepare("DELETE FROM jobs").run();
+		await db
+			.prepare(
+				"UPDATE github_project_activity SET data=json_set(data,'$.headRefName','quest/first') WHERE id='21'",
+			)
+			.run();
+		await running("iterate", "pulls/2");
+		html = await board();
+		expect(html).toMatch(/waypoint-agent[\s\S]*First[\s\S]*Agent: Runner offline/);
 	});
 });
