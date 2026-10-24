@@ -16,6 +16,10 @@ export type Pull = Issue & {
 	fork?: boolean;
 	/** A `## Decisions needed` section in it hands a draft back to the maintainer. */
 	body?: string;
+	/** Closed by merging it; set with `closed`. */
+	merged?: boolean;
+	/** Its branch outlived it closing: still at its head, or with commits pushed after. */
+	kept?: "head" | "pushed";
 	/** GitHub's mergeStateStatus; only CLEAN merges. Defaults to BLOCKED, or DRAFT for a draft. */
 	merge?: "CLEAN" | "BLOCKED" | "DIRTY" | "UNSTABLE" | "UNKNOWN";
 };
@@ -60,7 +64,7 @@ function entity(repo: Repo, item: Issue) {
 		databaseId: databaseId(repo, item.number),
 		number: item.number,
 		title: item.title,
-		state: item.closed ? "CLOSED" : "OPEN",
+		state: (item as Pull).merged ? "MERGED" : item.closed ? "CLOSED" : "OPEN",
 		updatedAt,
 		closedAt: item.closed ? updatedAt : null,
 		author: { login: item.author },
@@ -108,14 +112,21 @@ function graphql(repo: Repo, query: string) {
 	if (/(?<!:)pullRequests\(/.test(query)) result.pullRequests = page(repo.pulls.map((pull) => pullNode(repo, pull)));
 	if (query.includes("open:pullRequests(")) result.open = page(open.map((pull) => pullNode(repo, pull)));
 	if (query.includes("refs(")) {
-		const branches = [
-			...repo.claims,
-			...open.flatMap((p) => (p.branch.startsWith("quest/") && !p.fork ? [p.branch] : [])),
-		];
+		// Quest branches by tip: claims, open pull requests' heads, and branches kept after theirs closed.
+		const tips = new Map(repo.claims.map((branch) => [branch, sha1(`claim ${repo.owner}/${repo.name}:${branch}`)]));
+		for (const pull of repo.pulls)
+			if (pull.branch.startsWith("quest/") && !pull.fork && (!pull.closed || pull.kept))
+				tips.set(pull.branch, pull.kept === "pushed" ? sha1(`pushed ${pull.branch}`) : headOf(repo, pull));
 		result.refs = page(
-			[...new Set(branches.map((b) => b.replace(/^quest\//, "")))].map((name) => ({
-				name,
+			[...tips].map(([branch, oid]) => ({
+				name: branch.replace(/^quest\//, ""),
 				prefix: "refs/heads/quest/",
+				target: { oid },
+				associatedPullRequests: page(
+					repo.pulls
+						.filter((pull) => pull.merged && !pull.fork && pull.branch === branch)
+						.map((pull) => ({ headRefOid: headOf(repo, pull) })),
+				),
 			})),
 		);
 	}

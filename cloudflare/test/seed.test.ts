@@ -15,8 +15,11 @@ const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const db = env.DB;
 afterEach(() => vi.restoreAllMocks());
 
-/** Seed a fresh world against the fake GitHub, returning it, a request helper, and the session cookie. */
-async function seeded() {
+/**
+ * Seed a fresh world, after `edit` changes it, against the fake GitHub,
+ * returning it, a request helper, and the session cookie.
+ */
+async function seeded(edit: (world: World) => void = () => {}) {
 	await db.batch([
 		db.prepare("DELETE FROM jobs"),
 		db.prepare("DELETE FROM runners"),
@@ -24,6 +27,7 @@ async function seeded() {
 		db.prepare("DELETE FROM github_installations"),
 	]);
 	const data = { ...world(), forks: env.GITHUB_FORK_OWNER };
+	edit(data);
 	vi.spyOn(globalThis, "fetch").mockImplementation(fakeGitHub(data));
 	// Webhooks read and notify in the background, so each request finishes its `waitUntil` work.
 	const request = async (path: string, init?: RequestInit) => {
@@ -147,6 +151,31 @@ it("seeds a representative inbox through the Worker's own routes", async () => {
 	});
 	expect(merged.status).toBe(303);
 	expect(data.repos[0]!.pulls.find((p) => p.number === 12)!.closed).toBe(true);
+});
+
+it("ignores a quest branch left at the head of its merged pull request", async () => {
+	const { request, cookie } = await seeded((data) => {
+		const closed = { author: "contributor", checks: "SUCCESS", review: "APPROVED", closed: true } as const;
+		data.repos[0]!.pulls.push(
+			// Its work landed, so the branch holds nothing.
+			{ ...closed, number: 21, title: "Passkeys", branch: "quest/m0/sign-in", merged: true, kept: "head" },
+			// Closed unmerged: that work may be wanted back.
+			{ ...closed, number: 22, title: "Offline", branch: "quest/m1/offline", kept: "head" },
+			// Pushed to after its merge: new work.
+			{ ...closed, number: 23, title: "Export", branch: "quest/m0/export", merged: true, kept: "pushed" },
+		);
+	});
+	const board = await (
+		await request("/projects/github/example/rocket/board", { headers: { Cookie: cookie } })
+	).text();
+	const row = (title: string) => board.match(new RegExp(`${title}[^<]*</a>[\\s\\S]*?</li>`))?.[0] ?? "";
+	expect(row("Add passkey sign-in")).toContain("Available");
+	expect(row("Keep working offline")).toContain("Claimed");
+	expect(row("Export a project as a ZIP archive")).toContain("Claimed");
+	// The inbox agrees.
+	const inbox = await (await request("/inbox", { headers: { Cookie: cookie } })).text();
+	expect(inbox).toContain("Add passkey sign-in");
+	expect(inbox).not.toContain("Keep working offline");
 });
 
 it("gets failed and blocked jobs moving again from the inbox", async () => {

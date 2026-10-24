@@ -122,4 +122,3 @@ fixes what it finds:
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Seeded GitHub fake](/quest/m0/kix/github-fake.md) - the local server runs publication end to end, and tests share its fake
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR
-- [Merged claims](/quest/m0/kix/merged-claims.md) - the board ignores branches whose pull request merged, as the CLI does
