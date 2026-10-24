@@ -236,7 +236,7 @@ export async function reconcile(
 				throw new GitHubError("Invalid branch observation");
 			// A branch left at a merged PR's head holds nothing: its work landed.
 			const pulls = merged.map((pull) => ({ head: pull.headRefOid, merged: true }));
-			if (landed(tip, pulls)) continue;
+			if (landed(tip, pulls) !== undefined) continue;
 			// Ref.name is relative to the requested prefix.
 			updated.occupancy.claims.push(`quest/${ref.name}`);
 		}

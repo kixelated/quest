@@ -18,12 +18,12 @@ export interface ClosedPull {
 }
 
 /**
- * Whether a quest branch at `tip` landed: `tip` is the head of a PR from it
- * that merged, so the branch holds no claim. One whose PR closed unmerged
+ * The PR that landed a quest branch at `tip`: one from it that merged with
+ * `tip` as its head, so the branch holds no claim. One whose PR closed unmerged
  * still holds its quest, since that work may be wanted back, and so does one
  * with commits pushed after its merge. The CLI and the Worker share this rule.
  */
-export function landed(tip: string, pulls: Iterable<ClosedPull>): boolean {
-	for (const pull of pulls) if (pull.merged && pull.head === tip) return true;
-	return false;
+export function landed<P extends ClosedPull>(tip: string, pulls: Iterable<P>): P | undefined {
+	for (const pull of pulls) if (pull.merged && pull.head === tip) return pull;
+	return undefined;
 }
