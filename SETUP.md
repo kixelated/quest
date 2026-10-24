@@ -46,7 +46,10 @@ quest init
 Init writes a stub per skill under both `.claude/skills/` and `.agents/skills/`
 without creating symbolic links (existing linked layouts continue to work), creates `quest/README.md` when missing, and appends a line
 starting with `Quests: ` to the root `AGENTS.md`, or `CLAUDE.md` when only that
-exists. It prints each path it changed and is safe to rerun.
+exists. It also appends `quest/** merge=quest` to `.gitattributes` and sets
+`merge.quest.driver` in the clone's git config, so local merges resolve
+concurrent edits to quest link lists. It prints each path it changed and is
+safe to rerun.
 
 If init refuses, it names the conflicting path. Report it and ask the user how
 to proceed; never delete or rename their files to get past it.
@@ -82,8 +85,8 @@ work or `/quest-import` to bring in open GitHub issues.
 
 1. Run `quest skill export` and follow it, so active quests become GitHub
    issues. Skip this only if the user says so.
-2. Run `quest uninstall`. It removes only unmodified stubs and the `Quests: `
-   line, and never deletes the quest tree.
+2. Run `quest uninstall`. It removes only unmodified stubs, the `Quests: `
+   line, and the merge driver, and never deletes the quest tree.
 3. Remove the pin added above: the mise entry, or the flake input and dev
    shell package. For an unpinned install, delete the `quest` binary the
    installer placed (`~/.local/bin/quest` by default, or `quest.exe` in the
