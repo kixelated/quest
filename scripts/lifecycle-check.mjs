@@ -76,6 +76,14 @@ try {
 		execFileSync("git", ["-C", repository, "worktree", "add", "--quiet", "--detach", root]);
 		run(root, "init");
 		assert.equal(run(root, "init"), "");
+		// The merge driver probes for `resolve` with `quest help resolve`, which fails for an unknown command.
+		assertFile(root, ".gitattributes", "quest/** merge=quest\n");
+		assert.match(
+			execFileSync("git", ["-C", root, "config", "merge.quest.driver"], { encoding: "utf8" }),
+			/resolve/,
+		);
+		run(root, "help", "resolve");
+		assert.equal(spawnSync(command, [...prefix, "help", "unknown"]).status, 2);
 		for (const dir of destinations) {
 			assert(lstatSync(join(root, dir)).isDirectory(), `${dir} must not require symlink privileges`);
 			for (const skill of skills)
@@ -113,6 +121,8 @@ try {
 		assertFile(root, ".claude/skills/quest-plan/SKILL.md", edited);
 		assertFile(root, ".agents/skills/quest-start/notes.md", "User notes.\n");
 		assert(!existsSync(join(root, ".agents/skills/quest-start/SKILL.md")));
+		assert(!existsSync(join(root, ".gitattributes")));
+		assert.equal(spawnSync("git", ["-C", root, "config", "merge.quest.driver"]).status, 1);
 		for (const dir of originalDirs) assertFile(root, `${dir}/custom/SKILL.md`, `# Custom ${dir} workflow\n`);
 		run(root, "check");
 		assert.equal(run(root, "uninstall"), "");
