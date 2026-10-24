@@ -4,7 +4,7 @@
 // records a claim the same way, judging readiness by the upstream tree.
 import { execFileSync } from "node:child_process";
 
-import { handedBack } from "../core";
+import { handedBack, landed } from "../core";
 import {
 	type GitHubDependencies,
 	type ObjectValue,
@@ -257,8 +257,15 @@ export async function mergedPull(
 ): Promise<string | null> {
 	const query = new URLSearchParams({ state: "closed", head: `${head.owner}:${branch}`, per_page: "100" });
 	const rows = await github.all(`${repositoryPath(repository)}/pulls?${query}`);
-	const pull = rows.find((row) => typeof row.merged_at === "string" && object(row.head).sha === tip);
-	return pull === undefined ? null : string(pull.html_url);
+	const pull = landed(
+		tip,
+		rows.map((row) => ({
+			head: string(object(row.head).sha),
+			merged: typeof row.merged_at === "string",
+			url: string(row.html_url),
+		})),
+	);
+	return pull?.url ?? null;
 }
 
 /** Where a claim lands: the remote, its upstream, and the upstream default branch's tip and quest tree. */

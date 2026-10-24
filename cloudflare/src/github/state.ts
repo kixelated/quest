@@ -1,4 +1,4 @@
-import { branchQuest, handedBack, parse, ready } from "quest/core";
+import { branchQuest, handedBack, landed, parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
@@ -38,11 +38,18 @@ export type Pull = Entity & {
 	};
 	commits: { nodes: { commit: { oid: string; statusCheckRollup: { state: string } | null } }[] };
 };
+/** A quest branch, its tip, and the merged PRs from it, newest first. */
+type QuestRef = {
+	name: string;
+	prefix: string;
+	target: { oid: string } | null;
+	associatedPullRequests: { nodes: { headRefOid: string }[] };
+};
 export type ActivityPage = {
 	issues?: Connection<Entity>;
 	pullRequests?: Connection<Pull>;
 	open?: Connection<Pull>;
-	refs?: Connection<{ name: string; prefix: string }>;
+	refs?: Connection<QuestRef>;
 	/** Stale entities read by number, in the order requested; null when GitHub no longer has one. */
 	[stale: `s${number}`]: Entity | Pull | null | undefined;
 };
@@ -107,7 +114,7 @@ export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = [])
 	if (occupancy.refs !== false) {
 		variables.push("$refs: String");
 		fields.push(
-			'refs(refPrefix:"refs/heads/quest/",first:100,after:$refs) { nodes { name prefix } pageInfo { hasNextPage endCursor } }',
+			'refs(refPrefix:"refs/heads/quest/",first:100,after:$refs) { nodes { name prefix target { oid } associatedPullRequests(states:MERGED,first:10,orderBy:{field:CREATED_AT,direction:DESC}) { nodes { headRefOid } } } pageInfo { hasNextPage endCursor } }',
 		);
 	}
 	// Numbers come from validated webhook pointers and are interpolated as integers.
@@ -218,8 +225,18 @@ export async function reconcile(
 	};
 	if (occupancy.refs !== false)
 		for (const ref of page.refs!.nodes) {
-			if (typeof ref.name !== "string" || ref.prefix !== "refs/heads/quest/")
+			const tip = ref.target?.oid;
+			const merged = ref.associatedPullRequests?.nodes;
+			if (
+				typeof ref.name !== "string" ||
+				ref.prefix !== "refs/heads/quest/" ||
+				typeof tip !== "string" ||
+				!Array.isArray(merged)
+			)
 				throw new GitHubError("Invalid branch observation");
+			// A branch left at a merged PR's head holds nothing: its work landed.
+			const pulls = merged.map((pull) => ({ head: pull.headRefOid, merged: true }));
+			if (landed(tip, pulls) !== undefined) continue;
 			// Ref.name is relative to the requested prefix.
 			updated.occupancy.claims.push(`quest/${ref.name}`);
 		}

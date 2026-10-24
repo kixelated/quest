@@ -124,4 +124,3 @@ fixes what it finds:
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR
-- [Merged claims](/quest/m0/kix/merged-claims.md) - the board ignores branches whose pull request merged, as the CLI does

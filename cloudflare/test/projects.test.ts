@@ -689,6 +689,15 @@ describe("project setup routes", () => {
 function connection<T>(nodes: T[], more = false, cursor: string | null = null) {
 	return { nodes, pageInfo: { hasNextPage: more, endCursor: cursor } };
 }
+/** A quest branch that no merged PR left behind. */
+function ref(name: string) {
+	return {
+		name,
+		prefix: "refs/heads/quest/",
+		target: { oid: "b".repeat(40) },
+		associatedPullRequests: { nodes: [] },
+	};
+}
 function issue(id = 100, number = 1) {
 	return {
 		databaseId: String(id),
@@ -721,7 +730,7 @@ function activity(): ActivityPage {
 		issues: connection([issue()]),
 		pullRequests: connection(pulls),
 		open: connection(pulls),
-		refs: connection([{ name: "second", prefix: "refs/heads/quest/" }]),
+		refs: connection([ref("second")]),
 	};
 }
 // A long history whose open PRs and quest branches fit in one page.
@@ -1283,7 +1292,7 @@ describe("webhook reconciliation", () => {
 			refs: connection([]),
 		};
 		await github({ activity: quiet }).service.projectState(repo, "enrollment-test", true);
-		mocked({ activity: { ...quiet, refs: connection([{ name: "first", prefix: "refs/heads/quest/" }]) } });
+		mocked({ activity: { ...quiet, refs: connection([ref("first")]) } });
 		await delivery("push", { ...event, ref: "refs/heads/quest/first", created: true }, undefined, {}, testEnv);
 		const state = await github().service.projectState(repo, "enrollment-test");
 		expect(state!.claims).toEqual(["quest/first.md"]);
