@@ -10,7 +10,10 @@ if ($Tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 $expectedArchitecture = if ($Target -eq 'aarch64-pc-windows-msvc') { 'Arm64' } else { 'X64' }
 if ($architecture -ne $expectedArchitecture) { throw "Expected native $expectedArchitecture runner; got $architecture" }
-$work = Join-Path ([System.IO.Path]::GetTempPath()) ('quest install ' + [guid]::NewGuid())
+# The runner empties RUNNER_TEMP after the job, so nothing here deletes the installed binary: on
+# windows-11-arm, the runner's agent briefly opens running executables without delete sharing.
+if (-not $env:RUNNER_TEMP) { throw 'Run this on a GitHub Actions runner, which empties RUNNER_TEMP' }
+$work = Join-Path $env:RUNNER_TEMP ('quest install ' + [guid]::NewGuid())
 $originalDirectory = Get-Location
 $originalMise = @{}
 foreach ($name in @('MISE_CONFIG_DIR', 'MISE_DATA_DIR', 'MISE_CACHE_DIR')) { $originalMise[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -53,5 +56,4 @@ try {
 } finally {
     Set-Location $originalDirectory
     foreach ($name in $originalMise.Keys) { [Environment]::SetEnvironmentVariable($name, $originalMise[$name], 'Process') }
-    if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
 }
