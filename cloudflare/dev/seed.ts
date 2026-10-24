@@ -499,7 +499,7 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			},
 		},
 		{
-			id: "seed-start-cli",
+			id: "00000000-5eed-4000-8000-000000000002",
 			workflow: "start",
 			target: "quest/m0/cli.md",
 			revision: commit,
