@@ -85,7 +85,8 @@ and moves one branch. Before writing anything it checks, in order:
   other than `AGENTS.md` and `CLAUDE.md`), `bootstrap` only `flake.nix` and
   `flake.lock`, `start`, `iterate`, and `merge` their task's changes. No workflow changes
   `.github/workflows/`, because the App does not request the workflows
-  permission. A refused change pauses the job with a `publication` decision
+  permission; a merge commit may keep a pull request's own workflow changes,
+  but not change the workflows of the head it updates. A refused change pauses the job with a `publication` decision
   listing each path and reason, instead of being dropped; the maintainer's
   answer resumes the agent's session.
 - The job's requester still holds maintainer authority, and the repository's
@@ -138,7 +139,7 @@ not replaced.
 Planning pull requests are always drafts, as are those of jobs asked to stop.
 Other jobs set `draft`, which defaults to `true` while decisions or unfinished
 work remain; a later delivery with `draft: false` marks the pull request ready.
-kix never converts a ready pull request back. Delivery requires an enabled
+kix never converts a ready pull request back. Delivery and landing require an enabled
 project; a paused project's running jobs can still preserve their work on their
 branches. Pull requests use `maintainer_can_modify: false`, because an
 upstream-scoped token cannot grant edits on the fork branch.

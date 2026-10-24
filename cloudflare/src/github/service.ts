@@ -113,6 +113,8 @@ export interface Branch {
 	commit(parent: string, changes: Change[], message: string, merge?: string): Promise<string>;
 	/** Whether the branch this one merges into, upstream, already holds `commit`. */
 	based(commit: string): Promise<boolean>;
+	/** The tree ID of `commit`'s `.github/workflows`, or null when it has none. */
+	workflows(commit: string): Promise<string | null>;
 	/** Move the branch from `from` (null creates it) to `to`; false when it moved first. */
 	move(from: string | null, to: string): Promise<boolean>;
 	/** Point the branch at `to` wherever it is, creating it if it is gone, discarding its commits. */
@@ -1106,6 +1108,19 @@ export class GitHubService {
 				}
 			},
 			based,
+			workflows: async (commit) => {
+				try {
+					const entries = await this.#api<unknown>(token, `${path}/contents/.github?ref=${sha(commit)}`);
+					if (!Array.isArray(entries)) return null;
+					const found = (entries as { name?: unknown; type?: unknown; sha?: unknown }[]).find(
+						(entry) => entry.name === "workflows" && entry.type === "dir",
+					);
+					return typeof found?.sha === "string" ? sha(found.sha) : null;
+				} catch (error) {
+					if (error instanceof GitHubError && error.status === 404) return null;
+					throw error;
+				}
+			},
 			commit: async (parent, changes, message, merge) => {
 				const base = await this.#api<{ tree: { sha: string } }>(
 					token,
@@ -1400,36 +1415,44 @@ export class GitHubService {
 		pull: number,
 		input: { head: string; hold: string | null; method: MergeMethod | null },
 	) {
-		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, async (token, current) => {
-			const holds = await this.#holds(token, repo, pull);
-			if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
-			if (!input.hold || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== input.hold)
-				throw new PublicationBlocked(
-					"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
-				);
-			if (holds.head !== sha(input.head))
-				throw new PublicationBlocked("The pull request's head moved outside this job.");
-			const mutation =
-				!holds.queue && IMMEDIATE.includes(holds.mergeState)
-					? "mergePullRequest"
-					: "enablePullRequestAutoMerge";
-			const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
-				query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId } }`,
-				variables: {
-					id: holds.id,
-					sha: input.head,
-					method: (input.method ?? mergeMethod(current)).toUpperCase(),
-				},
-			});
-			if (result.errors?.length) {
-				const reason = result.errors[0]?.message;
-				throw new PublicationBlocked(
-					`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
-				);
-			}
-			await this.#invalidate(repo);
-			return { merged: mutation === "mergePullRequest" };
-		});
+		return this.#authorized(
+			repo,
+			userId,
+			{ contents: "write", pull_requests: "write" },
+			async (token, current, installation) => {
+				// Landing is a contribution like opening a pull request, so a paused project lands nothing.
+				if ((await this.#state(repo, installation)) !== "enabled")
+					throw new GitHubError("Contributions are paused");
+				const holds = await this.#holds(token, repo, pull);
+				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
+				if (!input.hold || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== input.hold)
+					throw new PublicationBlocked(
+						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
+					);
+				if (holds.head !== sha(input.head))
+					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				const mutation =
+					!holds.queue && IMMEDIATE.includes(holds.mergeState)
+						? "mergePullRequest"
+						: "enablePullRequestAutoMerge";
+				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
+					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId } }`,
+					variables: {
+						id: holds.id,
+						sha: input.head,
+						method: (input.method ?? mergeMethod(current)).toUpperCase(),
+					},
+				});
+				if (result.errors?.length) {
+					const reason = result.errors[0]?.message;
+					throw new PublicationBlocked(
+						`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
+					);
+				}
+				await this.#invalidate(repo);
+				return { merged: mutation === "mergePullRequest" };
+			},
+		);
 	}
 }
 

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileS
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
-import { Claude, streamReader } from "../src/runner/claude";
+import { Claude, streamReader, TOOL_TIMEOUT_MS } from "../src/runner/claude";
 import { devShell, login } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
@@ -12,7 +12,7 @@ import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
 import { formatAnswer, resumePrompt, startPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
-import { fingerprint, waitForChange } from "../src/runner/wait";
+import { fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -575,8 +575,8 @@ const resume = argv.includes("--resume");
 const session = resume ? at("--resume") : at("--session-id");
 const stdin = fs.readFileSync(0, "utf8");
 const log = (value) => fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(value) + "\\n");
-log({ argv, stdin, cwd: process.cwd(), home: process.env.CLAUDE_CONFIG_DIR, gh: process.env.GH_TOKEN ?? null });
 const kix = JSON.parse(fs.readFileSync(at("--mcp-config"), "utf8")).mcpServers.kix;
+log({ argv, stdin, cwd: process.cwd(), home: process.env.CLAUDE_CONFIG_DIR, gh: process.env.GH_TOKEN ?? null, timeout: kix.timeout });
 const out = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 out({ type: "system", subtype: "init", session_id: session });
 let id = 0;
@@ -780,6 +780,9 @@ describe("quest runner", () => {
 		// The tools' bearer token never appears on the command line.
 		expect(JSON.stringify(launch.argv)).not.toContain("Bearer");
 		expect(launch.gh).toBeNull();
+		// Tool calls may outlast Claude Code's 60s first-response limit for HTTP servers, up to the longest wait.
+		expect(launch.timeout).toBe(TOOL_TIMEOUT_MS);
+		expect(TOOL_TIMEOUT_MS).toBeGreaterThan(WAIT_LIMIT);
 		expect(launch.stdin).toContain("Always run the tests.");
 		expect(launch.stdin).toContain("kix adds for this job: Extra rule.");
 		// Raw output arrives as numbered chunks, and the checkout is gone once the job completed.

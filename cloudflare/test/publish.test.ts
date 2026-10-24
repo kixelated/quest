@@ -29,6 +29,9 @@ function fakeGitHub() {
 		[prHead, { parents: [revision], tree: "e".repeat(40), message: "pr" }],
 	]);
 	const trees = new Map<string, { base: string; entries: any[] }>();
+	/** Each tree's `.github/workflows` files, by path. */
+	const workflows = new Map<string, Record<string, string>>();
+	const treeIds = new Map<string, string>();
 	const refs = new Map<string, string>();
 	const pulls: any[] = [];
 	const requests: Request[] = [];
@@ -37,6 +40,7 @@ function fakeGitHub() {
 		refs,
 		commits,
 		trees,
+		workflows,
 		pulls,
 		role: "maintain",
 		forkParent: 10,
@@ -152,6 +156,14 @@ function fakeGitHub() {
 			if (!pr.labels.includes(name)) return json({ message: "Label does not exist" }, 404);
 			pr.labels = pr.labels.filter((label) => label !== name);
 			return json([]);
+		}
+		if (repo === "upstream/project" && rest === "/contents/.github") {
+			const files = Object.entries(workflows.get(commits.get(url.searchParams.get("ref")!)?.tree ?? "") ?? {});
+			// A tree's ID follows its contents.
+			const key = JSON.stringify(files.sort());
+			const sha = treeIds.get(key) ?? oid();
+			treeIds.set(key, sha);
+			return files.length ? json([{ name: "workflows", type: "dir", sha }]) : json({}, 404);
 		}
 		const compared = repo === "upstream/project" && rest.match(/^\/compare\/([a-f0-9]{40})\.\.\.main$/)?.[1];
 		if (compared) {
@@ -275,6 +287,12 @@ function fakeGitHub() {
 		if (rest === "/git/trees") {
 			const sha = oid();
 			trees.set(sha, { base: body.base_tree, entries: body.tree });
+			const files = { ...workflows.get(body.base_tree) };
+			for (const entry of body.tree)
+				if (entry.path.startsWith(".github/workflows/"))
+					if (entry.sha === null) delete files[entry.path];
+					else files[entry.path] = entry.content ?? entry.sha;
+			workflows.set(sha, files);
 			return json({ sha });
 		}
 		if (rest === "/git/commits") {
@@ -1341,12 +1359,57 @@ describe("merge jobs", () => {
 		expect(await job(id)).toMatchObject({ hold: null });
 	});
 
-	it("merges at once when nothing is left to wait for", async () => {
+	it("merges at once when nothing is left to wait for, unless the project is paused", async () => {
 		const id = await merging();
 		github.pr.mergeState = "CLEAN";
+		await db.prepare("UPDATE github_projects SET state='paused' WHERE id=10").run();
+		const paused = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(paused.status).toBe(403);
+		expect(await paused.json()).toEqual({ error: "Contributions are paused" });
+		expect(github.lands).toEqual([]);
+		await db.prepare("UPDATE github_projects SET state='enabled' WHERE id=10").run();
 		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
 		expect(await response.json()).toEqual({ head: prHead, landed: { merged: true } });
 		expect(github.lands.map((l) => [l.mutation, l.variables.method])).toEqual([["mergePullRequest", "SQUASH"]]);
+	});
+
+	it("refuses only the workflow changes its merge makes to the pull request's head", async () => {
+		// The pull request and its base branch both changed a workflow.
+		const workflow = ".github/workflows/ci.yml";
+		github.workflows.set("e".repeat(40), { [workflow]: "pr" });
+		const main = "f".repeat(40);
+		github.commits.set(main, { parents: [revision], tree: "1".repeat(40), message: "main" });
+		github.workflows.set("1".repeat(40), { [workflow]: "main" });
+		github.base = main;
+		const id = await merging();
+		// Keeping the pull request's version publishes, though it differs from what the merge brings in.
+		const kept = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			message: "Merge main",
+			changes: [file(workflow, "pr")],
+			merge: main,
+		});
+		expect(kept.status).toBe(200);
+		const { head } = (await kept.json()) as { head: string };
+		// Taking the base branch's version changes the head's workflows.
+		const taken = await publish({
+			job: id,
+			attempt: 1,
+			head,
+			session: "s",
+			message: "Merge main",
+			changes: [],
+			merge: main,
+		});
+		expect(taken.status).toBe(202);
+		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+			type: "publication",
+			blocked:
+				"Merging changes the pull request's workflows. Changing GitHub Actions workflows needs the workflows permission, which the App does not request.",
+		});
+		expect(github.refs.get("upstream/project:contributor/fix")).toBe(head);
 	});
 
 	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {

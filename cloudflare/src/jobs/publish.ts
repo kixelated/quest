@@ -48,13 +48,15 @@ export function validPath(path: string) {
 	);
 }
 
+const WORKFLOWS = "Changing GitHub Actions workflows needs the workflows permission, which the App does not request";
+
 /**
  * Why `workflow` may not publish `path`, or null when it may. A refusal
  * becomes a maintainer decision rather than silently dropping the change.
  */
-export function refusal(workflow: Workflow, path: string): string | null {
-	if (path === ".github/workflows" || path.startsWith(".github/workflows/"))
-		return "Changing GitHub Actions workflows needs the workflows permission, which the App does not request";
+export function refusal(workflow: Workflow, path: string, merging = false): string | null {
+	// A merge publication's changes are relative to the merged-in commit, so commit() checks its workflows instead.
+	if (!merging && (path === ".github/workflows" || path.startsWith(".github/workflows/"))) return WORKFLOWS;
 	if (workflow === "bootstrap" && path !== "flake.nix" && path !== "flake.lock")
 		return "A devShell bootstrap publishes only flake.nix and flake.lock";
 	if (workflow === "plan" && !(path.startsWith("quest/") && isQuest(path)))
@@ -205,7 +207,11 @@ async function commit(
 ): Promise<string> {
 	if (input.merge && !(await branch.based(input.merge)))
 		throw new JobError("A merge commit may only merge in a commit its upstream base branch already holds");
-	const next = await branch.commit(head ?? job.revision, input.changes, input.message!, input.merge ?? undefined);
+	const parent = head ?? job.revision;
+	const next = await branch.commit(parent, input.changes, input.message!, input.merge ?? undefined);
+	// GitHub checks a merge commit's workflow changes against the head it updates, its first parent.
+	if (input.merge && (await branch.workflows(parent)) !== (await branch.workflows(next)))
+		throw new PublicationBlocked(`Merging changes the pull request's workflows. ${WORKFLOWS}.`);
 	// Check the fence again immediately before the write that makes the commit visible.
 	await store.claim(db, runner, job.id, job.attempt, head, next, Date.now());
 	// A failure here leaves the claim pending; the next publication finds out whether it landed.
@@ -223,7 +229,7 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 		throw new JobError("Work on a pull request updates its head and opens no pull request");
 	if (input.land && job.workflow !== "merge") throw new JobError("Only a merge job lands its pull request");
 	const refused = input.changes.flatMap((change) => {
-		const reason = refusal(job.workflow, change.path);
+		const reason = refusal(job.workflow, change.path, !!input.merge);
 		return reason ? [{ path: change.path, reason }] : [];
 	});
 	if (refused.length) return decide(db, runner, input, { type: "publication", refused });
