@@ -82,7 +82,13 @@ every request rechecks current GitHub authority. `start` takes only quests that
 observations show ready and unclaimed, except that retrying a failed job does
 not count that job's own open pull request as a claim: the one it recorded, or
 else the only open one observed on its branch at a commit it published. A
-retry records the failed job it `continues`. A job on an issue or pull request
+retry records the failed job it `continues`. A new `plan` takes the
+maintainer's `idea`, up to 4,000 characters, and optional pasted `context`
+(an email, call notes, findings), up to 64,000, on its own `plans/<id>`
+target; a retry keeps both. A completed job's result may list suggested
+`followups`, and planning them targets `plans/<that job>`: kix writes the
+idea and takes the follow-ups and summary as context from the job's own
+result, never from the request, and offers them once. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
 observations read it. `iterate` and `merge` jobs are untrusted and route
 only to Linux runners that declare VM builds. A `merge` job runs the merge
@@ -158,7 +164,8 @@ Changes a workflow may not publish pause the job with a `publication`
 decision. The current attempt of a job on an issue or pull request reads it at
 `GET /api/runner/context?job=…&attempt=…`, as the App with the requester's
 current authority: an issue's text and comments, or a pull request's text,
-comments, reviews, unresolved review threads, and checks at its head. [GITHUB.md](GITHUB.md#publication) describes the request, its
+comments, reviews, unresolved review threads, and checks at its head. A new
+plan's attempt reads its `idea` and `context` there instead. [GITHUB.md](GITHUB.md#publication) describes the request, its
 validation, and how interrupted publications are reconciled.
 
 ### Raw output
@@ -199,7 +206,9 @@ progress, and their projects. Each item is one job target (`issues/1`,
 `pulls/2`, a quest path), so an issue, its planning job, and that job's
 questions stay one item, and webhook updates and reconnects never add another
 prompt. Agents waiting on an answer come first, then failed jobs, new pull
-requests, new issues, and ready quests. Each webhook rereads its project in the
+requests, new issues, ready quests, and a finished job's suggested follow-ups,
+offered as "plan these?" on the `plans/<job>` target their interview takes, so
+the offer, the interview, and its questions stay one item. Each webhook rereads its project in the
 background, so a new issue or PR arrives with its title, ready to act on. An
 item offers only actions that would work: none on a paused project, and only a
 refresh while availability is pending or a background read failed, with the
@@ -207,8 +216,13 @@ failure's reason. Every action is a plain form post to the job routes, which
 recheck authority and move on to the next active decision (or the empty
 state) with a short notice such as "Answer recorded"; the item acted on stays
 reachable from its list with its earlier answers. A refused action says why
-and links back to its item. Prompts render as escaped text and never
-preselect the recommendation. A `publication` decision lists the refused
+and links back to its item. Prompts render as escaped text, list the
+recommended option first, always take an answer in the maintainer's own words,
+and never preselect the recommendation. Each project's "Plan something new"
+box takes an idea and optional pasted context, which the agent reads as
+untrusted, and folds the runner and account behind an automatic default. A
+plan's thread keeps what it started from and links its draft proposal once
+delivered; a running job names its runner and account. A `publication` decision lists the refused
 paths or why the branch is blocked, and takes the maintainer's reply as text.
 A service fork branch that changed outside its job also offers Start over,
 which resets the branch to the job's revision and queues a new job there.
@@ -218,6 +232,20 @@ The inbox reads each target's latest job however old it is: every one that
 awaits a decision, and any other whose issue, pull request, or quest is still
 observed, so finished work stays set aside. Retrying a failed planning
 interview keeps its `plans/<id>` target.
+
+Beside the decisions (below them on a phone), an Agents card shows each job
+on the maintainer's projects (`src/inbox/activity.ts`): every target's latest
+job while it is queued, running, or waiting, and an ended one while the pull
+request it delivered is open and no later job works on that pull request. A
+card names the job's target and state (queued, working, runner offline,
+waiting on you, account limited, PR open, or stopped), its runner and account,
+the agent's latest checkpoint or result summary as escaped text, and how long
+ago it wrote it. A working job silent for 15 minutes says "No update since"
+instead of guessing. Each card stands in for its job's in-progress row. Raw
+output stays behind the card's disclosure: `/app.js` fetches the output route
+above only once a maintainer opens it, and shows it as text. An enrolled
+project's quest log also charts its tree as the quest map, ringing the quests
+those same jobs work on.
 
 A user's projects are those in `github_project_members`. Enrolling a project
 adds its enroller, and any other user joins by passing the maintainer check on

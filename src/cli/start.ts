@@ -13,6 +13,7 @@ import {
 	ensure,
 	gitOutput,
 	held,
+	mergedPull,
 	openPullRequests,
 	pullsFrom,
 	remoteBranches,
@@ -68,12 +69,18 @@ export async function startQuest(
 		`Quest-Claim: ${nonce}`,
 	]);
 	// The lease expects the landed tip, or no branch at all.
-	push(
-		root,
-		remote,
-		[`--force-with-lease=refs/heads/${branch}:${landed.get(branch) ?? ""}`, `${sha}:refs/heads/${branch}`],
-		`someone pushed ${branch} first`,
-	);
+	try {
+		push(
+			root,
+			remote,
+			[`--force-with-lease=refs/heads/${branch}:${landed.get(branch) ?? ""}`, `${sha}:refs/heads/${branch}`],
+			`someone pushed ${branch} first`,
+		);
+	} catch (error) {
+		if (error instanceof Refusal) throw error;
+		const message = await obstructed(root, up, remote, path, branch);
+		throw message === null ? error : new Refusal(message);
+	}
 
 	let url: string | null = null;
 	if (up.github === null) {
@@ -84,6 +91,51 @@ export async function startQuest(
 
 	checkout(root, branch, sha, deps.warn);
 	return { branch, sha, url };
+}
+
+/**
+ * Why `remote` refused `branch`, when a branch there is in its way: git cannot hold a branch whose
+ * name is another's directory, as `quest/m1/epic` is for `quest/m1/epic/one`. Each such branch is
+ * named, with whether it is a merged PR's head, and left alone. `null` when nothing is in the way.
+ */
+async function obstructed(
+	root: string,
+	up: Upstream,
+	remote: string,
+	path: string,
+	branch: string,
+): Promise<string | null> {
+	const parts = branch.split("/");
+	const patterns = parts.slice(1).map((_, i) => `refs/heads/${parts.slice(0, i + 1).join("/")}`);
+	let listing: string;
+	try {
+		listing = gitOutput(root, ["ls-remote", up.push, ...patterns, `refs/heads/${branch}/*`]);
+	} catch {
+		return null;
+	}
+	const found = listing
+		.split("\n")
+		.filter((line) => line !== "")
+		.map((line) => {
+			const [tip, ref] = line.split("\t");
+			return { tip, name: ref.replace(/^refs\/heads\//, "") };
+		})
+		// ls-remote matches patterns against the end of a ref, so keep only the exact ancestors and descendants.
+		.filter(({ name }) => branch.startsWith(`${name}/`) || name.startsWith(`${branch}/`));
+	if (found.length === 0) return null;
+	const github = up.github;
+	const states = await Promise.all(
+		found.map(async ({ tip, name }) => {
+			if (github === null) return `- ${name}: whether it is a merged PR's head is unknown off GitHub`;
+			const url = await mergedPull(github.client, github.repository, github.head, name, tip);
+			return `- ${name}: ${url === null ? "not a merged PR's head" : `the head of ${url}, which merged`}`;
+		}),
+	);
+	return [
+		`${path} cannot be claimed: git cannot hold ${branch} on ${remote} beside a branch named after its directory or inside it:`,
+		...states,
+		"Stop and report this; do not delete or rename a branch in the way.",
+	].join("\n");
 }
 
 /**
@@ -266,7 +318,10 @@ function push(root: string, remote: string, args: string[], rejected: string): v
 		const { stdout, stderr } = error as { stdout?: string; stderr?: string };
 		// --porcelain reports each ref on stdout: `!` and `[rejected]` for a ref that is not as expected.
 		if (/^!\t.*\t\[rejected\]/m.test(stdout ?? "")) throw new Refusal(rejected);
-		throw new Error(`git push to ${remote} failed: ${(stderr || stdout || "").trim()}`);
+		// stderr may hold only the remote's chatter, so add each refused ref's reason from stdout.
+		const refused = (stdout ?? "").split("\n").filter((line) => line.startsWith("!"));
+		const detail = [(stderr ?? "").trim(), ...refused].filter((line) => line !== "").join("\n");
+		throw new Error(`git push to ${remote} failed: ${detail}`);
 	}
 }
 

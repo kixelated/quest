@@ -30,13 +30,15 @@ CREATE TABLE jobs_rebuilt (
   pendingAt INTEGER,
   pull INTEGER,
   continues TEXT REFERENCES jobs_rebuilt(id) ON DELETE SET NULL,
+  idea TEXT,
+  context TEXT,
   -- A merge job's hold on its pull request: the ID of the timeline event that
   -- added the `quest:merge` label for it, as `quest merge` names holds. Null
   -- once the label is released or was never added.
   hold TEXT
 );
-INSERT INTO jobs_rebuilt(id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,attempt,runner,account,session,lease,delivered,cancel,summary,result,createdAt,updatedAt,head,pending,pendingAt,pull,continues)
-  SELECT id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,attempt,runner,account,session,lease,delivered,cancel,summary,result,createdAt,updatedAt,head,pending,pendingAt,pull,continues FROM jobs;
+INSERT INTO jobs_rebuilt(id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,attempt,runner,account,session,lease,delivered,cancel,summary,result,createdAt,updatedAt,head,pending,pendingAt,pull,continues,idea,context)
+  SELECT id,repository,workflow,target,revision,branch,actor,trusted,pinRunner,pinAccount,state,attempt,runner,account,session,lease,delivered,cancel,summary,result,createdAt,updatedAt,head,pending,pendingAt,pull,continues,idea,context FROM jobs;
 CREATE TABLE kept_job_events AS SELECT * FROM job_events ORDER BY rowid;
 CREATE TABLE kept_job_questions AS SELECT * FROM job_questions ORDER BY rowid;
 CREATE TABLE kept_job_output_attempts AS SELECT * FROM job_output_attempts;

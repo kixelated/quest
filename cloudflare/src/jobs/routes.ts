@@ -138,7 +138,8 @@ jobs.post("/api/runner/publish", async (c) => {
 
 // The current attempt of a job on an issue or pull request reads its target
 // as the App, with the requester's current authority: runners hold no GitHub
-// credentials, and the job record keeps only the target's number.
+// credentials, and the job record keeps only the target's number. A new
+// plan's attempt reads the request it started from.
 jobs.get("/api/runner/context", async (c) => {
 	const runner = await machine(c);
 	if (!runner) return c.json({ error: "Runner token required" }, 401);
@@ -147,6 +148,8 @@ jobs.get("/api/runner/context", async (c) => {
 	if (!job || !Number.isSafeInteger(attempt) || attempt < 1) throw new JobError("Job and attempt required");
 	const current = await store.publishing(c.env.DB, runner, job, attempt);
 	c.header("Cache-Control", "no-store");
+	// A new plan's request is kix's own record: the maintainer's idea and what they pasted.
+	if (PLAN.test(current.target)) return c.json({ kind: "plan", idea: current.idea, context: current.context });
 	return c.json(
 		await new GitHubService(c.env).readTarget(
 			{ owner: current.owner, name: current.name, id: current.repository },
@@ -211,12 +214,60 @@ jobs.get(base, async (c) => {
 
 type Plan = Omit<store.NewJob, "repository" | "actor" | "pinRunner" | "pinAccount">;
 
+/** A new interview's target, `plans/<id>`. */
+const PLAN = /^plans\/([0-9a-f-]{36})$/;
+
+/** The longest idea and pasted context a new plan takes, in characters as the inbox form counts them. */
+export const PLAN_LIMITS = { idea: 4000, context: 64_000 };
+
+/** What a new interview starts from: the maintainer's idea and optional pasted context. */
+type PlanRequest = { idea: string; context: string | null };
+
+/** Optional text, with a form's CRLF line breaks counted as one character, limited by length. */
+function words(value: unknown, max: number, name: string): string | null {
+	if (value === undefined) return null;
+	if (typeof value !== "string") throw new JobError(`Invalid ${name}`);
+	const text = value.replaceAll("\r\n", "\n").trim();
+	if (text.length > max) throw new JobError(`Keep the ${name} to at most ${max} characters`);
+	return text || null;
+}
+
+/**
+ * What a new planning interview starts from. A new plan takes the
+ * maintainer's idea and optional pasted context, which the agent reads as
+ * untrusted. Planning a finished job's follow-ups takes them from that job's
+ * result, never from the request. A retry keeps its failed job's request,
+ * and planning an issue needs none.
+ */
+async function planRequest(
+	db: D1Database,
+	repository: number,
+	body: Record<string, unknown>,
+	failed: store.Published | null,
+): Promise<PlanRequest | null> {
+	const idea = words(body.idea, PLAN_LIMITS.idea, "idea");
+	const context = words(body.context, PLAN_LIMITS.context, "context");
+	if (body.target === undefined) return idea ? { idea, context } : null;
+	if (idea || context) throw new JobError("Only a new plan takes an idea");
+	const plan = typeof body.target === "string" ? body.target.match(PLAN)?.[1] : undefined;
+	if (!plan || failed) return null;
+	const request = await store.followupRequest(db, repository, plan);
+	if (!request) throw new JobError("Nothing is left to plan here");
+	return request;
+}
+
 /**
  * Resolve a requested workflow and target against current observations.
  * `failed` is the target's failed latest job, whose pull request a retry
  * continues rather than counting it as another claim.
  */
-function resolve(workflow: unknown, target: unknown, state: ProjectState, failed: store.Published | null): Plan {
+function resolve(
+	workflow: unknown,
+	target: unknown,
+	state: ProjectState,
+	failed: store.Published | null,
+	request: PlanRequest | null,
+): Plan {
 	const commit = state.project.commit;
 	const open = (kind: "issue" | "pull", prefix: string) =>
 		state.activity.find(
@@ -234,16 +285,19 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState, failed
 		return { workflow, target, revision: commit, branch, trusted: true };
 	}
 	if (workflow === "plan") {
-		// A new interview gets its own target; retrying one keeps it, replacing the failure.
-		const retry = typeof target === "string" ? target.match(/^plans\/([0-9a-f-]{36})$/)?.[1] : undefined;
-		if (target === undefined || retry) {
-			const plan = retry ?? crypto.randomUUID();
+		// A new interview gets its own target. Retrying a failed one keeps it and
+		// its request; planning a finished job's follow-ups targets that job's ID.
+		const plan = typeof target === "string" ? target.match(PLAN)?.[1] : undefined;
+		if (target === undefined || plan) {
+			if (!request && !failed) throw new JobError("Describe what to plan");
+			const id = plan ?? crypto.randomUUID();
 			return {
 				workflow,
-				target: `plans/${plan}`,
+				target: `plans/${id}`,
 				revision: commit,
-				branch: `plan/${plan.slice(0, 8)}`,
+				branch: `plan/${id.slice(0, 8)}`,
 				trusted: true,
+				...request,
 			};
 		}
 		const issue = open("issue", "issues");
@@ -280,16 +334,19 @@ function resolve(workflow: unknown, target: unknown, state: ProjectState, failed
 jobs.post(base, async (c) => {
 	const { user, repo, github } = await maintained(c);
 	const { body, form } = await input(c);
-	const pinRunner = body.runner === undefined ? null : id(body.runner);
-	const pinAccount = body.account === undefined ? null : id(body.account);
-	if ((body.runner !== undefined && !pinRunner) || (body.account !== undefined && !pinAccount))
+	// A form names a runner's account as one `pin` choice, `runner:account`.
+	const [runner, account] = typeof body.pin === "string" ? body.pin.split(":") : [body.runner, body.account];
+	const pinRunner = runner === undefined ? null : id(runner);
+	const pinAccount = account === undefined ? null : id(account);
+	if ((runner !== undefined && !pinRunner) || (account !== undefined && !pinAccount))
 		throw new JobError("Invalid runner or account");
 	const failed =
-		body.workflow === "start" && typeof body.target === "string"
+		(body.workflow === "start" || body.workflow === "plan") && typeof body.target === "string"
 			? await store.failed(c.env.DB, repo.id, body.target)
 			: null;
+	const request = body.workflow === "plan" ? await planRequest(c.env.DB, repo.id, body, failed) : null;
 	const { job, enabled, flake } = await github.jobSource(repo, user, (state) =>
-		resolve(body.workflow, body.target, state, failed),
+		resolve(body.workflow, body.target, state, failed, request),
 	);
 	// A decision binds the revision the maintainer saw, such as a pull request's head.
 	if (body.revision !== undefined && body.revision !== job.revision)

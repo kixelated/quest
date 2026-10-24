@@ -980,7 +980,7 @@ describe("job routes", () => {
 		expect((await post("", { workflow: "start", target: "quest/README.md" })).status).toBe(409);
 		expect((await post("", { workflow: "plan", target: "issues/7" })).status).toBe(409);
 		expect((await post("", { workflow: "plan", target: "issues/1" })).status).toBe(201);
-		expect((await post("", { workflow: "plan" })).status).toBe(201);
+		expect((await post("", { workflow: "plan", idea: "Plan the importer" })).status).toBe(201);
 		expect((await post("", { workflow: "iterate", target: "pulls/2" })).status).toBe(201);
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(409);
 		expect((await post("", { workflow: "deploy" })).status).toBe(409);
@@ -994,6 +994,64 @@ describe("job routes", () => {
 				["iterate", "pulls/2", head, "contributor/fix", 0, maintainer],
 			]),
 		);
+	});
+
+	it("starts a new plan from the maintainer's idea and keeps it across a retry", async () => {
+		const refuse = async (body: Record<string, unknown>, error: string) => {
+			const response = await post("", body);
+			expect(response.status).toBe(409);
+			expect(await response.json()).toEqual({ error });
+		};
+		await refuse({ workflow: "plan" }, "Describe what to plan");
+		await refuse({ workflow: "plan", idea: "  ", context: "pasted" }, "Describe what to plan");
+		await refuse({ workflow: "plan", idea: "x".repeat(4001) }, "Keep the idea to at most 4000 characters");
+		await refuse({ workflow: "plan", target: "issues/1", idea: "Also this" }, "Only a new plan takes an idea");
+		// An interview no job started, or one whose follow-ups nobody suggested, is not a plan to retry.
+		await refuse({ workflow: "plan", target: `plans/${crypto.randomUUID()}` }, "Nothing is left to plan here");
+		const created = await post("", { workflow: "plan", idea: " Config includes\r\n", context: "Notes:\r\nA" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+		const job = (await store.readJob(db, id))!;
+		expect(job).toMatchObject({
+			idea: "Config includes",
+			context: "Notes:\nA",
+			branch: `plan/${job.target.slice(6, 14)}`,
+		});
+		await db.prepare("UPDATE jobs SET state='failed' WHERE id=?").bind(id).run();
+		const retried = (await (await post("", { workflow: "plan", target: job.target })).json()) as { id: string };
+		expect(await store.readJob(db, retried.id)).toMatchObject({
+			target: job.target,
+			idea: "Config includes",
+			context: "Notes:\nA",
+			continues: id,
+		});
+	});
+
+	it("plans a finished job's suggested follow-ups once, from its own result", async () => {
+		const id = await job(10, maintainer, {}, 1);
+		await db
+			.prepare("UPDATE jobs SET state='completed',summary='Shipped it.',result=? WHERE id=?")
+			.bind(JSON.stringify({ head: null, followups: ["Cache the parser", "Document `--fast`"] }), id)
+			.run();
+		expect(await store.listFollowups(db, 10)).toMatchObject([
+			{ id, followups: ["Cache the parser", "Document `--fast`"] },
+		]);
+		// The request names only the target; the follow-ups come from the job, not the form.
+		const refused = await post("", { workflow: "plan", target: `plans/${id}`, context: "forged" });
+		expect(refused.status).toBe(409);
+		const planned = await post("", { workflow: "plan", target: `plans/${id}` });
+		expect(planned.status).toBe(201);
+		const plan = (await store.readJob(db, ((await planned.json()) as { id: string }).id))!;
+		expect(plan).toMatchObject({
+			workflow: "plan",
+			target: `plans/${id}`,
+			idea: "Plan the follow-ups that the start job on quest/first.md suggested.",
+			context:
+				"A finished job suggested these follow-ups:\n\n- Cache the parser\n- Document `--fast`\n\nIts summary: Shipped it.",
+		});
+		expect(await store.listFollowups(db, 10)).toEqual([]);
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(plan.id).run();
+		expect((await post("", { workflow: "plan", target: `plans/${id}` })).status).toBe(409);
 	});
 
 	it("starts an epic on its README branch while a child's branch is claimed", async () => {

@@ -62,6 +62,9 @@ export type Job = {
 	continues: string | null;
 	/** A merge job's `quest:merge` label: the timeline event that added it, until kix releases it. */
 	hold: string | null;
+	/** A new plan's request: the maintainer's idea, and pasted context the agent reads as untrusted. */
+	idea: string | null;
+	context: string | null;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -631,6 +634,8 @@ export type NewJob = Pick<Job, "repository" | "workflow" | "target" | "revision"
 	trusted: boolean;
 	pinRunner?: string | null;
 	pinAccount?: string | null;
+	idea?: string | null;
+	context?: string | null;
 };
 
 /** Create a job, or return the active job already doing the same work. */
@@ -653,8 +658,8 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const [insert, active, enabled, pinned] = await db.batch([
 		db
 			.prepare(
-				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,continues,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,f.id,?,?,?,?,'queued',?,? FROM github_projects p
+				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,continues,idea,context,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,f.id,COALESCE(?,f.idea),COALESCE(?,f.context),?,?,?,?,'queued',?,? FROM github_projects p
  LEFT JOIN jobs f ON ?=0 AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
  WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
@@ -665,6 +670,8 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				input.revision,
 				input.branch,
 				onPull(input.workflow) ? input.revision : null,
+				input.idea ?? null,
+				input.context ?? null,
 				input.actor,
 				trusted,
 				runner,
@@ -761,6 +768,78 @@ export async function listInboxJobs(db: D1Database, repository: number, observed
 			ORDER BY createdAt DESC,id`,
 		)
 		.bind(repository, JSON.stringify(observed))
+		.all<{ id: string }>();
+	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+}
+
+/** The most follow-ups a delivery suggests, and the longest one, in characters. */
+export const FOLLOWUPS = { count: 20, length: 1000 };
+
+/** The follow-ups a completed job's result suggests: untrusted agent text, so only well-formed ones count. */
+export function followupsOf(result: unknown): string[] {
+	const list = (result as { followups?: unknown } | null)?.followups;
+	if (!Array.isArray(list)) return [];
+	return list
+		.filter((item): item is string => typeof item === "string" && !!item.trim() && item.length <= FOLLOWUPS.length)
+		.map((item) => item.trim())
+		.slice(0, FOLLOWUPS.count);
+}
+
+/** A job that delivered suggested follow-ups, which a "plan these?" decision offers until it is planned. */
+export type Followups = Pick<Job, "id" | "workflow" | "target" | "summary" | "pull" | "updatedAt"> & {
+	followups: string[];
+};
+
+/** Completed jobs whose suggested follow-ups were not planned yet, newest first: each one's plan target is `plans/<job>`. */
+const unplanned = `state='completed' AND json_array_length(result,'$.followups')>0
+ AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=j.repository AND n.target='plans/'||j.id)`;
+
+/** The project's "plan these?" decisions, newest first. */
+export async function listFollowups(db: D1Database, repository: number): Promise<Followups[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT id,workflow,target,summary,pull,result,updatedAt FROM jobs j WHERE repository=? AND ${unplanned} ORDER BY updatedAt DESC,id LIMIT 50`,
+		)
+		.bind(repository)
+		.all<Omit<Followups, "followups"> & { result: string }>();
+	return results.flatMap(({ result, ...job }) => {
+		const followups = followupsOf(JSON.parse(result));
+		return followups.length ? [{ ...job, followups }] : [];
+	});
+}
+
+/** The request a "plan these?" decision starts its interview from, or null once it was planned. */
+export async function followupRequest(db: D1Database, repository: number, job: string) {
+	const row = await db
+		.prepare(`SELECT workflow,target,summary,result FROM jobs j WHERE id=? AND repository=? AND ${unplanned}`)
+		.bind(job, repository)
+		.first<Pick<Job, "workflow" | "target" | "summary"> & { result: string }>();
+	const followups = row ? followupsOf(JSON.parse(row.result)) : [];
+	if (!row || !followups.length) return null;
+	// The follow-ups and summary are agent text, so they are context, not the maintainer's words.
+	const context = [
+		"A finished job suggested these follow-ups:",
+		followups.map((item) => `- ${item.replaceAll("\n", " ")}`).join("\n"),
+		...(row.summary ? [`Its summary: ${row.summary}`] : []),
+	].join("\n\n");
+	return { idea: `Plan the follow-ups that the ${row.workflow} job on ${row.target} suggested.`, context };
+}
+
+/**
+ * The jobs agent cards show, newest first: each target's latest job while it
+ * is queued, running, or waiting, or once ended while the pull request it
+ * delivered is one of the `open` ones and no later job works on that pull request.
+ */
+export async function listActivityJobs(db: D1Database, repository: number, open: number[]) {
+	const rows = await db
+		.prepare(
+			`SELECT id FROM jobs j WHERE repository=?1
+				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
+				AND (state IN ('queued','running','waiting') OR (pull IN (SELECT value FROM json_each(?2))
+					AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target='pulls/'||j.pull AND n.id<>j.id AND n.createdAt>=j.createdAt)))
+			ORDER BY createdAt DESC,id`,
+		)
+		.bind(repository, JSON.stringify(open))
 		.all<{ id: string }>();
 	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
 }
@@ -922,8 +1001,8 @@ export async function restart(db: D1Database, job: string, question: string, use
 			.bind(now, job, question, user, now),
 		db
 			.prepare(
-				`INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
- SELECT ?,repository,workflow,target,revision,branch,?,actor,trusted,pinRunner,pinAccount,'queued',?,? FROM jobs WHERE id=? AND state='cancelled' AND ${answered}`,
+				`INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,idea,context,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
+ SELECT ?,repository,workflow,target,revision,branch,?,idea,context,actor,trusted,pinRunner,pinAccount,'queued',?,? FROM jobs WHERE id=? AND state='cancelled' AND ${answered}`,
 			)
 			.bind(id, head, now, now, job, question, user, now),
 	]);

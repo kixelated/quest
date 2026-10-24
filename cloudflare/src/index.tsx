@@ -13,11 +13,12 @@ import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { readActivity } from "./github/state";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
+import { cards, highlights } from "./inbox/activity";
 import * as inbox from "./inbox/model";
 import { InboxPage } from "./inbox/page";
 import { purge, retain } from "./jobs/output";
 import { BootstrapRequired, fromForm, hub, inboxURL, jobs, nextURL, resume, stop } from "./jobs/routes";
-import { JobError, active, listRunners, moveAccount, registerRunner } from "./jobs/store";
+import { JobError, active, listActivityJobs, listRunners, moveAccount, registerRunner } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
 import { RunnersPage, connectRequest } from "./runners";
 import * as push from "./push/notify";
@@ -270,7 +271,8 @@ app.get("/inbox", async (c) => {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
 	if (!session) return c.redirect("/sign-in?next=/inbox", 303);
 	const user = session.user.id;
-	const { projects, items, runners } = await inbox.load(c.env, user);
+	const { projects, readable, items, activity, runners } = await inbox.load(c.env, user);
+	const now = Date.now();
 	const { decisions, working, skipped } = inbox.arrange(items);
 	const project = c.req.query("project");
 	const target = c.req.query("item");
@@ -294,6 +296,8 @@ app.get("/inbox", async (c) => {
 			working={working}
 			skipped={skipped}
 			runners={runners}
+			cards={cards(readable, activity, runners, items, now)}
+			now={now}
 			notifications={push.keys(c.env)?.publicKey ?? null}
 		/>,
 	);
@@ -343,14 +347,22 @@ app.post("/runners/accounts", async (c) => {
 	return c.redirect("/runners", 303);
 });
 app.get("/projects/github/:owner/:repository/board", async (c) => {
-	const { state } = await liveProject(c);
+	const { repo, state } = await liveProject(c);
 	if (!state) return c.redirect(`${projectURL(c.req.param("owner"), c.req.param("repository"))}/state`, 303);
+	// The map highlights the quests agents work on, from the same jobs as the inbox's cards.
+	const view = { project: repo, state, error: null };
+	const jobs = await listActivityJobs(c.env.DB, repo.id, inbox.openPulls(view));
+	const runners = await inbox.presence(
+		c.env,
+		jobs.map((job) => job.actor),
+	);
 	return page(
 		c,
 		{ title: `${state.project.title} quest log`, description: "Pinned repository quest tree." },
 		<BoardPage
 			board={readBoard(state.project)}
 			show={SHOWN.find(([kind]) => kind === c.req.query("show"))?.[0] ?? null}
+			agents={highlights(cards([view], [jobs], runners, [], Date.now()))}
 		/>,
 	);
 });
