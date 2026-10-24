@@ -62,6 +62,7 @@ interface PullHead {
 	body: string | null;
 	created_at: string;
 	head: { ref: string; sha: string; repo: { id: number; name: string; owner: { login: string } } | null };
+	base: { ref: string };
 }
 export class GitHubError extends Error {
 	constructor(
@@ -92,7 +93,7 @@ export class NotMaintainer extends GitHubError {}
 export type Change = { path: string; content: Uint8Array | null; mode: "100644" | "100755" | "120000" };
 /** What a job may publish: its workflow, its target, and its one branch. */
 export type Contribution = {
-	workflow: "plan" | "start" | "iterate" | "bootstrap";
+	workflow: "plan" | "start" | "iterate" | "merge" | "bootstrap";
 	target: string;
 	branch: string;
 	pull: number | null;
@@ -104,8 +105,16 @@ export interface Branch {
 	repository: GitHubRepository;
 	/** The branch's commit, or null when it does not exist yet. */
 	head(): Promise<string | null>;
-	/** Create a commit of `changes` on `parent` without moving the branch. */
-	commit(parent: string, changes: Change[], message: string): Promise<string>;
+	/**
+	 * Create a commit of `changes` on `parent` without moving the branch. With
+	 * `merge`, it is a merge commit of `parent` and `merge`, and `changes` are
+	 * relative to `merge`'s files.
+	 */
+	commit(parent: string, changes: Change[], message: string, merge?: string): Promise<string>;
+	/** Whether the branch this one merges into, upstream, already holds `commit`. */
+	based(commit: string): Promise<boolean>;
+	/** The tree ID of `commit`'s `.github/workflows`, or null when it has none. */
+	workflows(commit: string): Promise<string | null>;
 	/** Move the branch from `from` (null creates it) to `to`; false when it moved first. */
 	move(from: string | null, to: string): Promise<boolean>;
 	/** Point the branch at `to` wherever it is, creating it if it is gone, discarding its commits. */
@@ -156,13 +165,7 @@ export function refName(name: string) {
 async function refusal(response: Response) {
 	try {
 		const { message } = (await response.json()) as { message?: unknown };
-		if (typeof message === "string")
-			return (
-				message
-					.replace(/[\x00-\x1f\x7f]+/g, " ")
-					.trim()
-					.slice(0, 300) || null
-			);
+		if (typeof message === "string") return line(message) || null;
 	} catch {}
 	return null;
 }
@@ -1021,18 +1024,33 @@ export class GitHubService {
 		job: Contribution,
 		action: (branch: Branch) => Promise<T>,
 	) {
-		const iterate = job.workflow === "iterate";
+		const pulled = job.workflow === "iterate" || job.workflow === "merge";
 		return this.#authorized(
 			upstream,
 			userId,
-			iterate ? { pull_requests: "read" } : {},
+			pulled ? { contents: "read", pull_requests: "read" } : {},
 			async (token, current, installation) => {
 				this.#public(current);
 				if ((await this.#state(upstream, installation)) === null)
 					throw new GitHubError("Project is not enrolled for this installation");
-				if (!iterate)
+				// A merge commit may only bring in what the pull request's upstream base already holds.
+				const based = (base: string) => async (commit: string) => {
+					try {
+						const ref = base.split("/").map(encodeURIComponent).join("/");
+						const { status } = await this.#api<{ status: string }>(
+							token,
+							`${repositoryPath(upstream)}/compare/${sha(commit)}...${ref}`,
+						);
+						return status === "identical" || status === "ahead";
+					} catch (error) {
+						if (error instanceof GitHubError && error.status === 404) return false;
+						throw error;
+					}
+				};
+				// A job's own branch starts from the default branch's current commit, so it merges nothing in.
+				if (!pulled)
 					return this.#fork(upstream, upstream.name, { contents: "write" }, (forkToken, fork) =>
-						action(this.#branch(forkToken, fork, job.branch)),
+						action(this.#branch(forkToken, fork, job.branch, async () => false)),
 					);
 				const pull = await this.#api<PullHead>(
 					token,
@@ -1041,14 +1059,15 @@ export class GitHubService {
 				if (pull.state !== "open" || pull.head.ref !== job.branch)
 					throw new GitHubError("The pull request was closed or its head branch changed");
 				const head = pull.head.repo;
+				const base = based(pull.base.ref);
 				if (head?.id === upstream.id)
 					return this.#withRepository(upstream, { contents: "write" }, async (writeToken, latest) =>
-						action(this.#branch(writeToken, latest, job.branch)),
+						action(this.#branch(writeToken, latest, job.branch, base)),
 					);
 				if (head && this.#forkOwner(head.owner.login))
 					return this.#fork(upstream, head.name, { contents: "write" }, (forkToken, fork) => {
 						if (fork.id !== head.id) throw new GitHubError("Repository identity or availability changed");
-						return action(this.#branch(forkToken, fork, job.branch));
+						return action(this.#branch(forkToken, fork, job.branch, base));
 					});
 				throw new PublicationBlocked(
 					"The pull request's head is in a contributor's fork, which the bot cannot update. Ask its author to apply the changes, or close it and start new work.",
@@ -1092,7 +1111,7 @@ export class GitHubService {
 		}
 	}
 
-	#branch(token: string, repo: Repository, branch: string): Branch {
+	#branch(token: string, repo: Repository, branch: string, based: Branch["based"]): Branch {
 		if (!refName(branch) || branch === repo.default_branch)
 			throw new PublicationBlocked("Jobs never write a repository's default branch");
 		const path = `/repos/${repo.owner.login}/${repo.name}`;
@@ -1113,8 +1132,25 @@ export class GitHubService {
 					throw error;
 				}
 			},
-			commit: async (parent, changes, message) => {
-				const base = await this.#api<{ tree: { sha: string } }>(token, `${path}/git/commits/${sha(parent)}`);
+			based,
+			workflows: async (commit) => {
+				try {
+					const entries = await this.#api<unknown>(token, `${path}/contents/.github?ref=${sha(commit)}`);
+					if (!Array.isArray(entries)) return null;
+					const found = (entries as { name?: unknown; type?: unknown; sha?: unknown }[]).find(
+						(entry) => entry.name === "workflows" && entry.type === "dir",
+					);
+					return typeof found?.sha === "string" ? sha(found.sha) : null;
+				} catch (error) {
+					if (error instanceof GitHubError && error.status === 404) return null;
+					throw error;
+				}
+			},
+			commit: async (parent, changes, message, merge) => {
+				const base = await this.#api<{ tree: { sha: string } }>(
+					token,
+					`${path}/git/commits/${sha(merge ?? parent)}`,
+				);
 				const tree = [];
 				for (const change of changes) {
 					const mode = change.mode;
@@ -1145,7 +1181,7 @@ export class GitHubService {
 				const commit = await this.#api<{ sha: string }>(token, `${path}/git/commits`, "POST", {
 					message,
 					tree: sha(created.sha),
-					parents: [parent],
+					parents: merge ? [parent, sha(merge)] : [parent],
 				});
 				return sha(commit.sha);
 			},
@@ -1190,8 +1226,8 @@ export class GitHubService {
 		job: Contribution,
 		input: { title: string; body: string; draft: boolean },
 	) {
-		if (job.workflow === "iterate")
-			throw new GitHubError("An iteration updates its pull request's head and opens no pull request");
+		if (job.workflow === "iterate" || job.workflow === "merge")
+			throw new GitHubError("Work on a pull request updates its head and opens no pull request");
 		return this.#authorized(upstream, userId, { pull_requests: "write" }, async (token, current, installation) => {
 			this.#public(current);
 			if ((await this.#state(upstream, installation)) !== "enabled")
@@ -1266,14 +1302,7 @@ export class GitHubService {
 	 */
 	mergePullRequest(repo: GitHubRepository, userId: string, pull: number, expectedHead: string) {
 		return this.#authorized(repo, userId, { contents: "write", pull_requests: "write" }, async (token, current) => {
-			const method = current.allow_squash_merge
-				? "squash"
-				: current.allow_merge_commit
-					? "merge"
-					: current.allow_rebase_merge
-						? "rebase"
-						: null;
-			if (!method) throw new GitHubError("The repository allows no merge method");
+			const method = mergeMethod(current);
 			let merged: { sha: string };
 			try {
 				merged = await this.#api<{ sha: string }>(
@@ -1291,13 +1320,232 @@ export class GitHubService {
 					throw new GitHubError(`GitHub refused the merge: ${error.reason}`, error.status);
 				throw error;
 			}
-			// As a webhook would, mark observations stale so the inbox stops offering the merged pull request.
-			await this.#env.DB.prepare(
-				"UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=?",
-			)
-				.bind(repo.id)
-				.run();
+			await this.#invalidate(repo);
 			return { sha: merged.sha };
 		});
 	}
+
+	/** As a webhook would, mark observations stale so the inbox stops offering a pull request that merged or is landing. */
+	async #invalidate(repo: GitHubRepository) {
+		await this.#env.DB.prepare(
+			"UPDATE github_project_state SET invalidated=1,revision=revision+1 WHERE repository=?",
+		)
+			.bind(repo.id)
+			.run();
+	}
+
+	/** A pull request's hold labels and the timeline events that add a label or start a landing, as `quest merge` reads them. */
+	async #holds(token: string, repo: GitHubRepository, pull: number): Promise<Holds> {
+		const result = await this.#api<{
+			data?: { repository: { pullRequest: HoldRow | null } | null };
+			errors?: unknown[];
+		}>(token, "/graphql", "POST", {
+			query: HOLDS,
+			variables: { owner: repo.owner, name: repo.name, number: number(pull) },
+		});
+		const row = result.data?.repository?.pullRequest;
+		if (result.errors?.length || !row) throw new GitHubError("This pull request is unavailable");
+		return {
+			id: row.id,
+			state: row.state,
+			head: row.headRefOid,
+			mergeState: row.mergeStateStatus,
+			queue: row.isMergeQueueEnabled === true,
+			landing: row.autoMergeRequest !== null || row.mergeQueueEntry !== null,
+			labels: row.labels.nodes.map((label) => label.name).filter((name) => name.startsWith(HOLD_PREFIX)),
+			events: row.timelineItems.nodes.map((event) => ({
+				id: event.id,
+				label: event.__typename === "LabeledEvent" ? (event.label?.name ?? "") : null,
+			})),
+		};
+	}
+
+	/** Remove `quest:merge` from a pull request; one already gone is fine. */
+	async #unhold(token: string, repo: GitHubRepository, pull: number) {
+		try {
+			await this.#api(
+				token,
+				`${repositoryPath(repo)}/issues/${number(pull)}/labels/${encodeURIComponent(MERGE_LABEL)}`,
+				"DELETE",
+			);
+		} catch (error) {
+			if (!(error instanceof GitHubError) || error.status !== 404) throw error;
+		}
+	}
+
+	/**
+	 * Hold an open pull request for a merge job with the `quest:merge` label,
+	 * the contract `quest merge --help` states for local sessions too. Refused
+	 * while another session holds a `quest:*` label; a `quest:merge` whose
+	 * landing ended unmerged is spent and removed first. When two sessions
+	 * label it at once, the first label added keeps it. Returns the hold's
+	 * token: the timeline event that added the label.
+	 */
+	holdPullRequest(repo: GitHubRepository, userId: string, pull: number) {
+		return this.#authorized(repo, userId, { issues: "write", pull_requests: "read" }, async (token) => {
+			let holds = await this.#holds(token, repo, pull);
+			if (holds.state !== "OPEN") throw new GitHubError("The pull request is no longer open");
+			if (spent(holds)) {
+				await this.#unhold(token, repo, pull);
+				holds = { ...holds, labels: holds.labels.filter((name) => name !== MERGE_LABEL) };
+			}
+			const other = holds.labels[0];
+			if (other) throw new GitHubError(heldBy(other));
+			await this.#api(token, `${repositoryPath(repo)}/issues/${number(pull)}/labels`, "POST", {
+				labels: [MERGE_LABEL],
+			});
+			holds = await this.#holds(token, repo, pull);
+			const ours = added(holds, MERGE_LABEL);
+			if (!ours) throw new GitHubError("GitHub does not show the quest:merge label kix added");
+			const rival = holds.labels.find((name) => {
+				if (name === MERGE_LABEL) return false;
+				const event = added(holds, name);
+				return !event || holds.events.indexOf(event) < holds.events.indexOf(ours);
+			});
+			if (rival) {
+				await this.#unhold(token, repo, pull);
+				throw new GitHubError(heldBy(rival));
+			}
+			return ours.id;
+		});
+	}
+
+	/**
+	 * Release a merge job's `quest:merge` hold unless its pull request is
+	 * queued or auto-merging. The App acts on its own label here, with no
+	 * maintainer request behind it. Returns whether the hold is over: released
+	 * now, already removed or replaced, or its pull request no longer open.
+	 */
+	releasePullRequest(repo: GitHubRepository, pull: number, hold: string) {
+		return this.#withRepository(repo, { issues: "write", pull_requests: "read" }, async (token) => {
+			const holds = await this.#holds(token, repo, pull);
+			if (holds.state !== "OPEN" || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== hold)
+				return true;
+			if (holds.landing) return false;
+			await this.#unhold(token, repo, pull);
+			return true;
+		});
+	}
+
+	/**
+	 * Land a merge job's pull request at exactly `head`, while the job still
+	 * holds it: enable auto-merge bound to that head, which enters the merge
+	 * queue when the base has one, or merge at once when GitHub would refuse
+	 * auto-merge because nothing is left to wait for. `method` is the one the
+	 * repository's instructions name, or else the first the repository allows.
+	 */
+	landPullRequest(
+		repo: GitHubRepository,
+		userId: string,
+		pull: number,
+		input: { head: string; hold: string | null; method: MergeMethod | null },
+	) {
+		return this.#authorized(
+			repo,
+			userId,
+			{ contents: "write", pull_requests: "write" },
+			async (token, current, installation) => {
+				// Landing is a contribution like opening a pull request, so a paused project lands nothing.
+				if ((await this.#state(repo, installation)) !== "enabled")
+					throw new GitHubError("Contributions are paused");
+				const holds = await this.#holds(token, repo, pull);
+				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
+				if (!input.hold || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== input.hold)
+					throw new PublicationBlocked(
+						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
+					);
+				if (holds.head !== sha(input.head))
+					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				const mutation =
+					!holds.queue && IMMEDIATE.includes(holds.mergeState)
+						? "mergePullRequest"
+						: "enablePullRequestAutoMerge";
+				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
+					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId } }`,
+					variables: {
+						id: holds.id,
+						sha: input.head,
+						method: (input.method ?? mergeMethod(current)).toUpperCase(),
+					},
+				});
+				if (result.errors?.length) {
+					const reason = result.errors[0]?.message;
+					throw new PublicationBlocked(
+						`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
+					);
+				}
+				await this.#invalidate(repo);
+				return { merged: mutation === "mergePullRequest" };
+			},
+		);
+	}
+}
+
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+/** The first merge method the repository allows: squash, then a merge commit, then rebase. */
+function mergeMethod(current: Repository): MergeMethod {
+	if (current.allow_squash_merge) return "squash";
+	if (current.allow_merge_commit) return "merge";
+	if (current.allow_rebase_merge) return "rebase";
+	throw new GitHubError("The repository allows no merge method");
+}
+
+/** The label prefix and merge label `quest iterate`, `ready`, and `merge` hold pull requests with. */
+const HOLD_PREFIX = "quest:";
+export const MERGE_LABEL = "quest:merge";
+/** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
+const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
+const HOLDS = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+ id state headRefOid mergeStateStatus isMergeQueueEnabled autoMergeRequest { enabledAt } mergeQueueEntry { state }
+ labels(first: 100) { nodes { name } }
+ timelineItems(last: 100, itemTypes: [LABELED_EVENT, AUTO_MERGE_ENABLED_EVENT, ADDED_TO_MERGE_QUEUE_EVENT]) { nodes { __typename
+  ... on LabeledEvent { id label { name } } ... on AutoMergeEnabledEvent { id } ... on AddedToMergeQueueEvent { id } } } } } }`;
+type HoldRow = {
+	id: string;
+	state: string;
+	headRefOid: string;
+	mergeStateStatus: string;
+	isMergeQueueEnabled: boolean | null;
+	autoMergeRequest: unknown;
+	mergeQueueEntry: unknown;
+	labels: { nodes: { name: string }[] };
+	timelineItems: { nodes: { __typename: string; id: string; label?: { name: string } | null }[] };
+};
+type Holds = {
+	id: string;
+	state: string;
+	head: string;
+	mergeState: string;
+	queue: boolean;
+	/** Auto-merge is enabled or the pull request is in the merge queue. */
+	landing: boolean;
+	/** Its `quest:*` labels. */
+	labels: string[];
+	/** Oldest first; `label` is null for a landing that started. */
+	events: { id: string; label: string | null }[];
+};
+
+/** The latest event that added `label`. */
+function added(holds: Holds, label: string) {
+	return [...holds.events].reverse().find((event) => event.label === label);
+}
+
+/** A `quest:merge` label is spent once a landing started after it was added and ended unmerged. */
+function spent(holds: Holds) {
+	const event = added(holds, MERGE_LABEL);
+	if (!event || holds.landing || !holds.labels.includes(MERGE_LABEL)) return false;
+	return holds.events.slice(holds.events.indexOf(event) + 1).some((later) => later.label === null);
+}
+
+function heldBy(label: string) {
+	return `Another session holds this pull request with ${label}; pick it again once it is released`;
+}
+
+/** Untrusted GitHub text as one bounded line. */
+function line(text: string) {
+	return text
+		.replace(/[\x00-\x1f\x7f]+/g, " ")
+		.trim()
+		.slice(0, 300);
 }

@@ -5,10 +5,11 @@ import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
 import { type ProjectState, type Pull, continued, startable } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
+import * as landing from "./landing";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
 import { data, id, text } from "./protocol";
-import { HeadMoved, LIMITS, parsePublication, publish, restart } from "./publish";
+import { HeadMoved, LIMITS, parsePublication, publish, pullOf, restart } from "./publish";
 import * as store from "./store";
 import { JobError } from "./store";
 
@@ -304,10 +305,13 @@ function resolve(
 		const n = issue.number;
 		return { workflow, target: `issues/${n}`, revision: commit, branch: `plan/issue-${n}`, trusted: true };
 	}
-	if (workflow === "iterate") {
+	if (workflow === "iterate" || workflow === "merge") {
 		const pull = open("pull", "pulls");
-		if (!pull) throw new JobError("Iterate on an open pull request");
+		if (!pull)
+			throw new JobError(workflow === "merge" ? "Merge an open pull request" : "Iterate on an open pull request");
 		const data = pull.data as Pull;
+		if (workflow === "merge" && data.isDraft)
+			throw new JobError("Mark the draft ready for review before merging it");
 		// Until the sandbox classifies commit authors, every PR head is untrusted
 		// and routes only to Linux runners that build its devShell in a VM.
 		return {
@@ -351,7 +355,7 @@ jobs.post(base, async (c) => {
 	if (job.workflow === "bootstrap") {
 		if (flake) throw new JobError("The default branch already has a flake");
 	} else if (!flake) {
-		if (job.workflow === "iterate") throw new JobError("The pull request's head has no flake devShell");
+		if (store.onPull(job.workflow)) throw new JobError("The pull request's head has no flake devShell");
 		throw new BootstrapRequired();
 	}
 	const created = await store.createJob(
@@ -359,6 +363,22 @@ jobs.post(base, async (c) => {
 		{ ...job, repository: repo.id, actor: user, pinRunner, pinAccount },
 		Date.now(),
 	);
+	// A new merge job holds its pull request before it runs, as a local `quest merge` would.
+	if (created.created && job.workflow === "merge") {
+		const pull = pullOf(job.target);
+		let token: string;
+		let recorded: boolean;
+		try {
+			token = await github.holdPullRequest(repo, user, pull);
+			recorded = await store.held(c.env.DB, created.id, token);
+		} catch (error) {
+			await store.cancel(c.env.DB, created.id, user, Date.now());
+			await hub(c.env, user).dispatch(user);
+			throw error;
+		}
+		// A stop that came first found no hold to release, so the label goes back now.
+		if (!recorded) await github.releasePullRequest(repo, pull, token);
+	}
 	await hub(c.env, user).dispatch(user);
 	return reply(c, form, "start", created, created.created ? 201 : 200);
 });
@@ -434,6 +454,8 @@ jobs.post(`${base}/:job/cancel`, async (c) => {
 	const { user, job } = await owned(c);
 	await store.cancel(c.env.DB, job.id, user, Date.now());
 	await hub(c.env, job.actor).dispatch(job.actor);
+	// A running attempt reports its cancellation later, which releases its hold then.
+	await landing.ended(c.env, job.id);
 	return reply(c, fromForm(c) ? {} : null, "stop", null);
 });
 

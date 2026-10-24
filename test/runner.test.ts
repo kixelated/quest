@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import type { AdapterName } from "../src/runner/adapter";
-import { Claude, jobEnvironment, streamReader } from "../src/runner/claude";
+import { Claude, jobEnvironment, streamReader, TOOL_TIMEOUT_MS } from "../src/runner/claude";
 import { addAccount, devShell, login, RunnerInputError, runnerAdapters } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
@@ -24,6 +24,7 @@ import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/ru
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
 import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
+import { fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -297,6 +298,74 @@ describe("workspace", () => {
 		expect(existsSync(again.dir)).toBe(false);
 	});
 
+	posix("publishes a merge of the base branch as a merge commit, relative to the merged files", async () => {
+		const { dir, commit } = upstream();
+		git(dir, "checkout", "-q", "-b", "feature");
+		writeFileSync(join(dir, "feature.txt"), "feature\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-q", "-m", "feature");
+		const head = git(dir, "rev-parse", "HEAD");
+		git(dir, "checkout", "-q", "main");
+		writeFileSync(join(dir, "main.txt"), "main\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-q", "-m", "main moved");
+		const main = git(dir, "rev-parse", "HEAD");
+		const workspace = await Workspace.prepare(
+			tempDir(),
+			job(commit, { workflow: "merge", target: "pulls/2", branch: "feature", head }),
+			dir,
+		);
+		expect((await workspace.snapshot()).merge).toBeNull();
+		git(workspace.dir, "fetch", "-q", "origin", "main");
+		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
+		writeFileSync(join(workspace.dir, "fix.txt"), "fix\n");
+		const snapshot = await workspace.snapshot();
+		expect(snapshot.merge).toBe(main);
+		// Only what differs from the merged commit is sent: the branch's own files and the fix.
+		expect(snapshot.changes.map((c) => c.path)).toEqual(["feature.txt", "fix.txt"]);
+		await workspace.published("e".repeat(40), snapshot);
+		// Once published, the merge is history; later changes build on it.
+		writeFileSync(join(workspace.dir, "later.txt"), "later\n");
+		const later = await workspace.snapshot();
+		expect(later.merge).toBeNull();
+		expect(later.changes.map((c) => c.path)).toEqual(["later.txt"]);
+	});
+
+	posix("lists the submodules a merge changes, which its changes cannot carry", async () => {
+		const { dir } = upstream();
+		const module = join(tempDir(), "module");
+		mkdirSync(module);
+		git(module, "init", "-q", "-b", "main");
+		writeFileSync(join(module, "a.txt"), "a\n");
+		git(module, "add", ".");
+		git(module, "commit", "-q", "-m", "one");
+		git(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", module, "sub");
+		git(dir, "commit", "-q", "-m", "submodule");
+		const base = git(dir, "rev-parse", "HEAD");
+		// The pull request moves the submodule; main moves on elsewhere.
+		git(dir, "checkout", "-q", "-b", "feature");
+		writeFileSync(join(module, "a.txt"), "b\n");
+		git(module, "commit", "-q", "-am", "two");
+		git(join(dir, "sub"), "-c", "protocol.file.allow=always", "pull", "-q", "origin", "main");
+		git(dir, "commit", "-q", "-am", "bump submodule");
+		const head = git(dir, "rev-parse", "HEAD");
+		git(dir, "checkout", "-q", "main");
+		writeFileSync(join(dir, "main.txt"), "main\n");
+		git(dir, "add", "main.txt");
+		git(dir, "commit", "-q", "-m", "main moved");
+		const workspace = await Workspace.prepare(
+			tempDir(),
+			job(base, { workflow: "merge", target: "pulls/2", branch: "feature", head }),
+			dir,
+		);
+		git(workspace.dir, "fetch", "-q", "origin", "main");
+		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
+		const snapshot = await workspace.snapshot();
+		expect(snapshot.merge).not.toBeNull();
+		// Relative to the merged commit, the pull request's own submodule bump is a change kix cannot send.
+		expect(snapshot.skipped).toEqual(["sub"]);
+	});
+
 	posix("prepares jobs on one repository at once without racing on its clone", async () => {
 		const { dir, commit } = upstream();
 		const root = tempDir();
@@ -409,6 +478,57 @@ describe("Claude Code output", () => {
 
 		const crashed = streamReader();
 		expect(crashed.exit(1, "boom\n")).toEqual({ limited: null, failed: true, reply: "boom" });
+	});
+});
+
+describe("waiting on a pull request", () => {
+	const pull = (checks: string, reviews = 0) => ({
+		state: "OPEN",
+		head: { oid: "a".repeat(40) },
+		checks: { commit: "a".repeat(40), state: checks, runs: [] },
+		reviews: Array.from({ length: reviews }, () => ({ body: "" })),
+		comments: [],
+		threads: [],
+	});
+
+	test("wakes when what the merge loop acts on changes, not on every check", async () => {
+		const reads = [pull("PENDING"), pull("PENDING"), pull("SUCCESS")];
+		const slept: number[] = [];
+		const waited = await waitForChange(async () => reads.shift(), {
+			since: fingerprint(pull("PENDING")),
+			until: 1_000_000,
+			stopped: () => null,
+			interval: 10,
+			now: () => 0,
+			pause: async (ms) => slept.push(ms),
+		});
+		expect(waited).toEqual({ changed: true, context: pull("SUCCESS") });
+		expect(slept).toEqual([10, 10]);
+		expect(fingerprint(pull("SUCCESS", 1))).not.toBe(fingerprint(pull("SUCCESS")));
+		// A new review still counts once kix's window of the latest reviews is full.
+		const full = (newest: string) => ({
+			...pull("SUCCESS"),
+			reviews: [...Array.from({ length: 49 }, () => ({ body: "" })), { body: newest }],
+		});
+		expect(fingerprint(full("Approved"))).not.toBe(fingerprint(full("")));
+	});
+
+	test("ends at its deadline, or when the job stops", async () => {
+		let clock = 0;
+		const options = {
+			since: null,
+			until: 25,
+			interval: 10,
+			now: () => clock,
+			pause: async (ms: number) => (clock += ms),
+		};
+		expect(await waitForChange(async () => pull("PENDING"), { ...options, stopped: () => null })).toEqual({
+			changed: false,
+			context: pull("PENDING"),
+		});
+		expect(await waitForChange(async () => pull("PENDING"), { ...options, stopped: () => "Stopped." })).toEqual({
+			stopped: "Stopped.",
+		});
 	});
 });
 
@@ -580,6 +700,17 @@ describe("prompts", () => {
 		expect(plan).toContain("Plan issue #4 of owner/repo. Read it with the `context` tool first");
 		const iterate = startPrompt(job("a".repeat(40), { workflow: "iterate", target: "pulls/9" }), null, tempDir());
 		expect(iterate).toContain("Iterate on pull request #9 of owner/repo. Read it, its review threads");
+		expect(iterate).toContain("merging the base branch into the checkout with `git merge`");
+	});
+
+	test("run a merge job through the merge skill, landing with deliver and waiting with wait", () => {
+		const merge = startPrompt(job("a".repeat(40), { workflow: "merge", target: "pulls/9" }), null, tempDir());
+		expect(merge).toContain("Merge pull request #9 of owner/repo. The maintainer picked merge");
+		expect(merge).toContain("Where the workflow says to land with `quest merge --land`, call `deliver` instead");
+		expect(merge).toContain("Where the workflow says to run `quest wait`, call `wait`");
+		expect(merge).toContain("# The merge workflow");
+		// The skill's design checkpoint still reaches the maintainer.
+		expect(merge).toContain("Every fourth round");
 	});
 
 	test("carry earlier summaries and the latest answer", () => {
@@ -769,6 +900,7 @@ const at = (flag) => argv[argv.indexOf(flag) + 1];
 const resume = argv.includes("--resume");
 const session = resume ? at("--resume") : at("--session-id");
 const stdin = fs.readFileSync(0, "utf8");
+const kix = JSON.parse(fs.readFileSync(at("--mcp-config"), "utf8")).mcpServers.kix;
 const log = (value) => fs.appendFileSync(join(__dirname, "..", "calls.log"), JSON.stringify(value) + "\\n");
 log({
 	argv,
@@ -780,8 +912,8 @@ log({
 	tmp: process.env.TMPDIR,
 	envFile: fs.readFileSync(process.env.CLAUDE_ENV_FILE, "utf8"),
 	settings: JSON.parse(fs.readFileSync(at("--settings"), "utf8")),
+	timeout: kix.timeout,
 });
-const kix = JSON.parse(fs.readFileSync(at("--mcp-config"), "utf8")).mcpServers.kix;
 const out = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 out({ type: "system", subtype: "init", session_id: session });
 let id = 0;
@@ -1093,6 +1225,9 @@ describe("quest runner", () => {
 		// The tools' bearer token never appears on the command line.
 		expect(JSON.stringify(launch.argv)).not.toContain("Bearer");
 		expect(launch.gh).toBeNull();
+		// Tool calls may outlast Claude Code's 60s first-response limit for HTTP servers, up to the longest wait.
+		expect(launch.timeout).toBe(TOOL_TIMEOUT_MS);
+		expect(TOOL_TIMEOUT_MS).toBeGreaterThan(WAIT_LIMIT);
 		expect(launch.secret).toBeNull();
 		// Commands run sandboxed in the checkout, with a private temporary directory and the devShell sourced first.
 		const checkout = r.home.path("jobs", "job1");

@@ -31,6 +31,8 @@ export type Pull = Entity & {
 	reviewDecision: string | null;
 	/** GitHub's merge readiness for the App, such as CLEAN, BLOCKED, or DIRTY; absent in older observations. */
 	mergeStateStatus?: string;
+	/** The `quest:*` label a session holds it with, such as a queued merge's; absent in older observations. */
+	hold?: string | null;
 	reviews: { totalCount: number };
 	latestReviews: {
 		nodes: { state: string; author: { login: string } | null; commit: { oid: string } | null }[];
@@ -87,7 +89,7 @@ export const RETENTION = 30 * 24 * 60 * 60 * 1000;
 
 const entityFields =
 	"databaseId:fullDatabaseId number title state updatedAt closedAt author { login } comments { totalCount }";
-const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
+const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus labels(first:20) { nodes { name } } reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
 export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {
@@ -164,11 +166,16 @@ function validate(kind: "issue" | "pull", item: Entity) {
 	}
 }
 
-/** What is kept of an observed entity: a PR's body only as whether it hands its draft back. */
+/**
+ * What is kept of an observed entity: a PR's body only as whether it hands
+ * its draft back, and its labels only as the `quest:*` one a session holds it with.
+ */
 function observed(kind: "issue" | "pull", item: Entity): Entity {
 	if (kind === "issue") return item;
-	const { body, ...pull } = item as Pull & { body?: unknown };
-	return { ...pull, handedBack: typeof body === "string" && handedBack(body) } as Pull;
+	const { body, labels, ...pull } = item as Pull & { body?: unknown; labels?: { nodes: { name: unknown }[] } };
+	const names = (labels?.nodes ?? []).map((label) => label.name);
+	const hold = names.find((name): name is string => typeof name === "string" && name.startsWith("quest:")) ?? null;
+	return { ...pull, handedBack: typeof body === "string" && handedBack(body), hold } as Pull;
 }
 
 /**

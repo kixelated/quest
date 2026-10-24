@@ -1,10 +1,12 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GitHubService } from "../src/github/service";
 import { app } from "../src/index";
+import * as landing from "../src/jobs/landing";
 import { refusal, restart, validPath } from "../src/jobs/publish";
 import * as store from "../src/jobs/store";
-import { type Repo, type World, fakeGitHub, intercept as around } from "../dev/github";
+import { type Repo, type World, blob, commitOf, fakeGitHub, intercept as around } from "../dev/github";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
 
@@ -1014,7 +1016,7 @@ describe("runner publication", () => {
 				.filter((r) => r.path.endsWith("/access_tokens"))
 				.map((r) => r.body.permissions),
 		).toEqual([
-			{ metadata: "read", pull_requests: "read" },
+			{ metadata: "read", contents: "read", pull_requests: "read" },
 			{ metadata: "read", contents: "write" },
 		]);
 		expect((await publish({ job: id, attempt: 1, head, pull: { title: "T", body: "B" } })).status).toBe(409);
@@ -1062,6 +1064,212 @@ describe("runner publication", () => {
 		])
 			expect((await publish(body)).status).toBe(409);
 		expect(requests()).toEqual([]);
+	});
+});
+
+describe("merge jobs", () => {
+	const pull = () => project.pulls.find((p) => p.number === 2)!;
+	/** The landing mutations the Worker sent GitHub. */
+	const lands = () =>
+		requests().flatMap((r) => {
+			const mutation =
+				r.path === "/graphql" && r.body.query.match(/(enablePullRequestAutoMerge|mergePullRequest)\(/)?.[1];
+			return mutation ? [{ mutation, variables: r.body.variables }] : [];
+		});
+	/** Answer every landing mutation with GitHub's refusal. */
+	function refuseLanding(message: string) {
+		vi.mocked(globalThis.fetch).mockImplementation(async function (this: unknown, input, init) {
+			if (String(init?.body ?? "").includes("PullRequestAutoMerge("))
+				return Response.json({ errors: [{ message }] });
+			return github.call(this, input, init);
+		});
+	}
+	/** A running merge job on pull request #2 that holds it, as picking merge leaves it. */
+	async function merging() {
+		const id = await running({
+			workflow: "merge",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		project.branches["contributor/fix"] = prHead;
+		await store.held(db, id, await new GitHubService(testEnv).holdPullRequest(upstream, user, 2));
+		// A merge job starts once it holds its pull request.
+		await store.dispatch(db, user, new Map([[machine.id, 1]]), 0);
+		return id;
+	}
+
+	it("merges its base in, lands exactly the head it published, and keeps its hold while queued", async () => {
+		const id = await merging();
+		expect(pull().labels).toEqual(["quest:merge"]);
+		// The base branch moved on; the job merged it into the checkout.
+		const main = "f".repeat(40);
+		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+		project.branches.main = main;
+		const stray = "9".repeat(40);
+		project.commits[stray] = { parents: [], tree: "2".repeat(40), message: "elsewhere" };
+		const refused = await publish({ job: id, attempt: 1, head: prHead, message: "m", changes: [], merge: stray });
+		expect(refused.status).toBe(409);
+		expect(await refused.json()).toEqual({
+			error: "A merge commit may only merge in a commit its upstream base branch already holds",
+		});
+		const response = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			message: "Merge main",
+			changes: [file("a", "1")],
+			merge: main,
+			land: { method: "merge" },
+		});
+		expect(response.status).toBe(200);
+		const { head, landed } = (await response.json()) as { head: string; landed: unknown };
+		const commit = project.commits[head]!;
+		expect(commit.parents).toEqual([prHead, main]);
+		expect(project.trees[commit.tree]!.base).toBe("1".repeat(40));
+		expect(project.branches["contributor/fix"]).toBe(head);
+		expect(landed).toEqual({ merged: false });
+		expect(lands()).toEqual([
+			{ mutation: "enablePullRequestAutoMerge", variables: { id: "PR_10002", sha: head, method: "MERGE" } },
+		]);
+
+		// Its landing is queued when the job ends, so it keeps holding the pull request.
+		await store.finish(db, machine, id, 1, { outcome: "completed", summary: "Landing", result: undefined }, 0);
+		await landing.ended(testEnv, id);
+		expect(pull().labels).toEqual(["quest:merge"]);
+		// Once the landing ends unmerged, the bot gives the pull request back.
+		pull().landing = false;
+		await landing.release(testEnv, 10, "pulls/2");
+		expect(pull().labels).toEqual([]);
+		expect(await job(id)).toMatchObject({ hold: null });
+	});
+
+	it("merges at once when nothing is left to wait for, unless the project is paused", async () => {
+		const id = await merging();
+		pull().merge = "CLEAN";
+		await db.prepare("UPDATE github_projects SET state='paused' WHERE id=10").run();
+		const paused = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(paused.status).toBe(403);
+		expect(await paused.json()).toEqual({ error: "Contributions are paused" });
+		expect(lands()).toEqual([]);
+		await db.prepare("UPDATE github_projects SET state='enabled' WHERE id=10").run();
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: true } });
+		expect(lands().map((l) => [l.mutation, l.variables.method])).toEqual([["mergePullRequest", "SQUASH"]]);
+		expect(pull()).toMatchObject({ merged: true, closed: true });
+	});
+
+	it("refuses only the workflow changes its merge makes to the pull request's head", async () => {
+		// The pull request and its base branch both changed a workflow.
+		const workflow = ".github/workflows/ci.yml";
+		const root = project.commits[commitOf(project)]!.tree;
+		const changed = (content: string) => ({ base: root, entries: [{ path: workflow, sha: blob(content) }] });
+		project.trees["3".repeat(40)] = changed("pr");
+		project.commits[prHead] = { parents: [revision], tree: "3".repeat(40), message: "pr" };
+		const main = "f".repeat(40);
+		project.trees["1".repeat(40)] = changed("main");
+		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+		project.branches.main = main;
+		const id = await merging();
+		// Keeping the pull request's version publishes, though it differs from what the merge brings in.
+		const kept = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			message: "Merge main",
+			changes: [file(workflow, "pr")],
+			merge: main,
+		});
+		expect(kept.status).toBe(200);
+		const { head } = (await kept.json()) as { head: string };
+		// Taking the base branch's version changes the head's workflows.
+		const taken = await publish({
+			job: id,
+			attempt: 1,
+			head,
+			session: "s",
+			message: "Merge main",
+			changes: [],
+			merge: main,
+		});
+		expect(taken.status).toBe(202);
+		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+			type: "publication",
+			blocked:
+				"Merging changes the pull request's workflows. Changing GitHub Actions workflows needs the workflows permission, which the App does not request.",
+		});
+		expect(project.branches["contributor/fix"]).toBe(head);
+	});
+
+	it("refuses a merge that would revert submodules it cannot publish", async () => {
+		const id = await merging();
+		const main = "f".repeat(40);
+		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+		project.branches.main = main;
+		const merge = { job: id, attempt: 1, head: prHead, message: "Merge main", changes: [], merge: main };
+		const refused = await publish({ ...merge, session: "s", submodules: ["vendor/lib"], land: {} });
+		expect(refused.status).toBe(202);
+		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+			type: "publication",
+			refused: [
+				{
+					path: "vendor/lib",
+					reason: "kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version",
+				},
+			],
+		});
+		expect(project.branches["contributor/fix"]).toBe(prHead);
+		expect(lands()).toEqual([]);
+		// Only a merge lists them.
+		const plain = await publish({ job: id, attempt: 1, head: prHead, submodules: ["vendor/lib"], land: {} });
+		expect(await plain.json()).toEqual({ error: "Only a merge lists the submodules it cannot publish" });
+	});
+
+	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {
+		const reason = "Pull request Auto merge is not allowed for this repository";
+		const cases: [() => void, string][] = [
+			[
+				() => (project.branches["contributor/fix"] = revision),
+				"The branch contributor/fix changed outside this job.",
+			],
+			[
+				() => (pull().labels = []),
+				"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
+			],
+			[() => refuseLanding(reason), `GitHub refused to land the pull request: ${reason}`],
+		];
+		for (const [change, blocked] of cases) {
+			pull().labels = [];
+			const id = await merging();
+			change();
+			const response = await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} });
+			expect(response.status).toBe(202);
+			const waiting = await job(id);
+			expect(waiting.state).toBe("waiting");
+			expect(waiting.questions.at(-1)!.prompt).toEqual({ type: "publication", blocked });
+			await store.cancel(db, id, user, 0);
+		}
+		// The landing GitHub refused used the first merge method the repository allows.
+		expect(lands().map((l) => l.variables.method)).toEqual(["SQUASH"]);
+	});
+
+	it("gives the pull request back when the job fails, and lands nothing for other workflows", async () => {
+		const id = await merging();
+		await fail(id);
+		await landing.ended(testEnv, id);
+		expect(pull().labels).toEqual([]);
+		expect(await job(id)).toMatchObject({ hold: null });
+
+		const iterate = await running({
+			workflow: "iterate",
+			target: "pulls/3",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		const refused = await publish({ job: iterate, attempt: 1, head: prHead, land: {} });
+		expect(await refused.json()).toEqual({ error: "Only a merge job lands its pull request" });
 	});
 });
 

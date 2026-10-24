@@ -41,6 +41,11 @@ export type Pull = Issue & {
 	merge?: "CLEAN" | "BLOCKED" | "DIRTY" | "UNSTABLE" | "UNKNOWN";
 	/** When it was opened, in milliseconds; defaults to the world's fixed update time. */
 	createdAt?: number;
+	labels?: string[];
+	/** Timeline events that added a label, or with a null label enabled auto-merge, oldest first. */
+	timeline?: { id: string; label: string | null }[];
+	/** Auto-merge is enabled, so it lands once its requirements pass. */
+	landing?: boolean;
 };
 export type Commit = { parents: string[]; tree: string; message: string };
 /** A tree written through the API: its base tree and the entries changed on it. */
@@ -59,6 +64,7 @@ export type Repo = {
 	 * Upstream branches and their commits. A pull request's branch that is not
 	 * listed is at a commit derived from its number; a `quest/*` branch with no
 	 * open pull request is a claim, unless it is still at a merged one's head.
+	 * Listing `main` moves the default branch on for comparisons with it.
 	 */
 	branches: Record<string, string>;
 	/** Branches on the repository's service fork, `<forks>/<name>`, and their commits. */
@@ -118,6 +124,8 @@ function entity(repo: Repo, item: Issue) {
 	};
 }
 
+const mergeState = (pull: Pull) => pull.merge ?? (pull.draft ? "DRAFT" : "BLOCKED");
+
 function pullNode(repo: Repo, pull: Pull) {
 	const oid = headOf(repo, pull);
 	const reviews = pull.reviews ?? [];
@@ -128,7 +136,8 @@ function pullNode(repo: Repo, pull: Pull) {
 		headRefOid: oid,
 		isDraft: !!pull.draft,
 		reviewDecision: pull.review,
-		mergeStateStatus: pull.merge ?? (pull.draft ? "DRAFT" : "BLOCKED"),
+		mergeStateStatus: mergeState(pull),
+		labels: { nodes: (pull.labels ?? []).map((name) => ({ name })) },
 		reviews: { totalCount: reviews.length },
 		latestReviews: {
 			nodes: reviews.map((r) => ({ state: r.state, author: { login: r.author }, commit: { oid } })),
@@ -207,6 +216,27 @@ function pullTarget(repo: Repo, pull: Pull, after: unknown) {
 	};
 }
 
+/** A pull request's labels, the timeline that added them, and its landing, as a merge hold reads them. */
+function holdsTarget(repo: Repo, pull: Pull) {
+	return {
+		id: nodeId(repo, pull),
+		state: pull.merged ? "MERGED" : pull.closed ? "CLOSED" : "OPEN",
+		headRefOid: headOf(repo, pull),
+		mergeStateStatus: mergeState(pull),
+		isMergeQueueEnabled: false,
+		autoMergeRequest: pull.landing ? { enabledAt: updatedAt } : null,
+		mergeQueueEntry: null,
+		labels: { nodes: (pull.labels ?? []).map((name) => ({ name })) },
+		timelineItems: {
+			nodes: (pull.timeline ?? []).map((event) =>
+				event.label === null
+					? { __typename: "AutoMergeEnabledEvent", id: event.id }
+					: { __typename: "LabeledEvent", id: event.id, label: { name: event.label } },
+			),
+		},
+	};
+}
+
 const page = <T>(nodes: T[]) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
 
 function graphql(repo: Repo, query: string, variables: Record<string, unknown>) {
@@ -220,6 +250,10 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 			}),
 		);
 		return { data: { repository: objects } };
+	}
+	if (query.includes("timelineItems(")) {
+		const pull = repo.pulls.find((p) => p.number === variables.number);
+		return { data: { repository: { pullRequest: pull ? holdsTarget(repo, pull) : null } } };
 	}
 	const open = repo.pulls.filter((pull) => !pull.closed);
 	const result: Record<string, unknown> = {};
@@ -305,6 +339,21 @@ function connect(repo: Repo) {
 	for (const tip of tips) repo.commits[tip] ??= { parents: [main], tree: treeOf(repo), message: "Work" };
 }
 
+/** A tree's `.github/workflows` files and their blob IDs: the default branch's files, then each written tree's changes. */
+function workflowsOf(repo: Repo, sha: string): Record<string, string> {
+	const workflow = (path: string) => path.startsWith(".github/workflows/");
+	if (sha === treeOf(repo))
+		return Object.fromEntries(repo.files.filter((f) => workflow(f.path)).map((f) => [f.path, blob(f.content)]));
+	const written = repo.trees[sha];
+	if (!written) return {};
+	const files = workflowsOf(repo, written.base);
+	for (const entry of written.entries as { path: string; sha?: string | null; content?: string }[])
+		if (workflow(entry.path))
+			if (entry.sha === null) delete files[entry.path];
+			else files[entry.path] = entry.sha ?? blob(entry.content ?? "");
+	return files;
+}
+
 type Permission = "metadata" | "contents" | "issues" | "pull_requests" | "checks" | "statuses";
 /** What an installation token may do: the repositories (`owner/name`) and permissions it was minted for. */
 type Grant = { repositories: Set<string>; permissions: Partial<Record<Permission, string>> };
@@ -317,6 +366,8 @@ export function fakeGitHub(world: World) {
 	for (const repo of world.repos) connect(repo);
 	const grants = new Map<string, Grant>();
 	let minted = 0;
+	let events = 0;
+	const nextEvent = () => ++events;
 	const json = (body: unknown, status = 200) => Response.json(body, { status });
 	const notFound = () => json({ message: "Not Found" }, 404);
 	const missing = (method: string, url: string) => {
@@ -444,6 +495,32 @@ export function fakeGitHub(world: World) {
 						}
 				return json({ errors: [{ type: "NOT_FOUND" }] });
 			}
+			const landing = query.match(/\b(enablePullRequestAutoMerge|mergePullRequest)\(/)?.[1];
+			if (landing) {
+				for (const repo of world.repos)
+					for (const pull of repo.pulls)
+						if (nodeId(repo, pull) === variables.id) {
+							if (
+								!scope.repositories.has(`${repo.owner}/${repo.name}`) ||
+								!writes("contents") ||
+								!writes("pull_requests")
+							)
+								return json({ errors: [{ type: "FORBIDDEN" }] });
+							if (pull.closed) return json({ errors: [{ message: "Pull request is closed" }] });
+							if (variables.sha !== headOf(repo, pull))
+								return json({ errors: [{ message: "Head sha didn't match expected head" }] });
+							if (landing === "mergePullRequest") {
+								if (!["CLEAN", "HAS_HOOKS", "UNSTABLE"].includes(mergeState(pull)))
+									return json({ errors: [{ message: "Pull Request is not mergeable" }] });
+								pull.closed = pull.merged = true;
+							} else {
+								pull.landing = true;
+								pull.timeline = [...(pull.timeline ?? []), { id: `AME_${nextEvent()}`, label: null }];
+							}
+							return json({ data: { [landing]: { clientMutationId: null } } });
+						}
+				return json({ errors: [{ type: "NOT_FOUND" }] });
+			}
 			const repo = world.repos.find((r) => r.owner === variables.owner && r.name === variables.name);
 			if (!repo || !scope.repositories.has(`${repo.owner}/${repo.name}`))
 				return json({ errors: [{ type: "NOT_FOUND", message: "Not Found" }] });
@@ -551,6 +628,50 @@ export function fakeGitHub(world: World) {
 			pull.closed = true;
 			pull.merged = true;
 			return json({ sha: commitOf(repo), merged: true, message: "Pull Request successfully merged" });
+		}
+		const labels = tail.match(/^\/issues\/(\d+)\/labels(?:\/([^/]+))?$/);
+		if (labels && (method === "POST" || method === "DELETE")) {
+			if (!writes("issues")) return forbidden();
+			const pull = repo.pulls.find((p) => String(p.number) === labels[1]);
+			if (!pull) return notFound();
+			const current = pull.labels ?? [];
+			if (method === "POST" && !labels[2]) {
+				for (const name of body.labels as string[]) {
+					if (!current.includes(name)) current.push(name);
+					pull.timeline = [...(pull.timeline ?? []), { id: `LE_${nextEvent()}`, label: name }];
+				}
+				pull.labels = current;
+				return json(current.map((name) => ({ name })));
+			}
+			const name = labels[2] && decodeURIComponent(labels[2]);
+			if (method !== "DELETE" || !name) return missing(method, request.url);
+			if (!current.includes(name)) return json({ message: "Label does not exist" }, 404);
+			pull.labels = current.filter((label) => label !== name);
+			return json(pull.labels.map((label) => ({ name: label })));
+		}
+		const compare = tail.match(/^\/compare\/([0-9a-f]{40})\.\.\.main$/);
+		if (compare && method === "GET") {
+			const base = repo.branches.main ?? commitOf(repo);
+			const from = compare[1]!;
+			if (!repo.commits[from]) return notFound();
+			const reaches = (sha: string, target: string): boolean =>
+				sha === target || (repo.commits[sha]?.parents ?? []).some((parent) => reaches(parent, target));
+			const status =
+				from === base
+					? "identical"
+					: reaches(base, from)
+						? "ahead"
+						: reaches(from, base)
+							? "behind"
+							: "diverged";
+			return json({ status });
+		}
+		if (tail === "/contents/.github" && method === "GET") {
+			const tree = repo.commits[url.searchParams.get("ref") ?? ""]?.tree;
+			const files = Object.entries(tree ? workflowsOf(repo, tree) : {}).sort();
+			if (!files.length) return notFound();
+			const sha = sha1(`workflows ${JSON.stringify(files)}`);
+			return json([{ name: "workflows", path: ".github/workflows", type: "dir", sha }]);
 		}
 		if (tail.startsWith("/contents/")) {
 			const file = repo.files.find((f) => f.path === decodeURIComponent(tail.slice("/contents/".length)));

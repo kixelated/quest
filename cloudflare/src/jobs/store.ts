@@ -9,7 +9,12 @@
 /** A disconnected runner's running jobs move to another runner after this long. */
 export const GRACE = 2 * 60_000;
 
-export type Workflow = "plan" | "start" | "iterate" | "bootstrap";
+export type Workflow = "plan" | "start" | "iterate" | "merge" | "bootstrap";
+
+/** Whether a workflow works on an open pull request's own head branch, rather than opening one. */
+export function onPull(workflow: Workflow) {
+	return workflow === "iterate" || workflow === "merge";
+}
 export type JobState = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 export type Outcome = "completed" | "failed" | "cancelled" | "limited";
 export type Platform = "linux" | "darwin";
@@ -55,6 +60,8 @@ export type Job = {
 	pull: number | null;
 	/** The failed job this retry continues. */
 	continues: string | null;
+	/** A merge job's `quest:merge` label: the timeline event that added it, until kix releases it. */
+	hold: string | null;
 	/** A new plan's request: the maintainer's idea, and pasted context the agent reads as untrusted. */
 	idea: string | null;
 	context: string | null;
@@ -197,6 +204,16 @@ export async function listRunners(db: D1Database, owner: string, online: Set<str
 	}));
 }
 
+/** What a statement that may end jobs returns, for `ended`. */
+const ending = "id,workflow,state,hold";
+
+/** The merge jobs a statement `RETURNING ${ending}` ended while they still held their pull request. */
+function ended(result: D1Result): string[] {
+	return (result.results as Pick<Job, "id" | "workflow" | "state" | "hold">[])
+		.filter((job) => job.workflow === "merge" && job.hold !== null && job.state === "cancelled")
+		.map((job) => job.id);
+}
+
 const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? AND state='running')";
 
 /**
@@ -204,7 +221,8 @@ const fence = "EXISTS(SELECT 1 FROM jobs WHERE id=? AND attempt=? AND runner=? A
  * running. Listing an attempt acknowledges its assignment. Says which
  * reported attempts to continue, cancel, or stop because they are no longer
  * this runner's. An acknowledged attempt the status omits was lost, so it
- * moves now; an unacknowledged one may still be on its way.
+ * moves now; an unacknowledged one may still be on its way. Also returns
+ * the merge jobs this cancelled that still hold their pull request.
  */
 export async function report(
 	db: D1Database,
@@ -236,7 +254,7 @@ export async function report(
 			.bind(runner.id, runner.owner, reported),
 		db
 			.prepare(
-				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE runner=? AND state='running' AND delivered=1 AND NOT ${listed}`,
+				`UPDATE jobs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'queued' END,lease=NULL,updatedAt=? WHERE runner=? AND state='running' AND delivered=1 AND NOT ${listed} RETURNING ${ending}`,
 			)
 			.bind(now, runner.id, running),
 		db
@@ -249,11 +267,14 @@ export async function report(
 			.bind(running),
 	]);
 	const rows = results.at(-1)!.results as Pick<Job, "id" | "attempt" | "runner" | "state" | "cancel">[];
-	return attempts.map(({ job, attempt }) => {
-		const row = rows.find((r) => r.id === job);
-		const owned = row && row.attempt === attempt && row.runner === runner.id && row.state === "running";
-		return { job, attempt, action: !owned ? "stop" : row.cancel ? "cancel" : "continue" } as const;
-	});
+	return {
+		attempts: attempts.map(({ job, attempt }) => {
+			const row = rows.find((r) => r.id === job);
+			const owned = row && row.attempt === attempt && row.runner === runner.id && row.state === "running";
+			return { job, attempt, action: !owned ? "stop" : row.cancel ? "cancel" : "continue" } as const;
+		}),
+		ended: ended(results[3]!),
+	};
 }
 
 /**
@@ -283,14 +304,15 @@ export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner
  * Reconcile an owner's jobs with their connected runners and free slots.
  * A running job has a lease exactly while its runner is disconnected; an
  * expired lease moves the job. Then queued work is assigned. Returns what to
- * send each runner and when to run again. Every assignment its runner has
+ * send each runner, the merge jobs it cancelled that still hold their pull
+ * request, and when to run again. Every assignment its runner has
  * not acknowledged is sent again, since a delivery can be lost after the
  * claim commits. Until acknowledged, an assignment holds one of the runner's
  * reported free slots, which it could not count yet.
  */
 export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
 	const connected = JSON.stringify([...slots.keys()]);
-	const [, , , , candidates, offers, cancels, pending] = await db.batch([
+	const [, , cancelled, , candidates, offers, cancels, pending] = await db.batch([
 		db
 			.prepare(
 				"UPDATE jobs SET lease=NULL WHERE actor=? AND state='running' AND lease IS NOT NULL AND runner IN (SELECT value FROM json_each(?))",
@@ -304,7 +326,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		// An abandoned attempt that was asked to cancel stops rather than moving.
 		db
 			.prepare(
-				"UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND cancel=1 AND lease<=?",
+				`UPDATE jobs SET state='cancelled',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND cancel=1 AND lease<=? RETURNING ${ending}`,
 			)
 			.bind(now, owner, now),
 		db
@@ -312,11 +334,12 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 				"UPDATE jobs SET state='queued',lease=NULL,updatedAt=? WHERE actor=? AND state='running' AND lease<=?",
 			)
 			.bind(now, owner, now),
-		// A paused project starts and continues nothing new.
+		// A paused project starts and continues nothing new, and a merge job starts once it holds its pull request.
 		db
 			.prepare(
 				`SELECT j.* FROM jobs j JOIN github_projects p ON p.id=j.repository
- WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' ORDER BY j.createdAt,j.id`,
+ WHERE j.actor=? AND p.state='enabled' AND j.cancel=0 AND j.state='queued' AND (j.workflow<>'merge' OR j.hold IS NOT NULL)
+ ORDER BY j.createdAt,j.id`,
 			)
 			.bind(owner),
 		db
@@ -386,6 +409,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 	return {
 		assign,
 		cancel: cancels!.results as (Attempt & { runner: string })[],
+		ended: ended(cancelled!),
 		wake: wake?.at ?? null,
 	};
 }
@@ -643,8 +667,8 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const pin = [runner, runner, input.actor, trusted, account, account];
 	const id = crypto.randomUUID();
 	// The insert checks the project and pins again, since a pause or a
-	// runner's status can commit after the request read them. An iteration
-	// continues the pull request's existing head branch. Retrying a target
+	// runner's status can commit after the request read them. Iterating on or
+	// merging a pull request continues its existing head branch. Retrying a target
 	// whose latest job failed continues that job's branch and pull request
 	// where it left them, as a reassigned attempt would, and records which
 	// job it continues.
@@ -653,7 +677,7 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 			.prepare(
 				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,continues,idea,context,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
  SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,f.id,COALESCE(?,f.idea),COALESCE(?,f.context),?,?,?,?,'queued',?,? FROM github_projects p
- LEFT JOIN jobs f ON ?<>'iterate' AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
+ LEFT JOIN jobs f ON ?=0 AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
  WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
 			.bind(
@@ -662,7 +686,7 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				input.target,
 				input.revision,
 				input.branch,
-				input.workflow === "iterate" ? input.revision : null,
+				onPull(input.workflow) ? input.revision : null,
 				input.idea ?? null,
 				input.context ?? null,
 				input.actor,
@@ -671,7 +695,7 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				account,
 				now,
 				now,
-				input.workflow,
+				onPull(input.workflow) ? 1 : 0,
 				input.branch,
 				input.target,
 				input.repository,
@@ -1021,6 +1045,32 @@ export async function hold(db: D1Database, job: string, input: { summary: string
 			)
 			.bind(input.summary, now, job, id),
 	]);
+}
+
+/**
+ * Record the `quest:merge` label a merge job holds its pull request with,
+ * while the job is still queued. Returns false once it was stopped meanwhile,
+ * so the caller gives the label back.
+ */
+export async function held(db: D1Database, job: string, token: string) {
+	const { meta } = await db.prepare("UPDATE jobs SET hold=? WHERE id=? AND state='queued'").bind(token, job).run();
+	return meta.changes === 1;
+}
+
+/** A merge job's hold on its pull request is over. */
+export async function released(db: D1Database, job: string, token: string) {
+	await db.prepare("UPDATE jobs SET hold=NULL WHERE id=? AND hold=?").bind(job, token).run();
+}
+
+/** The ended merge jobs on `target` that still hold its pull request, such as one whose landing is queued. */
+export async function holding(db: D1Database, repository: number, target: string) {
+	const { results } = await db
+		.prepare(
+			"SELECT id,hold FROM jobs WHERE repository=? AND target=? AND workflow='merge' AND hold IS NOT NULL AND state NOT IN ('queued','running','waiting')",
+		)
+		.bind(repository, target)
+		.all<{ id: string; hold: string }>();
+	return results;
 }
 
 /**

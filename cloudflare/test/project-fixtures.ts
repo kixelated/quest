@@ -63,6 +63,8 @@ export const issue = {
  * refuse them with that message. Other GitHub IDs in `maintainers` hold the
  * maintain role too, and `limited` rate-limits every role check. A `role` of
  * null removes the signed-in user from the repository, so GitHub answers 404.
+ * `labels` are #2's labels and `events` its label and landing timeline, which
+ * label requests change; `landing` says it is queued or auto-merging.
  */
 export async function maintainerOf() {
 	const github = {
@@ -77,6 +79,9 @@ export async function maintainerOf() {
 		merged: [] as unknown[],
 		maintainers: [] as string[],
 		limited: false,
+		labels: [] as string[],
+		events: [] as { id: string; label: string | null }[],
+		landing: false,
 	};
 	const who = identity("github");
 	const cookie = (await oauth(who)).session!;
@@ -110,8 +115,47 @@ export async function maintainerOf() {
 				id: 5,
 				app_id: 123,
 				suspended_at: null,
-				permissions: { metadata: "read", contents: "write", issues: "read", pull_requests: "write" },
+				permissions: { metadata: "read", contents: "write", issues: "write", pull_requests: "write" },
 			});
+		if (path === "/graphql" && String(init?.body).includes("timelineItems")) {
+			return Response.json({
+				data: {
+					repository: {
+						pullRequest: {
+							id: "PR_2",
+							state: github.pull.toUpperCase(),
+							headRefOid: github.head,
+							mergeStateStatus: "BLOCKED",
+							isMergeQueueEnabled: false,
+							autoMergeRequest: github.landing ? {} : null,
+							mergeQueueEntry: null,
+							labels: { nodes: github.labels.map((name) => ({ name })) },
+							timelineItems: {
+								nodes: github.events.map((event) =>
+									event.label === null
+										? { __typename: "AutoMergeEnabledEvent", id: event.id }
+										: { __typename: "LabeledEvent", id: event.id, label: { name: event.label } },
+								),
+							},
+						},
+					},
+				},
+			});
+		}
+		if (path === "/repos/upstream/project/issues/2/labels" && init?.method === "POST") {
+			const [name] = JSON.parse(String(init.body)).labels as string[];
+			if (!github.labels.includes(name!)) github.labels.push(name!);
+			github.events.push({ id: `LE_${github.events.length + 1}`, label: name! });
+			return Response.json([]);
+		}
+		const unlabel = path.match(/^\/repos\/upstream\/project\/issues\/2\/labels\/(.+)$/)?.[1];
+		if (unlabel && init?.method === "DELETE") {
+			const name = decodeURIComponent(unlabel);
+			if (!github.labels.includes(name))
+				return Response.json({ message: "Label does not exist" }, { status: 404 });
+			github.labels = github.labels.filter((label) => label !== name);
+			return Response.json([]);
+		}
 		if (path.endsWith("/access_tokens")) return Response.json({ token: "installation-token" });
 		if (path === "/installation/token") return new Response(null, { status: 204 });
 		if (path === "/repos/upstream/project")
@@ -155,7 +199,7 @@ export async function maintainerOf() {
 		// The live issue and pull request that a job binds, which observations can lag.
 		if (path === "/repos/upstream/project/issues/1") return Response.json({ state: github.issue });
 		if (path === "/repos/upstream/project/pulls/2")
-			return Response.json({ state: github.pull, head: { sha: github.head } });
+			return Response.json({ state: github.pull, head: { sha: github.head }, base: { ref: "trunk" } });
 		const ref = url.searchParams.get("ref");
 		if (path === "/repos/upstream/project/contents/flake.nix" && (ref === commit || ref === head))
 			return (ref === commit ? github.flake : github.pullFlake)

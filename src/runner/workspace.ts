@@ -33,6 +33,12 @@ interface Record {
 /** A pending publication: the changes, and the tree they would make the branch hold. */
 export interface Snapshot {
 	tree: string;
+	/**
+	 * A commit the checkout merged in since the branch's head, such as its
+	 * base branch: the publication is a merge commit, and `changes` are
+	 * relative to this commit's files rather than the head's.
+	 */
+	merge: string | null;
 	changes: Change[];
 	/** Paths that cannot be published, such as submodules. */
 	skipped: string[];
@@ -101,10 +107,12 @@ export class Workspace {
 		const git = (args: string[]) =>
 			run("git", ["-C", this.dir, ...args], { env, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" });
 		try {
+			const merge = await this.#merged();
 			await git(["read-tree", this.#record.base]);
 			await git(["add", "--all", "--", "."]);
 			const tree = (await git(["write-tree"])).stdout.trim();
-			const diff = (await git(["diff-tree", "-r", "-z", "--no-renames", this.#record.base, tree])).stdout;
+			const diff = (await git(["diff-tree", "-r", "-z", "--no-renames", merge ?? this.#record.base, tree]))
+				.stdout;
 			const changes: Change[] = [];
 			const skipped: string[] = [];
 			const fields = diff.split("\0");
@@ -128,19 +136,43 @@ export class Workspace {
 					});
 				}
 			}
-			return { tree, changes, skipped };
+			return { tree, merge, changes, skipped };
 		} finally {
 			rmSync(index, { force: true });
 		}
 	}
 
+	/**
+	 * The commit the checkout's latest merge brought in that the branch does
+	 * not hold yet, or null. The agent merges with Git; only its effect on
+	 * history is read here, and the working tree is still what is published.
+	 */
+	async #merged(): Promise<string | null> {
+		const base = this.#record.base;
+		const listed = await run(
+			"git",
+			["-C", this.dir, "rev-list", "--merges", "--parents", "-n", "1", `${base}..HEAD`],
+			{
+				encoding: "utf8",
+			},
+		);
+		const merged = listed.stdout.trim().split(" ")[2];
+		if (!merged) return null;
+		const held = await run("git", ["-C", this.dir, "merge-base", "--is-ancestor", merged, base]).then(
+			() => true,
+			() => false,
+		);
+		return held ? null : merged;
+	}
+
 	/** Record that the branch now holds `snapshot` at `head`, so the next snapshot is relative to it. */
 	async published(head: string | null, snapshot: Snapshot | null): Promise<void> {
 		let base = this.#record.base;
-		if (snapshot && snapshot.changes.length > 0) {
+		if (snapshot && (snapshot.changes.length > 0 || snapshot.merge)) {
+			const parents = ["-p", base, ...(snapshot.merge ? ["-p", snapshot.merge] : [])];
 			const commit = await run(
 				"git",
-				["-C", this.dir, "commit-tree", snapshot.tree, "-p", base, "-m", `kix ${head}`],
+				["-C", this.dir, "commit-tree", snapshot.tree, ...parents, "-m", `kix ${head}`],
 				{
 					encoding: "utf8",
 					env: {

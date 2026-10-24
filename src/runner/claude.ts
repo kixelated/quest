@@ -26,8 +26,12 @@ import {
 	STOP_GRACE_MS,
 } from "./adapter";
 import type { Sandbox } from "./sandbox";
+import { WAIT_LIMIT } from "./wait";
 
 const run = promisify(execFile);
+
+/** How long Claude Code waits on one kix tool call: the longest `wait`, with margin. */
+export const TOOL_TIMEOUT_MS = WAIT_LIMIT + 5 * 60_000;
 
 /** The environment for an account's Claude Code, with the account's own home. */
 export function accountEnvironment(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
@@ -178,6 +182,9 @@ export class Claude implements Adapter {
 					type: "http",
 					url: launch.tools.url,
 					headers: { Authorization: `Bearer ${launch.tools.token}` },
+					// HTTP tool calls otherwise fail after 60s without a first response byte
+					// (and 5 minutes idle), but a merge job's `wait` replies only after up to WAIT_LIMIT.
+					timeout: TOOL_TIMEOUT_MS,
 				},
 			},
 		};

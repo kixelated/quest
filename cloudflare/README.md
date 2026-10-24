@@ -75,8 +75,8 @@ connections and keeps no records of its own.
 
 ### Jobs
 
-A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`, or
-`bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
+A job is one maintainer-authorized workflow (`plan`, `start`, `iterate`,
+`merge`, or `bootstrap`) on one target, pinned to a revision (`src/jobs/`). Maintainers
 create, answer, and cancel jobs at `/projects/github/<owner>/<repo>/jobs`, and
 every request rechecks current GitHub authority. `start` takes only quests that
 observations show ready and unclaimed, except that retrying a failed job does
@@ -90,8 +90,11 @@ target; a retry keeps both. A completed job's result may list suggested
 idea and takes the follow-ups and summary as context from the job's own
 result, never from the request, and offers them once. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
-observations read it. `iterate` jobs are untrusted and route
-only to Linux runners that declare VM builds. Without a `flake.nix`, the route
+observations read it. `iterate` and `merge` jobs are untrusted and route
+only to Linux runners that declare VM builds. A `merge` job runs the merge
+skill's loop on an open, non-draft pull request and lands it; it holds the PR
+with the `quest:merge` label that local `quest merge` sessions share
+(`src/jobs/landing.ts`), as described in [GITHUB.md](GITHUB.md#merge-jobs). Without a `flake.nix`, the route
 offers a `bootstrap` job instead. A paused project gets no new jobs and none are
 claimed; resuming it dispatches the jobs that waited. Disconnecting a project
 deletes its jobs and their output and tells their runners to stop. Duplicate
