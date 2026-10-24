@@ -126,12 +126,6 @@ describe("decision notifications", () => {
 	let respond: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 	beforeEach(async () => {
-		await db.batch([
-			db.prepare("DELETE FROM push_subscriptions"),
-			db.prepare("DELETE FROM jobs"),
-			db.prepare("DELETE FROM runners"),
-			db.prepare("DELETE FROM github_projects"),
-		]);
 		const maintainer = await maintainerOf();
 		({ user, cookie, github } = maintainer);
 		sent = [];

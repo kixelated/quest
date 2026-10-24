@@ -18,12 +18,6 @@ let github: Awaited<ReturnType<typeof maintainerOf>>["github"];
 let mock: Awaited<ReturnType<typeof maintainerOf>>["mock"];
 
 beforeEach(async () => {
-	await db.batch([
-		db.prepare("DELETE FROM jobs"),
-		db.prepare("DELETE FROM runners"),
-		db.prepare("DELETE FROM github_projects"),
-		db.prepare("DELETE FROM github_installations"),
-	]);
 	({ user, cookie, github, mock } = await maintainerOf());
 });
 afterEach(() => vi.restoreAllMocks());

@@ -17,12 +17,6 @@ afterEach(() => vi.restoreAllMocks());
 
 /** Seed a fresh world against the fake GitHub, returning it, a request helper, and the session cookie. */
 async function seeded() {
-	await db.batch([
-		db.prepare("DELETE FROM jobs"),
-		db.prepare("DELETE FROM runners"),
-		db.prepare("DELETE FROM github_projects"),
-		db.prepare("DELETE FROM github_installations"),
-	]);
 	const data = { ...world(), forks: env.GITHUB_FORK_OWNER };
 	vi.spyOn(globalThis, "fetch").mockImplementation(fakeGitHub(data));
 	// Webhooks read and notify in the background, so each request finishes its `waitUntil` work.
