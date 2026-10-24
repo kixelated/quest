@@ -20,7 +20,9 @@ Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
 
 Finished quests are deleted; git history keeps them.
-Merge conflicts are expected; resolve them by aligning quests.
+Merge conflicts are expected.
+A local merge resolves conflicting edits to link lists itself when `quest` is on PATH; GitHub's cannot, so merge the base branch locally and push.
+Resolve the rest, such as prose, by aligning quests.
 
 ## Format
 

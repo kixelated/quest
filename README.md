@@ -247,6 +247,23 @@ branch or open PR on `origin`, or on the repository a GitHub fork came from,
 since the branch would no longer name it.
 Neither command touches branches or PRs.
 
+## Merge quest lists
+
+Concurrent PRs edit the same link lists: the base branch deletes finished
+quests' lines while a branch inserts a new quest beside them. `quest init`
+routes `quest/**` through a merge driver in `.gitattributes` and registers it
+in the clone's git config, so a local `git merge` resolves those conflicts.
+
+Inside a conflicting `Required`, `Related`, or `Closes` list, `quest resolve`
+keeps the entries neither side removed and adds the ones either side
+inserted, ours before theirs at the same place, matching entries by their
+opening link. Prose, headings, an entry both sides rewrote, or one side
+removed while the other edited, keep the usual conflict markers. Any `quest`
+command registers the driver in a fresh clone or worktree whose
+`.gitattributes` names it. Without `quest` on the merge's PATH, the driver
+falls back to `git merge-file`, and GitHub's merges ignore drivers, so a PR
+shows as conflicting until a local merge from its base is pushed.
+
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread

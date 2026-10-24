@@ -34,7 +34,8 @@ import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUr
 import { type Hold, type State, finish, land, release, take } from "./hold";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
-import { init, uninstall } from "./setup";
+import { resolveFile } from "./resolve";
+import { heal, init, uninstall } from "./setup";
 import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
@@ -800,6 +801,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	program
+		.command("resolve")
+		.summary("Merge driver: resolve concurrent edits to a quest's link lists")
+		.description(
+			"Merge driver: merge <theirs> into <ours> from <base> by lines, as git merge-file does, and write the " +
+				"result to <ours>. A conflict that only edits the entries of one Required, Related, or Closes list is " +
+				"resolved: entries either side removed stay removed, entries either side added are kept in their " +
+				"place, ours before theirs, and an entry only one side changed takes that change. Entries match by " +
+				"their opening link. Any other conflict, including prose, a heading, an entry both sides changed, or a " +
+				"reordered list, keeps standard conflict markers, showing the base when merge.conflictStyle is diff3 " +
+				"or zdiff3. Exits 1 when a conflict remains.\n\n" +
+				"quest init registers it for quest/** as the merge.quest driver. Any other command registers the driver " +
+				"in the clone's config when .gitattributes names merge=quest and no config sets it. Without quest on " +
+				"the merge's PATH, the driver falls back to git merge-file. GitHub's merges ignore merge drivers.",
+		)
+		.argument("<ours>", "Our version, overwritten with the result (git's %A)")
+		.argument("<base>", "The common ancestor (git's %O)")
+		.argument("<theirs>", "Their version (git's %B)")
+		.action((ours: string, base: string, theirs: string) => {
+			if (resolveFile(ours, base, theirs) > 0) code = 1;
+		});
+
+	program
 		.command("guide")
 		.description("Print the quest guide: the format, workflow, and rules agents follow")
 		.action(() => out.stdout(GUIDE));
@@ -827,7 +850,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("init")
-		.description("Install skill stubs, a quest root, and agent pointers for this repository")
+		.description("Install skill stubs, a quest root, agent pointers, and the merge driver for this repository")
 		.action(() => {
 			const changes = init(root());
 			for (const line of theme ? theme.init(changes) : changes) print(line);
@@ -835,11 +858,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("uninstall")
-		.description("Remove Quest stubs and markers installed by `quest init`")
+		.description("Remove Quest stubs, markers, and the merge driver installed by `quest init`")
 		.action(() => {
 			const changes = uninstall(root());
 			for (const line of theme ? theme.uninstall(changes) : changes) print(line);
 		});
+
+	// Fresh clones and worktrees get the merge driver from whichever command runs first.
+	program.hook("preAction", (_program, action) => {
+		if (!["init", "uninstall"].includes(action.name())) heal(root());
+	});
 
 	try {
 		program.parse(gateBoundary(argv), { from: "user" });
