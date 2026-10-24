@@ -10,9 +10,11 @@ export const WAIT_LIMIT = 55 * 60_000;
 
 /**
  * What the merge loop acts on in a pull request's context, as `context`
- * returns it: its state, head, overall checks, and how many reviews,
- * comments, and unresolved review threads it has. A single check finishing
- * among many does not count until the overall state changes.
+ * returns it: its state, head, overall checks, and its reviews, comments,
+ * and unresolved review threads. These are whole entries rather than counts,
+ * since kix reads only the latest ones and a new entry can replace an old
+ * one. A single check finishing among many does not count until the overall
+ * state changes.
  */
 export function fingerprint(context: unknown): string {
 	const pull = (context ?? {}) as {
@@ -20,9 +22,9 @@ export function fingerprint(context: unknown): string {
 		draft?: unknown;
 		head?: { oid?: unknown };
 		checks?: { commit?: unknown; state?: unknown };
-		reviews?: unknown[];
-		comments?: unknown[];
-		threads?: { comments?: unknown[] }[];
+		reviews?: unknown;
+		comments?: unknown;
+		threads?: unknown;
 	};
 	return JSON.stringify([
 		pull.state,
@@ -30,9 +32,9 @@ export function fingerprint(context: unknown): string {
 		pull.head?.oid,
 		pull.checks?.commit,
 		pull.checks?.state,
-		pull.reviews?.length,
-		pull.comments?.length,
-		pull.threads?.map((thread) => thread.comments?.length),
+		pull.reviews,
+		pull.comments,
+		pull.threads,
 	]);
 }
 

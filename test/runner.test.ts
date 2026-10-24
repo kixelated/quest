@@ -396,6 +396,12 @@ describe("waiting on a pull request", () => {
 		expect(waited).toEqual({ changed: true, context: pull("SUCCESS") });
 		expect(slept).toEqual([10, 10]);
 		expect(fingerprint(pull("SUCCESS", 1))).not.toBe(fingerprint(pull("SUCCESS")));
+		// A new review still counts once kix's window of the latest reviews is full.
+		const full = (newest: string) => ({
+			...pull("SUCCESS"),
+			reviews: [...Array.from({ length: 49 }, () => ({ body: "" })), { body: newest }],
+		});
+		expect(fingerprint(full("Approved"))).not.toBe(fingerprint(full("")));
 	});
 
 	test("ends at its deadline, or when the job stops", async () => {
