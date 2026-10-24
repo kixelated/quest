@@ -2,8 +2,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-	chmodSync,
-	copyFileSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -29,17 +27,12 @@ const assertFile = (root, path, expected) => assert.equal(read(root, path), expe
 const skills = ["audit", "complete", "delete", "export", "import", "iterate", "merge", "plan", "spawn", "start"];
 const destinations = [".claude/skills", ".agents/skills"];
 try {
+	// Run the caller's binary in place, so the cleanup below never deletes an executable it just ran:
+	// on windows-11-arm, the hosted runner's agent briefly opens running executables without delete
+	// sharing, and removing one then fails with EBUSY. Callers test a binary path with spaces.
 	const javascript = extname(input) === ".js";
-	const binary = join(
-		work,
-		"tool bin",
-		javascript ? "quest.js" : process.platform === "win32" ? "quest.exe" : "quest",
-	);
-	mkdirSync(dirname(binary));
-	copyFileSync(input, binary);
-	if (process.platform !== "win32") chmodSync(binary, 0o755);
-	const command = javascript ? process.execPath : binary;
-	const prefix = javascript ? [binary] : [];
+	const command = javascript ? process.execPath : input;
+	const prefix = javascript ? [input] : [];
 	const run = (root, ...args) =>
 		execFileSync(command, [...prefix, "--root", root, ...args], {
 			cwd: root,

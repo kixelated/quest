@@ -222,6 +222,7 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		fetch: fetcher,
 		log,
 	});
+	const held = state.hold();
 	const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 	const stop = () => {
 		log("stopping: publishing running work so it moves to another runner");
@@ -239,5 +240,6 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		return 0;
 	} finally {
 		for (const signal of signals) process.off(signal, stop);
+		held.release();
 	}
 }
