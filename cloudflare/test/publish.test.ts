@@ -152,16 +152,12 @@ async function job(id: string) {
 
 beforeEach(async () => {
 	await db.batch([
-		db.prepare("DELETE FROM jobs"),
-		db.prepare("DELETE FROM runners"),
-		db.prepare("DELETE FROM github_projects"),
-		db.prepare("DELETE FROM github_installations"),
 		db
-			.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
+			.prepare("INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
 			.bind(user, user, `${user}@example.test`),
 		db
 			.prepare(
-				"INSERT OR IGNORE INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES(?,?,'github',?,0,0)",
+				"INSERT INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES(?,?,'github',?,0,0)",
 			)
 			.bind(`${user}-account`, String(githubUser), user),
 		db
@@ -693,7 +689,7 @@ describe("runner publication", () => {
 		expect(blocked.status).toBe(202);
 		const question = (await job(id)).questions[0]!.id;
 		await db
-			.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
+			.prepare("INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
 			.bind("other", "other", "other@example.test")
 			.run();
 		const { resumed } = await store.answer(db, id, question, "other", "Keep going", Date.now());

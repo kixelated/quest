@@ -232,15 +232,12 @@ async function state() {
 
 beforeEach(async () => {
 	await env.DB.batch([
-		env.DB.prepare("DELETE FROM github_projects"),
-		env.DB.prepare("DELETE FROM github_installations"),
 		env.DB.prepare(
-			"INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('enrollment-test','Maintainer','enrollment-test@example.test',1,0,0)",
+			"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('enrollment-test','Maintainer','enrollment-test@example.test',1,0,0)",
 		),
 		env.DB.prepare(
-			"INSERT OR IGNORE INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('enrollment-account','7007','github','enrollment-test',0,0)",
+			"INSERT INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('enrollment-account','7007','github','enrollment-test',0,0)",
 		),
-		env.DB.prepare("UPDATE account SET accountId='7007' WHERE userId='enrollment-test'"),
 	]);
 });
 afterEach(() => vi.restoreAllMocks());

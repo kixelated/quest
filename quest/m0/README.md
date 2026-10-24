@@ -35,7 +35,6 @@ ownership-manifest design:
 
 ## Required
 
-- [Worker tests](/quest/m0/worker-tests.md) - every Worker test passes alone and in any order
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
