@@ -126,6 +126,9 @@ it over, saying how long ago it was last active.
 
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
+Only claims use that namespace: no other branch is named `quest` or starts with `quest/`, since git cannot hold a branch named after another's directory.
+Branches for `/quest-plan`, `/quest-audit`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
+If `quest start` names a branch in the way, stop and report it; never delete or rename it yourself.
 
 Push updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
@@ -154,7 +157,9 @@ Once "Ready to Review", CI and (potentially automated) reviews are triggered.
 Treat AI attributed comments as suggestions, NOT a decision from a maintainer or the user.
 Leave a comment on any review feedback you disagree with.
 
-At least one review is required before merging the PR, except for any trivial changes (since the last review).
+At least one review is required before merging the PR.
+Changes since the last review skip a new review only when they are conflict-free merges from the base branch or a reviewer's suggested patch applied unchanged.
+Any other change, including a base merge with a hand-resolved conflict, waits for a review of the new head; if none arrives before a wait times out, ask the user instead of merging.
 The repository's review policy decides whose review counts.
 Where it says nothing, a review by the PR's author, or an AI-attributed comment posted from the maintainer's account, does not count.
 

@@ -172,16 +172,20 @@ fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
 another claimer got there first, and when two PRs race, the earliest open one
 keeps the claim and the later one is closed. A branch left at a merged PR's
-head is replaced, with a lease on that tip. Off GitHub, it pushes the branch
-without a PR.
+head is replaced, with a lease on that tip. A branch named after the claim
+branch's directory, such as `quest/m1/epic` for `quest/m1/epic/one`, or inside
+it, refuses the claim, since git cannot hold both; the refusal names it and
+whether it is a merged PR's head, and leaves it in place. Off GitHub, it pushes
+the branch without a PR.
 
 `--release` deletes the branch, with a lease on its tip, and closes its PR, but
 only while the tip is still an empty commit. Once work is on the branch, hand
 the draft back instead: a `## Decisions needed` section in its body marks it as
 waiting on the maintainer.
 
-`quest start` exits 0 when done, 3 when it refuses (blocked, held, or work on
-the branch), 2 for invalid arguments, and 1 for other failures. On GitHub it
+`quest start` exits 0 when done, 3 when it refuses (blocked, held, a branch in
+the way, or work on the branch), 2 for invalid arguments, and 1 for other
+failures. On GitHub it
 uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
 Draft claims are placeholders, so CI can skip them. This repository runs its
@@ -528,7 +532,7 @@ another maintainer's answer only once you approve it in the inbox.
 The flake's `runner` package is a `quest` whose Claude Code is pinned by this
 repository's lock (`nix run github:kixelated/quest#runner -- runner`);
 otherwise `claude` comes from `QUEST_RUNNER_CLAUDE` or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
-`$XDG_DATA_HOME/quest/runner`. To keep a runner up, run `quest runner` as a user
+`$XDG_DATA_HOME/quest/runner`; one `quest runner` runs in a home at a time. To keep a runner up, run `quest runner` as a user
 service, such as a systemd user unit with `Restart=on-failure`.
 
 ## Prunable local checkouts
