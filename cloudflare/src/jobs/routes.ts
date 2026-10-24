@@ -365,13 +365,19 @@ jobs.post(base, async (c) => {
 	);
 	// A new merge job holds its pull request before it runs, as a local `quest merge` would.
 	if (created.created && job.workflow === "merge") {
+		const pull = pullOf(job.target);
+		let token: string;
+		let recorded: boolean;
 		try {
-			await store.held(c.env.DB, created.id, await github.holdPullRequest(repo, user, pullOf(job.target)));
+			token = await github.holdPullRequest(repo, user, pull);
+			recorded = await store.held(c.env.DB, created.id, token);
 		} catch (error) {
 			await store.cancel(c.env.DB, created.id, user, Date.now());
 			await hub(c.env, user).dispatch(user);
 			throw error;
 		}
+		// A stop that came first found no hold to release, so the label goes back now.
+		if (!recorded) await github.releasePullRequest(repo, pull, token);
 	}
 	await hub(c.env, user).dispatch(user);
 	return reply(c, form, "start", created, created.created ? 201 : 200);

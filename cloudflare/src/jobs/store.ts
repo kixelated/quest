@@ -1047,9 +1047,14 @@ export async function hold(db: D1Database, job: string, input: { summary: string
 	]);
 }
 
-/** Record the `quest:merge` label a merge job holds its pull request with. */
+/**
+ * Record the `quest:merge` label a merge job holds its pull request with,
+ * while the job is still queued. Returns false once it was stopped meanwhile,
+ * so the caller gives the label back.
+ */
 export async function held(db: D1Database, job: string, token: string) {
-	await db.prepare("UPDATE jobs SET hold=? WHERE id=?").bind(token, job).run();
+	const { meta } = await db.prepare("UPDATE jobs SET hold=? WHERE id=? AND state='queued'").bind(token, job).run();
+	return meta.changes === 1;
 }
 
 /** A merge job's hold on its pull request is over. */

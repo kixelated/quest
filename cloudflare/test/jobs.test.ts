@@ -1210,6 +1210,24 @@ describe("job routes", () => {
 		expect(await state(id)).toMatchObject({ hold: null });
 	});
 
+	it("gives the label back when a merge pick is stopped while it takes the pull request", async () => {
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			// The maintainer stops the queued job while GitHub adds its label.
+			if (new URL(String(input)).pathname.endsWith("/issues/2/labels") && init?.method === "POST") {
+				const queued = await db
+					.prepare("SELECT id FROM jobs WHERE workflow='merge' AND state='queued'")
+					.first<{ id: string }>();
+				expect((await post(`/${queued!.id}/cancel`, {})).status).toBe(204);
+			}
+			return mock(input, init);
+		});
+		const created = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+		expect(await state(id)).toMatchObject({ state: "cancelled", hold: null });
+		expect(github.labels).toEqual([]);
+	});
+
 	it("starts a merge job only once it holds its pull request", async () => {
 		const machine = await runner(maintainer, "machine", "linux", true);
 		await connected(machine, [account("main")]);
@@ -1228,7 +1246,7 @@ describe("job routes", () => {
 		);
 		const slots = new Map([[machine.id, 1]]);
 		expect((await store.dispatch(db, maintainer, slots, 0)).assign).toEqual([]);
-		await store.held(db, id, "LE_1");
+		expect(await store.held(db, id, "LE_1")).toBe(true);
 		expect((await store.dispatch(db, maintainer, slots, 0)).assign.map((a) => a.job.id)).toEqual([id]);
 	});
 
