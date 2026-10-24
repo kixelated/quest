@@ -40,5 +40,13 @@ export default defineConfig({
 	// (the pool appends `import main` to cloudflare:test), all transformed by vitest's
 	// one Node process, which also answers a module resolve for every SELF.fetch.
 	// One shared runtime imports the Worker once, so a busy host can't stall the tests.
-	test: { setupFiles: ["./test/setup.ts"], fileParallelism: false, isolate: false },
+	// test/setup.ts resets storage before each test, and every run shuffles files and
+	// tests, so a test that depends on another's leftovers fails (rerun with the
+	// printed seed: `vitest run --sequence.seed=<seed>`).
+	test: {
+		setupFiles: ["./test/setup.ts"],
+		fileParallelism: false,
+		isolate: false,
+		sequence: { shuffle: true },
+	},
 });
