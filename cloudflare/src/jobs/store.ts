@@ -9,7 +9,12 @@
 /** A disconnected runner's running jobs move to another runner after this long. */
 export const GRACE = 2 * 60_000;
 
-export type Workflow = "plan" | "start" | "iterate" | "bootstrap";
+export type Workflow = "plan" | "start" | "iterate" | "merge" | "bootstrap";
+
+/** Whether a workflow works on an open pull request's own head branch, rather than opening one. */
+export function onPull(workflow: Workflow) {
+	return workflow === "iterate" || workflow === "merge";
+}
 export type JobState = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 export type Outcome = "completed" | "failed" | "cancelled" | "limited";
 export type Platform = "linux" | "darwin";
@@ -55,6 +60,8 @@ export type Job = {
 	pull: number | null;
 	/** The failed job this retry continues. */
 	continues: string | null;
+	/** A merge job's `quest:merge` label: the timeline event that added it, until kix releases it. */
+	hold: string | null;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -638,8 +645,8 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 	const pin = [runner, runner, input.actor, trusted, account, account];
 	const id = crypto.randomUUID();
 	// The insert checks the project and pins again, since a pause or a
-	// runner's status can commit after the request read them. An iteration
-	// continues the pull request's existing head branch. Retrying a target
+	// runner's status can commit after the request read them. Iterating on or
+	// merging a pull request continues its existing head branch. Retrying a target
 	// whose latest job failed continues that job's branch and pull request
 	// where it left them, as a reassigned attempt would, and records which
 	// job it continues.
@@ -648,7 +655,7 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 			.prepare(
 				`INSERT OR IGNORE INTO jobs(id,repository,workflow,target,revision,branch,head,pending,pendingAt,pull,continues,actor,trusted,pinRunner,pinAccount,state,createdAt,updatedAt)
  SELECT ?,p.id,?,?,?,?,COALESCE(?,f.head),f.pending,f.pendingAt,f.pull,f.id,?,?,?,?,'queued',?,? FROM github_projects p
- LEFT JOIN jobs f ON ?<>'iterate' AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
+ LEFT JOIN jobs f ON ?=0 AND f.state='failed' AND f.branch=? AND f.id=(SELECT id FROM jobs WHERE repository=p.id AND target=? ORDER BY createdAt DESC,id LIMIT 1)
  WHERE p.id=? AND p.state='enabled' AND ${pinnable}`,
 			)
 			.bind(
@@ -657,14 +664,14 @@ export async function createJob(db: D1Database, input: NewJob, now: number) {
 				input.target,
 				input.revision,
 				input.branch,
-				input.workflow === "iterate" ? input.revision : null,
+				onPull(input.workflow) ? input.revision : null,
 				input.actor,
 				trusted,
 				runner,
 				account,
 				now,
 				now,
-				input.workflow,
+				onPull(input.workflow) ? 1 : 0,
 				input.branch,
 				input.target,
 				input.repository,
@@ -942,6 +949,27 @@ export async function hold(db: D1Database, job: string, input: { summary: string
 			)
 			.bind(input.summary, now, job, id),
 	]);
+}
+
+/** Record the `quest:merge` label a merge job holds its pull request with. */
+export async function held(db: D1Database, job: string, token: string) {
+	await db.prepare("UPDATE jobs SET hold=? WHERE id=?").bind(token, job).run();
+}
+
+/** A merge job's hold on its pull request is over. */
+export async function released(db: D1Database, job: string, token: string) {
+	await db.prepare("UPDATE jobs SET hold=NULL WHERE id=? AND hold=?").bind(job, token).run();
+}
+
+/** The ended merge jobs on `target` that still hold its pull request, such as one whose landing is queued. */
+export async function holding(db: D1Database, repository: number, target: string) {
+	const { results } = await db
+		.prepare(
+			"SELECT id,hold FROM jobs WHERE repository=? AND target=? AND workflow='merge' AND hold IS NOT NULL AND state NOT IN ('queued','running','waiting')",
+		)
+		.bind(repository, target)
+		.all<{ id: string; hold: string }>();
+	return results;
 }
 
 /**

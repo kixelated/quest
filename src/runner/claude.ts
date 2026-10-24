@@ -11,11 +11,15 @@ import { promisify } from "node:util";
 
 import { boundedLines, LINE_LIMIT, strippedEnvironment } from "../cli/agent";
 import type { Adapter, Exit, Launch, Running, SignedIn } from "./adapter";
+import { WAIT_LIMIT } from "./wait";
 
 const run = promisify(execFile);
 
 /** How long a stopped agent has to exit before it is killed. */
 export const STOP_GRACE_MS = 10_000;
+
+/** How long Claude Code waits on one kix tool call: the longest `wait`, with margin. */
+export const TOOL_TIMEOUT_MS = WAIT_LIMIT + 5 * 60_000;
 
 /**
  * The environment for an account's CLI: the user's, without other harnesses'
@@ -127,6 +131,9 @@ export class Claude implements Adapter {
 					type: "http",
 					url: launch.tools.url,
 					headers: { Authorization: `Bearer ${launch.tools.token}` },
+					// HTTP tool calls otherwise fail after 60s without a first response byte
+					// (and 5 minutes idle), but a merge job's `wait` replies only after up to WAIT_LIMIT.
+					timeout: TOOL_TIMEOUT_MS,
 				},
 			},
 		};

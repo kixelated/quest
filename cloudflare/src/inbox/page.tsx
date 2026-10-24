@@ -333,6 +333,14 @@ function blocked(item: Item, view: ProjectView | undefined) {
 /** The workflow a new job runs for the item, bound to the revision on screen. */
 function work(item: Item, view: ProjectView) {
 	const commit = view.state!.project.commit;
+	// Retrying a failed merge job picks merge again.
+	if (item.kind === "pull" && item.need === "retry" && item.job?.workflow === "merge")
+		return {
+			workflow: "merge",
+			target: item.target,
+			revision: (item.activity!.data as Pull).headRefOid,
+			label: "Merge this PR",
+		};
 	if (item.kind === "pull")
 		return {
 			workflow: "iterate",
@@ -349,13 +357,15 @@ function work(item: Item, view: ProjectView) {
 }
 
 /**
- * The observed pull request when GitHub reports it can merge as is: no
- * conflicts, and its checks and branch rules satisfied. Anything else is
- * reviewed on GitHub or merged by a later merge job.
+ * How picking merge lands the observed open pull request: at once, bound to
+ * its head, when GitHub reports it can merge as is (no conflicts, and its
+ * checks and branch rules satisfied), or else through a merge job that first
+ * fixes its conflicts, checks, and review findings. A draft is not offered.
  */
-function clean(item: Item) {
+function landing(item: Item) {
 	const pull = item.kind === "pull" ? (item.activity?.data as Pull | null | undefined) : null;
-	return pull?.state === "OPEN" && ["CLEAN", "HAS_HOOKS"].includes(pull.mergeStateStatus ?? "") ? pull : null;
+	if (pull?.state !== "OPEN" || pull.isDraft) return null;
+	return { pull, clean: ["CLEAN", "HAS_HOOKS"].includes(pull.mergeStateStatus ?? "") };
 }
 
 function Refresh(props: { project: Item["project"] }) {
@@ -375,14 +385,22 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 	// Only an unblocked item has the observations its work is bound to.
 	const job = starts && !reason ? work(item, view!) : null;
 	// Only an idle item offers merge: no queued, running, or waiting job can still push to its head.
-	const merge = starts && !reason ? clean(item) : null;
+	const merge = starts && !reason ? landing(item) : null;
 	const active = item.job && ["queued", "running", "waiting"].includes(item.job.state) && !item.job.cancel;
 	return (
 		<div class="decision-actions">
-			{merge && (
-				<form method="post" action={`${base}/pulls/${merge.number}/merge`}>
-					<input type="hidden" name="head" value={merge.headRefOid} />
+			{merge?.clean && (
+				<form method="post" action={`${base}/pulls/${merge.pull.number}/merge`}>
+					<input type="hidden" name="head" value={merge.pull.headRefOid} />
 					<input type="hidden" name="version" value={item.version} />
+					<button class="button primary">Merge this PR</button>
+				</form>
+			)}
+			{merge && !merge.clean && job?.workflow !== "merge" && (
+				<form method="post" action={`${base}/jobs`}>
+					<input type="hidden" name="workflow" value="merge" />
+					<input type="hidden" name="target" value={item.target} />
+					<input type="hidden" name="revision" value={merge.pull.headRefOid} />
 					<button class="button primary">Merge this PR</button>
 				</form>
 			)}
@@ -397,7 +415,7 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 						<input type="hidden" name="workflow" value={job.workflow} />
 						{job.target && <input type="hidden" name="target" value={job.target} />}
 						<input type="hidden" name="revision" value={job.revision} />
-						<button class={merge ? "button quiet" : "button primary"}>
+						<button class={merge && job.workflow !== "merge" ? "button quiet" : "button primary"}>
 							{item.need === "retry" ? "Try again" : job.label}
 						</button>
 					</form>

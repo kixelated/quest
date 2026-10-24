@@ -256,17 +256,42 @@ describe("decision inbox", () => {
 		expect(thread(html)).toContain("GitHub reported changes");
 	});
 
-	it("offers merge only on a clean pull request no job holds, to current maintainers", async () => {
+	it("offers merge only on a pull request no job or session holds, to current maintainers", async () => {
 		const merge = "/projects/github/upstream/project/pulls/2/merge";
 		await db
 			.prepare(
 				"UPDATE github_project_activity SET data=json_set(data,'$.mergeStateStatus','BLOCKED') WHERE id='21'",
 			)
 			.run();
+		// A pull request GitHub cannot merge as is lands through a merge job, which fixes it first.
 		let active = thread(await inbox());
 		expect(active).not.toContain(merge);
+		expect(active).toContain('<input type="hidden" name="workflow" value="merge"/>');
+		expect(active).toContain('<button class="button primary">Merge this PR');
 		expect(active).toContain("Review on GitHub");
-		expect(active).toContain('<button class="button primary">Iterate on this PR');
+		expect(active).toContain('<button class="button quiet">Iterate on this PR');
+		const picked = await submit(jobs, [
+			["workflow", "merge"],
+			["target", "pulls/2"],
+			["revision", head],
+		]);
+		expect(picked.status).toBe(303);
+		expect(github.labels).toEqual(["quest:merge"]);
+		const [job] = await store.listJobs(db, 10);
+		expect(job).toMatchObject({ workflow: "merge", hold: "LE_1" });
+		expect(thread(await inbox({ project: "10", item: "pulls/2" }))).not.toContain("Merge this PR");
+		await db.prepare("DELETE FROM jobs").run();
+		// A pull request a session holds with a label is its work in progress, until the label goes.
+		await db
+			.prepare("UPDATE github_project_activity SET data=json_set(data,'$.hold','quest:merge') WHERE id='21'")
+			.run();
+		expect(await inbox()).toMatch(/<h2>In progress<\/h2>[\s\S]*Fix/);
+		active = thread(await inbox({ project: "10", item: "pulls/2" }));
+		expect(active).not.toContain("Merge this PR");
+		expect(active).not.toContain("Iterate on this PR");
+		await db
+			.prepare("UPDATE github_project_activity SET data=json_set(data,'$.hold',json('null')) WHERE id='21'")
+			.run();
 		await db
 			.prepare(
 				"UPDATE github_project_activity SET data=json_set(data,'$.mergeStateStatus','CLEAN') WHERE id='21'",
