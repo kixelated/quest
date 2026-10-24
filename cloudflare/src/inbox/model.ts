@@ -107,9 +107,14 @@ export function entities(project: Enrollment, state: ProjectState | null) {
 	return found;
 }
 
-/** A PR whose observed draft its starter still holds, so nothing waits on the maintainer. */
+/**
+ * A PR whose observed draft its starter still holds, or that a session holds
+ * with a `quest:*` label, such as one whose landing is queued, so nothing
+ * waits on the maintainer.
+ */
 function held(entity: Pick<Item, "kind" | "activity">) {
-	return entity.kind === "pull" && !!entity.activity?.data && owned(entity.activity.data as Pull);
+	const pull = entity.kind === "pull" ? (entity.activity?.data as Pull | null | undefined) : null;
+	return !!pull && (owned(pull) || !!pull.hold);
 }
 
 function fallback(project: Enrollment, target: string): Entity {

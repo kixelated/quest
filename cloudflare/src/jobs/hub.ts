@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import * as push from "../push/notify";
+import * as landing from "./landing";
 import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
@@ -172,6 +173,8 @@ export class RunnerHub extends DurableObject<Env> {
 				// A limit waits on an account choice; a failure waits on a retry.
 				if (state === "waiting" || state === "failed")
 					this.ctx.waitUntil(push.job(this.env, message.job, state === "waiting" ? "account" : "failed"));
+				// A merge job that ended without a landing in progress gives its pull request back.
+				if (state && state !== "waiting") this.ctx.waitUntil(landing.ended(this.env, message.job));
 				return {};
 			}
 		}

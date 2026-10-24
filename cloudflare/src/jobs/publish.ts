@@ -10,10 +10,11 @@ import {
 	GitHubService,
 	PublicationBlocked,
 	type GitHubRepository,
+	type MergeMethod,
 } from "../github/service";
 import { id, text } from "./protocol";
 import * as store from "./store";
-import { JobError, type Runner, type Workflow } from "./store";
+import { JobError, onPull, type Runner, type Workflow } from "./store";
 import { withDecisions } from "./trail";
 
 /** Bounds one request's GitHub writes: inline text costs no extra request, other files one each. */
@@ -28,7 +29,14 @@ export type Publication = {
 	session: string | null;
 	message: string | null;
 	changes: Change[];
+	/**
+	 * A commit of the branch's upstream base that the changes merge in: they
+	 * become a merge commit of `head` and it, relative to its files.
+	 */
+	merge: string | null;
 	pull: { title: string; body: string; draft: boolean } | null;
+	/** A merge job lands its pull request at the published head, with the merge method its instructions name. */
+	land: { method: MergeMethod | null } | null;
 };
 
 /** Whether `path` names a file inside a work tree, never Git's own directory. */
@@ -90,8 +98,18 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	if (bytes > LIMITS.bytes) throw new JobError("Publication too large");
 	if (new Set(changes.map((change) => change.path)).size !== changes.length)
 		throw new JobError("Duplicate change path");
-	const message = changes.length ? text(body.message, 64 * 1024) : null;
-	if (changes.length && !message) throw new JobError("Commit message required");
+	if (body.merge !== undefined && !(typeof body.merge === "string" && /^[a-f0-9]{40}$/.test(body.merge)))
+		throw new JobError("The merged commit must be a full SHA");
+	const merge = (body.merge as string | undefined) ?? null;
+	const message = changes.length || merge ? text(body.message, 64 * 1024) : null;
+	if ((changes.length || merge) && !message) throw new JobError("Commit message required");
+	let land: Publication["land"] = null;
+	if (body.land !== undefined) {
+		const method = (body.land as Record<string, unknown> | null)?.method;
+		if (method !== undefined && method !== "merge" && method !== "squash" && method !== "rebase")
+			throw new JobError("Land with the merge, squash, or rebase method");
+		land = { method: (method as MergeMethod | undefined) ?? null };
+	}
 	let pull: Publication["pull"] = null;
 	if (body.pull !== undefined) {
 		const input = body.pull as Record<string, unknown> | null;
@@ -106,8 +124,8 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 			throw new JobError("Pull request title and body required");
 		pull = { title, body: description, draft: input!.draft !== false };
 	}
-	if (!changes.length && !pull) throw new JobError("Nothing to publish");
-	return { job, attempt, head: body.head as string | null, session, message, changes, pull };
+	if (!changes.length && !merge && !pull && !land) throw new JobError("Nothing to publish");
+	return { job, attempt, head: body.head as string | null, session, message, changes, merge, pull, land };
 }
 
 /**
@@ -122,9 +140,19 @@ export class HeadMoved extends JobError {
 
 /** A pause on a decision; `asked` is false for a retry of one already asked. */
 type Decision = { decision: string; cancel: boolean; asked: boolean };
-type Published = { head: string | null; pull?: { number: number; url: string; draft: boolean } };
+type Published = {
+	head: string | null;
+	pull?: { number: number; url: string; draft: boolean };
+	/** A merge job's landing: merged at once, or queued or auto-merging. */
+	landed?: { merged: boolean };
+};
 
 const DECISION = "Publishing this work needs a maintainer's decision";
+
+/** The number of a `pulls/<n>` target. */
+export function pullOf(target: string) {
+	return Number(target.match(/^pulls\/(\d{1,15})$/)?.[1] ?? Number.NaN);
+}
 
 /** Pause the attempt on a decision the maintainer must make before this can publish. */
 async function decide(db: D1Database, runner: Runner, input: Publication, prompt: unknown): Promise<Decision> {
@@ -175,7 +203,9 @@ async function commit(
 	branch: Branch,
 	head: string | null,
 ): Promise<string> {
-	const next = await branch.commit(head ?? job.revision, input.changes, input.message!);
+	if (input.merge && !(await branch.based(input.merge)))
+		throw new JobError("A merge commit may only merge in a commit its upstream base branch already holds");
+	const next = await branch.commit(head ?? job.revision, input.changes, input.message!, input.merge ?? undefined);
 	// Check the fence again immediately before the write that makes the commit visible.
 	await store.claim(db, runner, job.id, job.attempt, head, next, Date.now());
 	// A failure here leaves the claim pending; the next publication finds out whether it landed.
@@ -189,8 +219,9 @@ async function commit(
 export async function publish(env: Env, runner: Runner, input: Publication): Promise<Published | Decision> {
 	const db = env.DB;
 	const job = await store.publishing(db, runner, input.job, input.attempt);
-	if (input.pull && job.workflow === "iterate")
-		throw new JobError("An iteration updates its pull request's head and opens no pull request");
+	if (input.pull && onPull(job.workflow))
+		throw new JobError("Work on a pull request updates its head and opens no pull request");
+	if (input.land && job.workflow !== "merge") throw new JobError("Only a merge job lands its pull request");
 	const refused = input.changes.flatMap((change) => {
 		const reason = refusal(job.workflow, change.path);
 		return reason ? [{ path: change.path, reason }] : [];
@@ -203,13 +234,29 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 		// A pull request opens from the branch, so a delivery alone still checks where it is.
 		head = await github.contribute(upstream, job.actor, job, async (branch) => {
 			const head = await verify(db, job, input, branch);
-			return input.changes.length ? commit(db, runner, job, input, branch, head) : head;
+			return input.changes.length || input.merge ? commit(db, runner, job, input, branch, head) : head;
 		});
 	} catch (error) {
 		if (!(error instanceof PublicationBlocked)) throw error;
-		// Only a service fork branch is kix's to reset; an iterated pull request's head is not.
-		const restart = error instanceof BranchChanged && job.workflow !== "iterate";
+		// Only a service fork branch is kix's to reset; a pull request's own head is not.
+		const restart = error instanceof BranchChanged && !onPull(job.workflow);
 		return decide(db, runner, input, { type: "publication", blocked: error.message, ...(restart && { restart }) });
+	}
+	if (input.land) {
+		// The attempt may have ended, or been asked to stop, while the branch was written.
+		const current = await store.publishing(db, runner, input.job, input.attempt);
+		if (current.cancel) throw new JobError("The maintainer stopped this job, so it does not land");
+		try {
+			const landed = await github.landPullRequest(upstream, current.actor, pullOf(current.target), {
+				head: head!,
+				hold: current.hold,
+				method: input.land.method,
+			});
+			return { head, landed };
+		} catch (error) {
+			if (!(error instanceof PublicationBlocked)) throw error;
+			return decide(db, runner, input, { type: "publication", blocked: error.message });
+		}
 	}
 	if (!input.pull) return { head };
 	if (!head) throw new JobError("Publish the job's changes before opening its pull request");
@@ -249,7 +296,7 @@ export async function restart(
 			q.attempt === job.attempt,
 	);
 	const offered = open?.kind === "publication" && (open.prompt as { restart?: unknown } | null)?.restart === true;
-	if (job.state !== "waiting" || job.workflow === "iterate" || !offered)
+	if (job.state !== "waiting" || onPull(job.workflow) || !offered)
 		throw new JobError("Only a job whose own branch changed can start over");
 	// The answering maintainer's authority is rechecked before anything changes.
 	return new GitHubService(env).contribute(upstream, user, job, async (branch) => {
