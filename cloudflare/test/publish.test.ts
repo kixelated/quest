@@ -1202,6 +1202,30 @@ describe("merge jobs", () => {
 		expect(project.branches["contributor/fix"]).toBe(head);
 	});
 
+	it("refuses a merge that would revert submodules it cannot publish", async () => {
+		const id = await merging();
+		const main = "f".repeat(40);
+		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+		project.branches.main = main;
+		const merge = { job: id, attempt: 1, head: prHead, message: "Merge main", changes: [], merge: main };
+		const refused = await publish({ ...merge, session: "s", submodules: ["vendor/lib"], land: {} });
+		expect(refused.status).toBe(202);
+		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+			type: "publication",
+			refused: [
+				{
+					path: "vendor/lib",
+					reason: "kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version",
+				},
+			],
+		});
+		expect(project.branches["contributor/fix"]).toBe(prHead);
+		expect(lands()).toEqual([]);
+		// Only a merge lists them.
+		const plain = await publish({ job: id, attempt: 1, head: prHead, submodules: ["vendor/lib"], land: {} });
+		expect(await plain.json()).toEqual({ error: "Only a merge lists the submodules it cannot publish" });
+	});
+
 	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {
 		const reason = "Pull request Auto merge is not allowed for this repository";
 		const cases: [() => void, string][] = [

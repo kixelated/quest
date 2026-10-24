@@ -330,6 +330,41 @@ describe("workspace", () => {
 		expect(later.changes.map((c) => c.path)).toEqual(["later.txt"]);
 	});
 
+	posix("lists the submodules a merge changes, which its changes cannot carry", async () => {
+		const { dir, commit } = upstream();
+		const module = join(tempDir(), "module");
+		mkdirSync(module);
+		git(module, "init", "-q", "-b", "main");
+		writeFileSync(join(module, "a.txt"), "a\n");
+		git(module, "add", ".");
+		git(module, "commit", "-q", "-m", "one");
+		git(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", module, "sub");
+		git(dir, "commit", "-q", "-m", "submodule");
+		const base = git(dir, "rev-parse", "HEAD");
+		// The pull request moves the submodule; main moves on elsewhere.
+		git(dir, "checkout", "-q", "-b", "feature");
+		writeFileSync(join(module, "a.txt"), "b\n");
+		git(module, "commit", "-q", "-am", "two");
+		git(join(dir, "sub"), "-c", "protocol.file.allow=always", "pull", "-q", "origin", "main");
+		git(dir, "commit", "-q", "-am", "bump submodule");
+		const head = git(dir, "rev-parse", "HEAD");
+		git(dir, "checkout", "-q", "main");
+		writeFileSync(join(dir, "main.txt"), "main\n");
+		git(dir, "add", "main.txt");
+		git(dir, "commit", "-q", "-m", "main moved");
+		const workspace = await Workspace.prepare(
+			tempDir(),
+			job(base, { workflow: "merge", target: "pulls/2", branch: "feature", head }),
+			dir,
+		);
+		git(workspace.dir, "fetch", "-q", "origin", "main");
+		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
+		const snapshot = await workspace.snapshot();
+		expect(snapshot.merge).not.toBeNull();
+		// Relative to the merged commit, the pull request's own submodule bump is a change kix cannot send.
+		expect(snapshot.skipped).toEqual(["sub"]);
+	});
+
 	posix("prepares jobs on one repository at once without racing on its clone", async () => {
 		const { dir, commit } = upstream();
 		const root = tempDir();

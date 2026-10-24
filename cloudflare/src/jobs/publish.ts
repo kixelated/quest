@@ -34,6 +34,12 @@ export type Publication = {
 	 * become a merge commit of `head` and it, relative to its files.
 	 */
 	merge: string | null;
+	/**
+	 * Submodules the merge changes relative to `merge` that the runner cannot
+	 * send, since changes carry no submodules: publishing without them would
+	 * revert them to the merged-in commit's version.
+	 */
+	submodules: string[];
 	pull: { title: string; body: string; draft: boolean } | null;
 	/** A merge job lands its pull request at the published head, with the merge method its instructions name. */
 	land: { method: MergeMethod | null } | null;
@@ -49,6 +55,8 @@ export function validPath(path: string) {
 }
 
 const WORKFLOWS = "Changing GitHub Actions workflows needs the workflows permission, which the App does not request";
+const SUBMODULES =
+	"kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version";
 
 /**
  * Why `workflow` may not publish `path`, or null when it may. A refusal
@@ -103,6 +111,14 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	if (body.merge !== undefined && !(typeof body.merge === "string" && /^[a-f0-9]{40}$/.test(body.merge)))
 		throw new JobError("The merged commit must be a full SHA");
 	const merge = (body.merge as string | undefined) ?? null;
+	const submodules = body.submodules ?? [];
+	if (
+		!Array.isArray(submodules) ||
+		submodules.length > LIMITS.changes ||
+		!submodules.every((path) => typeof path === "string" && validPath(path))
+	)
+		throw new JobError("Invalid submodule paths");
+	if (submodules.length && !merge) throw new JobError("Only a merge lists the submodules it cannot publish");
 	const message = changes.length || merge ? text(body.message, 64 * 1024) : null;
 	if ((changes.length || merge) && !message) throw new JobError("Commit message required");
 	let land: Publication["land"] = null;
@@ -127,7 +143,18 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 		pull = { title, body: description, draft: input!.draft !== false };
 	}
 	if (!changes.length && !merge && !pull && !land) throw new JobError("Nothing to publish");
-	return { job, attempt, head: body.head as string | null, session, message, changes, merge, pull, land };
+	return {
+		job,
+		attempt,
+		head: body.head as string | null,
+		session,
+		message,
+		changes,
+		merge,
+		submodules: submodules as string[],
+		pull,
+		land,
+	};
 }
 
 /**
@@ -228,10 +255,13 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 	if (input.pull && onPull(job.workflow))
 		throw new JobError("Work on a pull request updates its head and opens no pull request");
 	if (input.land && job.workflow !== "merge") throw new JobError("Only a merge job lands its pull request");
-	const refused = input.changes.flatMap((change) => {
-		const reason = refusal(job.workflow, change.path, !!input.merge);
-		return reason ? [{ path: change.path, reason }] : [];
-	});
+	const refused = [
+		...input.submodules.map((path) => ({ path, reason: SUBMODULES })),
+		...input.changes.flatMap((change) => {
+			const reason = refusal(job.workflow, change.path, !!input.merge);
+			return reason ? [{ path: change.path, reason }] : [];
+		}),
+	];
 	if (refused.length) return decide(db, runner, input, { type: "publication", refused });
 	const github = new GitHubService(env);
 	const upstream: GitHubRepository = { owner: job.owner, name: job.name, id: job.repository };

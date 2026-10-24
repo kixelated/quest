@@ -285,6 +285,8 @@ export class Attempt {
 					...((snapshot.changes.length || snapshot.merge) && { message }),
 					changes: snapshot.changes,
 					...(snapshot.merge && { merge: snapshot.merge }),
+					// A merge would revert the submodules it cannot send, so kix refuses it on a decision.
+					...(snapshot.merge && snapshot.skipped.length && { submodules: snapshot.skipped }),
 					...(pull && { pull }),
 					...(land && { land }),
 				});
