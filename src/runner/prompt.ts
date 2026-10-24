@@ -1,9 +1,9 @@
 // What a job's agent is told. The workflow comes from the quest guide and
 // skills this binary ships, given in full rather than as a slash command the
 // CLI might not know and would then read as plain text. The repository's own
-// instructions are loaded explicitly, since not every CLI reads AGENTS.md.
+// instructions are loaded explicitly, since the sandboxed CLI loads none.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { GUIDE, skill } from "../cli/skills";
@@ -18,29 +18,52 @@ Report only through the kix tools:
 - \`deliver\`: when the work is done, with a summary and the pull request's title, body, and draft flag. kix publishes the working tree and opens or updates the pull request. End your turn after delivering.
 - \`context\`: on a job for an issue or pull request, read it as GitHub has it now: its text and comments, and a pull request's reviews, unresolved review threads, and checks. Use it wherever the workflow reads them with \`gh\` or \`quest status\`.
 
-Where the workflow says to claim with \`quest start\`, or to take or release a pull request with \`quest iterate\` or \`quest release\`, skip it; kix holds the job's pull request. Where it says to push, open or update a pull request, mark it ready, or comment on it, call \`deliver\` instead. Where it says to ask or prompt the user, call \`ask\`; you can always prompt, so ignore instructions for agents that cannot. Never run \`git push\`, \`gh\`, or anything else that writes to GitHub. Commit locally if you like; kix publishes your working tree as it is.`;
+Where the workflow says to claim with \`quest start\`, or to take or release a pull request with \`quest iterate\` or \`quest release\`, skip it; kix holds the job's pull request. Where it says to push, open or update a pull request, mark it ready, or comment on it, call \`deliver\` instead. Where it says to ask or prompt the user, call \`ask\`; you can always prompt, so ignore instructions for agents that cannot. Never run \`git push\`, \`gh\`, or anything else that writes to GitHub. Commit locally if you like; kix publishes your working tree as it is.
+
+Your shell commands run in an OS sandbox, with the project's devShell already loaded in each one. They can write only to this checkout and \`$TMPDIR\` (\`$HOME\` is inside it), reach no network host, and have no Nix daemon, so \`nix build\`, \`nix develop\`, and \`nix flake check\` fail. When a check cannot run there, say which and why in your summary rather than working around the sandbox.`;
 
 /**
- * The repository's `AGENTS.md` files, which not every CLI reads (Claude Code
- * reads CLAUDE.md on its own): the root's in full, and where the nested ones
- * are, since each applies to the files under its directory.
+ * A root instruction file's text. The runner reads it outside the sandbox, so
+ * only a regular file counts: a symlink committed to a job's branch could
+ * otherwise put any file this user can read into the prompt.
+ */
+function instructionFile(dir: string, name: string): string | null {
+	const path = join(dir, name);
+	try {
+		return lstatSync(path).isFile() ? readFileSync(path, "utf8").trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The repository's `AGENTS.md` and `CLAUDE.md` files, which a job's CLI does
+ * not load itself (Claude Code reads only the runner's settings): the root's
+ * in full, and where the nested ones are, since each applies to the files
+ * under its directory.
  */
 function repositoryInstructions(dir: string): string {
 	const parts: string[] = [];
-	const root = join(dir, "AGENTS.md");
-	if (existsSync(root)) parts.push(`## AGENTS.md\n\n${readFileSync(root, "utf8").trim()}`);
+	const agents = instructionFile(dir, "AGENTS.md");
+	if (agents !== null) parts.push(`## AGENTS.md\n\n${agents}`);
+	const claude = instructionFile(dir, "CLAUDE.md");
+	if (claude !== null && claude !== agents) parts.push(`## CLAUDE.md\n\n${claude}`);
 	let tracked: string[] = [];
 	try {
-		tracked = execFileSync("git", ["-C", dir, "ls-files", "-z", "--", ":(glob)**/AGENTS.md"], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		})
+		tracked = execFileSync(
+			"git",
+			["-C", dir, "ls-files", "-z", "--", ":(glob)**/AGENTS.md", ":(glob)**/CLAUDE.md"],
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		)
 			.split("\0")
-			.filter((path) => path && path !== "AGENTS.md");
+			.filter((path) => path && path !== "AGENTS.md" && path !== "CLAUDE.md");
 	} catch {}
 	if (tracked.length)
 		parts.push(
-			`## Nested AGENTS.md files\n\nEach applies to the files under its directory, in addition to the root's. Read the ones for the directories you work in before changing anything there:\n\n${tracked.map((path) => `- \`${path}\``).join("\n")}`,
+			`## Nested instruction files\n\nEach applies to the files under its directory, in addition to the root's. Read the ones for the directories you work in before changing anything there:\n\n${tracked.map((path) => `- \`${path}\``).join("\n")}`,
 		);
 	return parts.join("\n\n");
 }

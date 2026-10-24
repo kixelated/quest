@@ -1,11 +1,12 @@
 // The `quest runner` commands: sign the machine in to kix, sign agent
 // accounts in with their own CLIs, and run jobs in the foreground.
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { accessSync, constants, realpathSync, rmSync } from "node:fs";
 import { hostname } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 
 import type { Adapter } from "./adapter";
 import { Claude } from "./claude";
@@ -14,6 +15,8 @@ import type { Job } from "./protocol";
 import { Runner } from "./runner";
 
 export const DEFAULT_URL = "https://kix.quest";
+
+const run = promisify(execFile);
 
 /** A runner command's mistake in its arguments or setup, reported as a usage error. */
 export class RunnerInputError extends Error {}
@@ -61,7 +64,7 @@ export function claudeBinary(env: NodeJS.ProcessEnv): string {
 }
 
 function adapterFor(io: RunnerIO): Adapter {
-	return new Claude(claudeBinary(io.env), "bypassPermissions", io.env);
+	return new Claude(claudeBinary(io.env), io.env);
 }
 
 function home(io: RunnerIO): RunnerHome {
@@ -158,11 +161,29 @@ export function removeAccount(io: RunnerIO, id: string): number {
 	return 0;
 }
 
-/** Projects without a flake are bootstrapped in the runner's own environment, which has Nix. */
-export function devShell(job: Job): string[] {
-	if (job.workflow === "bootstrap") return [];
-	// Trusted revisions only: their flake's nixConfig, such as its substituters, is honored.
-	return ["nix", "develop", "--accept-flake-config", "--no-write-lock-file", "--command"];
+/**
+ * The job's devShell environment, which its sandboxed commands source: the
+ * script `nix print-dev-env` prints for the flake at the job's revision. The
+ * runner evaluates and builds it through the host's Nix, so it reads the
+ * committed revision rather than a checkout the agent may have edited, and
+ * runs nothing from it; the shellHook runs inside the sandbox. A project
+ * without a flake is bootstrapped in the runner's own environment.
+ */
+export async function devShell(job: Job, repository: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+	if (job.workflow === "bootstrap") return null;
+	const url = `git+file://${repository.split("/").map(encodeURIComponent).join("/")}?rev=${job.revision}`;
+	try {
+		// Trusted revisions only: their flake's nixConfig, such as its substituters, is honored.
+		const { stdout } = await run("nix", ["print-dev-env", "--accept-flake-config", "--no-write-lock-file", url], {
+			env,
+			encoding: "utf8",
+			maxBuffer: 64 * 1024 * 1024,
+		});
+		return stdout;
+	} catch (error) {
+		const stderr = (error as { stderr?: string }).stderr?.trim().split("\n").slice(-20).join("\n");
+		throw new Error(`could not build the devShell at ${job.revision}${stderr ? `:\n${stderr}` : ""}`);
+	}
 }
 
 /** Run jobs in the foreground until interrupted. */
@@ -175,6 +196,12 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 	const adapter = adapterFor(io);
 	if (!which("nix", io.env))
 		throw new RunnerInputError("nix is not installed; every job runs in its project's devShell");
+	// Claude Code's sandbox needs both on Linux; macOS has Seatbelt built in.
+	const missing = process.platform === "linux" ? ["bwrap", "socat"].filter((name) => !which(name, io.env)) : [];
+	if (missing.length)
+		throw new RunnerInputError(
+			`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not installed; every job runs in an OS sandbox (install bubblewrap and socat, or use the flake's runner package)`,
+		);
 	try {
 		execFileSync("git", ["--version"], { stdio: "ignore" });
 	} catch {
@@ -189,7 +216,7 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		login: current,
 		slots: options.slots,
 		adapter: () => adapter,
-		shell: devShell,
+		devShell: (job, repository) => devShell(job, repository, io.env),
 		remote: (job) => `https://github.com/${job.owner}/${job.name}.git`,
 		env: io.env,
 		fetch: fetcher,

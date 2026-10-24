@@ -13,6 +13,7 @@ import { serveTools } from "./mcp";
 import { OutputUploader } from "./output";
 import { resumePrompt, startPrompt, SYSTEM } from "./prompt";
 import { type Job, type Message, type Outcome, clip } from "./protocol";
+import { type Sandbox, closeSandbox, openSandbox } from "./sandbox";
 import { Workspace } from "./workspace";
 
 /** What an attempt needs from its runner. */
@@ -23,8 +24,12 @@ export interface Context {
 	/** The account's isolated CLI home. */
 	home(account: Account): string;
 	adapter(account: Account): Adapter;
-	/** The command prefix the agent runs under for this job, such as its project's devShell. */
-	shell(job: Job): string[];
+	/**
+	 * The job's devShell as a script for its sandboxed commands to source,
+	 * evaluated from the job's revision in the bare clone `repository`, or
+	 * null to run in the runner's own environment.
+	 */
+	devShell(job: Job, repository: string): Promise<string | null>;
 	/** Where to fetch the job's repository from. */
 	remote(job: Job): string;
 	env: NodeJS.ProcessEnv;
@@ -130,13 +135,14 @@ export class Attempt {
 	async #run(): Promise<void> {
 		const { job, ctx } = this;
 		try {
+			// An untrusted head's devShell must be built in a VM, which this runner cannot do yet.
 			if (!job.trusted)
 				return await this.#finish(
 					"failed",
-					"This runner runs only trusted revisions until the job sandbox ships; run this job on a runner that builds untrusted heads in a VM.",
+					"This runner runs only trusted revisions; run this job on a runner that builds untrusted heads in a VM.",
 				);
-			// Until the job sandbox ships, the agent acts on an answer with this machine's
-			// access only once this runner's owner gave or approved it. kix holds such jobs.
+			// Until the sandbox is verified on every runner platform, the agent acts on an
+			// answer only once this runner's owner gave or approved it. kix holds such jobs.
 			if (job.questions.some((q) => q.answer !== null && typeof q.approvedAt !== "number"))
 				return await this.#finish(
 					"failed",
@@ -147,14 +153,23 @@ export class Attempt {
 				return await this.#finish("failed", `The account ${job.account} is no longer on this runner.`);
 			this.#workspace = await Workspace.prepare(ctx.root, job, ctx.remote(job));
 			if (this.#ended()) return await this.#conclude(null, account);
+			const devShell = await ctx.devShell(job, this.#workspace.repository);
+			if (this.#ended()) return await this.#conclude(null, account);
 			const resume = job.session !== null;
 			const output = new OutputUploader(
 				(seq, text) => ctx.request({ type: "output", job: job.id, attempt: job.attempt, seq, text }),
 				(line) => ctx.log(`${job.id}: ${line}`),
 			);
 			const tools = await serveTools(this.#tools());
+			let sandbox: Sandbox | undefined;
 			let exit: Exit;
 			try {
+				sandbox = openSandbox({
+					cwd: this.#workspace.dir,
+					repository: this.#workspace.repository,
+					runnerHome: ctx.root,
+					devShell,
+				});
 				this.#agent = ctx.adapter(account).launch({
 					cwd: this.#workspace.dir,
 					home: ctx.home(account),
@@ -163,7 +178,7 @@ export class Attempt {
 					prompt: resume ? resumePrompt(job) : startPrompt(job, this.instructions, this.#workspace.dir),
 					system: SYSTEM,
 					tools: { url: tools.url, token: tools.token },
-					shell: ctx.shell(job),
+					sandbox,
 					env: ctx.env,
 					output: (line) => output.write(line),
 				});
@@ -173,6 +188,7 @@ export class Attempt {
 			} finally {
 				await tools.close();
 				await output.close();
+				if (sandbox) closeSandbox(sandbox);
 			}
 			await this.#conclude(exit, account);
 		} catch (error) {
