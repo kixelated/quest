@@ -360,7 +360,11 @@ jobs that are queued, running, failed, or waiting on an agent's questions, a
 tool permission, or an account limit.
 
 `dev/github.ts` fakes GitHub for every outbound request, so nothing leaves
-localhost and no real credential is used. Notifications are off, since a push
+localhost and no real credential is used. It models what publication needs:
+commits and trees, fast-forward branch updates on the upstream and its service
+fork, and pull request creation, so a runner's job publishes end to end. Like
+GitHub, it scopes each installation token to the repositories and permissions
+it was minted for. Notifications are off, since a push
 would reach a real push service. Sign in with GitHub completes as the
 seeded maintainer. From a shell, sign in with a cookie jar:
 
@@ -370,7 +374,8 @@ curl -sL -c jar -b jar -H 'Origin: http://localhost:8787' -d provider=github htt
 
 Check phone and desktop widths with the browser's device emulation. The Worker
 tests run the same seed (`test/seed.test.ts`), so it follows schema and route
-changes, and later end-to-end tests can start from it.
+changes, and later end-to-end tests can start from it. The publication tests
+(`test/publish.test.ts`) use the same fake with a smaller world of their own.
 
 ## Checks
 
