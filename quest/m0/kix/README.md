@@ -107,18 +107,20 @@ fixes what it finds:
 - A rejected `rate_limit_event` and its `resetsAt` arrive when a plan runs
   out, so the account sits out until its reset instead of the one-hour
   fallback.
+- opencode accounts (shipped with stubbed servers and a free model) sign in
+  to an OpenCode Go plan and a ChatGPT plan, the latter through its headless
+  method on a remote runner, and run a job on opencode's default model or
+  `--model`. Their limits pause the account until the reset: OpenCode Go's
+  `account_rate_limit` retry, and ChatGPT's `usage_limit_reached` error with
+  `resets_at`. If ChatGPT plans fall short through opencode, plan the Codex
+  adapter the 2026-10-15 decision allows.
 
 ## Required
 
-- [Runner hardening](/quest/m0/kix/runner-hardening.md) - one runner per home, and `context` reads every review thread
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
-- [Job sandbox](/quest/m0/kix/sandbox.md) - OS-sandboxed commands, with untrusted PR devShells built in a VM on Linux runners
-- [opencode adapter](/quest/m0/kix/opencode.md) - OpenCode Go, ChatGPT plans, and API-key providers through opencode
+- [Job sandbox](/quest/m0/kix/sandbox.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
 - [Merge jobs](/quest/m0/kix/merge-job.md) - a merge pick fixes conflicts, CI, and reviews on a runner, then lands the PR
-- [Web planning](/quest/m0/kix/planning.md) - issue-to-quest interviews produce draft planning PRs
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
-- [Seeded GitHub fake](/quest/m0/kix/github-fake.md) - the local server runs publication end to end, and tests share its fake
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR
-- [Merged claims](/quest/m0/kix/merged-claims.md) - the board ignores branches whose pull request merged, as the CLI does

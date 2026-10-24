@@ -120,8 +120,6 @@ describe("Worker", () => {
 			"/%5cevil.example",
 		].map((next) => [next, "/inbox"]),
 	])("returns to a local page after signing in: %j -> %j", async (next, expected) => {
-		// Better Auth stores each sign-in's callback with its OAuth state.
-		await env.DB.prepare("DELETE FROM verification").run();
 		const response = await SELF.fetch(`${origin}/sign-in`, {
 			method: "POST",
 			headers: { Origin: origin },

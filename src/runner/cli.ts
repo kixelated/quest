@@ -1,19 +1,23 @@
 // The `quest runner` commands: sign the machine in to kix, sign agent
 // accounts in with their own CLIs, and run jobs in the foreground.
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { accessSync, constants, realpathSync, rmSync } from "node:fs";
 import { hostname } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 
-import type { Adapter } from "./adapter";
+import type { Adapter, AdapterName } from "./adapter";
 import { Claude } from "./claude";
+import { Opencode } from "./opencode";
 import { type Account, type Login, RunnerHome, defaultHome } from "./home";
 import type { Job } from "./protocol";
 import { Runner } from "./runner";
 
 export const DEFAULT_URL = "https://kix.quest";
+
+const run = promisify(execFile);
 
 /** A runner command's mistake in its arguments or setup, reported as a usage error. */
 export class RunnerInputError extends Error {}
@@ -44,24 +48,55 @@ export function which(name: string, env: NodeJS.ProcessEnv): string | undefined 
 	return undefined;
 }
 
+const CLIS: Record<AdapterName, { binary: string; variable: string; product: string }> = {
+	claude: { binary: "claude", variable: "QUEST_RUNNER_CLAUDE", product: "Claude Code" },
+	opencode: { binary: "opencode", variable: "QUEST_RUNNER_OPENCODE", product: "opencode" },
+};
+
 /**
- * The Claude Code binary: `QUEST_RUNNER_CLAUDE`, or `claude` on PATH. It is
- * resolved before any devShell is entered, so a project cannot substitute
- * its own `claude` for the one the account signed in with.
+ * An agent CLI's binary: its `QUEST_RUNNER_*` variable, or the CLI on PATH.
+ * It is resolved before any devShell is entered, so a project cannot
+ * substitute its own CLI for the one the account signed in with.
  */
-export function claudeBinary(env: NodeJS.ProcessEnv): string {
-	const configured = env.QUEST_RUNNER_CLAUDE;
+export function cliBinary(name: AdapterName, env: NodeJS.ProcessEnv): string {
+	const { binary, variable, product } = CLIS[name];
+	const configured = env[variable];
 	if (configured) {
-		if (!isAbsolute(configured)) throw new RunnerInputError("QUEST_RUNNER_CLAUDE must be an absolute path");
+		if (!isAbsolute(configured)) throw new RunnerInputError(`${variable} must be an absolute path`);
 		return configured;
 	}
-	const found = which("claude", env);
-	if (!found) throw new RunnerInputError("claude is not installed; install Claude Code or set QUEST_RUNNER_CLAUDE");
+	const found = which(binary, env);
+	if (!found) throw new RunnerInputError(`${binary} is not installed; install ${product} or set ${variable}`);
 	return found;
 }
 
-function adapterFor(io: RunnerIO): Adapter {
-	return new Claude(claudeBinary(io.env), "bypassPermissions", io.env);
+export function adapterFor(name: AdapterName, env: NodeJS.ProcessEnv): Adapter {
+	const binary = cliBinary(name, env);
+	return name === "opencode" ? new Opencode(binary, env) : new Claude(binary, env);
+}
+
+/**
+ * The adapters a running runner launches jobs with, each resolved once, the
+ * first time an account needs it. Claude Code sandboxes its jobs' commands,
+ * which on Linux needs bubblewrap and socat, so they are checked then; macOS
+ * has Seatbelt built in. opencode runs unsandboxed, so it needs neither.
+ */
+export function runnerAdapters(env: NodeJS.ProcessEnv): (name: AdapterName) => Adapter {
+	const adapters = new Map<AdapterName, Adapter>();
+	return (name) => {
+		let adapter = adapters.get(name);
+		if (adapter) return adapter;
+		const missing =
+			name === "claude" && process.platform === "linux"
+				? ["bwrap", "socat"].filter((tool) => !which(tool, env))
+				: [];
+		if (missing.length)
+			throw new RunnerInputError(
+				`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not installed; Claude Code jobs run in an OS sandbox (install bubblewrap and socat, or use the flake's runner package)`,
+			);
+		adapters.set(name, (adapter = adapterFor(name, env)));
+		return adapter;
+	};
 }
 
 function home(io: RunnerIO): RunnerHome {
@@ -111,22 +146,33 @@ export async function login(
 }
 
 /** Sign a new account in with its CLI's own flow, in its own home. */
-export async function addAccount(io: RunnerIO, options: { console: boolean; label?: string }): Promise<number> {
+export async function addAccount(
+	io: RunnerIO,
+	options: { cli: AdapterName; console: boolean; label?: string; model?: string },
+): Promise<number> {
 	platform();
 	const label = options.label?.trim();
 	if (label !== undefined && (!label || label.length > 100))
 		throw new RunnerInputError("--label must be 1 to 100 characters");
+	if (options.console && options.cli !== "claude")
+		throw new RunnerInputError("--console is for Claude Code; opencode asks how to sign in");
+	const model = options.model?.trim();
+	if (model !== undefined && options.cli !== "opencode")
+		throw new RunnerInputError("--model is for opencode; Claude Code picks its own");
+	if (model !== undefined && !/^[^/\s]+\/\S+$/.test(model))
+		throw new RunnerInputError("--model must be provider/model, such as openai/gpt-5.5");
 	const state = home(io);
-	const adapter = adapterFor(io);
+	const adapter = adapterFor(options.cli, io.env);
 	const { id, home: dir } = state.newAccount();
 	try {
 		await adapter.login(dir, { console: options.console });
 		const signedIn = await adapter.status(dir);
 		if (!signedIn) throw new Error("the account did not finish signing in");
+		if (model) Opencode.setModel(dir, model);
 		const account: Account = {
 			id,
 			adapter: adapter.name,
-			provider: adapter.provider,
+			provider: signedIn.provider,
 			kind: signedIn.kind,
 			label: label ?? signedIn.label.slice(0, 100),
 		};
@@ -158,11 +204,35 @@ export function removeAccount(io: RunnerIO, id: string): number {
 	return 0;
 }
 
-/** Projects without a flake are bootstrapped in the runner's own environment, which has Nix. */
-export function devShell(job: Job): string[] {
-	if (job.workflow === "bootstrap") return [];
-	// Trusted revisions only: their flake's nixConfig, such as its substituters, is honored.
-	return ["nix", "develop", "--accept-flake-config", "--no-write-lock-file", "--command"];
+/**
+ * The job's devShell environment, which its sandboxed commands source: the
+ * script `nix print-dev-env` prints for the flake at the job's revision. The
+ * runner evaluates and builds it through the host's Nix, so it reads the
+ * committed revision rather than a checkout the agent may have edited, and
+ * runs nothing from it; the shellHook runs inside the sandbox. A project
+ * without a flake is bootstrapped in the runner's own environment.
+ */
+export async function devShell(
+	job: Job,
+	repository: string,
+	env: NodeJS.ProcessEnv,
+	signal?: AbortSignal,
+): Promise<string | null> {
+	if (job.workflow === "bootstrap") return null;
+	const url = `git+file://${repository.split("/").map(encodeURIComponent).join("/")}?rev=${job.revision}`;
+	try {
+		// Trusted revisions only: their flake's nixConfig, such as its substituters, is honored.
+		const { stdout } = await run("nix", ["print-dev-env", "--accept-flake-config", "--no-write-lock-file", url], {
+			env,
+			encoding: "utf8",
+			maxBuffer: 64 * 1024 * 1024,
+			signal,
+		});
+		return stdout;
+	} catch (error) {
+		const stderr = (error as { stderr?: string }).stderr?.trim().split("\n").slice(-20).join("\n");
+		throw new Error(`could not build the devShell at ${job.revision}${stderr ? `:\n${stderr}` : ""}`);
+	}
 }
 
 /** Run jobs in the foreground until interrupted. */
@@ -171,8 +241,11 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 	const state = home(io);
 	const current = state.login();
 	if (!current) throw new RunnerInputError("this machine is not signed in; run `quest runner login` first");
-	if (!state.accounts().length) throw new RunnerInputError("no accounts; add one with `quest runner account add`");
-	const adapter = adapterFor(io);
+	const accounts = state.accounts();
+	if (!accounts.length) throw new RunnerInputError("no accounts; add one with `quest runner account add`");
+	// Only the CLIs some account uses, resolved before any job enters a devShell.
+	const adapter = runnerAdapters(io.env);
+	for (const account of accounts) adapter(account.adapter);
 	if (!which("nix", io.env))
 		throw new RunnerInputError("nix is not installed; every job runs in its project's devShell");
 	try {
@@ -188,13 +261,15 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		home: state,
 		login: current,
 		slots: options.slots,
-		adapter: () => adapter,
-		shell: devShell,
+		// An account added while the runner runs uses a CLI resolved, and a sandbox checked, then.
+		adapter: (account) => adapter(account.adapter),
+		devShell: (job, repository, signal) => devShell(job, repository, io.env, signal),
 		remote: (job) => `https://github.com/${job.owner}/${job.name}.git`,
 		env: io.env,
 		fetch: fetcher,
 		log,
 	});
+	const held = state.hold();
 	const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 	const stop = () => {
 		log("stopping: publishing running work so it moves to another runner");
@@ -212,5 +287,6 @@ export async function runRunner(io: RunnerIO, options: { slots: number }): Promi
 		return 0;
 	} finally {
 		for (const signal of signals) process.off(signal, stop);
+		held.release();
 	}
 }

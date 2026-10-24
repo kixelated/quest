@@ -232,15 +232,12 @@ async function state() {
 
 beforeEach(async () => {
 	await env.DB.batch([
-		env.DB.prepare("DELETE FROM github_projects"),
-		env.DB.prepare("DELETE FROM github_installations"),
 		env.DB.prepare(
-			"INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('enrollment-test','Maintainer','enrollment-test@example.test',1,0,0)",
+			"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('enrollment-test','Maintainer','enrollment-test@example.test',1,0,0)",
 		),
 		env.DB.prepare(
-			"INSERT OR IGNORE INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('enrollment-account','7007','github','enrollment-test',0,0)",
+			"INSERT INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('enrollment-account','7007','github','enrollment-test',0,0)",
 		),
-		env.DB.prepare("UPDATE account SET accountId='7007' WHERE userId='enrollment-test'"),
 	]);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -692,6 +689,15 @@ describe("project setup routes", () => {
 function connection<T>(nodes: T[], more = false, cursor: string | null = null) {
 	return { nodes, pageInfo: { hasNextPage: more, endCursor: cursor } };
 }
+/** A quest branch that no merged PR left behind. */
+function ref(name: string) {
+	return {
+		name,
+		prefix: "refs/heads/quest/",
+		target: { oid: "b".repeat(40) },
+		associatedPullRequests: { nodes: [] },
+	};
+}
 function issue(id = 100, number = 1) {
 	return {
 		databaseId: String(id),
@@ -724,7 +730,7 @@ function activity(): ActivityPage {
 		issues: connection([issue()]),
 		pullRequests: connection(pulls),
 		open: connection(pulls),
-		refs: connection([{ name: "second", prefix: "refs/heads/quest/" }]),
+		refs: connection([ref("second")]),
 	};
 }
 // A long history whose open PRs and quest branches fit in one page.
@@ -1286,7 +1292,7 @@ describe("webhook reconciliation", () => {
 			refs: connection([]),
 		};
 		await github({ activity: quiet }).service.projectState(repo, "enrollment-test", true);
-		mocked({ activity: { ...quiet, refs: connection([{ name: "first", prefix: "refs/heads/quest/" }]) } });
+		mocked({ activity: { ...quiet, refs: connection([ref("first")]) } });
 		await delivery("push", { ...event, ref: "refs/heads/quest/first", created: true }, undefined, {}, testEnv);
 		const state = await github().service.projectState(repo, "enrollment-test");
 		expect(state!.claims).toEqual(["quest/first.md"]);

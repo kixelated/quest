@@ -10,7 +10,6 @@ let cookie = "";
 let owner = "";
 
 beforeEach(async () => {
-	await db.prepare("DELETE FROM runners").run();
 	const who = identity("github");
 	cookie = (await oauth(who)).session!;
 	owner = (await db
@@ -68,7 +67,7 @@ describe("runner login", () => {
 
 	it("refuses a key another account already connected", async () => {
 		await db
-			.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
+			.prepare("INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
 			.bind("someone", "someone", "someone@example.test")
 			.run();
 		await store.registerRunner(db, "someone", "theirs", "linux", false, await key(), 0);

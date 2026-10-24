@@ -1422,8 +1422,39 @@ a.entry-title:hover {
 	flex-basis: 100%;
 }
 .history summary,
-.skipped summary {
+.skipped summary,
+.new-plan summary,
+.pin summary {
 	cursor: pointer;
+}
+/* The new plan box opens under its project, across the row. */
+.new-plan {
+	display: block;
+}
+.new-plan[open] summary {
+	margin-bottom: 0.75rem;
+}
+/* Where a new job runs is secondary, so it stays folded and small. */
+/* A fieldset is as wide as its content by default; long account names must wrap, not widen the page. */
+.new-plan .ask,
+.pin {
+	min-width: 0;
+}
+.pin {
+	display: grid;
+	gap: 0.4rem;
+	font-size: 0.92rem;
+	color: var(--ql-muted);
+}
+.pin select {
+	width: 100%;
+	min-width: 0;
+	padding: 0.5rem;
+	color: var(--ql-text);
+	background: var(--ql-bg);
+	border: 1px solid var(--ql-rule);
+	border-radius: 4px;
+	font: inherit;
 }
 .history ol {
 	display: grid;

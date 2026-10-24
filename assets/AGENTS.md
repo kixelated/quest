@@ -128,6 +128,9 @@ it over, saying how long ago it was last active.
 
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
+Only claims use that namespace: no other branch is named `quest` or starts with `quest/`, since git cannot hold a branch named after another's directory.
+Branches for `/quest-plan`, `/quest-audit`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
+If `quest start` names a branch in the way, stop and report it; never delete or rename it yourself.
 
 Push updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.

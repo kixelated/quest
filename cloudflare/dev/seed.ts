@@ -3,10 +3,22 @@
 // through the Worker's own routes against the fake GitHub, so they follow the
 // current code; only runners and jobs, which need a live runner, are written
 // to D1 directly.
-import { type Repo, type World, commitOf, databaseId, headOf, webhookSignature } from "./github";
+import {
+	type Comment,
+	type Pull,
+	type Repo,
+	type World,
+	commitOf,
+	databaseId,
+	headOf,
+	webhookSignature,
+} from "./github";
 
 const quest = (title: string, goal: string, required: string[] = []) =>
 	`# ${title}\n\n## Goal\n\n${goal}\n` + (required.length ? `\n## Required\n\n${required.join("\n")}\n` : "");
+/** A discussion of `count` short comments. */
+const remarks = (count: number, author: string): Comment[] =>
+	Array.from({ length: count }, (_, i) => ({ author, body: `Seen it too (${i + 1}).`, at: "2026-10-19T12:00:00Z" }));
 
 /** A fresh world: `seed` adds to it, and the fake GitHub answers from it. */
 export function world(): World {
@@ -68,12 +80,21 @@ export function world(): World {
 		],
 		issues: [
 			{ number: 2, title: "Old crash on startup", author: "reporter", closed: true },
-			{ number: 3, title: "Crash when the config file is empty", author: "reporter", comments: 2 },
+			{
+				number: 3,
+				title: "Crash when the config file is empty",
+				author: "reporter",
+				body: "The app crashes on startup when `config.toml` exists but is empty.",
+				comments: [
+					{ author: "maintainer", body: "Reproduced on main.", at: "2026-10-19T12:00:00Z" },
+					{ author: null, body: "Same with a file holding only whitespace.", at: "2026-10-19T13:00:00Z" },
+				],
+			},
 			{
 				number: 7,
 				title: "Settings page loses unsaved changes when the session expires while the browser tab sits in the background on a phone",
 				author: "phone-user",
-				comments: 5,
+				comments: remarks(5, "phone-user"),
 			},
 			{ number: 8, title: "Add a dark mode toggle", author: "night-owl" },
 		],
@@ -86,7 +107,7 @@ export function world(): World {
 				checks: "SUCCESS",
 				review: "APPROVED",
 				reviews: [{ state: "APPROVED", author: "reviewer" }],
-				comments: 3,
+				comments: remarks(3, "reviewer"),
 				merge: "CLEAN",
 			},
 			{
@@ -148,12 +169,15 @@ export function world(): World {
 				merge: "CLEAN",
 			},
 		],
-		claims: ["quest/m0/docs"],
+		// A claim pushed without a pull request.
+		branches: { "quest/m0/docs": "d".repeat(40) },
 		// Changed outside its waiting job, which can start over.
 		fork: { "quest/m1/fonts": "f".repeat(40) },
+		commits: {},
+		trees: {},
 	};
-	// kix opened this one for a job that then failed before recording it.
-	rocket.pulls.push({
+	// kix opened this one from its fork branch for a job that then failed before recording it.
+	const imported: Pull = {
 		number: 20,
 		title: "Import a project from a ZIP archive",
 		author: "quest-dev[bot]",
@@ -162,7 +186,9 @@ export function world(): World {
 		checks: "PENDING",
 		review: null,
 		draft: true,
-	});
+	};
+	rocket.pulls.push(imported);
+	rocket.fork[imported.branch] = headOf(rocket, imported);
 	const archive: Repo = {
 		id: 9102,
 		owner: "example",
@@ -183,12 +209,15 @@ export function world(): World {
 		],
 		issues: [{ number: 1, title: "Archive the old site", author: "reporter" }],
 		pulls: [],
-		claims: [],
+		branches: {},
 		fork: {},
+		commits: {},
+		trees: {},
 	};
 	return {
 		app: { id: 123, slug: "quest-dev" },
 		installation: 9201,
+		forkInstallation: 9202,
 		forks: "quest-dev-forks",
 		users: [{ id: 9001, login: "dev-maintainer", name: "Dev Maintainer", email: "maintainer@example.test" }],
 		repos: [rocket, archive],
@@ -320,12 +349,17 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 		target: string;
 		revision: string;
 		branch: string;
-		state: "queued" | "running" | "waiting" | "failed";
+		state: "queued" | "running" | "waiting" | "failed" | "completed";
 		/** The commit the job last published to its branch. */
 		head?: string;
 		runner?: string;
 		account?: string;
 		summary?: string;
+		/** What a completed job reported, such as its suggested follow-ups. */
+		result?: unknown;
+		/** A new plan's request: the maintainer's idea and what they pasted with it. */
+		idea?: string;
+		context?: string;
 		question?: { kind: "agent" | "account" | "publication"; prompt: unknown };
 	};
 	const list: Job[] = [
@@ -465,6 +499,50 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			summary: "Reproducing the lost settings in a background tab.",
 		},
 		{
+			id: "00000000-5eed-4000-8000-000000000001",
+			workflow: "plan",
+			target: "plans/00000000-5eed-4000-8000-000000000001",
+			revision: commit,
+			branch: "plan/00000000",
+			state: "waiting",
+			runner: "workstation",
+			account: "claude-max",
+			idea: "Let people share a read-only link to a project",
+			context: "From the call with the design team:\n- links should expire\n- no sign-in to view",
+			summary: "Read the call notes and the project pages. One choice decides the quests.",
+			question: {
+				kind: "agent",
+				prompt: {
+					kind: "decision",
+					questions: [
+						{
+							header: "Expiry",
+							question: "How long should a shared link last?",
+							options: [
+								{ label: "Until revoked" },
+								{ label: "30 days", description: "Matches the call notes.", recommended: true },
+							],
+						},
+					],
+				},
+			},
+		},
+		{
+			id: "00000000-5eed-4000-8000-000000000002",
+			workflow: "start",
+			target: "quest/m0/cli.md",
+			revision: commit,
+			branch: "quest/m0/cli",
+			state: "completed",
+			runner: "workstation",
+			account: "claude-max",
+			summary: "Added the command-line entry point and its tests.",
+			result: {
+				head: null,
+				followups: ["Shell completions for bash, zsh, and fish", "A --json flag on every listing command"],
+			},
+		},
+		{
 			id: "seed-start-offline",
 			workflow: "start",
 			target: "quest/m1/offline.md",
@@ -495,7 +573,7 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 			return [
 				db
 					.prepare(
-						"INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,state,attempt,runner,account,delivered,summary,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+						"INSERT INTO jobs(id,repository,workflow,target,revision,branch,head,actor,trusted,state,attempt,runner,account,delivered,summary,result,idea,context,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 					)
 					.bind(
 						job.id,
@@ -513,6 +591,9 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 						job.account ?? null,
 						attempt,
 						job.summary ?? null,
+						job.result === undefined ? null : JSON.stringify(job.result),
+						job.idea ?? null,
+						job.context ?? null,
 						at,
 						now,
 					),
