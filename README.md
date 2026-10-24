@@ -520,9 +520,10 @@ Every job runs in its own checkout inside the project's `nix develop` shell,
 with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
 job instead. The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
-and `deliver` publishes the result and its pull request. A job on an issue or
+and `deliver` publishes the result and its pull request, listing any suggested
+follow-ups, which the inbox offers you to plan. A job on an issue or
 pull request reads it through `context`, since the runner holds no GitHub
-token. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
+token; a new plan reads your idea and pasted context there. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
 runner. Until the job sandbox ships, runners take only trusted revisions,
