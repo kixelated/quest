@@ -29,7 +29,8 @@
             config.allowUnfreePredicate = pkg: nixpkgs.lib.getName pkg == "claude-code";
           };
           quest = pkgs.callPackage ./nix/package.nix { };
-          # `quest runner` with the agent CLIs it drives pinned by this flake's lock.
+          # `quest runner` with the agent CLIs it drives pinned by this flake's lock, and on
+          # Linux the bubblewrap and socat Claude Code's sandbox runs its jobs' commands in.
           runner = pkgs.symlinkJoin {
             name = "quest-runner-${quest.version}";
             paths = [ quest ];
@@ -37,7 +38,12 @@
             postBuild = ''
               wrapProgram $out/bin/quest \
                 --set-default QUEST_RUNNER_CLAUDE ${pkgs.lib.getExe pkgs.claude-code} \
-                --set-default QUEST_RUNNER_OPENCODE ${pkgs.lib.getExe pkgs.opencode}
+                --set-default QUEST_RUNNER_OPENCODE ${pkgs.lib.getExe pkgs.opencode} ${pkgs.lib.optionalString pkgs.stdenv.isLinux "--prefix PATH : ${
+                  pkgs.lib.makeBinPath [
+                    pkgs.bubblewrap
+                    pkgs.socat
+                  ]
+                }"}
             '';
             meta = quest.meta;
           };

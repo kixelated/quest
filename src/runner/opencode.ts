@@ -6,6 +6,11 @@
 // home signed in to, never the credentials. The kix tools attach as a remote
 // MCP server, and opencode's question tool is denied so every question goes
 // through kix's `ask` instead.
+//
+// opencode has no sandbox of its own, and the runner does not yet wrap it in
+// one: its commands run on the host, in the devShell the runner built from the
+// job's revision and with the attempt's private HOME, but not confined to the
+// checkout.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -268,8 +273,12 @@ export class Opencode implements Adapter {
 		};
 		// The account's XDG directories apply to opencode alone: the devShell's nix reads the user's.
 		const xdg = Object.entries(accountDirectories(launch.home)).map(([name, dir]) => `${name}=${dir}`);
+		// The sandbox's script sets the private HOME and enters the devShell, in bash's syntax, before opencode starts.
 		const argv = [
-			...launch.shell,
+			"bash",
+			"-c",
+			'. "$0" && exec "$@"',
+			launch.sandbox.env,
 			"/usr/bin/env",
 			...xdg,
 			this.binary,
@@ -282,6 +291,7 @@ export class Opencode implements Adapter {
 			cwd: launch.cwd,
 			env: {
 				...environment(launch.env),
+				TMPDIR: launch.sandbox.tmp,
 				OPENCODE_SERVER_PASSWORD: password,
 				OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
 			},

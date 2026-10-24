@@ -522,9 +522,30 @@ default. Use Claude Code for Claude subscriptions, since opencode cannot sign
 in to them. kix.quest/runners shows each runner's presence and sets the order
 jobs use your accounts in.
 
-Every job runs in its own checkout inside the project's `nix develop` shell,
-with the flake's `nixConfig` honored; a project without a flake gets a bootstrap
-job instead. The agent reports through kix tools: `checkpoint` summaries publish
+Every job runs in its own checkout with the project's devShell, which the runner
+builds with `nix print-dev-env` from the job's revision, honoring the flake's
+`nixConfig`; a project without a flake gets a bootstrap job instead. On Claude
+Code accounts, Claude Code's sandbox (bubblewrap on Linux, Seatbelt on macOS)
+confines every command the agent runs, the devShell's shellHook included:
+commands write only to the checkout and a private temporary directory that is
+also their `HOME`, cannot read account homes, the runner's state, or shared
+temporary directories, and have no Nix daemon. A trusted revision's commands
+reach only the npm, crates.io, and PyPI package registries, so its checks can
+install dependencies; an untrusted one's reach no network host. npm's registry
+also accepts publishes, so a prompt-injected agent holding someone's npm token
+could publish the checkout there. The agent's file tools edit only the checkout,
+WebFetch is off, and the checkout's own `.claude` settings, hooks, and MCP
+servers are never loaded. Claude Code itself runs outside the sandbox with a
+minimal environment, so its login stays out of the commands' reach. This is an
+OS sandbox, not a VM, and it narrows rather than removes the risk of running
+agent commands on your machine. opencode has no sandbox yet: on opencode
+accounts the agent's commands run unconfined on your machine, in the devShell
+with a private `HOME`.
+
+On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
+pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
+AppArmor allows them only for programs with a profile granting `userns`.
+The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
 follow-ups, which the inbox offers you to plan. A job on an issue or
@@ -532,13 +553,14 @@ pull request reads it through `context`, since the runner holds no GitHub
 token; a new plan reads your idea and pasted context there. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
-runner. Until the job sandbox ships, runners take only trusted revisions,
-agents run with every tool allowed (Claude Code's `bypassPermissions`), and a
-job resumes with another maintainer's answer only once you approve it in the
-inbox. opencode runs as `opencode serve` on localhost behind a password made for each turn.
+runner. Runners take only trusted revisions until they can build untrusted
+heads' devShells in a VM, and a job resumes with another maintainer's answer
+only once you approve it in the inbox. opencode runs as `opencode serve` on
+localhost behind a password made for each turn.
 
-The flake's `runner` package is a `quest` whose Claude Code and opencode are
-pinned by this repository's lock (`nix run github:kixelated/quest#runner -- runner`);
+The flake's `runner` package is a `quest` whose Claude Code and opencode (and on
+Linux, bubblewrap and socat) are pinned by this repository's lock
+(`nix run github:kixelated/quest#runner -- runner`);
 otherwise `claude` and `opencode` come from `QUEST_RUNNER_CLAUDE` and
 `QUEST_RUNNER_OPENCODE`, or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
 `$XDG_DATA_HOME/quest/runner`; one `quest runner` runs in a home at a time. To keep a runner up, run `quest runner` as a user
