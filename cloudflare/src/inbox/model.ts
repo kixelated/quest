@@ -112,7 +112,8 @@ function held(entity: Pick<Item, "kind" | "activity">) {
 	return entity.kind === "pull" && !!entity.activity?.data && owned(entity.activity.data as Pull);
 }
 
-function fallback(project: Enrollment, target: string): Entity {
+/** What an item is called and links to when nothing observed names its target. */
+export function fallback(project: Enrollment, target: string): Entity {
 	const web = `https://github.com/${project.owner}/${project.name}`;
 	const kind = kindOf(target);
 	const number = target.split("/")[1];
@@ -264,22 +265,36 @@ export async function load(env: Env, user: string) {
 		}),
 	);
 	const projects = views.filter((view) => view !== null);
-	const items = await collect(
-		env.DB,
-		user,
-		projects.filter((view) => !view.error),
-	);
-	// Jobs run on their requester's runners, so presence comes from each requester's hub.
-	const actors = [...new Set(items.flatMap((item) => (item.job ? [item.job.actor] : [])))];
-	const runners = new Map<string, Runners>(
+	const readable = projects.filter((view) => !view.error);
+	const [items, activity] = await Promise.all([
+		collect(env.DB, user, readable),
+		Promise.all(readable.map((view) => store.listActivityJobs(env.DB, view.project.id, openPulls(view)))),
+	]);
+	const actors = [
+		...items.flatMap((item) => (item.job ? [item.job.actor] : [])),
+		...activity.flat().map((j) => j.actor),
+	];
+	return { projects, readable, items, activity, runners: await presence(env, actors) };
+}
+
+/** The open pull requests the project's observations list. */
+export function openPulls(view: ProjectView) {
+	return [...entities(view.project, view.state).keys()].flatMap((target) => {
+		const number = target.match(/^pulls\/(\d+)$/)?.[1];
+		return number ? [Number(number)] : [];
+	});
+}
+
+/** Each job requester's runners, with presence from their hub: jobs run on their requester's runners. */
+export async function presence(env: Env, actors: Iterable<string>) {
+	return new Map<string, Runners>(
 		await Promise.all(
-			actors.map(
+			[...new Set(actors)].map(
 				async (actor) =>
 					[actor, await store.listRunners(env.DB, actor, new Set(await hub(env, actor).online()))] as const,
 			),
 		),
 	);
-	return { projects, items, runners };
 }
 
 /** Record that the maintainer saw an item as it is now. */

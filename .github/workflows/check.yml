@@ -69,8 +69,11 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
+      # Hosted macOS runners can queue past the timeout, which then reports a job
+      # that never ran as failed. Pull requests rely on Release's native macOS
+      # lifecycle checks instead; main still checks the flake's macOS build.
       matrix:
-        runner: [ubuntu-latest, macos-14]
+        runner: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-14"]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
