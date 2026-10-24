@@ -59,7 +59,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 - [Status holds](/quest/m0/helpers/status-holds.md) - `quest status` shows a PR's `quest:*` hold
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
-- [Resolve](/quest/m0/helpers/resolve.md) - a local merge resolves concurrent link-list edits in quest files, set up by `quest init`
 
 ## Related
 

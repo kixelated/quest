@@ -1,7 +1,8 @@
 // `quest init` and `quest uninstall`: install skill stubs and reverse it.
 //
-// Init touches only stubs, one reference line, and an empty `quest/README.md`
-// when missing. Uninstall never deletes the quest tree.
+// Init touches only stubs, one reference line, one `.gitattributes` line, an
+// empty `quest/README.md` when missing, and the clone's merge driver config.
+// Uninstall never deletes the quest tree.
 
 import {
 	existsSync,
@@ -18,6 +19,8 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { gitOutput } from "./claims";
+import { DRIVER } from "./resolve";
 import { SKILLS } from "./skills";
 
 /**
@@ -31,6 +34,9 @@ export const REFERENCE_LINE = "Quests: when work mentions a quest, run `quest gu
 
 /** The skill directories Claude Code and Codex read; new installs use real directories. */
 const SKILL_DIRS = [".claude/skills", ".agents/skills"] as const;
+
+/** Routes quest files through the `quest` merge driver; uninstall removes lines starting with it. */
+export const ATTRIBUTES_LINE = "quest/** merge=quest";
 
 const QUEST_ROOT_README = "# Quests\n\n## Goal\n\nWhat this project is working toward.\n";
 
@@ -58,6 +64,7 @@ export function init(root: string): string[] {
 	checkPath(root, readme, "file");
 	const instructions = ["AGENTS.md", "CLAUDE.md"].find((name) => isFile(join(root, name))) ?? "AGENTS.md";
 	checkPath(root, instructions, "file");
+	checkPath(root, ".gitattributes", "file");
 
 	const changes: string[] = [];
 	for (const { path, stub } of missing) {
@@ -73,7 +80,49 @@ export function init(root: string): string[] {
 	}
 
 	if (appendLine(root, instructions, REFERENCE_MARKER, REFERENCE_LINE)) changes.push(instructions);
+	if (appendLine(root, ".gitattributes", ATTRIBUTES_LINE, ATTRIBUTES_LINE)) changes.push(".gitattributes");
+	register(root);
 	return changes;
+}
+
+/**
+ * Register the merge driver when `root`'s `.gitattributes` names it, so fresh
+ * clones and worktrees get it from any command. Never fails.
+ */
+export function heal(root: string): void {
+	let named = false;
+	try {
+		named = lines(read(root, ".gitattributes")).some((line) => /(^|\s)merge=quest(\s|$)/.test(line));
+	} catch {
+		// No attributes, so no driver to register.
+	}
+	if (named) register(root);
+}
+
+/**
+ * Set `merge.quest.driver` in the clone's config when no config sets it, and
+ * only inside a git work tree: git ignores a driver named only in
+ * `.gitattributes`. A failed write is ignored, leaving git's own merge.
+ */
+function register(root: string): void {
+	try {
+		if (gitOutput(root, ["config", "--get", "merge.quest.driver"]) !== "") return;
+		if (gitOutput(root, ["rev-parse", "--is-inside-work-tree"]) !== "true") return;
+		gitOutput(root, ["config", "--local", "merge.quest.driver", DRIVER]);
+	} catch {
+		// Not a repository, or its config is not writable.
+	}
+}
+
+/** Remove the merge driver from the clone's config, inside a git work tree. */
+function unregister(root: string): void {
+	try {
+		if (gitOutput(root, ["rev-parse", "--is-inside-work-tree"]) !== "true") return;
+		if (gitOutput(root, ["config", "--local", "--get", "merge.quest.driver"]) === "") return;
+		gitOutput(root, ["config", "--local", "--remove-section", "merge.quest"]);
+	} catch {
+		// Not a repository, or its config is not writable.
+	}
 }
 
 /** Check an install destination and its parents before any writes, following valid symlinks. */
@@ -126,6 +175,8 @@ export function uninstall(root: string): string[] {
 	for (const path of ["AGENTS.md", "CLAUDE.md"]) {
 		if (removeLine(root, path, REFERENCE_MARKER)) changes.push(path);
 	}
+	if (removeLine(root, ".gitattributes", ATTRIBUTES_LINE)) changes.push(".gitattributes");
+	unregister(root);
 	return changes;
 }
 
