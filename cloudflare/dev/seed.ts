@@ -3,10 +3,22 @@
 // through the Worker's own routes against the fake GitHub, so they follow the
 // current code; only runners and jobs, which need a live runner, are written
 // to D1 directly.
-import { type Repo, type World, commitOf, databaseId, headOf, webhookSignature } from "./github";
+import {
+	type Comment,
+	type Pull,
+	type Repo,
+	type World,
+	commitOf,
+	databaseId,
+	headOf,
+	webhookSignature,
+} from "./github";
 
 const quest = (title: string, goal: string, required: string[] = []) =>
 	`# ${title}\n\n## Goal\n\n${goal}\n` + (required.length ? `\n## Required\n\n${required.join("\n")}\n` : "");
+/** A discussion of `count` short comments. */
+const remarks = (count: number, author: string): Comment[] =>
+	Array.from({ length: count }, (_, i) => ({ author, body: `Seen it too (${i + 1}).`, at: "2026-10-19T12:00:00Z" }));
 
 /** A fresh world: `seed` adds to it, and the fake GitHub answers from it. */
 export function world(): World {
@@ -68,12 +80,21 @@ export function world(): World {
 		],
 		issues: [
 			{ number: 2, title: "Old crash on startup", author: "reporter", closed: true },
-			{ number: 3, title: "Crash when the config file is empty", author: "reporter", comments: 2 },
+			{
+				number: 3,
+				title: "Crash when the config file is empty",
+				author: "reporter",
+				body: "The app crashes on startup when `config.toml` exists but is empty.",
+				comments: [
+					{ author: "maintainer", body: "Reproduced on main.", at: "2026-10-19T12:00:00Z" },
+					{ author: null, body: "Same with a file holding only whitespace.", at: "2026-10-19T13:00:00Z" },
+				],
+			},
 			{
 				number: 7,
 				title: "Settings page loses unsaved changes when the session expires while the browser tab sits in the background on a phone",
 				author: "phone-user",
-				comments: 5,
+				comments: remarks(5, "phone-user"),
 			},
 			{ number: 8, title: "Add a dark mode toggle", author: "night-owl" },
 		],
@@ -86,7 +107,7 @@ export function world(): World {
 				checks: "SUCCESS",
 				review: "APPROVED",
 				reviews: [{ state: "APPROVED", author: "reviewer" }],
-				comments: 3,
+				comments: remarks(3, "reviewer"),
 				merge: "CLEAN",
 			},
 			{
@@ -148,12 +169,15 @@ export function world(): World {
 				merge: "CLEAN",
 			},
 		],
-		claims: ["quest/m0/docs"],
+		// A claim pushed without a pull request.
+		branches: { "quest/m0/docs": "d".repeat(40) },
 		// Changed outside its waiting job, which can start over.
 		fork: { "quest/m1/fonts": "f".repeat(40) },
+		commits: {},
+		trees: {},
 	};
-	// kix opened this one for a job that then failed before recording it.
-	rocket.pulls.push({
+	// kix opened this one from its fork branch for a job that then failed before recording it.
+	const imported: Pull = {
 		number: 20,
 		title: "Import a project from a ZIP archive",
 		author: "quest-dev[bot]",
@@ -162,7 +186,9 @@ export function world(): World {
 		checks: "PENDING",
 		review: null,
 		draft: true,
-	});
+	};
+	rocket.pulls.push(imported);
+	rocket.fork[imported.branch] = headOf(rocket, imported);
 	const archive: Repo = {
 		id: 9102,
 		owner: "example",
@@ -183,12 +209,15 @@ export function world(): World {
 		],
 		issues: [{ number: 1, title: "Archive the old site", author: "reporter" }],
 		pulls: [],
-		claims: [],
+		branches: {},
 		fork: {},
+		commits: {},
+		trees: {},
 	};
 	return {
 		app: { id: 123, slug: "quest-dev" },
 		installation: 9201,
+		forkInstallation: 9202,
 		forks: "quest-dev-forks",
 		users: [{ id: 9001, login: "dev-maintainer", name: "Dev Maintainer", email: "maintainer@example.test" }],
 		repos: [rocket, archive],
