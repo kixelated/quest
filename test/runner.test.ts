@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import { Claude, streamReader } from "../src/runner/claude";
@@ -476,6 +477,52 @@ describe("login", () => {
 	});
 });
 
+describe("runner home", () => {
+	/** Another process holding `dir` until it is killed. */
+	async function holder(dir: string) {
+		const root = resolve(import.meta.dirname, "..");
+		const script = join(tempDir(), "hold.ts");
+		writeFileSync(
+			script,
+			`import { RunnerHome } from ${JSON.stringify(join(root, "src/runner/home.ts"))};\n` +
+				`new RunnerHome(${JSON.stringify(dir)}).hold();\nconsole.log("held");\nsetInterval(() => {}, 1000);\n`,
+		);
+		const child = spawn("bun", [`--config=${join(root, "bunfig.toml")}`, script], {
+			stdio: ["ignore", "pipe", "inherit"],
+		});
+		const [line] = await once(child.stdout, "data");
+		expect(String(line)).toBe("held\n");
+		return child;
+	}
+
+	posix("refuses a second runner while one holds the home", async () => {
+		const dir = tempDir();
+		const first = new RunnerHome(dir).hold();
+		expect(() => new RunnerHome(dir).hold()).toThrow("another `quest runner` is running in");
+		first.release();
+		new RunnerHome(dir).hold().release();
+
+		const child = await holder(dir);
+		try {
+			expect(() => new RunnerHome(dir).hold()).toThrow(`(process ${child.pid} `);
+		} finally {
+			child.kill("SIGKILL");
+		}
+	});
+
+	posix("takes the home once its holder crashed", async () => {
+		const dir = tempDir();
+		const child = await holder(dir);
+		child.kill("SIGKILL");
+		await once(child, "exit");
+		const held = new RunnerHome(dir).hold();
+		// The crashed holder's record is gone, so only this one remains.
+		expect(readdirSync(join(dir, "running"))).toHaveLength(1);
+		held.release();
+		expect(readdirSync(join(dir, "running"))).toEqual([]);
+	});
+});
+
 /** A fake `claude` that runs the steps the test wrote for a new or resumed session. */
 const FAKE_CLAUDE = `
 const fs = require("node:fs");
@@ -876,6 +923,19 @@ describe("quest runner", () => {
 		expect(r.hub.of("result")).toEqual([]);
 		expect(r.publishes.at(-1)!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
 		expect(r.hub.of("status").at(-1)).toMatchObject({ attempts: [], slots: 0 });
+	});
+
+	posix("a replaced runner ends only once its agents exit", async () => {
+		const r = rig();
+		r.steps({ start: [ready, { wait: true }] });
+		r.assign(job(r.upstream.commit));
+		await waiting(r);
+		r.hub.socket.close(4000, "Replaced by a new connection");
+		expect(await r.runner.done).toBe("replaced");
+		// Its agent stopped before the runner let go of the home holding its checkout.
+		expect(r.runner.running).toEqual([]);
+		expect(r.calls().some((c) => c.terminated)).toBe(true);
+		expect(r.hub.of("result")).toEqual([]);
 	});
 
 	posix("continues from the head kix reports after a publication's reply was lost", async () => {

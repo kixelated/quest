@@ -528,7 +528,7 @@ another maintainer's answer only once you approve it in the inbox.
 The flake's `runner` package is a `quest` whose Claude Code is pinned by this
 repository's lock (`nix run github:kixelated/quest#runner -- runner`);
 otherwise `claude` comes from `QUEST_RUNNER_CLAUDE` or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
-`$XDG_DATA_HOME/quest/runner`. To keep a runner up, run `quest runner` as a user
+`$XDG_DATA_HOME/quest/runner`; one `quest runner` runs in a home at a time. To keep a runner up, run `quest runner` as a user
 service, such as a systemd user unit with `Restart=on-failure`.
 
 ## Prunable local checkouts
