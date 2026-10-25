@@ -30,7 +30,7 @@ import { SKILLS } from "./skills";
 const REFERENCE_MARKER = "Quests: ";
 
 /** Appended to the root agent instructions when Quest is installed. */
-export const REFERENCE_LINE = "Quests: when work mentions a quest, run `quest guide` and follow it.";
+export const REFERENCE_LINE = "Quests: before starting work, run `quest guide` and follow it.";
 
 /** The skill directories Claude Code and Codex read; new installs use real directories. */
 const SKILL_DIRS = [".claude/skills", ".agents/skills"] as const;

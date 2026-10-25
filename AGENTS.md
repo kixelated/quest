@@ -11,7 +11,7 @@ Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
 
 ## Development
 
-- Run `quest guide` and read it completely before planning or executing quests.
+- Run `quest guide` and read it completely before starting work.
 - Keep README examples consistent with the CLI's actual `--help` output.
   In this checkout, `quest` means `bun run --silent quest`.
 - Use an isolated worktree under `.worktrees/`. Preserve existing changes.
