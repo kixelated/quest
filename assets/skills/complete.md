@@ -23,7 +23,7 @@ Act on a PR only after the user picks its action in this session, including PRs 
 A blanket answer, such as "accept all" or "use your recommendations", never picks `/quest-merge`; ask again for each PR it would merge.
 A skip or hold stands until the user lifts it: do not ask about that PR again on a refresh, and state the hold in every sub-agent brief for it.
 GitHub auto-merge is that pick: enabling it takes write access, and GitHub disables it when anyone without write access pushes.
-Do not ask about a PR with auto-merge enabled; watch it like an enqueued PR, and dispatch `/quest-merge` only when a conflict, failing check, or review finding stalls it.
+Do not ask about a PR with auto-merge enabled; leave it to land, and dispatch `/quest-merge` only when a conflict, failing check, or review finding stalls it.
 A pick covers the PR until it lands or needs the user: when its push draws new review findings, send the agent back without asking; the merge skill's design checkpoint counts rounds from the PR, so it fires across those re-dispatches.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
@@ -34,16 +34,13 @@ For GitHub CI, review, or merge activity, it uses one `quest wait` and resumes w
 returned cursor as described by `quest skill merge`, rather than polling GitHub.
 Limit the number of active agents to the CPU core count.
 
-Tell each merge sub-agent that you watch its merge queue, so it reports once
-auto-merge is enabled. Wait on each such PR with `quest wait`, as `quest skill merge`
-describes, until it merges.
-If it leaves the queue unmerged or auto-merge is disabled, read `landing-stopped` from
-`quest status <pr>`. After `merge_conflict` or `failed_checks`, the pick still holds:
-dispatch `/quest-merge` again. Any other reason, such as a person removing it, is the
-user's call, so ask about the PR again.
+Merge sub-agents report once their PR is landing; do not watch the queue or wait for merges.
+An open PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.
+After `merge_conflict` or `failed_checks`, its pick still holds, even from an earlier session: dispatch `/quest-merge` again without asking.
+Any other reason, such as a person removing it, is the user's call, so ask about the PR again.
 
-Keep going until all PRs have been decided, then wait for all spawned sub-agents and enqueued PRs to finish.
-Refresh the open PR list whenever a sub-agent reports or a merge wait wakes, and once more before finishing; ask about each new PR in scope the same way.
+Keep going until all PRs have been decided, then wait for all spawned sub-agents to finish.
+Refresh the open PR list whenever a sub-agent reports, and once more before finishing; ask about each new PR in scope the same way.
 
 As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for a PR's suggested follow-ups once it merges.
 Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.
