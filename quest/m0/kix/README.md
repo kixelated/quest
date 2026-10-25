@@ -19,7 +19,8 @@ connect a Linux and a macOS runner, one with two accounts, receive an issue noti
 answer planning prompts, publish a draft quest PR, merge through GitHub's
 rules, start a ready quest, follow its summaries, answer an implementation
 question from a push notification, take its runner offline so the job is
-reassigned to the other, and receive its contribution PR notification. Exercise duplicate events,
+reassigned to the other, receive its contribution PR notification, and pick
+merge on it while it is not yet clean, so a merge job fixes and lands it. Exercise duplicate events,
 interrupted sessions, and an exhausted account with stubbed agents, starting
 from the seeded local server's fake GitHub and seed (`cloudflare/dev/`), before a
 live rehearsal on the operator's runner.
@@ -114,12 +115,19 @@ fixes what it finds:
   `account_rate_limit` retry, and ChatGPT's `usage_limit_reached` error with
   `resets_at`. If ChatGPT plans fall short through opencode, plan the Codex
   adapter the 2026-10-15 decision allows.
+- A merge job's publication refuses a merge commit that changes
+  `.github/workflows` relative to the head it updates, which
+  [kixelated/quest#209](https://github.com/kixelated/quest/pull/209) assumes
+  is the comparison GitHub makes. Try it with a real PR that edits a
+  workflow (decided 2026-10-24, user).
 
 ## Required
 
+- [Context pages](/quest/m0/kix/context-pages.md) - a job's `context` read returns every comment, review, and check of a busy PR
+- [Merge holds](/quest/m0/kix/merge-holds.md) - ended merge jobs never leave a `quest:merge` hold, through one shared hold rule
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
 - [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
-- [Job sandbox](/quest/m0/kix/sandbox.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
+- [Job sandbox](/quest/m0/kix/sandbox/README.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

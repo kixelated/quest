@@ -68,4 +68,4 @@ Earlier guidance:
 
 ## Required
 
-- [Job sandbox](/quest/m0/kix/sandbox.md) - safe iteration on PRs with contributors' commits
+- [Job sandbox](/quest/m0/kix/sandbox/README.md) - safe iteration on PRs with contributors' commits
