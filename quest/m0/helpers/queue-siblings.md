@@ -20,7 +20,8 @@ A second symptom: a quest-only PR waiting in the queue fails `quest check`
 once main finishes a quest it links. moq-dev/moq#6707 was dropped 3 times
 and moq-dev/moq#6790 4 times. Options: run `quest check` against current
 main before queueing, or have the check treat a link to a deleted quest as
-resolvable.
+resolvable. A pre-queue check alone misses a base that moves after queueing,
+and a tolerant check must tell a finished quest from a mistyped link.
 
 The fix belongs in quest, not in each repository's process. Rejected:
 landing one sibling at a time, which serializes batches.
