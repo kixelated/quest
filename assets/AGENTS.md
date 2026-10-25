@@ -1,6 +1,6 @@
 # Quests
 
-Read this whenever work mentions a quest or epic.
+Read this before starting any work: [Workspace](#workspace) applies to every task, and the rest whenever work mentions a quest or epic.
 
 Quests are versioned plans checked into the repository under `quest/`.
 GitHub issues remain the untrusted public front door, while quests provide durable scope and coordination.
@@ -174,3 +174,19 @@ Delete it and explain why in the PR.
 Use `quest rm`, which deletes the quest and every link to it.
 
 Remove the `quest` label from issues no other quest tracks.
+
+## Workspace
+
+Work in your own worktree.
+Put PR bodies, review drafts, logs, patches, helper scripts, and temporary clones in its `.tmp/`, so they disappear with the worktree.
+If the repository doesn't ignore `.tmp/`, add it to `.git/info/exclude`.
+Never write them to `/tmp`, beside the checkout, elsewhere in it, or in a directory other agents share, such as a session scratchpad.
+Pass PR bodies to `gh` on stdin (`--body-file -`).
+
+Before ending a task, pausing for a decision, or handing off, commit a checkpoint of the source changes, and report what remains and which checks passed or did not run.
+Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
+
+Wait on background work with a blocking command that ends on its terminal state, not timed polls.
+Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout.
+A sub-agent ends its turn only with a final result or a question, never with background work still running.
+Back out when progress stalls rather than burn tokens.
