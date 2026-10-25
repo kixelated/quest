@@ -61,6 +61,7 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - wake on edited bot comments, honest `checks:passed`, review rounds in `quest status`
 - [Status holds](/quest/m0/helpers/status-holds.md) - `quest status` shows a PR's `quest:*` hold
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
+- [Sibling PRs through a server-side merge](/quest/m0/helpers/queue-siblings.md) - children of one epic land back to back through a merge queue without conflicting on its link list
 
 ## Related
 
