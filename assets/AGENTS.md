@@ -179,7 +179,7 @@ Remove the `quest` label from issues no other quest tracks.
 
 Work in your own worktree.
 Put PR bodies, review drafts, logs, patches, helper scripts, and temporary clones in its `.tmp/`, so they disappear with the worktree.
-If the repository doesn't ignore `.tmp/`, add it to `.git/info/exclude`.
+If the repository doesn't ignore `.tmp/`, add it to the file `git rev-parse --git-path info/exclude` names.
 Never write them to `/tmp`, beside the checkout, elsewhere in it, or in a directory other agents share, such as a session scratchpad.
 Pass PR bodies to `gh` on stdin (`--body-file -`).
 
