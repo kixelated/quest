@@ -12,6 +12,7 @@ Look for:
 - Conflicts: quests that would change the same code or interface incompatibly, or that must land in order without a `Required` link.
 - Misaligned priorities: a quest ranked or placed in a milestone ahead of work it depends on, or behind work it blocks.
 - Stale plans: work already done, blockers that have cleared, or references to code that no longer exists.
+- Obsolete quests: a problem that is no longer real, or a plan a later change or decision has made the wrong solution.
 
 Split the reading across parallel sub-agents, each given a slice of the scope and returning its findings with evidence (a path, line, or commit).
 
