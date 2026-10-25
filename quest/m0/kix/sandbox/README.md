@@ -1,4 +1,4 @@
-# [L] Run untrusted PR heads on sandboxed runners
+# Run untrusted PR heads on sandboxed runners
 
 ## Goal
 
@@ -21,26 +21,19 @@ Decided 2026-10-15, from Codex's review of kixelated/quest#121:
 - OS sandbox, not a VM per job: bubblewrap on Linux and Seatbelt on macOS.
   Claude Code's docs say this does not replace a container or VM; the README
   documents that residual risk.
-- Job coordination marks every `iterate` job untrusted and routes it only to
-  Linux runners that register with `vm: true`. Classify PR heads whose commits
-  all come from maintainers or kix jobs as trusted here.
-- Untrusted heads: evaluate and build the PR's own devShell in a per-job
-  KVM microVM on a Linux runner, then bring the closure into the host store
-  and run the job's commands in the OS sandbox. Verify how to import unsigned
-  paths without making the runner trust arbitrary builders, and never
-  publish them to the shared cache. The runner refuses untrusted jobs until
-  then.
-- macOS runners take trusted revisions only, since a Linux VM cannot build a
-  darwin devShell. An untrusted-head job waits with "needs a Linux runner"
-  while none is online. Cloud runners are Linux-only.
+- Untrusted heads build their devShell in a per-job VM on a Linux runner
+  before their commands run in the OS sandbox. macOS runners take trusted
+  revisions only, since a Linux VM cannot build a darwin devShell. An
+  untrusted-head job waits with "needs a Linux runner" while none is online.
+  Cloud runners are Linux-only.
 - Decided 2026-10-22 on
   [kixelated/quest#188](https://github.com/kixelated/quest/pull/188), from
   Codex's security review: a job resumes with an answer from a maintainer
   other than the runner's owner (the job's requester) only after the owner
   approves it in the inbox, since the agent would act on that text with the
   owner's machine. kix holds the job and the runner refuses an answer
-  without `approvedAt`. The sandbox lifts this gate: remove the approval step
-  from kix, the inbox, and the runner.
+  without `approvedAt`. The sandbox lifts this gate once it is verified on
+  macOS.
 
 Shipped in [kixelated/quest#212](https://github.com/kixelated/quest/pull/212)
 (`src/runner/sandbox.ts`), and verified live on Linux with Claude Code
@@ -65,26 +58,23 @@ Shipped in [kixelated/quest#212](https://github.com/kixelated/quest/pull/212)
   cannot run their checks without installing dependencies. An untrusted
   revision's commands reach no network host. The answer-approval gate stays
   until the sandbox is verified on macOS.
-
-Remaining work:
-
-- opencode has no native sandbox, and its jobs' commands still run unconfined
-  on the host (in the revision's devShell, with the attempt's private HOME).
-  Decided 2026-10-15: run `opencode serve` under Anthropic's sandbox-runtime
-  with the runner's `Sandbox` policy (`src/runner/sandbox.ts`). The runner
-  reaches the server on localhost, and opencode needs its providers' hosts,
-  so check both under sandbox-runtime's network isolation. Keep the account's
-  login out of what the commands can read: verify how much of its XDG home the
-  wrapped process exposes, and deny reads of every other account home.
-  Commands also inherit the per-turn `OPENCODE_SERVER_PASSWORD`, and the kix
-  tools' bearer token in `OPENCODE_CONFIG_CONTENT`; keep both out of reach.
-
-- On macOS, sandboxed commands cannot reach the account's Keychain item
-  (`security find-generic-password`), `/private/var/folders`, or another
-  home, and the realpath'd `/private/tmp` directory works as `TMPDIR`.
-- On Ubuntu 23.10 and later, unprivileged user namespaces need an AppArmor
-  profile for the runner; document one and fail fast when the sandbox cannot
-  start, instead of failing each job.
+- Decided 2026-10-24 (user) on the same PR: opencode jobs keep running
+  their commands unconfined, as before the sandbox, until
+  [opencode sandboxing](/quest/m0/kix/sandbox/opencode.md) ships. The README
+  says so.
+- Decided 2026-10-24 (user) in `/quest-plan`: split the remaining work into
+  the children below, ranked so the earliest unblock the most. Dropped
+  (user): read-only registry access, which Claude Code's sandbox cannot
+  filter by request today, and a cancellable `Workspace.prepare` fetch.
 - Sources:
   [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)
   and [sandbox-runtime](https://www.npmjs.com/package/@anthropic-ai/sandbox-runtime).
+
+## Required
+
+- [Claude Code pin](/quest/m0/kix/sandbox/claude-pin.md) - the runner's pinned Claude Code moves to the version the sandbox docs describe
+- [Trusted PR heads](/quest/m0/kix/sandbox/trust.md) - PR heads whose commits all come from maintainers or kix jobs run on any runner
+- [opencode sandboxing](/quest/m0/kix/sandbox/opencode.md) - opencode jobs' commands run in the same sandbox as Claude Code's
+- [macOS sandbox](/quest/m0/kix/sandbox/macos.md) - the boundary verified under Seatbelt, then the answer-approval gate removed
+- [Ubuntu AppArmor](/quest/m0/kix/sandbox/apparmor.md) - the sandbox starts on stock Ubuntu, or the runner refuses at startup
+- [Untrusted devShells](/quest/m0/kix/sandbox/vm.md) - untrusted PR heads build their devShell in a per-job VM
