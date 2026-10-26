@@ -191,7 +191,7 @@ on a decision.
   refuse auto-merge because nothing is left to wait for. It uses the method the
   job names, else the first the repository allows. A base that requires the
   `quest land` check queues the PR for that gate instead, as `quest merge
-  --land` does: squash auto-merge whose commit body pins the head. A refusal
+--land` does: squash auto-merge whose commit body pins the head. A refusal
   pauses the job on a decision, in GitHub's words.
 - The label stays while the job runs or waits, and while the PR is queued or
   auto-merging. When the job ends without a landing in progress, or a

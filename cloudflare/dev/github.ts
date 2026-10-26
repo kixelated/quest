@@ -580,7 +580,9 @@ export function fakeGitHub(world: World) {
 								});
 							if (!writes("pull_requests")) return json({ errors: [{ type: "FORBIDDEN" }] });
 							if (!pull.landing)
-								return json({ errors: [{ message: "Auto-merge is not enabled for this pull request" }] });
+								return json({
+									errors: [{ message: "Auto-merge is not enabled for this pull request" }],
+								});
 							pull.landing = false;
 							delete pull.autoMerge;
 							return json({ data: { disablePullRequestAutoMerge: { clientMutationId: null } } });
@@ -651,7 +653,8 @@ export function fakeGitHub(world: World) {
 		}
 		if (tail === "/commits/main") return json({ sha: commitOf(repo), commit: { tree: { sha: treeOf(repo) } } });
 		// Requirements live in rulesets; classic branch protection is not modeled.
-		if (tail === "/branches/main" && method === "GET") return json({ name: "main", protection: { enabled: false } });
+		if (tail === "/branches/main" && method === "GET")
+			return json({ name: "main", protection: { enabled: false } });
 		if (tail.startsWith("/rules/branches/main") && method === "GET") {
 			const contexts = (repo.required ?? []).map((context) => ({ context }));
 			return json(
@@ -740,7 +743,11 @@ export function fakeGitHub(world: World) {
 			if (!writes("issues") && !writes("pull_requests")) return forbidden();
 			const item = [...repo.pulls, ...repo.issues].find((i) => String(i.number) === comment[1]);
 			if (!item) return notFound();
-			const added: Comment = { author: `${world.app.slug}[bot]`, body: String(body.body), at: new Date().toISOString() };
+			const added: Comment = {
+				author: `${world.app.slug}[bot]`,
+				body: String(body.body),
+				at: new Date().toISOString(),
+			};
 			item.comments = [...(item.comments ?? []), added];
 			return json({ body: added.body, user: { login: added.author } }, 201);
 		}

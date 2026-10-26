@@ -449,7 +449,9 @@ and each landed PR shows as merged.
 
 A gated base requires the `quest land` status check, which nothing reports on
 a PR head, so GitHub's auto-merge only waits and its merge button cannot land
-around the gate. Only the gate's push credential bypasses that rule. There,
+around the gate. Only the gate's push credential bypasses that rule; pin the
+check's source to an app that never reports it, so no one can satisfy it with
+a status. There,
 `quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
 auto-merge whose commit body pins the head it approved
 (`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
