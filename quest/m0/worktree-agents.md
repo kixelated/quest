@@ -2,10 +2,10 @@
 
 ## Goal
 
-Quest workflows use `quest worktree` checkout ownership through supported
-Codex and Claude lifecycle integrations. A completed or suspended worker
-releases its checkout without waiting for the parent chat to end or the PR to
-merge.
+Quest workflows use `quest worktree` checkout ownership through Claude Code's
+lifecycle hooks. A completed or suspended worker releases its checkout without
+waiting for the parent chat to end or the PR to merge. Codex is
+[its own quest](/quest/m0/codex-checkouts.md).
 
 ## Plan
 
@@ -21,8 +21,7 @@ Remaining work:
   merging into an existing file, and `quest uninstall` removes exactly those
   entries.
 - Derived defaults for a checkout the hook creates, which gets only a `name`.
-- Codex through `quest agent` running the harness inside `quest worktree run`.
-- Exercise both harnesses with a finished worker under a still-live parent,
+- Exercise Claude with a finished worker under a still-live parent,
   a suspended decision, a crash, and a restored session. Confirm live that
   `SubagentStop`'s `cwd` is the subagent's worktree, and that a hook-created
   worktree passes Claude's isolation identity check. Reconcile existing
@@ -55,7 +54,9 @@ Decisions:
 - Decided 2026-10-26 (user): Codex, which documents no worktree hooks, is
   covered by `quest agent` running it inside `quest worktree run`, which
   releases on exit and restores on resume. Codex app threads stay on Codex's
-  native archive.
+  native archive. Split the same day into
+  [Codex checkouts](/quest/m0/codex-checkouts.md), since it does not depend
+  on the Claude hooks.
 - Decided 2026-10-26 (user): agents are capped only at the harness's
   concurrent sub-agent limit, stated once in the guide; the core-count cap is
   gone, since `quest gate` holds expensive commands. The 2026-10-15 decision
