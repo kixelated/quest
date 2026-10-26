@@ -1,36 +1,30 @@
-# [M] Fail CI checks only on real breakage
+# [S] Keep native Windows git tests within their time limit
 
 ## Goal
 
-The native Windows test jobs and Release's macOS checks fail only when the
-code under test is broken: no admission-count, timeout, or runner-queue
-failure on a change that does not touch the code it exercises.
+The native Windows test jobs fail only when the code under test is broken:
+no `test/move.test.ts` or `test/landed.test.ts` timeout on a change that does
+not touch the code it exercises.
 
 ## Plan
 
-Decided 2026-10-24 (user) from the spawn and merge wave that landed
-[kixelated/quest#202](https://github.com/kixelated/quest/pull/202) through
-[#219](https://github.com/kixelated/quest/pull/219), where native Windows
-unit tests caused most failed Check runs, including on `main` (82a9566):
+Decided 2026-10-24 (user): find why these tests exceed vitest's 5 s on native
+Windows, and fix that cause. No raised timeouts, retries, or sleeps.
 
-- **Gate headroom test (user).** `test/gate.test.ts` "concurrent processes
-  never admit past the headroom" races 12 callers for 4 slots before a
-  deadline of `SETTLE_MS/2` and asserts exactly 4 were admitted. Slow
-  `windows-11-arm` and `windows-2022` runners, and loaded local hosts, admit
-  2 or 3; the gate never admitted more than its headroom. Assert that
-  invariant (never more than the headroom, in the output and the ledger) and
-  that every caller is eventually admitted, rather than an exact count by a
-  fixed deadline. Rejected: treating under-admission on a slow host as a gate
-  bug.
-- **Timeouts.** Find why `test/move.test.ts` ("refuses a claimed quest",
-  "reports mentions it does not edit"), several `test/start.test.ts` tests,
-  and `test/landed.test.ts` exceed vitest's 5 s on native Windows, and fix
-  that cause. No raised timeouts, retries, or sleeps.
-- **Release's macOS queue (user).** Release's macOS `check` jobs can wait
-  out a GitHub macOS capacity notice and show as a failed check on a PR, as
-  the `lifecycle (macos-14)` job did before
-  [kixelated/quest#218](https://github.com/kixelated/quest/pull/218). Apply
-  the same decision: keep macOS covered on pushes to `main` and where it
-  guards release artifacts, without failing PRs on a runner that never
-  arrived.
-- Reproduce each on its native runner before fixing, as #218 did.
+Found while reproducing on the native runners for
+[kixelated/quest#233](https://github.com/kixelated/quest/pull/233), which
+fixed the gate headroom test and Release's macOS queue:
+
+- These tests spend about 95% of their time starting git: 8-13 processes per
+  test, at 35-80 ms each inside the test workers, against about 2 ms on Linux.
+  The slowest take 0.8 s on `windows-2022` and 1.4 s on `windows-11-arm`
+  (Defender real-time scanning on), whether the files run in parallel or alone.
+- The four timeouts since 2026-10-21 ran about 3x to 20x slower than that,
+  three of them within 15 minutes during a CI burst on 2026-10-24, on hosts
+  whose other test files were also slow. Fewer git processes per test would
+  not absorb a 20x stall within 5 s.
+- Open (user): whether these files take a longer file-level time limit, like
+  `test/start.test.ts` (30 s), `test/snapshot.test.ts` (20 s), and
+  `test/worktree.test.ts` (20 s) already do; or cut their git processes
+  (copied fixture repositories, `maintenance.auto=false`, and batching the
+  CLI's repeated `git remote`/`git config` lookups) and keep 5 s.

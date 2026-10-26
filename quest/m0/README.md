@@ -35,7 +35,7 @@ ownership-manifest design:
 
 ## Required
 
-- [CI flakes](/quest/m0/ci-flakes.md) - native Windows tests and Release's macOS checks fail only on real breakage
+- [CI flakes](/quest/m0/ci-flakes.md) - native Windows git tests fail only on real breakage, not on a slow host
 - [Review policy](/quest/m0/review-policy.md) - CONTRIBUTING.md says whose review counts
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
