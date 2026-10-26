@@ -1,6 +1,6 @@
 // The `quest` command line: argument parsing and output around the core.
 
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
 import { Argument, Command, CommanderError, InvalidArgumentError, Option } from "commander";
@@ -31,8 +31,9 @@ import {
 import type { AdapterName } from "../runner/adapter";
 import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
-import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
+import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteRepository, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
+import { LAND_CHECK, checkQueue, parsePlan, parseResult, pushQueue, resolveQueue } from "./land";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { resolveFile } from "./resolve";
@@ -375,8 +376,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"in one call. It reports facts; it does not decide whether the PR is ready or whose review counts.\n\n" +
 				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
 				"url, state, draft, head, mergeable, merge-state, review-decision, auto-merge, merge-queue, " +
-				"landing-stopped, and checks; landing-stopped is the latest exit from the merge queue or auto-merge, " +
-				"with GitHub's reason (such as merge_conflict, failed_checks, manual, or manually_disabled), " +
+				"landing-stopped, and checks; landing-stopped is the latest exit from the merge queue, auto-merge, or " +
+				"quest land's queue, with the reason (such as merge_conflict, failed_checks, manual, or manually_disabled), " +
 				"actor, and time. Then " +
 				"a check line per failing or pending check, marked required or optional; a review line per " +
 				"reviewer's latest review, marked current or stale against the head; a reacted:<content> line per " +
@@ -473,6 +474,118 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				printToken(land(pr, token, options.land, method, gitHubDependencies(warn)));
 			},
 		);
+
+	const landing = program
+		.command("land")
+		.summary("Land every queued PR as one tested batch, from the repository's CI")
+		.description(
+			"A batched merge gate for a GitHub repository, run from its own CI in three phases so PR code never " +
+				"sees a push credential. `resolve` reads the queue, `check` builds and tests it with a read-only " +
+				"token, and `push` lands what passed.\n\n" +
+				`The base branch requires the \`${LAND_CHECK}\` check, which nothing reports on a PR head, so ` +
+				"GitHub's auto-merge only waits and its merge button cannot land around the gate. On such a base, " +
+				"`quest merge --land <sha>` queues a PR: it enables squash auto-merge whose commit body pins that head. " +
+				"A PR is queued while auto-merge is enabled and the pin is its current head, so a push by anyone " +
+				"but the gate dequeues it. The queue is in the order auto-merge was enabled.\n\n" +
+				"The gate builds the queued PRs, in order, into a chain of squash commits on the base, resolving " +
+				"quest files with `quest resolve`, and runs the check command once on the chain's tip. When that " +
+				"fails, it checks the first half, and so on, until a prefix passes, which lands at once, or one PR " +
+				"fails alone, which is ejected; the rest waits for the next run. Landing moves each PR's branch, " +
+				"with a lease on the head that was tested, to its squash commit, then fast-forwards the base to the " +
+				"tip, so GitHub shows each PR as merged and the base only ever holds a tested tree.\n\n" +
+				"An ejected PR loses auto-merge and `quest:merge`, and gets a comment with the reason, which " +
+				"`quest status` prints under landing-stopped: merge_conflict (a conflict `quest resolve` cannot " +
+				"settle), failed_checks (the check failed with it alone on the base, or a required check failed on " +
+				"its head), checks_pending, review_required, changes_requested, no_maintainer_edits (a fork the " +
+				"gate cannot push to), head_moved, not_pinned (auto-merge enabled without `quest merge --land`), " +
+				"or push_failed. Required reviews and the base's other required checks still apply.\n\n" +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token, and origin for the repository. Exits 0 when done, " +
+				"2 for invalid arguments, and 1 for other failures.",
+		);
+	landing
+		.command("resolve")
+		.summary("Print the queue as a plan for the other phases")
+		.description(
+			"Read the queue from GitHub with a read-only token and print it as a JSON plan: the base's commit, " +
+				"the queued PRs in order, and the PRs to eject with their reasons. Fails unless the base requires " +
+				`the \`${LAND_CHECK}\` check.`,
+		)
+		.option("--base <branch>", "The base branch (default: the repository's default branch)")
+		.action((options: { base?: string }) => {
+			const { repository } = remoteRepository(root(), "origin");
+			if (!repository) throw new Error("origin must name a github.com repository");
+			pending = resolveQueue(repository, options.base, gitHubDependencies(warn)).then(
+				(plan) => {
+					print(JSON.stringify(plan));
+					return 0;
+				},
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				},
+			);
+		});
+	landing
+		.command("check")
+		.summary("Build the queue onto the base and test it, printing the result")
+		.description(
+			"Fetch the plan's base and heads from origin, build the chain, and run <command> in the checkout on " +
+				"its tip, then on the first half while it fails, until a prefix passes or one PR fails alone. " +
+				"Each run checks out the commit it tests; untracked files stay. Needs `quest` on PATH for the merge " +
+				"driver and a git identity for the throwaway commits. The command's output goes to stderr; stdout " +
+				"is the JSON result for `push`. Needs no GitHub token.",
+		)
+		.argument("<plan>", "The plan file `resolve` printed")
+		.argument("<command>", "Executable to run; put -- before it when any argument starts with -")
+		.argument("[args...]", "Arguments forwarded verbatim")
+		.action((file: string, command: string, args: string[]) => {
+			const plan = parsePlan(readFileSync(file, "utf8"));
+			pending = checkQueue(root(), plan, [command, ...args], out.stderr).then(
+				(result) => {
+					print(JSON.stringify(result));
+					return 0;
+				},
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				},
+			);
+		});
+	landing
+		.command("push")
+		.summary("Land the prefix that passed and eject what cannot land")
+		.description(
+			"Rebuild the plan's chain, refuse a result that did not test exactly its prefixes, then eject the " +
+				"PRs the plan names, those that conflict, and one that failed alone. Land the prefix that passed: " +
+				"move each PR's branch with a lease on its tested head (a fork's first, the rest in one atomic push " +
+				"with the base's fast-forward). A moved head stops the landing; the prefix before it lands only if " +
+				"a check passed on exactly that prefix. A failed landing moves fork branches back. Ejection " +
+				"comments link the GitHub Actions run when GITHUB_RUN_ID is set. Prints `landed <number> <commit>` " +
+				"and `ejected <number> <reason>` lines; any line means the queue changed, so a workflow can run " +
+				"the gate again. Needs push access through origin and to forks that allow maintainer edits, and " +
+				"`quest` on PATH.",
+		)
+		.argument("<plan>", "The plan file `resolve` printed")
+		.argument("<result>", "The result file `check` printed")
+		.action((planFile: string, resultFile: string) => {
+			const plan = parsePlan(readFileSync(planFile, "utf8"));
+			const result = parseResult(readFileSync(resultFile, "utf8"));
+			const env = process.env;
+			const run =
+				env.GITHUB_RUN_ID && env.GITHUB_REPOSITORY
+					? `${env.GITHUB_SERVER_URL ?? "https://github.com"}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`
+					: undefined;
+			pending = pushQueue(root(), plan, result, run, gitHubDependencies(warn)).then(
+				(lines) => {
+					for (const line of lines) print(line);
+					return 0;
+				},
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				},
+			);
+		});
 
 	program
 		.command("release")

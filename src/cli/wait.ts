@@ -9,8 +9,11 @@ import {
 	object,
 	type ObjectValue,
 	type PullRequest,
+	type Requirements,
+	requirements,
 	string,
 } from "./github";
+import { LAND_CHECK } from "./land";
 import { classifyCheck } from "./status";
 
 const POLL = 5 * 60_000;
@@ -116,14 +119,6 @@ interface Check {
 	/** A GitHub Actions job whose workflow run has not finished, so it may still create jobs. */
 	running: boolean;
 	result?: { outcome: "passed" | "failed"; point: string; time: number };
-}
-
-/** What the base branch requires, read from branch protection and rulesets. */
-interface Requirements {
-	/** Required check names. */
-	names: Set<string>;
-	/** Workflow files that must pass as a whole, so each of their jobs is required. */
-	workflows: string[];
 }
 
 /** Wait until activity, returning plain output lines. Network and time are injected. */
@@ -358,38 +353,14 @@ async function watch(
 	};
 	/**
 	 * What the base branch requires, read once per wait. Only a requirement says whether a missing
-	 * check has yet to start, or whether the repository requires none.
+	 * check has yet to start, or whether the repository requires none. The gate's own check is never
+	 * on a PR head, so a gated base waits only for the rest.
 	 */
-	const requirements = new Map<string, Requirements>();
+	const known = new Map<string, Requirements>();
 	const required = async (branch: string): Promise<Requirements> => {
-		const known = requirements.get(branch);
-		if (known) return known;
-		const ref = encodeURIComponent(branch);
-		const protection = object(
-			object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {},
-		);
-		const legacy = object(protection.required_status_checks ?? {});
-		// Classic protection may list only `contexts`, without the newer `checks`.
-		const contexts =
-			legacy.checks === undefined
-				? (Array.isArray(legacy.contexts) ? legacy.contexts : []).map(string)
-				: array(legacy.checks).map((row) => string(row.context));
-		const rules = await github.all(`${base}/rules/branches/${ref}?per_page=100`);
-		const found: Requirements = {
-			names: new Set([
-				...(legacy.enforcement_level === "off" ? [] : contexts),
-				...rules
-					.filter((rule) => rule.type === "required_status_checks")
-					.flatMap((rule) => array(object(rule.parameters).required_status_checks))
-					.map((row) => string(row.context)),
-			]),
-			workflows: rules
-				.filter((rule) => rule.type === "workflows")
-				.flatMap((rule) => array(object(rule.parameters).workflows))
-				.map((row) => string(row.path)),
-		};
-		requirements.set(branch, found);
-		return found;
+		const found = known.get(branch) ?? (await requirements(github, pr, branch));
+		known.set(branch, found);
+		return { ...found, names: new Set([...found.names].filter((name) => name !== LAND_CHECK)) };
 	};
 
 	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=${PAGE}`);

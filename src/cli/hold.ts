@@ -3,7 +3,17 @@
 // that added the label is its hold token, since sessions often share an account.
 import { handedBack } from "../core";
 import { repositoryPath } from "./claims";
-import { array, GitHub, type GitHubDependencies, object, type ObjectValue, type PullRequest, string } from "./github";
+import {
+	array,
+	GitHub,
+	type GitHubDependencies,
+	object,
+	type ObjectValue,
+	type PullRequest,
+	requirements,
+	string,
+} from "./github";
+import { LAND_CHECK, pin } from "./land";
 import { Refusal, ago } from "./start";
 
 export type State = "iterate" | "ready" | "merge";
@@ -18,7 +28,7 @@ const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 const READ = `query($owner: String!, $repo: String!, $number: Int!) {
 	repository(owner: $owner, name: $repo) {
 		pullRequest(number: $number) {
-			id url state isDraft body headRefOid mergeStateStatus isMergeQueueEnabled
+			id url state isDraft body baseRefName headRefOid mergeStateStatus isMergeQueueEnabled
 			autoMergeRequest { enabledAt }
 			mergeQueueEntry { state }
 			labels(first: 100) { nodes { name } }
@@ -47,6 +57,7 @@ interface Snapshot {
 	state: "OPEN" | "CLOSED" | "MERGED";
 	draft: boolean;
 	body: string;
+	base: string;
 	head: string;
 	mergeState: string;
 	queue: boolean;
@@ -102,6 +113,8 @@ export async function finish(pr: PullRequest, token: string, deps: GitHubDepende
  * Take `pr` for merge, then land `sha`, which must still be its head: enable
  * auto-merge bound to it, which enters the merge queue when the base has one,
  * or merge at once when GitHub would refuse auto-merge because nothing is left to wait for.
+ * A base that requires the `quest land` check queues it for `quest land` instead:
+ * squash auto-merge whose commit body pins `sha`.
  */
 export async function land(
 	pr: PullRequest,
@@ -120,6 +133,17 @@ export async function land(
 	const { hold, snapshot } = await acquire(labels, "merge", token, current);
 	return holding(hold, async () => {
 		current(snapshot);
+		const gated = (await requirements(labels.github, pr, snapshot.base)).names.has(LAND_CHECK);
+		if (gated) {
+			if (method !== "squash") deps.warn(`${snapshot.url} lands through quest land, which squashes`);
+			await labels.github.graphql(
+				`mutation($id: ID!, $sha: GitObjectID!, $body: String!) {
+					enablePullRequestAutoMerge(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: SQUASH, commitBody: $body }) { clientMutationId }
+				}`,
+				{ id: snapshot.id, sha: snapshot.head, body: pin(snapshot.head) },
+			);
+			return;
+		}
 		if (snapshot.queue && method !== "merge") {
 			deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
 		}
@@ -293,6 +317,7 @@ class Labels {
 			state: string(row.state) as Snapshot["state"],
 			draft: row.isDraft === true,
 			body: typeof row.body === "string" ? row.body : "",
+			base: string(row.baseRefName),
 			head: string(row.headRefOid),
 			mergeState: string(row.mergeStateStatus),
 			queue: row.isMergeQueueEnabled === true,

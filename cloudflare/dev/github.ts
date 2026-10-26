@@ -46,6 +46,10 @@ export type Pull = Issue & {
 	timeline?: { id: string; label: string | null }[];
 	/** Auto-merge is enabled, so it lands once its requirements pass. */
 	landing?: boolean;
+	/** The enabled auto-merge's time and commit body; `quest land` reads its queue from them. */
+	autoMerge?: { enabledAt: string; commitBody: string };
+	/** A fork's head branch accepts pushes from the upstream's maintainers. */
+	maintainerCanModify?: boolean;
 };
 export type Commit = { parents: string[]; tree: string; message: string };
 /** A tree written through the API: its base tree and the entries changed on it. */
@@ -77,6 +81,8 @@ export type Repo = {
 	commits: Record<string, Commit>;
 	/** Trees written through the API. */
 	trees: Record<string, Tree>;
+	/** Check names the default branch's rulesets require. */
+	required?: string[];
 };
 export type World = {
 	app: { id: number; slug: string };
@@ -239,7 +245,50 @@ function holdsTarget(repo: Repo, pull: Pull) {
 
 const page = <T>(nodes: T[]) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
 
-function graphql(repo: Repo, query: string, variables: Record<string, unknown>) {
+/** The repository holding a pull request's head branch, as `owner/name`. */
+const holderOf = (repo: Repo, pull: Pull, forks: string) =>
+	`${pull.fork ? forks : (pull.contributor ?? repo.owner)}/${repo.name}`;
+
+/** A pull request as `quest land` reads its queue: auto-merge, head, reviews, and checks. */
+function queueTarget(repo: Repo, pull: Pull, forks: string) {
+	return {
+		id: nodeId(repo, pull),
+		number: pull.number,
+		url: `https://github.com/${repo.owner}/${repo.name}/pull/${pull.number}`,
+		title: pull.title,
+		isDraft: !!pull.draft,
+		headRefName: pull.branch,
+		headRefOid: headOf(repo, pull),
+		maintainerCanModify: !!pull.maintainerCanModify,
+		reviewDecision: pull.review,
+		headRepository: { nameWithOwner: holderOf(repo, pull, forks) },
+		autoMergeRequest: pull.landing
+			? { enabledAt: pull.autoMerge?.enabledAt ?? updatedAt, commitBody: pull.autoMerge?.commitBody ?? "" }
+			: null,
+		commits: {
+			nodes: [
+				{
+					commit: {
+						oid: headOf(repo, pull),
+						statusCheckRollup: pull.checks && {
+							contexts: page(
+								(pull.runs ?? []).map((run) => ({
+									__typename: "CheckRun",
+									name: run.name,
+									status: "COMPLETED",
+									conclusion: run.conclusion,
+									detailsUrl: run.url,
+								})),
+							),
+						},
+					},
+				},
+			],
+		},
+	};
+}
+
+function graphql(repo: Repo, query: string, variables: Record<string, unknown>, forks: string) {
 	const blobs = [...query.matchAll(/(q\d+): object\(oid: "([0-9a-f]{40})"\)/g)];
 	if (blobs.length) {
 		const files = new Map(repo.files.map((file) => [blob(file.content), file.content]));
@@ -254,6 +303,21 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 	if (query.includes("timelineItems(")) {
 		const pull = repo.pulls.find((p) => p.number === variables.number);
 		return { data: { repository: { pullRequest: pull ? holdsTarget(repo, pull) : null } } };
+	}
+	if (query.includes("defaultBranchRef")) return { data: { repository: { defaultBranchRef: { name: "main" } } } };
+	if (query.includes("queue:pullRequests(")) {
+		const queued = repo.pulls.filter((pull) => !pull.closed && variables.base === "main");
+		return {
+			data: {
+				repository: {
+					ref:
+						variables.qualified === "refs/heads/main"
+							? { target: { oid: repo.branches.main ?? commitOf(repo) } }
+							: null,
+					queue: page(queued.map((pull) => queueTarget(repo, pull, forks))),
+				},
+			},
+		};
 	}
 	const open = repo.pulls.filter((pull) => !pull.closed);
 	const result: Record<string, unknown> = {};
@@ -413,7 +477,7 @@ export function fakeGitHub(world: World) {
 		return all.length && all.every(Boolean) ? new Set(all as string[]) : null;
 	}
 
-	return async function (this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+	return async function (this: unknown, input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> {
 		// Called like fetch, with the runtime's checks: workerd's fetch throws when
 		// called as another object's method, and building the Request validates
 		// RequestInit as the real fetch does, refusing `redirect: "error"`.
@@ -495,6 +559,33 @@ export function fakeGitHub(world: World) {
 						}
 				return json({ errors: [{ type: "NOT_FOUND" }] });
 			}
+			// A pull request by node ID, or turning its auto-merge off.
+			if (query.includes("node(id:") || query.includes("disablePullRequestAutoMerge(")) {
+				for (const repo of world.repos)
+					for (const pull of repo.pulls)
+						if (nodeId(repo, pull) === variables.id) {
+							if (!scope.repositories.has(`${repo.owner}/${repo.name}`))
+								return json({ errors: [{ type: "NOT_FOUND" }] });
+							if (query.includes("node(id:"))
+								return json({
+									data: {
+										node: {
+											state: pull.merged ? "MERGED" : pull.closed ? "CLOSED" : "OPEN",
+											autoMergeRequest: pull.landing
+												? { enabledAt: pull.autoMerge?.enabledAt ?? updatedAt }
+												: null,
+										},
+									},
+								});
+							if (!writes("pull_requests")) return json({ errors: [{ type: "FORBIDDEN" }] });
+							if (!pull.landing)
+								return json({ errors: [{ message: "Auto-merge is not enabled for this pull request" }] });
+							pull.landing = false;
+							delete pull.autoMerge;
+							return json({ data: { disablePullRequestAutoMerge: { clientMutationId: null } } });
+						}
+				return json({ errors: [{ type: "NOT_FOUND" }] });
+			}
 			const landing = query.match(/\b(enablePullRequestAutoMerge|mergePullRequest)\(/)?.[1];
 			if (landing) {
 				for (const repo of world.repos)
@@ -515,6 +606,10 @@ export function fakeGitHub(world: World) {
 								pull.closed = pull.merged = true;
 							} else {
 								pull.landing = true;
+								pull.autoMerge = {
+									enabledAt: new Date().toISOString(),
+									commitBody: typeof variables.body === "string" ? variables.body : "",
+								};
 								pull.timeline = [...(pull.timeline ?? []), { id: `AME_${nextEvent()}`, label: null }];
 							}
 							return json({ data: { [landing]: { clientMutationId: null } } });
@@ -524,7 +619,7 @@ export function fakeGitHub(world: World) {
 			const repo = world.repos.find((r) => r.owner === variables.owner && r.name === variables.name);
 			if (!repo || !scope.repositories.has(`${repo.owner}/${repo.name}`))
 				return json({ errors: [{ type: "NOT_FOUND", message: "Not Found" }] });
-			return json(graphql(repo, query, variables));
+			return json(graphql(repo, query, variables, world.forks));
 		}
 		if (!repo || !scope.repositories.has(fullName!)) return notFound();
 		if (service) return serviceFork(repo, tail, method, body, writes) ?? missing(method, request.url);
@@ -554,6 +649,16 @@ export function fakeGitHub(world: World) {
 			});
 		}
 		if (tail === "/commits/main") return json({ sha: commitOf(repo), commit: { tree: { sha: treeOf(repo) } } });
+		// Requirements live in rulesets; classic branch protection is not modeled.
+		if (tail === "/branches/main" && method === "GET") return json({ name: "main", protection: { enabled: false } });
+		if (tail.startsWith("/rules/branches/main") && method === "GET") {
+			const contexts = (repo.required ?? []).map((context) => ({ context }));
+			return json(
+				contexts.length
+					? [{ type: "required_status_checks", parameters: { required_status_checks: contexts } }]
+					: [],
+			);
+		}
 		if (tail.startsWith(`/git/trees/${treeOf(repo)}`) && method === "GET") return json(tree(repo));
 		// Upstream branches: those the world lists, and those of its pull requests that are not on a fork.
 		const branches = {
@@ -628,6 +733,15 @@ export function fakeGitHub(world: World) {
 			pull.closed = true;
 			pull.merged = true;
 			return json({ sha: commitOf(repo), merged: true, message: "Pull Request successfully merged" });
+		}
+		const comment = tail.match(/^\/issues\/(\d+)\/comments$/);
+		if (comment && method === "POST") {
+			if (!writes("issues") && !writes("pull_requests")) return forbidden();
+			const item = [...repo.pulls, ...repo.issues].find((i) => String(i.number) === comment[1]);
+			if (!item) return notFound();
+			const added: Comment = { author: `${world.app.slug}[bot]`, body: String(body.body), at: new Date().toISOString() };
+			item.comments = [...(item.comments ?? []), added];
+			return json({ body: added.body, user: { login: added.author } }, 201);
 		}
 		const labels = tail.match(/^\/issues\/(\d+)\/labels(?:\/([^/]+))?$/);
 		if (labels && (method === "POST" || method === "DELETE")) {

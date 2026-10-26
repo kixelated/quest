@@ -224,6 +224,41 @@ export class GitHub {
 	}
 }
 
+/** What a base branch requires, read from branch protection and rulesets. */
+export interface Requirements {
+	/** Required check names. */
+	names: Set<string>;
+	/** Workflow files that must pass as a whole, so each of their jobs is required. */
+	workflows: string[];
+}
+
+/** What `branch` of `repository` requires, read with read access from branch protection and rulesets. */
+export async function requirements(github: GitHub, repository: Repository, branch: string): Promise<Requirements> {
+	const base = `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}`;
+	const ref = encodeURIComponent(branch);
+	const protection = object(object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {});
+	const legacy = object(protection.required_status_checks ?? {});
+	// Classic protection may list only `contexts`, without the newer `checks`.
+	const contexts =
+		legacy.checks === undefined
+			? (Array.isArray(legacy.contexts) ? legacy.contexts : []).map(string)
+			: array(legacy.checks).map((row) => string(row.context));
+	const rules = await github.all(`${base}/rules/branches/${ref}?per_page=100`);
+	return {
+		names: new Set([
+			...(legacy.enforcement_level === "off" ? [] : contexts),
+			...rules
+				.filter((rule) => rule.type === "required_status_checks")
+				.flatMap((rule) => array(object(rule.parameters).required_status_checks))
+				.map((row) => string(row.context)),
+		]),
+		workflows: rules
+			.filter((rule) => rule.type === "workflows")
+			.flatMap((rule) => array(object(rule.parameters).workflows))
+			.map((row) => string(row.path)),
+	};
+}
+
 /**
  * Whether a merged PR in `repository` had exactly `commit` as its head, as when it was squash-merged;
  * false for a commit GitHub does not have.

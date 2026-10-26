@@ -230,6 +230,32 @@ test("reports why the latest landing stopped, from a merge queue or auto-merge",
 	).toBe("landing-stopped manually_disabled kixelated 2026-10-07T12:01:00Z");
 });
 
+test("reports quest land's ejection after the auto-merge it disabled, ignoring other comments", async () => {
+	const comment = (body: string, author: Node, authorAssociation = "NONE") => ({
+		__typename: "IssueComment",
+		createdAt: "2026-10-07T12:02:00Z",
+		body,
+		authorAssociation,
+		author,
+	});
+	const ejected =
+		"quest land removed this pull request from the queue: it conflicts.\n\n<!-- quest land: merge_conflict -->";
+	const nodes = [
+		{
+			__typename: "AutoMergeDisabledEvent",
+			createdAt: "2026-10-07T12:01:00Z",
+			reasonCode: "manually_disabled",
+			actor: { login: "gate[bot]" },
+		},
+		comment(ejected, { __typename: "Bot", login: "gate" }),
+		comment("Thanks!", { __typename: "User", login: "kixelated" }, "OWNER"),
+		comment(ejected, { __typename: "User", login: "drive-by" }),
+	];
+	const body = pull({ checks: null, reviews: page([]), threads: page([]), timelineItems: { nodes } });
+	const status = await pullRequestStatus(pr, setup([body]).deps);
+	expect(status.landingStopped).toEqual({ reason: "merge_conflict", actor: "gate", at: "2026-10-07T12:02:00Z" });
+});
+
 test("long lists page only the connections that have more, keeping the first page's PR fields", async () => {
 	const fixture = setup([
 		pull({
