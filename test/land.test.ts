@@ -2,7 +2,7 @@
 // standing in for github.com, so every push and lease is real git.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,13 +32,20 @@ const RUN = "https://github.com/upstream/project/actions/runs/9";
 const CHECK = ["sh", "-c", "test ! -e broken || test -e fixed"];
 
 const PATH = process.env.PATH;
+/** Each directory `quest` ran in, one per line. */
+let ran = "";
 beforeEach(() => {
 	// The merge driver runs `quest resolve` from PATH, as in CI.
 	const tools = tempDir();
-	writeFileSync(join(tools, "quest"), `#!/bin/sh\nexec bun --config='${bunfig}' '${bin}' "$@"\n`);
+	ran = join(tools, "ran");
+	writeFileSync(join(tools, "quest"), `#!/bin/sh\npwd >> '${ran}'\nexec bun --config='${bunfig}' '${bin}' "$@"\n`);
 	chmodSync(join(tools, "quest"), 0o755);
 	process.env.PATH = `${tools}:${PATH}`;
 });
+
+function lines(text: string): string[] {
+	return text.split("\n").filter((line) => line !== "");
+}
 
 function git(cwd: string, ...args: string[]): string {
 	return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -284,7 +291,8 @@ class Forge {
 	}
 }
 
-describe("quest land", () => {
+// The fake `quest` on PATH is a shell script, as the merge driver tests' is.
+describe.skipIf(process.platform === "win32")("quest land", () => {
 	test("lands the queue as one chain of squash commits, each PR's branch at its own", async () => {
 		const forge = new Forge();
 		const base = forge.main();
@@ -438,6 +446,65 @@ describe("quest land", () => {
 		expect(forge.main()).toBe(base);
 		expect(forge.ref("upstream/project", "topic-1")).toBe(head);
 		expect(one.landing).toBe(true);
+	});
+
+	test("runs the merge driver outside the chain, where a queued PR's runtime config cannot reach it", async () => {
+		const forge = new Forge();
+		forge.pull("Preload", {
+			"bunfig.toml": 'preload = ["./evil.ts"]\n',
+			".env": "BUN_OPTIONS=--preload=./evil.ts\n",
+			"evil.ts": "throw new Error('PR code ran');\n",
+			"quest/m0/README.md": EPIC(["a", "b"]),
+			"quest/m0/b.md": "# [S] B\n\n## Goal\n\nB.\n",
+		});
+		forge.pull("Add c quest", {
+			"quest/m0/README.md": EPIC(["a", "c"]),
+			"quest/m0/c.md": "# [S] C\n\n## Goal\n\nC.\n",
+		});
+		const { landing } = await forge.round();
+		expect(landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual(["landed 1", "landed 2"]);
+		const dirs = lines(readFileSync(ran, "utf8")).filter((dir) => dir.endsWith(".git"));
+		// Once in check and once in push, each from its clone's git directory.
+		expect(dirs).toHaveLength(2);
+		expect(lines(readFileSync(ran, "utf8")).some((dir) => dir.includes("quest-land"))).toBe(false);
+	});
+
+	test("lands only PRs still queued as they were when checked", async () => {
+		const forge = new Forge();
+		const one = forge.pull("Add b", { "b.txt": "b\n" });
+		const two = forge.pull("Add c", { "c.txt": "c\n" });
+		const base = forge.main();
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
+		one.review = "CHANGES_REQUESTED";
+		two.landing = false;
+		const landing = await pushQueue(forge.clone(), plan, result, RUN, deps);
+		forge.settle();
+		// Only the whole chain was checked, so nothing before #1 can land either.
+		expect(landing).toEqual(["ejected 1 changes_requested"]);
+		expect(forge.main()).toBe(base);
+		expect([one.merged, two.merged]).toEqual([undefined, undefined]);
+	});
+
+	test("moves heads back when reading them fails", async () => {
+		const forge = new Forge();
+		const one = forge.pull("Add b", { "b.txt": "b\n" });
+		const head = one.head;
+		const base = forge.main();
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
+		const offline: GitHubDependencies = {
+			...deps,
+			fetch: (input, init) =>
+				String(init?.body).includes("{ headRefOid }")
+					? Promise.reject(new Error("offline"))
+					: deps.fetch(input, init),
+		};
+		await expect(pushQueue(forge.clone(), plan, result, RUN, offline)).rejects.toThrow("offline");
+		expect(forge.main()).toBe(base);
+		expect(forge.ref("upstream/project", "topic-1")).toBe(head);
 	});
 
 	test("ejects auto-merging PRs that are not queued or not ready, in enqueue order", async () => {

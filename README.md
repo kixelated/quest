@@ -469,7 +469,8 @@ quest land push plan.json result.json       # land what passed, eject what canno
 `check` runs the command on the chain's tip. When it fails, it runs it on the
 first half, and so on, until a prefix passes or one PR fails alone, with no
 retries and no batch-size limit. `push` rebuilds the chain itself and refuses a
-result that did not test exactly its prefixes. It moves each PR's branch, with
+result that did not test exactly its prefixes. It reads the queue again and
+lands only PRs still queued as they were when checked. It moves each PR's branch, with
 a lease on the head that was tested, to that PR's squash commit: a fork's
 branch first, then every other branch in one atomic push. Once GitHub shows
 every PR at its new head, it fast-forwards the base to the tip. GitHub marks a
@@ -566,7 +567,7 @@ jobs:
   land:
     needs: [resolve, check]
     runs-on: ubuntu-latest
-    permissions: { contents: write, pull-requests: write, issues: write, actions: write }
+    permissions: { contents: write, pull-requests: write, issues: write, actions: write, checks: read, statuses: read }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -594,7 +595,9 @@ the land job needs a token with admin rights, and the resolve job one with
 administration read, which `github.token` cannot have. Pushing to a fork's
 branch needs a credential the fork accepts maintainer edits from. `resolve` reads
 the repository from `origin` and fails unless its base requires the
-`quest land` check. Ejection comments link the run.
+`quest land` check. Ejection comments link the run. `push` merges PR files
+with its credential in reach, so it runs `quest resolve` from the clone's git
+directory, where a queued PR's `bunfig.toml` or `.env` cannot configure it.
 
 ## Gate expensive commands
 

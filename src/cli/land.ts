@@ -460,12 +460,16 @@ interface Chain {
  * builds the same trees in every phase.
  */
 function build(root: string, plan: Plan): Chain {
-	const driver = spawnSync("quest", ["help", "resolve"], { stdio: "ignore" });
-	if (driver.status !== 0) {
+	const probe = spawnSync("quest", ["help", "resolve"], { stdio: "ignore" });
+	if (probe.status !== 0) {
 		throw new Error("quest land merges quest files with `quest resolve`, so `quest` must be on PATH");
 	}
 	git(root, ["fetch", "--quiet", "--no-tags", "origin", plan.base.sha, ...plan.queue.map((entry) => entry.head)]);
 	const dir = resolve(root, git(root, ["rev-parse", "--git-path", "quest-land"]));
+	// The driver runs from the git directory, not the chain's worktree, where a
+	// queued PR's `bunfig.toml` or `.env` would configure the trusted `quest`.
+	const trusted = git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+	const driver = `d=$PWD && cd '${trusted.replaceAll("'", "'\\''")}' && quest resolve "$d"/%A "$d"/%O "$d"/%B`;
 	// A crashed run can leave its worktree registered.
 	tryGit(root, ["worktree", "remove", "--force", dir]);
 	git(root, ["worktree", "prune"]);
@@ -473,13 +477,7 @@ function build(root: string, plan: Plan): Chain {
 	const chain: Chain = { links: [], conflicts: [] };
 	try {
 		for (const entry of plan.queue) {
-			const merged = tryGit(dir, [
-				"-c",
-				"merge.quest.driver=quest resolve %A %O %B",
-				"merge",
-				"--squash",
-				entry.head,
-			]);
+			const merged = tryGit(dir, ["-c", `merge.quest.driver=${driver}`, "merge", "--squash", entry.head]);
 			if (merged.status !== 0) {
 				const files = lines(git(dir, ["diff", "--name-only", "--diff-filter=U"]));
 				if (files.length === 0)
@@ -637,6 +635,20 @@ export async function pushQueue(
 			break;
 		}
 	}
+	if (count > 0) {
+		// The queue can change while the gate checks it: land only PRs still queued as they were.
+		const [owner, repo] = plan.repository.split("/");
+		const fresh = await resolveQueue({ owner, repo }, plan.base.ref, deps);
+		for (let index = 0; index < count; index++) {
+			const { entry } = chain.links[index];
+			const now = fresh.queue.find((queued) => queued.number === entry.number);
+			if (now?.head === entry.head && now.enabledAt === entry.enabledAt) continue;
+			const ejected = fresh.eject.find((ejected) => ejected.number === entry.number);
+			if (ejected !== undefined) ejections.push(ejected);
+			count = passed.has(index) ? index : 0;
+			break;
+		}
+	}
 
 	const github = new GitHub(deps);
 	// One line per PR: `landed <number> <commit>` or `ejected <number> <reason>`.
@@ -722,8 +734,9 @@ async function landLinks(
 		if (pushed.status === 0) moved.push(...own);
 		else refused = { links: own, stderr: pushed.stderr.trim() };
 	}
-	if (refused === null && !(await synced(deps, links))) {
-		refused = { links: [], stderr: `GitHub did not show the moved heads within ${SYNC_MS / 1000} seconds` };
+	if (refused === null) {
+		const unsynced = await synced(deps, links);
+		if (unsynced !== null) refused = { links: [], stderr: unsynced };
 	}
 	if (refused === null) {
 		const pushed = tryGit(root, [
@@ -748,8 +761,8 @@ async function landLinks(
 	return refused;
 }
 
-/** Wait until GitHub shows each PR's head at its squash commit, or return false at the deadline. */
-async function synced(deps: GitHubDependencies, links: Link[]): Promise<boolean> {
+/** Wait until GitHub shows each PR's head at its squash commit; otherwise, return why not. */
+async function synced(deps: GitHubDependencies, links: Link[]): Promise<string | null> {
 	const github = new GitHub(deps, deps.now() + SYNC_MS);
 	try {
 		for (const link of links) {
@@ -762,10 +775,11 @@ async function synced(deps: GitHubDependencies, links: Link[]): Promise<boolean>
 				await github.pause(1000);
 			}
 		}
-		return true;
+		return null;
 	} catch (error) {
-		if (error instanceof GitHubDeadline) return false;
-		throw error;
+		if (error instanceof GitHubDeadline)
+			return `GitHub did not show the moved heads within ${SYNC_MS / 1000} seconds`;
+		return `cannot read the moved heads: ${error instanceof Error ? error.message : String(error)}`;
 	}
 }
 
