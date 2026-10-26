@@ -106,6 +106,8 @@ Unlike a blocked quest it stays ready, so it resurfaces every time ready work is
 ## Execution
 
 Start only ready quests.
+First question whether the quest is still needed: its problem may no longer be real, or a later change may have made its plan the wrong solution.
+If so, stop and propose rewriting or deleting it.
 `quest unblocked` ranks the ready quests, and `quest unblocked <path>` prints what blocks one.
 With `--unclaimed`, it skips quests someone holds and lists them on stderr.
 
