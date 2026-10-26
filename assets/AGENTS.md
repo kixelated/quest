@@ -106,6 +106,8 @@ Unlike a blocked quest it stays ready, so it resurfaces every time ready work is
 ## Execution
 
 Start only ready quests.
+First question whether the quest is still needed: its problem may no longer be real, or a later change may have made its plan the wrong solution.
+If so, stop and propose rewriting or deleting it.
 `quest unblocked` ranks the ready quests, and `quest unblocked <path>` prints what blocks one.
 With `--unclaimed`, it skips quests someone holds and lists them on stderr.
 
@@ -189,7 +191,7 @@ Pass PR bodies to `gh` on stdin (`--body-file -`).
 Before ending a task, pausing for a decision, or handing off, commit a checkpoint of the source changes, and report what remains and which checks passed or did not run.
 Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
 
-Wait on background work with a blocking command that ends on its terminal state, not timed polls.
+Wait on a PR's CI or reviews with `quest wait`, and on other background work with a blocking command that ends on its terminal state, not timed polls.
 Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout.
 A sub-agent ends its turn only with a final result or a question, never with background work still running.
 Back out when progress stalls rather than burn tokens.
