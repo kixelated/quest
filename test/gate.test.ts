@@ -241,21 +241,31 @@ test("a forward clock step forgets at most the last minute of admissions", async
 	expect(events).toEqual([`sleep ${SETTLE_MS}`]);
 });
 
-test("concurrent processes never admit past the headroom", { timeout: 30_000 }, async () => {
+test("concurrent processes never admit past the headroom, and admit every caller", { timeout: 30_000 }, async () => {
 	const directory = tempDir();
 	const ledger = join(directory, "ledger");
 	const go = join(directory, "go");
 	const gate = fileURLToPath(new URL("../src/cli/gate.ts", import.meta.url));
-	// Each caller waits for the others, then races for one of 4 CPUs' headroom until a shared deadline.
+	// Each caller waits for the others, then races for one of 4 CPUs' headroom. Their shared clock
+	// runs 20 times faster from the start, so spacing the other 8 takes seconds rather than a minute.
+	// The last version a caller publishes ends with its own admission, which it reports.
 	const script = `
 		const { existsSync, readFileSync } = await import("node:fs");
 		const { admit, fileHost } = await import(${JSON.stringify(gate)});
 		console.log("ready");
 		while (!existsSync(${JSON.stringify(go)})) await new Promise((resolve) => setTimeout(resolve, 2));
-		const deadline = Number(readFileSync(${JSON.stringify(go)}, "utf8"));
-		const host = { ...fileHost(${JSON.stringify(ledger)}), load: () => 0, memory: () => Infinity };
-		const signal = AbortSignal.timeout(Math.max(0, deadline - Date.now()));
-		await admit({ load: 4, memory: 1 }, host, signal).then(() => console.log("admitted"), () => {});
+		const start = Number(readFileSync(${JSON.stringify(go)}, "utf8"));
+		const file = fileHost(${JSON.stringify(ledger)}, () => start + (Date.now() - start) * 20);
+		let admission;
+		const host = {
+			...file,
+			load: () => 0,
+			memory: () => Infinity,
+			publish: (base, admissions) => file.publish(base, admissions) && Boolean((admission = admissions.at(-1))),
+			sleep: (ms, signal) => file.sleep(ms / 20, signal),
+		};
+		await admit({ load: 4, memory: 1 }, host, new AbortController().signal);
+		console.log(JSON.stringify(admission));
 	`;
 	const callers = Array.from({ length: 12 }, () => {
 		const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
@@ -270,13 +280,24 @@ test("concurrent processes never admit past the headroom", { timeout: 30_000 }, 
 		return { ready, exited: once(child, "exit").then(([code]) => ({ code, stdout })) };
 	});
 	await Promise.all(callers.map(({ ready }) => ready));
-	// The next admission is due SETTLE_MS after the last; the deadline comes sooner.
-	writeFileSync(`${go}.tmp`, String(Date.now() + SETTLE_MS / 2));
+	writeFileSync(`${go}.tmp`, String(Date.now()));
 	renameSync(`${go}.tmp`, go);
 	const results = await Promise.all(callers.map(({ exited }) => exited));
 	expect(results.map(({ code }) => code)).toEqual(Array(12).fill(0));
-	expect(results.filter(({ stdout }) => stdout.includes("admitted"))).toHaveLength(4);
-	expect(fileHost(ledger).ledger().admissions).toHaveLength(4);
+	const admissions: { id: string; at: number }[] = results
+		.map(({ stdout }) => JSON.parse(stdout.split("\n")[1]))
+		.sort((a, b) => a.at - b.at);
+	expect(new Set(admissions.map(({ id }) => id)).size).toBe(12);
+	// However slowly the callers arrive, one that finds 4 admissions from the last minute
+	// comes SETTLE_MS after the previous one.
+	admissions.forEach(({ at }, i) => {
+		const recent = admissions.slice(0, i).filter((previous) => previous.at > at - RECENT_MS);
+		if (recent.length >= 4) expect(at - admissions[i - 1].at).toBeGreaterThanOrEqual(SETTLE_MS);
+	});
+	// The ledger holds only those admissions, up to the last.
+	const recorded = fileHost(ledger).ledger().admissions;
+	expect(admissions).toEqual(expect.arrayContaining(recorded));
+	expect(recorded).toContainEqual(admissions.at(-1));
 });
 
 test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s container headroom", (version) => {
