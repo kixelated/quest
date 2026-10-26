@@ -28,7 +28,7 @@ Present those one at a time: a short paragraph explaining the problem, the quest
 Start each quest in a background sub-agent with its own isolated worktree, since agents cannot write to a worktree their parent created.
 
 Each agent reports back only when done or blocked.
-Limit the number of active agents to the physical CPU core count.
+Limit the number of active agents to the physical CPU core count, or the harness's concurrent sub-agent limit if lower; queue the rest and start one as each reports.
 
 When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
 Its report lists every open decision with a recommendation.

@@ -83,6 +83,8 @@ Already authorized background work may continue while the foreground waits.
 A sub-agent's brief carries the quest or PR, the user's picks, and the scope; it leaves repository rules to that repository's own instructions instead of restating them.
 A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
 Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
+When recorded decisions conflict, such as a newer PR comment or quest Plan against an older brief, follow the newest and note the change in the PR body; ask only when it is unclear which is newer.
+A decision about an open PR never authorizes closing it. Confirm a close as its own question, and comment on the PR before or with it.
 
 End every quest skill with a final summary in sections, such as the PRs and their states, the open decisions with recommendations, and suggested follow-ups, so a user returning to the session first sees what needs them.
 
@@ -134,7 +136,8 @@ If `quest start` names a branch in the way, stop and report it; never delete or 
 
 Push updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
-Never rebase or force-push a branch another session may hold.
+Never rebase or force-push, even a branch only you hold; merge the base instead.
+A PR that another session pushed to in the last hour is theirs: report its events instead of pushing to it.
 Before each push to a branch that already has a PR, confirm the PR is still open: a push after it merges brings the deleted branch back.
 The claim push from `quest start`, made before its draft PR exists, is exempt.
 
