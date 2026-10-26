@@ -11,6 +11,7 @@ import audit from "../../assets/skills/audit.md";
 import complete from "../../assets/skills/complete.md";
 import del from "../../assets/skills/delete.md";
 import exportSkill from "../../assets/skills/export.md";
+import grill from "../../assets/skills/grill.md";
 import importSkill from "../../assets/skills/import.md";
 import iterate from "../../assets/skills/iterate.md";
 import merge from "../../assets/skills/merge.md";
@@ -71,6 +72,7 @@ export const SKILLS: readonly Skill[] = Object.entries({
 	complete,
 	delete: del,
 	export: exportSkill,
+	grill,
 	import: importSkill,
 	iterate,
 	merge,
