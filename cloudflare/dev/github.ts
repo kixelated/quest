@@ -603,6 +603,7 @@ export function fakeGitHub(world: World) {
 									data: {
 										node: {
 											state: pull.merged ? "MERGED" : pull.closed ? "CLOSED" : "OPEN",
+											headRefOid: headOf(repo, pull),
 											autoMergeRequest: pull.landing
 												? { enabledAt: pull.autoMerge?.enabledAt ?? updatedAt }
 												: null,

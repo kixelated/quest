@@ -470,11 +470,13 @@ quest land push plan.json result.json       # land what passed, eject what canno
 first half, and so on, until a prefix passes or one PR fails alone, with no
 retries and no batch-size limit. `push` rebuilds the chain itself and refuses a
 result that did not test exactly its prefixes. It moves each PR's branch, with
-a lease on the head that was tested, to that PR's squash commit, then
-fast-forwards the base to the tip: a fork's branch first, then every other
-branch and the base in one atomic push. A moved head stops the landing, and the
-prefix before it lands only if a check passed on exactly that prefix, since a
-later PR can mask an earlier one's failure. A failed landing moves fork
+a lease on the head that was tested, to that PR's squash commit: a fork's
+branch first, then every other branch in one atomic push. Once GitHub shows
+every PR at its new head, it fast-forwards the base to the tip. GitHub marks a
+PR merged only when the base reaches a head it has already seen, so moving
+both in one push would close the PRs unmerged. A moved head stops the landing,
+and the prefix before it lands only if a check passed on exactly that prefix,
+since a later PR can mask an earlier one's failure. A failed landing moves the
 branches back, so they stay queued. The rest of the queue waits for the next run.
 
 An ejected PR loses its auto-merge and `quest:merge` label and gets a comment

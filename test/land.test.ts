@@ -197,19 +197,40 @@ class Forge {
 		return pull;
 	}
 
-	/** GitHub's view after a landing: what reached main merged. */
+	/**
+	 * GitHub catching up on pushes, before it answers a request: each open PR's
+	 * head is its branch's tip, unless `lag` requests remain before it syncs.
+	 */
+	lag = 0;
+	private sync(): void {
+		if (this.lag > 0) {
+			this.lag--;
+			return;
+		}
+		for (const pull of this.repo.pulls) {
+			if (pull.closed) continue;
+			const holder = pull.contributor ? `${pull.contributor}/project` : "upstream/project";
+			const tip = spawnSync(
+				"git",
+				["-C", join(this.hub, `${holder}.git`), "rev-parse", `refs/heads/${pull.branch}`],
+				{
+					encoding: "utf8",
+				},
+			);
+			if (tip.status === 0) pull.head = tip.stdout.trim();
+		}
+	}
+
+	/** GitHub's view after a landing: a PR whose head it had synced and that reached main merged. */
 	settle(): void {
 		const main = this.main();
 		this.repo.branches.main = main;
 		for (const pull of this.repo.pulls) {
-			const holder = pull.contributor ? `${pull.contributor}/project` : "upstream/project";
-			const tip = this.ref(holder, `refs/heads/${pull.branch}`);
 			if (
 				!pull.closed &&
-				spawnSync("git", ["-C", this.origin, "merge-base", "--is-ancestor", tip, main]).status === 0
+				spawnSync("git", ["-C", this.origin, "merge-base", "--is-ancestor", pull.head!, main]).status === 0
 			) {
 				pull.closed = pull.merged = true;
-				pull.head = tip;
 			}
 		}
 	}
@@ -233,10 +254,16 @@ class Forge {
 		});
 		const { token } = (await minted.json()) as { token: string };
 		// The fake refuses a method call, as workerd's fetch does; the CLI calls it as one.
+		let clock = 0;
 		return {
-			fetch: (input, init) => fetch(input, init),
-			now: Date.now,
-			sleep: async () => undefined,
+			fetch: (input, init) => {
+				this.sync();
+				return fetch(input, init);
+			},
+			now: () => clock,
+			sleep: async (milliseconds) => {
+				clock += milliseconds;
+			},
 			token,
 			warn: () => undefined,
 		};
@@ -368,6 +395,7 @@ describe("quest land", () => {
 	test("a failed landing push moves fork branches back, so they stay queued", async () => {
 		const forge = new Forge();
 		const open = forge.pull("Open", { "o.txt": "o\n" }, { contributor: "friend", edits: true });
+		const head = open.head;
 		const base = forge.main();
 		const hook = join(forge.origin, "hooks", "pre-receive");
 		writeFileSync(hook, "#!/bin/sh\necho 'main is frozen' >&2\nexit 1\n");
@@ -377,8 +405,39 @@ describe("quest land", () => {
 		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
 		await expect(pushQueue(forge.clone(), plan, result, undefined, deps)).rejects.toThrow(/main is frozen/);
 		expect(forge.main()).toBe(base);
-		expect(forge.ref("friend/project", "topic-1")).toBe(open.head);
+		expect(forge.ref("friend/project", "topic-1")).toBe(head);
 		expect(open.landing).toBe(true);
+	});
+
+	test("pushes the base only once GitHub shows every moved head, so each PR merges", async () => {
+		const forge = new Forge();
+		const one = forge.pull("Add b", { "b.txt": "b\n" });
+		const two = forge.pull("Add c", { "c.txt": "c\n" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
+		forge.lag = 3;
+		const landing = await pushQueue(forge.clone(), plan, result, RUN, deps);
+		forge.settle();
+		expect(landing.map((line) => line.split(" ")[0])).toEqual(["landed", "landed"]);
+		expect([one.merged, two.merged]).toEqual([true, true]);
+	});
+
+	test("lands nothing and moves heads back when GitHub never shows them", async () => {
+		const forge = new Forge();
+		const one = forge.pull("Add b", { "b.txt": "b\n" });
+		const head = one.head;
+		const base = forge.main();
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
+		forge.lag = Infinity;
+		await expect(pushQueue(forge.clone(), plan, result, RUN, deps)).rejects.toThrow(
+			"GitHub did not show the moved heads",
+		);
+		expect(forge.main()).toBe(base);
+		expect(forge.ref("upstream/project", "topic-1")).toBe(head);
+		expect(one.landing).toBe(true);
 	});
 
 	test("ejects auto-merging PRs that are not queued or not ready, in enqueue order", async () => {

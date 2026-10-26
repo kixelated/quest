@@ -647,7 +647,7 @@ export async function pushQueue(
 	if (count === 0) return output;
 
 	const links = chain.links.slice(0, count);
-	const refused = landLinks(root, plan, links);
+	const refused = await landLinks(root, plan, links, deps);
 	if (refused === null) {
 		for (const link of links) output.push(`landed ${link.entry.number} ${link.commit}`);
 		return output;
@@ -676,14 +676,25 @@ export async function pushQueue(
 	throw new Error(`the landing push failed, so nothing landed: ${refused.stderr}`);
 }
 
+/** How long `push` waits for GitHub to show the moved heads before it backs out. */
+const SYNC_MS = 60_000;
+
 /**
- * Move each PR's branch to its squash commit and fast-forward the base, all or
- * nothing. A fork's branch cannot join the base's atomic push, so it moves
- * first and moves back when a later push fails: the gate's own head pushes must
- * not dequeue a PR that did not land. Returns the PRs whose push git refused,
- * with its error, or null once everything landed.
+ * Move each PR's branch to its squash commit, then fast-forward the base, all or
+ * nothing. GitHub marks a PR merged only when the base reaches a head it has
+ * already synced: a head that moves in the base's push, or syncs after it,
+ * leaves the PR closed or open instead, so the base waits for every head.
+ * Heads that moved go back when a later step fails: the gate's own head pushes
+ * must not dequeue a PR that did not land. Returns the PRs whose head push git
+ * refused, none when the base push failed, with its error, or null once
+ * everything landed.
  */
-function landLinks(root: string, plan: Plan, links: Link[]): { links: Link[]; stderr: string } | null {
+async function landLinks(
+	root: string,
+	plan: Plan,
+	links: Link[],
+	deps: GitHubDependencies,
+): Promise<{ links: Link[]; stderr: string } | null> {
 	const moved: Link[] = [];
 	let refused: { links: Link[]; stderr: string } | null = null;
 	for (const link of links.filter((link) => !local(plan, link.entry))) {
@@ -699,18 +710,30 @@ function landLinks(root: string, plan: Plan, links: Link[]): { links: Link[]; st
 		}
 		moved.push(link);
 	}
-	if (refused === null) {
-		const own = links.filter((link) => local(plan, link.entry));
+	const own = links.filter((link) => local(plan, link.entry));
+	if (refused === null && own.length > 0) {
 		const pushed = tryGit(root, [
 			"push",
 			"--quiet",
 			"--atomic",
 			"origin",
-			`${links[links.length - 1].commit}:refs/heads/${plan.base.ref}`,
 			...own.flatMap((link) => move(link, link.commit, link.entry.head)),
 		]);
+		if (pushed.status === 0) moved.push(...own);
+		else refused = { links: own, stderr: pushed.stderr.trim() };
+	}
+	if (refused === null && !(await synced(deps, links))) {
+		refused = { links: [], stderr: `GitHub did not show the moved heads within ${SYNC_MS / 1000} seconds` };
+	}
+	if (refused === null) {
+		const pushed = tryGit(root, [
+			"push",
+			"--quiet",
+			"origin",
+			`${links[links.length - 1].commit}:refs/heads/${plan.base.ref}`,
+		]);
 		if (pushed.status === 0) return null;
-		refused = { links: own, stderr: pushed.stderr.trim() };
+		refused = { links: [], stderr: pushed.stderr.trim() };
 	}
 	const stuck = moved.filter(
 		(link) =>
@@ -723,6 +746,27 @@ function landLinks(root: string, plan: Plan, links: Link[]): { links: Link[]; st
 		);
 	}
 	return refused;
+}
+
+/** Wait until GitHub shows each PR's head at its squash commit, or return false at the deadline. */
+async function synced(deps: GitHubDependencies, links: Link[]): Promise<boolean> {
+	const github = new GitHub(deps, deps.now() + SYNC_MS);
+	try {
+		for (const link of links) {
+			while (true) {
+				const data = await github.graphql(
+					"query($id: ID!) { node(id: $id) { ... on PullRequest { headRefOid } } }",
+					{ id: link.entry.id },
+				);
+				if (object(data.node).headRefOid === link.commit) break;
+				await github.pause(1000);
+			}
+		}
+		return true;
+	} catch (error) {
+		if (error instanceof GitHubDeadline) return false;
+		throw error;
+	}
 }
 
 /** Remove `entry` from the queue for `reason`. */
