@@ -214,12 +214,15 @@ function parse(text: string): Admission[] {
 	return valid ? (value as Admission[]) : [];
 }
 
-/** Remove a file that another caller may already have removed, or on Windows may still hold open. */
+/**
+ * Remove a file that another caller may already have removed, or on Windows may still hold open
+ * or be removing too. Bun on Windows reports a concurrent removal as EFAULT, where Node reports EPERM.
+ */
 function remove(file: string) {
 	try {
 		rmSync(file, { force: true });
 	} catch (error) {
-		if (!["EPERM", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+		if (!["EPERM", "EBUSY", "EFAULT"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
 	}
 }
 
@@ -231,22 +234,25 @@ function remove(file: string) {
  */
 export function fileHost(directory: string, now = Date.now): Host {
 	const path = (version: number) => join(directory, String(version));
+	const latest = (): number => {
+		let names: string[];
+		try {
+			names = readdirSync(directory);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+			throw error;
+		}
+		return names.reduce((max, name) => (/^\d+$/.test(name) ? Math.max(max, Number(name)) : max), 0);
+	};
 	const ledger = (): Ledger => {
 		for (;;) {
-			let names: string[];
-			try {
-				names = readdirSync(directory);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 0, admissions: [] };
-				throw error;
-			}
-			const version = names.reduce((max, name) => (/^\d+$/.test(name) ? Math.max(max, Number(name)) : max), 0);
+			const version = latest();
 			if (version === 0) return { version, admissions: [] };
 			try {
 				return { version, admissions: parse(readFileSync(path(version), "utf8")) };
 			} catch (error) {
-				// Superseded and pruned since the listing.
-				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+				// Superseded and pruned since the listing: gone, or on Windows refusing reads while it is removed.
+				if (latest() === version) throw error;
 			}
 		}
 	};
