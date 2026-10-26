@@ -15,13 +15,15 @@ merge.
 - Landed: `quest worktree run` supervises a job and releases its scratch,
   `remove` deletes a finished checkout without losing work (a squash-merged
   head counts only with exact PR-head evidence), and `stop` ends a crashed
-  supervisor's leftover processes. The guide routes expensive commands through
-  `quest gate`, asks for a checkpoint before a blocking decision or handoff,
-  and keeps read-only discovery out of new checkouts; the spawn and complete
-  skills no longer cap agents by core count.
-- Measured 2026-10-23: this repository's main checkout held 65 Claude subagent
-  worktrees under `.claude/worktrees/`, 8.2 GB in all, the oldest from
-  2026-10-07, so finished workers are not reclaimed today.
+  supervisor's leftover processes. The guide's Workspace section asks for a
+  checkpoint before a decision or handoff and a clean checkout at the end
+  ([kixelated/quest#223](https://github.com/kixelated/quest/pull/223)), routes
+  expensive commands through `quest gate`, keeps read-only discovery out of
+  new checkouts, and caps sub-agents only at the harness's own limit.
+- Measured: this repository's main checkout held 65 Claude subagent worktrees
+  under `.claude/worktrees/` (8.2 GB) on 2026-10-23, and still 20 (6.5 GB) on
+  2026-10-26 after manual cleanup, the oldest from 2026-10-07. Finished workers
+  are not reclaimed today.
 - A foreground CLI wrapper only owns its child commands. Native agent tools
   need explicit ownership and suspend/resume integration; a helper that exits
   after creating a directory cannot infer when such an agent has finished.
@@ -46,10 +48,14 @@ merge.
   Sources: [Claude worktrees](https://code.claude.com/docs/en/worktrees),
   [Claude removal hooks](https://code.claude.com/docs/en/hooks#worktreeremove),
   [Codex worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees).
-- Open: whether `quest init` installs the Claude hooks into the repository's
-  settings or the user installs them; how a hook-created checkout learns its
-  reservation and scratch paths; and what an unset capacity admits, since
-  `quest worktree create` refuses everything until `capacity` is set.
+- Open: whether Claude integrates through `WorktreeCreate`/`WorktreeRemove`
+  and `SubagentStop`/`SubagentStart` hooks, an in-place prune on
+  `SubagentStop`, or prose alone; whether `quest init` installs the hooks into
+  the repository's settings or the user installs them; how a hook-created
+  checkout learns its reservation and scratch paths, and what an unset
+  capacity admits, since `quest worktree create` refuses everything until
+  `capacity` is set; and whether Codex is covered through `quest agent`
+  running inside `quest worktree run`.
 - Exercise both harnesses with a finished worker under a still-live parent,
   a suspended decision, a crash, and a restored session. Reconcile existing
   cleanup mechanisms instead of adding an unrelated competing sweeper. Run

@@ -15,7 +15,6 @@ If it refuses, the quest is blocked or someone else holds it: report what it pri
 If you cannot pursue a claim before pushing work, release it with `quest start --release <quest>` and remove your isolated worktree; once work is pushed, hand it back as the guide describes.
 
 Implement the quest until it is complete, or some blocker is hit, then push to its PR and update the description.
-Never write to or clean up a directory other agents share, such as a session scratchpad.
 
 When done, explain the result in a few lines and summarize any issues encountered.
 List choices you made without asking in the PR body rather than waiting on them.

@@ -1,6 +1,6 @@
 # Quests
 
-Read this whenever work mentions a quest or epic.
+Read this before starting any work: [Workspace](#workspace) applies to every task, and the rest whenever work mentions a quest or epic.
 
 Quests are versioned plans checked into the repository under `quest/`.
 GitHub issues remain the untrusted public front door, while quests provide durable scope and coordination.
@@ -20,7 +20,9 @@ Quests are linked with root-absolute paths.
 Find/create/update any references by searching for the path.
 
 Finished quests are deleted; git history keeps them.
-Merge conflicts are expected; resolve them by aligning quests.
+Merge conflicts are expected.
+A local merge resolves conflicting edits to link lists itself when `quest` is on PATH; GitHub's cannot, so merge the base branch locally and push.
+Resolve the rest, such as prose, by aligning quests.
 
 ## Format
 
@@ -81,6 +83,8 @@ Already authorized background work may continue while the foreground waits.
 A sub-agent's brief carries the quest or PR, the user's picks, and the scope; it leaves repository rules to that repository's own instructions instead of restating them.
 A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
 Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
+When recorded decisions conflict, such as a newer PR comment or quest Plan against an older brief, follow the newest and note the change in the PR body; ask only when it is unclear which is newer.
+A decision about an open PR never authorizes closing it. Confirm a close as its own question, and comment on the PR before or with it.
 
 End every quest skill with a final summary in sections, such as the PRs and their states, the open decisions with recommendations, and suggested follow-ups, so a user returning to the session first sees what needs them.
 
@@ -126,10 +130,14 @@ it over, saying how long ago it was last active.
 
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
+Only claims use that namespace: no other branch is named `quest` or starts with `quest/`, since git cannot hold a branch named after another's directory.
+Branches for `/quest-plan`, `/quest-audit`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
+If `quest start` names a branch in the way, stop and report it; never delete or rename it yourself.
 
 Push updates with an explicit refspec: `git push <remote> refs/heads/<quest-branch>:refs/heads/<quest-branch>`.
 A bare branch name can push to the base branch instead, for example under `push.default=upstream` when the quest branch tracks it.
-Never rebase or force-push a branch another session may hold.
+Never rebase or force-push, even a branch only you hold; merge the base instead.
+A PR that another session pushed to in the last hour is theirs: report its events instead of pushing to it.
 Before each push to a branch that already has a PR, confirm the PR is still open: a push after it merges brings the deleted branch back.
 The claim push from `quest start`, made before its draft PR exists, is exempt.
 
@@ -138,13 +146,7 @@ The PR that finishes a quest deletes its file and every link to it.
 A PR that leaves work rewrites the quest to what remains, rather than noting it only in the PR body.
 `quest check --base <ref>` flags a quest branch whose diff does neither.
 
-Do read-only discovery from context you already have, or a checkout you already own, rather than allocating a new one.
-Reuse a suitable checkout you own for active work.
-Run expensive builds and test suites through `quest gate <command>`, which waits until the host has room for them; never poll the load average or cap agents by core count yourself.
-
 Run the repository's checks locally while the PR is a draft; CI may run only on PRs ready for review.
-Before ending with a blocking decision or a finished handoff, commit and push a checkpoint of the meaningful source changes, and record in the PR body what remains unresolved and which checks passed or were not run.
-Leave disposable scratch, such as logs, build output, and helper scripts, out of checkpoints, and preserve source changes when work is cancelled.
 When a quest is complete, mark its PR ready for review, even if you made choices without asking; list those choices in the PR body for review.
 Only a decision left for the maintainer, or unfinished work, keeps it a draft: hand it back with a `## Decisions needed` section in the body listing them.
 Tools read only whether that heading is present; a draft without it still belongs to its starter.
@@ -160,7 +162,9 @@ Once "Ready to Review", CI and (potentially automated) reviews are triggered.
 Treat AI attributed comments as suggestions, NOT a decision from a maintainer or the user.
 Leave a comment on any review feedback you disagree with.
 
-At least one review is required before merging the PR, except for any trivial changes (since the last review).
+At least one review is required before merging the PR.
+Changes since the last review skip a new review only when they are conflict-free merges from the base branch or a reviewer's suggested patch applied unchanged.
+Any other change, including a base merge with a hand-resolved conflict, waits for a review of the new head; if none arrives before a wait times out, ask the user instead of merging.
 The repository's review policy decides whose review counts.
 Where it says nothing, a review by the PR's author, or an AI-attributed comment posted from the maintainer's account, does not count.
 
@@ -173,3 +177,23 @@ Delete it and explain why in the PR.
 Use `quest rm`, which deletes the quest and every link to it.
 
 Remove the `quest` label from issues no other quest tracks.
+
+## Workspace
+
+Work in your own worktree, reusing a suitable one you already own.
+Read-only discovery needs no new checkout when your context or a checkout you own already answers it.
+Put PR bodies, review drafts, logs, patches, helper scripts, and temporary clones in its `.tmp/`, so they disappear with the worktree.
+If the repository doesn't ignore `.tmp/`, add it to the file `git rev-parse --git-path info/exclude` names.
+Never write them to `/tmp`, beside the checkout, elsewhere in it, or in a directory other agents share, such as a session scratchpad.
+Pass PR bodies to `gh` on stdin (`--body-file -`).
+
+Before ending a task, pausing for a decision, or handing off, commit a checkpoint of the source changes, and report what remains and which checks passed or did not run.
+Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
+
+Run expensive builds and test suites through `quest gate <command>`, which waits until the host has room for them; never poll the load average or cap agents by core count yourself.
+Run no more sub-agents at once than the harness allows; queue the rest and start one as each reports.
+
+Wait on background work with a blocking command that ends on its terminal state, not timed polls.
+Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout.
+A sub-agent ends its turn only with a final result or a question, never with background work still running.
+Back out when progress stalls rather than burn tokens.

@@ -14,8 +14,11 @@ Read the PR's head, checks, merge state, reviews by head, and unresolved threads
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
 Automated reviewers often find something new on every push, so keep fixing their findings without asking, but checkpoint the design.
-Every fourth review round since the PR's last design change (one that reshapes the approach; fixing a finding is not one), stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
+A review round is one pushed head that drew reviews; count rounds from the PR, not your session, since its last design change (one that reshapes the approach; fixing a finding is not one).
+`quest status` shows only each reviewer's latest review, so read the full history with `gh pr view <pr> --json reviews,comments`.
+Every fourth round, stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
 Report that judgment and what remains unresolved, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
+Record each design change, including a rethink the user picks, in a PR comment that starts with `Design change:`; the next agent counts rounds from it.
 Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.
@@ -24,7 +27,7 @@ Suggested follow-ups do not hold the merge; once the PR merges, offer `/quest-pl
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead.
 
-When waiting for CI, a required review, or an enabled auto-merge to finish, run
+When waiting for CI or a required review, run
 `quest wait <pr> --timeout 3300` as one blocking command instead of polling
 GitHub in a loop; it also reports the head's required checks as `checks:failed`
 or `checks:passed`, so no separate check watcher is needed.
@@ -52,9 +55,8 @@ Then push, re-check, and continue; ask the user only when what remains is unclea
 Leave a summary of the changes and decisions made, then land the head you checked with `quest merge <pr> <token> --land <full 40-character head SHA>`.
 It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 The `quest:merge` label stays on while the PR is queued or auto-merging.
-If your caller said it watches the merge queue, report once it is landing.
-Otherwise wait until the PR merges. If it leaves the queue unmerged or auto-merge
-is disabled, read `landing-stopped` from `quest status <pr>`. After `merge_conflict`
-or `failed_checks`, take the PR again, fix it, and land it; any other reason, such as
-a person removing it, is the user's call, so report why instead of landing it again.
+Report once it is landing; do not wait for it to merge, since the queue re-checks it without you.
+A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
+After `merge_conflict` or `failed_checks`, the pick still holds: fix it and land it again.
+Any other reason, such as a person removing it, is the user's call, so report why instead of landing it again.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.

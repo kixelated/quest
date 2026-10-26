@@ -16,7 +16,7 @@ export interface RunnerOptions {
 	/** How many jobs run at once. */
 	slots: number;
 	adapter(account: Account): Adapter;
-	shell(job: Job): string[];
+	devShell(job: Job, repository: string, signal: AbortSignal): Promise<string | null>;
 	remote(job: Job): string;
 	env?: NodeJS.ProcessEnv;
 	dial?: Dial;
@@ -39,7 +39,7 @@ export class Runner {
 	#closing = false;
 	#wake: ReturnType<typeof setTimeout> | undefined;
 	#stopped: () => void = () => {};
-	/** Settles once the runner shut down or kix replaced its connection. */
+	/** Settles once the runner shut down or kix replaced its connection, and its agents exited. */
 	readonly done: Promise<"stopped" | "replaced">;
 
 	constructor(options: RunnerOptions) {
@@ -56,10 +56,14 @@ export class Runner {
 				push: (push) => this.#push(push),
 				replaced: () => {
 					this.#closing = true;
-					for (const attempt of this.#live) attempt.abandon();
+					const attempts = [...this.#live];
+					for (const attempt of attempts) attempt.abandon();
 					clearTimeout(this.#wake);
 					this.connection.close();
-					resolve("replaced");
+					// The runner keeps its home until its agents exit, so none outlives its hold on their checkouts.
+					void Promise.allSettled(attempts.map((attempt) => attempt.finished)).then(() =>
+						resolve("replaced"),
+					);
 				},
 				log: options.log,
 			},
@@ -104,7 +108,7 @@ export class Runner {
 		const now = this.#now();
 		return this.options.home.accounts().map((account) => ({
 			id: account.id,
-			provider: this.options.adapter(account).provider,
+			provider: account.provider,
 			kind: account.kind,
 			label: account.label,
 			limited: (account.limitedUntil ?? 0) > now,
@@ -182,7 +186,7 @@ export class Runner {
 			accounts: () => options.home.accounts(),
 			home: (account) => options.home.accountHome(account.id),
 			adapter: options.adapter,
-			shell: options.shell,
+			devShell: options.devShell,
 			remote: options.remote,
 			env: options.env ?? process.env,
 			request: (message) => this.#send(message),

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import * as landing from "../jobs/landing";
 import { arrived } from "../push/notify";
 import { GitHubService } from "./service";
 
@@ -219,5 +220,8 @@ githubWebhooks.post("/webhooks/github", async (c) => {
 				}
 			})(),
 		);
+	// A landing that ended unmerged, such as a merge queue removal, gives a merge job's pull request back.
+	const landed = event === "pull_request" && positiveId(payload.pull_request?.number);
+	if (landed) c.executionCtx.waitUntil(landing.release(c.env, repository, `pulls/${payload.pull_request.number}`));
 	return c.json({ status: "accepted" }, 202);
 });

@@ -1,17 +1,30 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
-import { Claude, streamReader } from "../src/runner/claude";
-import { devShell, login } from "../src/runner/cli";
+import type { AdapterName } from "../src/runner/adapter";
+import { Claude, jobEnvironment, streamReader, TOOL_TIMEOUT_MS } from "../src/runner/claude";
+import { addAccount, devShell, login, RunnerInputError, runnerAdapters } from "../src/runner/cli";
 import { Connection, type Socket, backoff } from "../src/runner/connection";
 import { type Account, RunnerHome } from "../src/runner/home";
 import { serveTools } from "../src/runner/mcp";
+import {
+	accountDirectories,
+	credentials,
+	environment,
+	Opencode,
+	retryLimit,
+	signedIn,
+	turnExit,
+} from "../src/runner/opencode";
 import { FLUSH_BYTES, OutputUploader, split } from "../src/runner/output";
-import { formatAnswer, resumePrompt, startPrompt } from "../src/runner/prompt";
+import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/runner/prompt";
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
+import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
+import { fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -285,6 +298,74 @@ describe("workspace", () => {
 		expect(existsSync(again.dir)).toBe(false);
 	});
 
+	posix("publishes a merge of the base branch as a merge commit, relative to the merged files", async () => {
+		const { dir, commit } = upstream();
+		git(dir, "checkout", "-q", "-b", "feature");
+		writeFileSync(join(dir, "feature.txt"), "feature\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-q", "-m", "feature");
+		const head = git(dir, "rev-parse", "HEAD");
+		git(dir, "checkout", "-q", "main");
+		writeFileSync(join(dir, "main.txt"), "main\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-q", "-m", "main moved");
+		const main = git(dir, "rev-parse", "HEAD");
+		const workspace = await Workspace.prepare(
+			tempDir(),
+			job(commit, { workflow: "merge", target: "pulls/2", branch: "feature", head }),
+			dir,
+		);
+		expect((await workspace.snapshot()).merge).toBeNull();
+		git(workspace.dir, "fetch", "-q", "origin", "main");
+		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
+		writeFileSync(join(workspace.dir, "fix.txt"), "fix\n");
+		const snapshot = await workspace.snapshot();
+		expect(snapshot.merge).toBe(main);
+		// Only what differs from the merged commit is sent: the branch's own files and the fix.
+		expect(snapshot.changes.map((c) => c.path)).toEqual(["feature.txt", "fix.txt"]);
+		await workspace.published("e".repeat(40), snapshot);
+		// Once published, the merge is history; later changes build on it.
+		writeFileSync(join(workspace.dir, "later.txt"), "later\n");
+		const later = await workspace.snapshot();
+		expect(later.merge).toBeNull();
+		expect(later.changes.map((c) => c.path)).toEqual(["later.txt"]);
+	});
+
+	posix("lists the submodules a merge changes, which its changes cannot carry", async () => {
+		const { dir } = upstream();
+		const module = join(tempDir(), "module");
+		mkdirSync(module);
+		git(module, "init", "-q", "-b", "main");
+		writeFileSync(join(module, "a.txt"), "a\n");
+		git(module, "add", ".");
+		git(module, "commit", "-q", "-m", "one");
+		git(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", module, "sub");
+		git(dir, "commit", "-q", "-m", "submodule");
+		const base = git(dir, "rev-parse", "HEAD");
+		// The pull request moves the submodule; main moves on elsewhere.
+		git(dir, "checkout", "-q", "-b", "feature");
+		writeFileSync(join(module, "a.txt"), "b\n");
+		git(module, "commit", "-q", "-am", "two");
+		git(join(dir, "sub"), "-c", "protocol.file.allow=always", "pull", "-q", "origin", "main");
+		git(dir, "commit", "-q", "-am", "bump submodule");
+		const head = git(dir, "rev-parse", "HEAD");
+		git(dir, "checkout", "-q", "main");
+		writeFileSync(join(dir, "main.txt"), "main\n");
+		git(dir, "add", "main.txt");
+		git(dir, "commit", "-q", "-m", "main moved");
+		const workspace = await Workspace.prepare(
+			tempDir(),
+			job(base, { workflow: "merge", target: "pulls/2", branch: "feature", head }),
+			dir,
+		);
+		git(workspace.dir, "fetch", "-q", "origin", "main");
+		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
+		const snapshot = await workspace.snapshot();
+		expect(snapshot.merge).not.toBeNull();
+		// Relative to the merged commit, the pull request's own submodule bump is a change kix cannot send.
+		expect(snapshot.skipped).toEqual(["sub"]);
+	});
+
 	posix("prepares jobs on one repository at once without racing on its clone", async () => {
 		const { dir, commit } = upstream();
 		const root = tempDir();
@@ -293,6 +374,79 @@ describe("workspace", () => {
 		for (const workspace of workspaces) expect(existsSync(join(workspace.dir, "AGENTS.md"))).toBe(true);
 		await Promise.all(workspaces.map((workspace) => workspace.remove()));
 		for (const workspace of workspaces) expect(existsSync(workspace.dir)).toBe(false);
+	});
+});
+
+describe("sandbox", () => {
+	posix("hides every account home, the runner's state, and shared temporary files", () => {
+		const runnerHome = tempDir();
+		const linux = openSandbox({
+			cwd: "/w",
+			repository: "/r.git",
+			runnerHome,
+			devShell: null,
+			trusted: true,
+			platform: "linux",
+			home: "/home/me",
+		});
+		try {
+			expect(linux.deny).toEqual(["/home", "/root", "/tmp", "/var/tmp", "/run/user", "/home/me", runnerHome]);
+			expect(linux.domains).toEqual(REGISTRIES);
+			// A bootstrap job runs in the runner's own environment: only the private HOME is set.
+			expect(readFileSync(linux.env, "utf8")).toBe(`export HOME='${linux.tmp}/home'\n`);
+			// Short enough for the sandbox's bridge sockets inside it.
+			expect(linux.tmp.length).toBeLessThan(40);
+		} finally {
+			closeSandbox(linux);
+		}
+		expect(existsSync(linux.tmp)).toBe(false);
+		const mac = openSandbox({
+			cwd: "/w",
+			repository: "/r.git",
+			runnerHome,
+			devShell: "export A=1\n",
+			trusted: false,
+			platform: "darwin",
+			home: "/Users/me",
+		});
+		try {
+			expect(mac.deny).toEqual(expect.arrayContaining(["/Users", "/private/tmp", "/private/var/folders"]));
+			expect(readFileSync(join(mac.tmp, "devshell.sh"), "utf8")).toBe("export A=1\n");
+			// An untrusted revision's commands reach no host.
+			expect(mac.domains).toEqual([]);
+		} finally {
+			closeSandbox(mac);
+		}
+	});
+
+	test("tells the agent which hosts its commands reach", () => {
+		expect(systemPrompt(REGISTRIES)).toContain("reach only these package registries (registry.npmjs.org, ");
+		expect(systemPrompt([])).toContain("reach no network host");
+	});
+
+	test("keeps only the agent's own variables in a job's environment", () => {
+		const sandbox = { tmp: "/tmp/quest-job-x", env: "/tmp/quest-job-x/env.sh" } as Sandbox;
+		const env = jobEnvironment(
+			{
+				PATH: "/bin",
+				HOME: "/home/me",
+				LANG: "C",
+				HTTPS_PROXY: "p",
+				AWS_SECRET_ACCESS_KEY: "s",
+				SSH_AUTH_SOCK: "a",
+			},
+			"/acct",
+			sandbox,
+		);
+		expect(env).toEqual({
+			PATH: "/bin",
+			HOME: "/home/me",
+			LANG: "C",
+			HTTPS_PROXY: "p",
+			CLAUDE_CONFIG_DIR: "/acct",
+			TMPDIR: "/tmp/quest-job-x",
+			CLAUDE_ENV_FILE: "/tmp/quest-job-x/env.sh",
+		});
 	});
 });
 
@@ -324,6 +478,131 @@ describe("Claude Code output", () => {
 
 		const crashed = streamReader();
 		expect(crashed.exit(1, "boom\n")).toEqual({ limited: null, failed: true, reply: "boom" });
+	});
+});
+
+describe("waiting on a pull request", () => {
+	const pull = (checks: string, reviews = 0) => ({
+		state: "OPEN",
+		head: { oid: "a".repeat(40) },
+		checks: { commit: "a".repeat(40), state: checks, runs: [] },
+		reviews: Array.from({ length: reviews }, () => ({ body: "" })),
+		comments: [],
+		threads: [],
+	});
+
+	test("wakes when what the merge loop acts on changes, not on every check", async () => {
+		const reads = [pull("PENDING"), pull("PENDING"), pull("SUCCESS")];
+		const slept: number[] = [];
+		const waited = await waitForChange(async () => reads.shift(), {
+			since: fingerprint(pull("PENDING")),
+			until: 1_000_000,
+			stopped: () => null,
+			interval: 10,
+			now: () => 0,
+			pause: async (ms) => slept.push(ms),
+		});
+		expect(waited).toEqual({ changed: true, context: pull("SUCCESS") });
+		expect(slept).toEqual([10, 10]);
+		expect(fingerprint(pull("SUCCESS", 1))).not.toBe(fingerprint(pull("SUCCESS")));
+		// A new review still counts once kix's window of the latest reviews is full.
+		const full = (newest: string) => ({
+			...pull("SUCCESS"),
+			reviews: [...Array.from({ length: 49 }, () => ({ body: "" })), { body: newest }],
+		});
+		expect(fingerprint(full("Approved"))).not.toBe(fingerprint(full("")));
+	});
+
+	test("ends at its deadline, or when the job stops", async () => {
+		let clock = 0;
+		const options = {
+			since: null,
+			until: 25,
+			interval: 10,
+			now: () => clock,
+			pause: async (ms: number) => (clock += ms),
+		};
+		expect(await waitForChange(async () => pull("PENDING"), { ...options, stopped: () => null })).toEqual({
+			changed: false,
+			context: pull("PENDING"),
+		});
+		expect(await waitForChange(async () => pull("PENDING"), { ...options, stopped: () => "Stopped." })).toEqual({
+			stopped: "Stopped.",
+		});
+	});
+});
+
+describe("opencode", () => {
+	test("labels an account by the providers its home signed in to", () => {
+		const home = tempDir();
+		expect(credentials(home)).toEqual([]);
+		const data = join(accountDirectories(home).XDG_DATA_HOME, "opencode");
+		mkdirSync(data, { recursive: true });
+		writeFileSync(
+			join(data, "auth.json"),
+			JSON.stringify({ openai: { type: "oauth", access: "a" }, "opencode-go": { type: "api", key: "k" } }),
+		);
+		expect(signedIn(credentials(home))).toEqual({
+			provider: "openai",
+			kind: "subscription",
+			label: "ChatGPT, OpenCode Go (opencode)",
+		});
+		expect(signedIn([{ provider: "wafer.ai", type: "api" }])).toEqual({
+			provider: "wafer-ai",
+			kind: "api-key",
+			label: "wafer.ai API key (opencode)",
+		});
+		expect(signedIn([])).toBeNull();
+	});
+
+	test("keeps the user's provider credentials and opencode settings from the account", () => {
+		const kept = environment({
+			PATH: "/bin",
+			CLOUDFLARE_API_KEY: "k",
+			AWS_SECRET_ACCESS_KEY: "s",
+			OPENCODE_CONFIG: "c",
+		});
+		expect(kept).toEqual({ PATH: "/bin" });
+	});
+
+	test("reads account limits from retries and errors, not brief rate limits", () => {
+		const retry = { type: "retry" as const, attempt: 1, next: 1_900_000_000_000 };
+		expect(
+			retryLimit({
+				...retry,
+				message: "Go limit reached",
+				action: { reason: "account_rate_limit", provider: "opencode-go", title: "", message: "", label: "" },
+			}),
+		).toEqual({ until: 1_900_000_000_000 });
+		expect(retryLimit({ ...retry, message: "The usage limit has been reached" })).toEqual({ until: null });
+		expect(retryLimit({ ...retry, message: "Rate limit reached for requests" })).toBeNull();
+		expect(retryLimit({ type: "busy" })).toBeNull();
+
+		const now = 1_000_000;
+		const api = (message: string, responseBody?: string, responseHeaders?: Record<string, string>) =>
+			({
+				role: "assistant",
+				error: { name: "APIError", data: { message, isRetryable: false, responseBody, responseHeaders } },
+			}) as never;
+		expect(
+			turnExit(
+				api("Too many", JSON.stringify({ error: { type: "usage_limit_reached", resets_at: 1_900_000 } })),
+				[],
+				null,
+				now,
+			).limited,
+		).toEqual({ until: 1_900_000_000 });
+		expect(turnExit(api("Quota exceeded.", "", { "retry-after": "60" }), [], null, now).limited).toEqual({
+			until: now + 60_000,
+		});
+		expect(turnExit(api("Bad request"), [], null, now)).toEqual({
+			limited: null,
+			failed: true,
+			reply: "Bad request",
+		});
+		expect(
+			turnExit({ role: "assistant" } as never, [{ type: "text", text: "All done" } as never], null, now),
+		).toEqual({ limited: null, failed: false, reply: "All done" });
 	});
 });
 
@@ -404,11 +683,34 @@ describe("prompts", () => {
 		expect(prompt).toContain("- `cloudflare/AGENTS.md`\n- `cloudflare/src/AGENTS.md`");
 	});
 
+	posix("carry CLAUDE.md, which the sandboxed CLI does not load, but never through a symlink", () => {
+		const dir = tempDir();
+		const secret = join(tempDir(), "id_ed25519");
+		writeFileSync(secret, "PRIVATE KEY\n");
+		symlinkSync(secret, join(dir, "AGENTS.md"));
+		writeFileSync(join(dir, "CLAUDE.md"), "Prefer small diffs.\n");
+		const prompt = startPrompt(job("a".repeat(40)), null, dir);
+		expect(prompt).toContain("## CLAUDE.md\n\nPrefer small diffs.");
+		expect(prompt).not.toContain("PRIVATE KEY");
+		expect(prompt).not.toContain("## AGENTS.md");
+	});
+
 	test("send plan and iterate jobs to the context tool", () => {
 		const plan = startPrompt(job("a".repeat(40), { workflow: "plan", target: "issues/4" }), null, tempDir());
 		expect(plan).toContain("Plan issue #4 of owner/repo. Read it with the `context` tool first");
 		const iterate = startPrompt(job("a".repeat(40), { workflow: "iterate", target: "pulls/9" }), null, tempDir());
 		expect(iterate).toContain("Iterate on pull request #9 of owner/repo. Read it, its review threads");
+		expect(iterate).toContain("merging the base branch into the checkout with `git merge`");
+	});
+
+	test("run a merge job through the merge skill, landing with deliver and waiting with wait", () => {
+		const merge = startPrompt(job("a".repeat(40), { workflow: "merge", target: "pulls/9" }), null, tempDir());
+		expect(merge).toContain("Merge pull request #9 of owner/repo. The maintainer picked merge");
+		expect(merge).toContain("Where the workflow says to land with `quest merge --land`, call `deliver` instead");
+		expect(merge).toContain("Where the workflow says to run `quest wait`, call `wait`");
+		expect(merge).toContain("# The merge workflow");
+		// The skill's design checkpoint still reaches the maintainer.
+		expect(merge).toContain("Every fourth round");
 	});
 
 	test("carry earlier summaries and the latest answer", () => {
@@ -444,6 +746,69 @@ describe("prompts", () => {
 	});
 });
 
+describe("account add", () => {
+	posix("signs an opencode account in with its own flow in its own home", async () => {
+		const dir = tempDir();
+		const bin = join(dir, "bin");
+		mkdirSync(bin);
+		// opencode's sign-in stores the credential under its XDG data home.
+		writeFileSync(
+			join(bin, "opencode"),
+			`#!/bin/sh\nmkdir -p "$XDG_DATA_HOME/opencode"\necho '{"opencode-go":{"type":"api","key":"k"}}' > "$XDG_DATA_HOME/opencode/auth.json"\n`,
+		);
+		chmodSync(join(bin, "opencode"), 0o755);
+		const out: string[] = [];
+		const io = {
+			stdout: (text: string) => out.push(text),
+			stderr: () => {},
+			env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, QUEST_RUNNER_HOME: join(dir, "home") },
+		};
+		await expect(addAccount(io, { cli: "opencode", console: true })).rejects.toThrow(RunnerInputError);
+		await expect(addAccount(io, { cli: "opencode", console: false, model: "gpt" })).rejects.toThrow(
+			RunnerInputError,
+		);
+		expect(await addAccount(io, { cli: "opencode", console: false, model: "opencode-go/kimi-k3" })).toBe(0);
+		const home = new RunnerHome(join(dir, "home"));
+		const [account] = home.accounts();
+		expect(account).toMatchObject({
+			adapter: "opencode",
+			provider: "opencode-go",
+			kind: "subscription",
+			label: "OpenCode Go (opencode)",
+		});
+		const config = join(
+			accountDirectories(home.accountHome(account!.id)).XDG_CONFIG_HOME,
+			"opencode",
+			"opencode.json",
+		);
+		expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ model: "opencode-go/kimi-k3" });
+	});
+});
+
+describe("runner adapters", () => {
+	test.skipIf(process.platform !== "linux")(
+		"need bubblewrap and socat on Linux only once a Claude Code account needs them",
+		() => {
+			const bin = join(tempDir(), "bin");
+			mkdirSync(bin);
+			const install = (...names: string[]) => {
+				for (const name of names) {
+					writeFileSync(join(bin, name), "#!/bin/sh\n");
+					chmodSync(join(bin, name), 0o755);
+				}
+			};
+			install("claude", "opencode");
+			const adapter = runnerAdapters({ PATH: bin });
+			// An opencode-only runner starts without them.
+			expect(adapter("opencode")).toBeInstanceOf(Opencode);
+			expect(() => adapter("claude")).toThrow(/bwrap and socat are not installed/);
+			// A Claude Code account added while the runner runs is checked then.
+			install("bwrap", "socat");
+			expect(adapter("claude")).toBeInstanceOf(Claude);
+		},
+	);
+});
+
 describe("login", () => {
 	posix("connects once the owner approves the link, keeping the token local", async () => {
 		const home = tempDir();
@@ -476,17 +841,79 @@ describe("login", () => {
 	});
 });
 
-/** A fake `claude` that runs the steps the test wrote for a new or resumed session. */
+describe("runner home", () => {
+	/** Another process holding `dir` until it is killed. */
+	async function holder(dir: string) {
+		const root = resolve(import.meta.dirname, "..");
+		const script = join(tempDir(), "hold.ts");
+		writeFileSync(
+			script,
+			`import { RunnerHome } from ${JSON.stringify(join(root, "src/runner/home.ts"))};\n` +
+				`new RunnerHome(${JSON.stringify(dir)}).hold();\nconsole.log("held");\nsetInterval(() => {}, 1000);\n`,
+		);
+		const child = spawn("bun", [`--config=${join(root, "bunfig.toml")}`, script], {
+			stdio: ["ignore", "pipe", "inherit"],
+		});
+		const [line] = await once(child.stdout, "data");
+		expect(String(line)).toBe("held\n");
+		return child;
+	}
+
+	posix("refuses a second runner while one holds the home", async () => {
+		const dir = tempDir();
+		const first = new RunnerHome(dir).hold();
+		expect(() => new RunnerHome(dir).hold()).toThrow("another `quest runner` is running in");
+		first.release();
+		new RunnerHome(dir).hold().release();
+
+		const child = await holder(dir);
+		try {
+			expect(() => new RunnerHome(dir).hold()).toThrow(`(process ${child.pid} `);
+		} finally {
+			child.kill("SIGKILL");
+		}
+	});
+
+	posix("takes the home once its holder crashed", async () => {
+		const dir = tempDir();
+		const child = await holder(dir);
+		child.kill("SIGKILL");
+		await once(child, "exit");
+		const held = new RunnerHome(dir).hold();
+		// The crashed holder's record is gone, so only this one remains.
+		expect(readdirSync(join(dir, "running"))).toHaveLength(1);
+		held.release();
+		expect(readdirSync(join(dir, "running"))).toEqual([]);
+	});
+});
+
+/**
+ * A fake `claude` that runs the steps the test wrote for a new or resumed
+ * session. Its log and steps sit beside its directory, since a job's
+ * environment keeps none of the test's variables.
+ */
 const FAKE_CLAUDE = `
 const fs = require("node:fs");
+const { join } = require("node:path");
 const argv = process.argv.slice(2);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
 const resume = argv.includes("--resume");
 const session = resume ? at("--resume") : at("--session-id");
 const stdin = fs.readFileSync(0, "utf8");
-const log = (value) => fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(value) + "\\n");
-log({ argv, stdin, cwd: process.cwd(), home: process.env.CLAUDE_CONFIG_DIR, gh: process.env.GH_TOKEN ?? null });
 const kix = JSON.parse(fs.readFileSync(at("--mcp-config"), "utf8")).mcpServers.kix;
+const log = (value) => fs.appendFileSync(join(__dirname, "..", "calls.log"), JSON.stringify(value) + "\\n");
+log({
+	argv,
+	stdin,
+	cwd: process.cwd(),
+	home: process.env.CLAUDE_CONFIG_DIR,
+	gh: process.env.GH_TOKEN ?? null,
+	secret: process.env.AWS_SECRET_ACCESS_KEY ?? null,
+	tmp: process.env.TMPDIR,
+	envFile: fs.readFileSync(process.env.CLAUDE_ENV_FILE, "utf8"),
+	settings: JSON.parse(fs.readFileSync(at("--settings"), "utf8")),
+	timeout: kix.timeout,
+});
 const out = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 out({ type: "system", subtype: "init", session_id: session });
 let id = 0;
@@ -500,7 +927,7 @@ async function rpc(method, params) {
 }
 (async () => {
 	await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "0" } });
-	const steps = JSON.parse(fs.readFileSync(process.env.FAKE_STEPS, "utf8"))[resume ? "resume" : "start"] ?? [];
+	const steps = JSON.parse(fs.readFileSync(join(__dirname, "..", "steps.json"), "utf8"))[resume ? "resume" : "start"] ?? [];
 	for (const step of steps) {
 		if (step.write) fs.writeFileSync(step.write, step.content);
 		if (step.remove) fs.rmSync(step.remove);
@@ -517,14 +944,97 @@ async function rpc(method, params) {
 })();
 `;
 
-/** A fake `nix` that runs `develop ... --command <argv>` in place. */
+/**
+ * A fake `opencode serve` that runs the same steps as the fake `claude` on
+ * each prompt: it checks the password, streams events, and ends a waiting
+ * turn when the session is aborted.
+ */
+const FAKE_OPENCODE = `
+const fs = require("node:fs");
+const { join } = require("node:path");
+const http = require("node:http");
+const argv = process.argv.slice(2);
+const logFile = join(__dirname, "..", "calls.log");
+const log = (value) => fs.appendFileSync(logFile, JSON.stringify(value) + "\\n");
+const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
+const auth = "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_SERVER_PASSWORD).toString("base64");
+const kix = config.mcp.kix;
+const streams = [];
+const send = (event) => { for (const s of streams) s.write("data: " + JSON.stringify(event) + "\\n\\n"); };
+let aborted = () => {};
+let sessions = 0;
+let id = 0;
+async function rpc(method, params) {
+	const response = await fetch(kix.url, {
+		method: "POST",
+		headers: { ...kix.headers, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
+	});
+	return (await response.json()).result;
+}
+const body = (request) => new Promise((resolve) => {
+	let text = "";
+	request.on("data", (chunk) => (text += chunk));
+	request.on("end", () => resolve(text ? JSON.parse(text) : {}));
+});
+const json = (response, value) => response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
+async function prompt(session, input) {
+	const steps = JSON.parse(fs.readFileSync(join(__dirname, "..", "steps.json"), "utf8"));
+	const resume = fs.existsSync(logFile) && fs.readFileSync(logFile, "utf8").includes('"prompted":"' + session + '"');
+	log({
+		argv, cwd: process.cwd(), stdin: input.parts[0].text, system: input.system, session, prompted: session,
+		xdg: process.env.XDG_DATA_HOME, devShell: process.env.IN_DEVSHELL ?? null, gh: process.env.GH_TOKEN ?? null, config,
+	});
+	await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "0" } });
+	for (const step of steps[resume ? "resume" : "start"] ?? []) {
+		if (step.write) fs.writeFileSync(step.write, step.content);
+		if (step.remove) fs.rmSync(step.remove);
+		if (step.emit) send({ ...step.emit, properties: { ...step.emit.properties, sessionID: session } });
+		if (step.tool) log({ tool: step.tool, reply: await rpc("tools/call", { name: step.tool, arguments: step.args }) });
+		if (step.wait) {
+			await new Promise((resolve) => (aborted = resolve));
+			log({ aborted: session });
+			return { info: { role: "assistant", error: { name: "MessageAbortedError", data: { message: "Aborted" } } }, parts: [] };
+		}
+	}
+	return { info: { role: "assistant", finish: "stop" }, parts: [{ type: "text", text: "done" }] };
+}
+const server = http.createServer(async (request, response) => {
+	if (request.headers.authorization !== auth) return response.writeHead(401).end();
+	const path = new URL(request.url, "http://x").pathname;
+	if (path === "/event") {
+		response.writeHead(200, { "Content-Type": "text/event-stream" });
+		streams.push(response);
+		return response.write("data: " + JSON.stringify({ type: "server.connected", properties: {} }) + "\\n\\n");
+	}
+	if (path === "/session") return json(response, { id: "ses_" + ++sessions + "_" + process.pid });
+	const message = /^\\/session\\/([^/]+)\\/message$/.exec(path);
+	if (message) return json(response, await prompt(message[1], await body(request)));
+	if (/\\/abort$/.test(path)) {
+		aborted();
+		return json(response, true);
+	}
+	response.writeHead(404).end();
+});
+process.on("SIGTERM", () => process.exit(143));
+server.listen(0, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + server.address().port));
+`;
+
+/** A fake `nix` whose `print-dev-env` prints a one-line devShell, or builds until killed when the steps say `nix`. */
 const FAKE_NIX = `
 const fs = require("node:fs");
+const { join } = require("node:path");
 const argv = process.argv.slice(2);
-fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ nix: argv.slice(0, argv.indexOf("--command")) }) + "\\n");
-const [command, ...args] = argv.slice(argv.indexOf("--command") + 1);
-const result = require("node:child_process").spawnSync(command, args, { stdio: "inherit" });
-process.exit(result.status ?? 1);
+const log = (value) => fs.appendFileSync(join(__dirname, "..", "calls.log"), JSON.stringify(value) + "\\n");
+const steps = join(__dirname, "..", "steps.json");
+if (fs.existsSync(steps) && JSON.parse(fs.readFileSync(steps, "utf8")).nix) {
+	process.on("SIGTERM", () => { log({ nixTerminated: true }); process.exit(143); });
+	setInterval(() => {}, 1000);
+	log({ nix: argv });
+} else {
+	log({ nix: argv });
+	process.stdout.write("export IN_DEVSHELL=1\\n");
+}
 `;
 
 interface Rig {
@@ -548,11 +1058,12 @@ function rig(
 		body: Sent,
 		upstream: { dir: string; commit: string },
 	) => { status: number; body: unknown } | undefined,
+	cli: AdapterName = "claude",
 ): Rig {
 	const dir = tempDir();
 	const bin = join(dir, "bin");
 	mkdirSync(bin);
-	for (const [name, body] of Object.entries({ claude: FAKE_CLAUDE, nix: FAKE_NIX })) {
+	for (const [name, body] of Object.entries({ claude: FAKE_CLAUDE, opencode: FAKE_OPENCODE, nix: FAKE_NIX })) {
 		writeFileSync(join(bin, name), `#!${process.execPath}\n${body}`);
 		chmodSync(join(bin, name), 0o755);
 	}
@@ -561,12 +1072,18 @@ function rig(
 	const home = new RunnerHome(join(dir, "home"));
 	const account: Account = {
 		id: "acct1",
-		adapter: "claude",
-		provider: "anthropic",
+		adapter: cli,
+		provider: cli === "claude" ? "anthropic" : "openai",
 		kind: "subscription",
 		label: "me@example.test",
 	};
 	home.saveAccounts([account]);
+	if (cli === "opencode") {
+		const data = join(accountDirectories(home.accountHome("acct1")).XDG_DATA_HOME, "opencode");
+		mkdirSync(data, { recursive: true });
+		writeFileSync(join(data, "auth.json"), JSON.stringify({ openai: { type: "oauth", access: "secret" } }));
+		Opencode.setModel(home.accountHome("acct1"), "openai/gpt-5.5");
+	}
 	const hub = new FakeHub();
 	const publishes: Sent[] = [];
 	const contexts: string[] = [];
@@ -574,9 +1091,8 @@ function rig(
 	const env = {
 		...process.env,
 		PATH: `${bin}:${process.env.PATH}`,
-		FAKE_LOG: log,
-		FAKE_STEPS: stepsFile,
 		GH_TOKEN: "secret",
+		AWS_SECRET_ACCESS_KEY: "secret",
 	};
 	const logs: string[] = [];
 	const source = upstream();
@@ -584,8 +1100,9 @@ function rig(
 		home,
 		login: { url: "http://kix.test", token: "token", id: "r1", name: "laptop" },
 		slots: 2,
-		adapter: () => new Claude(join(bin, "claude"), "bypassPermissions", env),
-		shell: devShell,
+		adapter: () =>
+			cli === "claude" ? new Claude(join(bin, "claude"), env) : new Opencode(join(bin, "opencode"), env),
+		devShell: (job, repository, signal) => devShell(job, repository, env, signal),
 		remote: () => source.dir,
 		env,
 		dial: hub.dial,
@@ -683,13 +1200,55 @@ describe("quest runner", () => {
 			["old.txt", true],
 		]);
 		const [nix, launch] = r.calls();
-		expect(nix).toEqual({ nix: ["develop", "--accept-flake-config", "--no-write-lock-file"] });
+		// The devShell comes from the job's revision in the bare clone, not from the checkout.
+		const repository = r.home.path("repos", "owner", "repo.git");
+		expect(nix).toEqual({
+			nix: [
+				"print-dev-env",
+				"--accept-flake-config",
+				"--no-write-lock-file",
+				`git+file://${repository}?rev=${r.upstream.commit}`,
+			],
+		});
 		expect(launch.argv).toEqual(expect.arrayContaining(["-p", "--output-format", "stream-json", "--session-id"]));
-		expect(launch.argv.slice(-2)).toEqual(["--disallowedTools", "AskUserQuestion"]);
+		expect(launch.argv).toEqual(
+			expect.arrayContaining([
+				"--permission-mode",
+				"dontAsk",
+				"--setting-sources",
+				"user",
+				"--strict-mcp-config",
+			]),
+		);
+		expect(launch.argv.slice(-2)).toEqual(["--disallowedTools", "AskUserQuestion,WebFetch"]);
 		expect(launch.home).toBe(r.home.accountHome("acct1"));
 		// The tools' bearer token never appears on the command line.
 		expect(JSON.stringify(launch.argv)).not.toContain("Bearer");
 		expect(launch.gh).toBeNull();
+		// Tool calls may outlast Claude Code's 60s first-response limit for HTTP servers, up to the longest wait.
+		expect(launch.timeout).toBe(TOOL_TIMEOUT_MS);
+		expect(TOOL_TIMEOUT_MS).toBeGreaterThan(WAIT_LIMIT);
+		expect(launch.secret).toBeNull();
+		// Commands run sandboxed in the checkout, with a private temporary directory and the devShell sourced first.
+		const checkout = r.home.path("jobs", "job1");
+		expect(launch.cwd).toBe(checkout);
+		expect(launch.tmp).toMatch(/^\/.*quest-job-/);
+		expect(launch.envFile).toContain(`export HOME='${launch.tmp}/home'`);
+		expect(launch.envFile).toContain(`. '${launch.tmp}/devshell.sh' >/dev/null`);
+		expect(launch.settings.sandbox).toMatchObject({
+			enabled: true,
+			failIfUnavailable: true,
+			allowUnsandboxedCommands: false,
+			filesystem: { allowRead: [checkout, repository, launch.tmp], allowWrite: [launch.tmp] },
+			// A trusted revision's commands reach the package registries and nothing else.
+			network: { allowedDomains: REGISTRIES, strictAllowlist: true },
+		});
+		expect(launch.argv[launch.argv.indexOf("--append-system-prompt") + 1]).toContain("registry.npmjs.org");
+		expect(launch.settings.sandbox.filesystem.denyRead).toEqual(expect.arrayContaining([r.home.dir]));
+		expect(launch.settings.permissions.allow).toEqual(["Bash", `Edit(/${checkout}/**)`, "WebSearch", "mcp__kix"]);
+		// The attempt's temporary directory and settings are gone once it ends.
+		expect(existsSync(launch.tmp)).toBe(false);
+		expect(existsSync(launch.argv[launch.argv.indexOf("--settings") + 1])).toBe(false);
 		expect(launch.stdin).toContain("Always run the tests.");
 		expect(launch.stdin).toContain("kix adds for this job: Extra rule.");
 		// Raw output arrives as numbered chunks, and the checkout is gone once the job completed.
@@ -769,6 +1328,104 @@ describe("quest runner", () => {
 		await r.runner.shutdown();
 	});
 
+	posix("drives opencode serve through a question and a resume in the same session", async () => {
+		const r = rig(undefined, "opencode");
+		r.steps({
+			start: [
+				{ write: "a.txt", content: "draft\n" },
+				{ tool: "checkpoint", args: { summary: "Drafted" } },
+				{
+					tool: "ask",
+					args: { summary: "Need a choice", questions: [{ question: "Which?", options: [{ label: "A" }] }] },
+				},
+			],
+			resume: [{ tool: "deliver", args: { summary: "Went with A", title: "feat: a", body: "Body" } }],
+		});
+		r.assign(job(r.upstream.commit), "Extra rule.");
+		const question = await r.hub.next((m) => m.type === "question");
+		await idle(r.runner);
+		expect(r.hub.of("checkpoint")).toMatchObject([{ summary: "Drafted", session: question.session }]);
+		const [nix, first] = r.calls();
+		expect(nix.nix.slice(0, 3)).toEqual(["print-dev-env", "--accept-flake-config", "--no-write-lock-file"]);
+		const home = r.home.accountHome("acct1");
+		// The account's XDG home applies to opencode alone, set inside the devShell built from the revision.
+		expect(first.argv).toEqual(["serve", "--hostname=127.0.0.1", "--port=0"]);
+		expect(first.devShell).toBe("1");
+		expect(first.xdg).toBe(join(home, "data"));
+		expect(first.gh).toBeNull();
+		expect(first.stdin).toContain("kix adds for this job: Extra rule.");
+		expect(first.system).toContain("checkpoint");
+		expect(first.config).toMatchObject({
+			model: "openai/gpt-5.5",
+			enabled_providers: ["openai"],
+			permission: { "*": "allow", question: "deny" },
+			mcp: { kix: { type: "remote", headers: { Authorization: expect.stringMatching(/^Bearer /) } } },
+		});
+		expect(first.config.plugin[0][1].env.XDG_DATA_HOME).not.toContain(home);
+		// Events stream as raw output.
+		expect(
+			r.hub
+				.of("output")
+				.map((o) => o.text)
+				.join(""),
+		).toContain("opencode server listening");
+
+		r.assign(
+			job(r.upstream.commit, {
+				attempt: 2,
+				session: question.session,
+				head: "0".repeat(39) + "1",
+				questions: [
+					{
+						id: "q1",
+						attempt: 1,
+						kind: "agent",
+						prompt: question.prompt,
+						answer: { answers: [{ choices: ["A"] }] },
+						approvedAt: 1,
+					},
+				],
+			}),
+		);
+		const result = await r.result();
+		await idle(r.runner);
+		expect(result).toMatchObject({ attempt: 2, outcome: "completed", summary: "Went with A" });
+		const resumed = r.calls().filter((c) => c.prompted);
+		expect(resumed).toHaveLength(2);
+		// The kix session maps to the opencode session that asked.
+		expect(resumed[1].session).toBe(first.session);
+		expect(resumed[1].stdin).toContain("Q: Which?\nA: A");
+		await r.runner.shutdown();
+	});
+
+	posix("aborts opencode on a cancel or an account limit", async () => {
+		const r = rig(undefined, "opencode");
+		r.steps({ start: [{ write: "a.txt", content: "partial\n" }, ready, { wait: true }] });
+		r.assign(job(r.upstream.commit));
+		await waiting(r);
+		r.hub.socket.deliver({ type: "cancel", job: "job1", attempt: 1 });
+		const cancelled = await r.result();
+		await idle(r.runner);
+		expect(cancelled).toMatchObject({ outcome: "cancelled" });
+		expect(r.calls().some((c) => c.aborted)).toBe(true);
+
+		const resets = Date.now() + 3_600_000;
+		const status = {
+			type: "retry",
+			attempt: 1,
+			message: "Go limit",
+			next: resets,
+			action: { reason: "account_rate_limit" },
+		};
+		r.steps({ start: [{ emit: { type: "session.status", properties: { status } } }, { wait: true }] });
+		r.assign(job(r.upstream.commit, { id: "job2" }));
+		const limited = await r.hub.next((m) => m.type === "result" && m.job === "job2");
+		await idle(r.runner);
+		expect(limited).toMatchObject({ outcome: "limited" });
+		expect(r.home.accounts()[0]!.limitedUntil).toBe(resets);
+		await r.runner.shutdown();
+	});
+
 	posix("cancels on request, publishing the partial work", async () => {
 		const r = rig();
 		r.steps({
@@ -789,6 +1446,25 @@ describe("quest runner", () => {
 		expect(r.publishes.at(-1)!.changes.map((c: Sent) => c.path)).toEqual(["b.txt"]);
 		expect(r.calls().some((c) => c.terminated)).toBe(true);
 		await r.runner.shutdown();
+	});
+
+	posix("a cancel or shutdown kills a devShell build before the agent starts", async () => {
+		const r = rig();
+		r.steps({ nix: [true] });
+		const building = (count: number) =>
+			vi.waitFor(() => expect(r.calls().filter((c) => c.nix)).toHaveLength(count), { timeout: 10_000 });
+		r.assign(job(r.upstream.commit));
+		await building(1);
+		r.hub.socket.deliver({ type: "cancel", job: "job1", attempt: 1 });
+		expect(await r.result()).toMatchObject({ outcome: "cancelled", summary: "The maintainer stopped this job." });
+		await idle(r.runner);
+
+		r.assign(job(r.upstream.commit, { id: "job2" }));
+		await building(2);
+		await r.runner.shutdown();
+		expect(r.hub.of("result").filter((m) => m.job === "job2")).toEqual([]);
+		expect(r.calls().filter((c) => c.nixTerminated)).toHaveLength(2);
+		expect(r.calls().filter((c) => c.argv)).toHaveLength(0);
 	});
 
 	posix("pauses a limited account until it resets, never switching accounts", async () => {
@@ -878,6 +1554,19 @@ describe("quest runner", () => {
 		expect(r.hub.of("status").at(-1)).toMatchObject({ attempts: [], slots: 0 });
 	});
 
+	posix("a replaced runner ends only once its agents exit", async () => {
+		const r = rig();
+		r.steps({ start: [ready, { wait: true }] });
+		r.assign(job(r.upstream.commit));
+		await waiting(r);
+		r.hub.socket.close(4000, "Replaced by a new connection");
+		expect(await r.runner.done).toBe("replaced");
+		// Its agent stopped before the runner let go of the home holding its checkout.
+		expect(r.runner.running).toEqual([]);
+		expect(r.calls().some((c) => c.terminated)).toBe(true);
+		expect(r.hub.of("result")).toEqual([]);
+	});
+
 	posix("continues from the head kix reports after a publication's reply was lost", async () => {
 		let landed = "";
 		const r = rig((body, source) => {
@@ -940,6 +1629,34 @@ describe("quest runner", () => {
 		await r.runner.shutdown();
 	});
 
+	posix("reads a new plan's request and reports the follow-ups it suggests", async () => {
+		const r = rig();
+		r.steps({
+			start: [
+				{ tool: "context", args: {} },
+				{ tool: "deliver", args: { summary: "Planned", title: "plan", body: "Body", followups: [7] } },
+				{
+					tool: "deliver",
+					args: { summary: "Planned", title: "plan", body: "Body", followups: [" Cache the parser "] },
+				},
+			],
+		});
+		const plan = "0".repeat(8) + "-0000-4000-8000-" + "0".repeat(12);
+		r.assign(job(r.upstream.commit, { workflow: "plan", target: `plans/${plan}`, branch: "plan/00000000" }));
+		const result = await r.result();
+		await idle(r.runner);
+		expect(r.contexts).toHaveLength(1);
+		const launch = r.calls().find((c) => c.argv)!;
+		expect(launch.stdin).toContain(
+			"Start a new planning interview. Read what it starts from with the `context` tool",
+		);
+		// A malformed list is the agent's to fix; nothing was published for it.
+		const [refused] = r.calls().filter((c) => c.tool === "deliver");
+		expect(refused.reply.isError).toBe(true);
+		expect(result).toMatchObject({ outcome: "completed", result: { followups: ["Cache the parser"] } });
+		await r.runner.shutdown();
+	});
+
 	posix("refuses to resume with an answer its owner has not approved", async () => {
 		const r = rig();
 		r.steps({ start: [{ tool: "deliver", args: { summary: "Done", title: "t", body: "b" } }] });
@@ -988,8 +1705,8 @@ describe("quest runner", () => {
 				home,
 				login: { url: "http://kix.test", token: "token", id: "r1", name: "laptop" },
 				slots: 1,
-				adapter: () => new Claude("claude", "bypassPermissions", {}),
-				shell: devShell,
+				adapter: () => new Claude("claude", {}),
+				devShell: async () => null,
 				remote: () => "",
 				dial: hub.dial,
 				log: () => {},

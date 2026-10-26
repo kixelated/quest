@@ -35,8 +35,8 @@ ownership-manifest design:
 
 ## Required
 
-- [Lifecycle flakes](/quest/m0/lifecycle-flakes.md) - lifecycle CI jobs stop failing on Windows `EBUSY` and unstarted macOS jobs
-- [Worker tests](/quest/m0/worker-tests.md) - every Worker test passes alone and in any order
+- [CI flakes](/quest/m0/ci-flakes.md) - native Windows tests and Release's macOS checks fail only on real breakage
+- [Review policy](/quest/m0/review-policy.md) - CONTRIBUTING.md says whose review counts
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges

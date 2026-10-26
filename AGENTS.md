@@ -11,7 +11,7 @@ Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
 
 ## Development
 
-- Run `quest guide` and read it completely before planning or executing quests.
+- Run `quest guide` and read it completely before starting work.
 - Keep README examples consistent with the CLI's actual `--help` output.
   In this checkout, `quest` means `bun run --silent quest`.
 - Use an isolated worktree under `.worktrees/`. Preserve existing changes.
@@ -28,5 +28,6 @@ Do not edit `CONTRIBUTING.md`, `PROMPTING.md`, `assets/AGENTS.md`, or
   rather than creating quests for it directly.
 - Starting or spawning quests stops at PR creation. It merges only when the user
   picks /quest-merge, and only after repository checks and reviews pass.
+- Pull requests land as squash merges.
 - End every GitHub post with `(written by <model>)`, naming the running model.
   Do not comment on repositories outside kixelated/moq-dev without approval.

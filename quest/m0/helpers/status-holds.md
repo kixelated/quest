@@ -16,5 +16,3 @@ added the holds:
   GitHub client, and report a draft its starter still holds the same way.
 - Update the `complete` skill to read holds from `quest status`, and the
   README's status example.
-- Ranked after the [complete loop](/quest/m0/helpers/complete-loop.md), which
-  also edits `complete`.

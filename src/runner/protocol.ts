@@ -2,7 +2,7 @@
 // `cloudflare/src/jobs/protocol.ts` is the authority; these are the fields the
 // runner reads and writes. Everything the hub sends is checked before use.
 
-export type Workflow = "plan" | "start" | "iterate" | "bootstrap";
+export type Workflow = "plan" | "start" | "iterate" | "merge" | "bootstrap";
 export type Outcome = "completed" | "failed" | "cancelled" | "limited";
 
 export interface Attempt {
@@ -49,7 +49,7 @@ export interface Job {
 	/** The commit the job builds on, such as the default branch when it was authorized. */
 	revision: string;
 	branch: string;
-	/** Trusted revisions only, until the job sandbox ships. */
+	/** Trusted revisions only, until runners build untrusted heads' devShells in a VM. */
 	trusted: number;
 	account: string | null;
 	/** The agent session to resume on this runner and account. */
@@ -102,7 +102,7 @@ export function parsePush(value: unknown): Push | null {
 	}
 	if (body?.type !== "assign") return null;
 	const job = record(body.job);
-	const workflows = ["plan", "start", "iterate", "bootstrap"];
+	const workflows = ["plan", "start", "iterate", "merge", "bootstrap"];
 	if (
 		!job ||
 		typeof job.id !== "string" ||

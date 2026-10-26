@@ -3,7 +3,7 @@
 import { realpathSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
-import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
+import { Argument, Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
 import { description, version } from "../../package.json";
 import {
@@ -28,13 +28,15 @@ import {
 	removeAccount,
 	runRunner,
 } from "../runner/cli";
+import type { AdapterName } from "../runner/adapter";
 import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
-import { init, uninstall } from "./setup";
+import { resolveFile } from "./resolve";
+import { heal, init, uninstall } from "./setup";
 import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
@@ -281,7 +283,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"quest check rejects, which can hide a blocker. Refuses a blocked quest, one missing from the " +
 				"upstream default branch, and one already held: a branch upstream or an open PR from that branch in " +
 				"any repository. A branch whose tip is a merged PR's head holds nothing, and the claim replaces it " +
-				"with a lease on that tip. A rejected push means someone else pushed the branch first. When two PRs " +
+				"with a lease on that tip. A rejected push means someone else pushed the branch first. A branch named after the claim " +
+				"branch's directory, or inside it, refuses the claim too, since git cannot hold both; the refusal names it " +
+				"and whether it is a merged PR's head, and leaves it in place. When two PRs " +
 				"race, as from forks, the earliest open PR keeps the claim; a later one is closed and its branch " +
 				"deleted.\n\n" +
 				"The remote's upstream holds claims: a GitHub fork pushes the branch to itself and opens the PR on its " +
@@ -290,7 +294,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
-				"(blocked, held, or work on the branch), 2 for invalid arguments, and 1 for other failures.",
+				"(blocked, held, a branch in the way, or work on the branch), 2 for invalid arguments, and 1 for other " +
+				"failures.",
 		)
 		.argument("<quest>", "Quest to claim, as /quest/..., quest/..., or a filesystem path")
 		.option("--release", "Release the claim instead: delete the empty claim branch and close its PR")
@@ -705,7 +710,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"Turn this Linux or macOS machine into a kix runner. `quest runner login` connects it to your kix " +
 				"account, `quest runner account add` signs agent accounts in with their own CLIs, and `quest runner` " +
 				"runs routed jobs in the foreground until interrupted.\n\n" +
-				"Each account signs in through Claude Code's own flow in an isolated home (CLAUDE_CONFIG_DIR); kix " +
+				"Each account signs in through its CLI's own flow, Claude Code or opencode, in an isolated home; kix " +
 				"stores only an opaque account id, its kind, and its label, and never sees its tokens. Every job runs " +
 				"inside its project's `nix develop` shell. State lives in $QUEST_RUNNER_HOME, by default " +
 				"$XDG_DATA_HOME/quest/runner.",
@@ -730,11 +735,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const account = runner.command("account").description("Add, list, and remove this runner's agent accounts");
 	account
 		.command("add")
-		.description("Sign a Claude Code account in with `claude auth login` in a new isolated home")
-		.option("--console", "Sign in with an Anthropic Console account (API billing) instead of a subscription")
-		.option("--label <label>", "The name kix shows for the account (default: its email and plan)")
-		.action((options: { console?: boolean; label?: string }) =>
-			runnerAction(() => addAccount(runnerIO(), { console: !!options.console, label: options.label })),
+		.description(
+			"Sign an account in with its CLI's own flow in a new isolated home: `claude auth login` for Claude " +
+				"Code, or `opencode auth login` for an OpenCode Go plan, a ChatGPT plan, or any provider's API key",
+		)
+		.addArgument(new Argument("[cli]", "The agent CLI").choices(["claude", "opencode"]).default("claude"))
+		.option("--console", "Claude Code: sign in with an Anthropic Console account (API billing)")
+		.option("--model <provider/model>", "opencode: the model this account's jobs use (default: opencode's)")
+		.option("--label <label>", "The name kix shows for the account (default: its email or providers)")
+		.action((cli: AdapterName, options: { console?: boolean; model?: string; label?: string }) =>
+			runnerAction(() =>
+				addAccount(runnerIO(), { cli, console: !!options.console, model: options.model, label: options.label }),
+			),
 		);
 	account
 		.command("list")
@@ -800,6 +812,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	program
+		.command("resolve")
+		.summary("Merge driver: resolve concurrent edits to a quest's link lists")
+		.description(
+			"Merge driver: merge <theirs> into <ours> from <base> by lines, as git merge-file does, and write the " +
+				"result to <ours>. A conflict that only edits the entries of one Required, Related, or Closes list is " +
+				"resolved: entries either side removed stay removed, entries either side added are kept in their " +
+				"place, ours before theirs, and an entry only one side changed takes that change. Entries match by " +
+				"their opening link. Any other conflict, including prose, a heading, an entry both sides changed, or a " +
+				"reordered list, keeps standard conflict markers, showing the base when merge.conflictStyle is diff3 " +
+				"or zdiff3. Exits 1 when a conflict remains.\n\n" +
+				"quest init registers it for quest/** as the merge.quest driver. Any other command registers the driver " +
+				"in the clone's config when .gitattributes names merge=quest and no config sets it. Without quest on " +
+				"the merge's PATH, the driver falls back to git merge-file. GitHub's merges ignore merge drivers.",
+		)
+		.argument("<ours>", "Our version, overwritten with the result (git's %A)")
+		.argument("<base>", "The common ancestor (git's %O)")
+		.argument("<theirs>", "Their version (git's %B)")
+		.action((ours: string, base: string, theirs: string) => {
+			if (resolveFile(ours, base, theirs) > 0) code = 1;
+		});
+
+	program
 		.command("guide")
 		.description("Print the quest guide: the format, workflow, and rules agents follow")
 		.action(() => out.stdout(GUIDE));
@@ -827,7 +861,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("init")
-		.description("Install skill stubs, a quest root, and agent pointers for this repository")
+		.description("Install skill stubs, a quest root, agent pointers, and the merge driver for this repository")
 		.action(() => {
 			const changes = init(root());
 			for (const line of theme ? theme.init(changes) : changes) print(line);
@@ -835,11 +869,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("uninstall")
-		.description("Remove Quest stubs and markers installed by `quest init`")
+		.description("Remove Quest stubs, markers, and the merge driver installed by `quest init`")
 		.action(() => {
 			const changes = uninstall(root());
 			for (const line of theme ? theme.uninstall(changes) : changes) print(line);
 		});
+
+	// Fresh clones and worktrees get the merge driver from whichever command runs first.
+	program.hook("preAction", (_program, action) => {
+		if (!["init", "uninstall"].includes(action.name())) heal(root());
+	});
 
 	try {
 		program.parse(gateBoundary(argv), { from: "user" });

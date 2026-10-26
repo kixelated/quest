@@ -2,8 +2,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-	chmodSync,
-	copyFileSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -29,17 +27,12 @@ const assertFile = (root, path, expected) => assert.equal(read(root, path), expe
 const skills = ["audit", "complete", "delete", "export", "import", "iterate", "merge", "plan", "spawn", "start"];
 const destinations = [".claude/skills", ".agents/skills"];
 try {
+	// Run the caller's binary in place, so the cleanup below never deletes an executable it just ran:
+	// on windows-11-arm, the hosted runner's agent briefly opens running executables without delete
+	// sharing, and removing one then fails with EBUSY. Callers test a binary path with spaces.
 	const javascript = extname(input) === ".js";
-	const binary = join(
-		work,
-		"tool bin",
-		javascript ? "quest.js" : process.platform === "win32" ? "quest.exe" : "quest",
-	);
-	mkdirSync(dirname(binary));
-	copyFileSync(input, binary);
-	if (process.platform !== "win32") chmodSync(binary, 0o755);
-	const command = javascript ? process.execPath : binary;
-	const prefix = javascript ? [binary] : [];
+	const command = javascript ? process.execPath : input;
+	const prefix = javascript ? [input] : [];
 	const run = (root, ...args) =>
 		execFileSync(command, [...prefix, "--root", root, ...args], {
 			cwd: root,
@@ -76,6 +69,14 @@ try {
 		execFileSync("git", ["-C", repository, "worktree", "add", "--quiet", "--detach", root]);
 		run(root, "init");
 		assert.equal(run(root, "init"), "");
+		// The merge driver probes for `resolve` with `quest help resolve`, which fails for an unknown command.
+		assertFile(root, ".gitattributes", "quest/** merge=quest\n");
+		assert.match(
+			execFileSync("git", ["-C", root, "config", "merge.quest.driver"], { encoding: "utf8" }),
+			/resolve/,
+		);
+		run(root, "help", "resolve");
+		assert.equal(spawnSync(command, [...prefix, "help", "unknown"]).status, 2);
 		for (const dir of destinations) {
 			assert(lstatSync(join(root, dir)).isDirectory(), `${dir} must not require symlink privileges`);
 			for (const skill of skills)
@@ -113,6 +114,8 @@ try {
 		assertFile(root, ".claude/skills/quest-plan/SKILL.md", edited);
 		assertFile(root, ".agents/skills/quest-start/notes.md", "User notes.\n");
 		assert(!existsSync(join(root, ".agents/skills/quest-start/SKILL.md")));
+		assert(!existsSync(join(root, ".gitattributes")));
+		assert.equal(spawnSync("git", ["-C", root, "config", "merge.quest.driver"]).status, 1);
 		for (const dir of originalDirs) assertFile(root, `${dir}/custom/SKILL.md`, `# Custom ${dir} workflow\n`);
 		run(root, "check");
 		assert.equal(run(root, "uninstall"), "");

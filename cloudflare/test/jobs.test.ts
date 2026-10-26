@@ -2,6 +2,7 @@ import { createScheduledController, runDurableObjectAlarm } from "cloudflare:tes
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { app } from "../src/index";
+import * as landing from "../src/jobs/landing";
 import * as output from "../src/jobs/output";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
@@ -17,7 +18,7 @@ const testEnv = { ...env, GITHUB_APP_PRIVATE_KEY: privateKey };
 const db = env.DB;
 async function user(id: string) {
 	await db
-		.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
+		.prepare("INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)")
 		.bind(id, id, `${id}@example.test`)
 		.run();
 }
@@ -62,13 +63,6 @@ async function run(slots: Record<string, number>, now: number, owner = "owner", 
 }
 
 beforeEach(async () => {
-	await db.batch([
-		db.prepare("DELETE FROM jobs"),
-		db.prepare("DELETE FROM runners"),
-		db.prepare("DELETE FROM github_projects"),
-		db.prepare("DELETE FROM github_installations"),
-		db.prepare("DELETE FROM output_cleanup"),
-	]);
 	await user("owner");
 	await user("other");
 	await project(10, "owner");
@@ -295,7 +289,7 @@ describe("job coordination", () => {
 		await expect(store.ask(db, old, id, 1, { summary: "?", session: "s", prompt: {} }, late)).rejects.toThrow(
 			"no longer current",
 		);
-		expect(await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], late)).toEqual([
+		expect((await store.report(db, old, [account("old")], [{ job: id, attempt: 1 }], late)).attempts).toEqual([
 			{ job: id, attempt: 1, action: "stop" },
 		]);
 		const done = { outcome: "completed", summary: "Done", result: { pr: 1 } } as const;
@@ -318,7 +312,7 @@ describe("job coordination", () => {
 		await run({}, 1);
 		expect((await state(id)).lease).toBe(1 + GRACE);
 		const listed = [{ job: id, attempt: 1 }];
-		expect(await store.report(db, machine, [account("main")], listed, 2)).toEqual([
+		expect((await store.report(db, machine, [account("main")], listed, 2)).attempts).toEqual([
 			{ job: id, attempt: 1, action: "continue" },
 		]);
 		await run({ [machine.id]: 0 }, 3);
@@ -447,9 +441,9 @@ describe("job coordination", () => {
 		await run({ [machine.id]: 1 }, 3);
 		await store.cancel(db, running, "owner", 4);
 		expect((await run({ [machine.id]: 0 }, 5)).cancel).toEqual([{ job: running, attempt: 1, runner: machine.id }]);
-		expect(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], 5)).toEqual([
-			{ job: running, attempt: 1, action: "cancel" },
-		]);
+		expect(
+			(await store.report(db, machine, [account("main")], [{ job: running, attempt: 1 }], 5)).attempts,
+		).toEqual([{ job: running, attempt: 1, action: "cancel" }]);
 		expect(await store.checkpoint(db, machine, running, 1, "Stopping", null, 6)).toEqual({ cancel: true });
 		const stopped = { outcome: "cancelled", summary: "Stopped after the parser", result: undefined } as const;
 		await store.finish(db, machine, running, 1, stopped, 7);
@@ -980,7 +974,7 @@ describe("job routes", () => {
 		expect((await post("", { workflow: "start", target: "quest/README.md" })).status).toBe(409);
 		expect((await post("", { workflow: "plan", target: "issues/7" })).status).toBe(409);
 		expect((await post("", { workflow: "plan", target: "issues/1" })).status).toBe(201);
-		expect((await post("", { workflow: "plan" })).status).toBe(201);
+		expect((await post("", { workflow: "plan", idea: "Plan the importer" })).status).toBe(201);
 		expect((await post("", { workflow: "iterate", target: "pulls/2" })).status).toBe(201);
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(409);
 		expect((await post("", { workflow: "deploy" })).status).toBe(409);
@@ -994,6 +988,64 @@ describe("job routes", () => {
 				["iterate", "pulls/2", head, "contributor/fix", 0, maintainer],
 			]),
 		);
+	});
+
+	it("starts a new plan from the maintainer's idea and keeps it across a retry", async () => {
+		const refuse = async (body: Record<string, unknown>, error: string) => {
+			const response = await post("", body);
+			expect(response.status).toBe(409);
+			expect(await response.json()).toEqual({ error });
+		};
+		await refuse({ workflow: "plan" }, "Describe what to plan");
+		await refuse({ workflow: "plan", idea: "  ", context: "pasted" }, "Describe what to plan");
+		await refuse({ workflow: "plan", idea: "x".repeat(4001) }, "Keep the idea to at most 4000 characters");
+		await refuse({ workflow: "plan", target: "issues/1", idea: "Also this" }, "Only a new plan takes an idea");
+		// An interview no job started, or one whose follow-ups nobody suggested, is not a plan to retry.
+		await refuse({ workflow: "plan", target: `plans/${crypto.randomUUID()}` }, "Nothing is left to plan here");
+		const created = await post("", { workflow: "plan", idea: " Config includes\r\n", context: "Notes:\r\nA" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+		const job = (await store.readJob(db, id))!;
+		expect(job).toMatchObject({
+			idea: "Config includes",
+			context: "Notes:\nA",
+			branch: `plan/${job.target.slice(6, 14)}`,
+		});
+		await db.prepare("UPDATE jobs SET state='failed' WHERE id=?").bind(id).run();
+		const retried = (await (await post("", { workflow: "plan", target: job.target })).json()) as { id: string };
+		expect(await store.readJob(db, retried.id)).toMatchObject({
+			target: job.target,
+			idea: "Config includes",
+			context: "Notes:\nA",
+			continues: id,
+		});
+	});
+
+	it("plans a finished job's suggested follow-ups once, from its own result", async () => {
+		const id = await job(10, maintainer, {}, 1);
+		await db
+			.prepare("UPDATE jobs SET state='completed',summary='Shipped it.',result=? WHERE id=?")
+			.bind(JSON.stringify({ head: null, followups: ["Cache the parser", "Document `--fast`"] }), id)
+			.run();
+		expect(await store.listFollowups(db, 10)).toMatchObject([
+			{ id, followups: ["Cache the parser", "Document `--fast`"] },
+		]);
+		// The request names only the target; the follow-ups come from the job, not the form.
+		const refused = await post("", { workflow: "plan", target: `plans/${id}`, context: "forged" });
+		expect(refused.status).toBe(409);
+		const planned = await post("", { workflow: "plan", target: `plans/${id}` });
+		expect(planned.status).toBe(201);
+		const plan = (await store.readJob(db, ((await planned.json()) as { id: string }).id))!;
+		expect(plan).toMatchObject({
+			workflow: "plan",
+			target: `plans/${id}`,
+			idea: "Plan the follow-ups that the start job on quest/first.md suggested.",
+			context:
+				"A finished job suggested these follow-ups:\n\n- Cache the parser\n- Document `--fast`\n\nIts summary: Shipped it.",
+		});
+		expect(await store.listFollowups(db, 10)).toEqual([]);
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(plan.id).run();
+		expect((await post("", { workflow: "plan", target: `plans/${id}` })).status).toBe(409);
 	});
 
 	it("starts an epic on its README branch while a child's branch is claimed", async () => {
@@ -1068,6 +1120,166 @@ describe("job routes", () => {
 		// Iterating on the bootstrap PR checks its head, which adds the flake.
 		expect((await post("", { workflow: "iterate", target: "pulls/2" })).status).toBe(201);
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(201);
+	});
+
+	it("holds a pull request picked for merge until its job stops, unless another session holds it", async () => {
+		const created = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({
+			workflow: "merge",
+			state: "queued",
+			revision: head,
+			head,
+			branch: "contributor/fix",
+			trusted: 0,
+			hold: "LE_1",
+		});
+		// Picking it again finds the same job, which already holds the pull request.
+		expect(await (await post("", { workflow: "merge", target: "pulls/2" })).json()).toEqual({ id, created: false });
+		expect(github.events).toHaveLength(1);
+		// Stopping the job gives the pull request back.
+		expect((await post(`/${id}/cancel`, {})).status).toBe(204);
+		expect(github.labels).toEqual([]);
+		expect(await state(id)).toMatchObject({ state: "cancelled", hold: null });
+
+		// A local session's hold refuses the pick and leaves no job behind.
+		github.labels = ["quest:iterate"];
+		github.events.push({ id: "LOCAL", label: "quest:iterate" });
+		const refused = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(refused.status).toBe(403);
+		expect(await refused.json()).toEqual({
+			error: "Another session holds this pull request with quest:iterate; pick it again once it is released",
+		});
+		expect(github.labels).toEqual(["quest:iterate"]);
+		expect(await store.active(db, 10, "pulls/2")).toBe(false);
+
+		// A merge label whose landing ended unmerged is spent, so the pick takes the pull request.
+		github.labels = ["quest:merge"];
+		github.events = [
+			{ id: "QUEUED", label: "quest:merge" },
+			{ id: "AUTO", label: null },
+		];
+		const again = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(again.status).toBe(201);
+		const { id: next } = (await again.json()) as { id: string };
+		expect(await state(next)).toMatchObject({ hold: "LE_3" });
+		expect(github.labels).toEqual(["quest:merge"]);
+	});
+
+	it("gives a merge job's pull request back once its landing ends unmerged", async () => {
+		const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+		const machine = await runner(maintainer, "machine", "linux", true);
+		await connected(machine, [account("main")]);
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
+		const dequeued = {
+			action: "dequeued",
+			installation: { id: 5 },
+			repository: { id: 10 },
+			pull_request: { id: 21, number: 2 },
+		};
+		// A running job keeps its hold whatever GitHub says.
+		await delivery("pull_request", dequeued, undefined, {}, testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		// The job started a landing, which keeps the hold while it is queued.
+		github.landing = true;
+		github.events.push({ id: "AUTO", label: null });
+		await store.finish(
+			db,
+			machine,
+			id,
+			1,
+			{ outcome: "completed", summary: "Landing", result: undefined },
+			Date.now(),
+		);
+		await delivery("pull_request", { ...dequeued, action: "auto_merge_enabled" }, undefined, {}, testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({ hold: "LE_1" });
+		// It left the queue unmerged: the bot removes the label.
+		github.landing = false;
+		await delivery("pull_request", dequeued, undefined, {}, testEnv);
+		expect(github.labels).toEqual([]);
+		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it("gives the label back when a merge pick is stopped while it takes the pull request", async () => {
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			// The maintainer stops the queued job while GitHub adds its label.
+			if (new URL(String(input)).pathname.endsWith("/issues/2/labels") && init?.method === "POST") {
+				const queued = await db
+					.prepare("SELECT id FROM jobs WHERE workflow='merge' AND state='queued'")
+					.first<{ id: string }>();
+				expect((await post(`/${queued!.id}/cancel`, {})).status).toBe(204);
+			}
+			return mock(input, init);
+		});
+		const created = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+		expect(await state(id)).toMatchObject({ state: "cancelled", hold: null });
+		expect(github.labels).toEqual([]);
+	});
+
+	it("starts a merge job only once it holds its pull request", async () => {
+		const machine = await runner(maintainer, "machine", "linux", true);
+		await connected(machine, [account("main")]);
+		const { id } = await store.createJob(
+			db,
+			{
+				repository: 10,
+				actor: maintainer,
+				workflow: "merge",
+				target: "pulls/2",
+				revision: head,
+				branch: "contributor/fix",
+				trusted: false,
+			},
+			0,
+		);
+		const slots = new Map([[machine.id, 1]]);
+		expect((await store.dispatch(db, maintainer, slots, 0)).assign).toEqual([]);
+		expect(await store.held(db, id, "LE_1")).toBe(true);
+		expect((await store.dispatch(db, maintainer, slots, 0)).assign.map((a) => a.job.id)).toEqual([id]);
+	});
+
+	it("gives a merge job's pull request back once an attempt it asked to stop is abandoned", async () => {
+		const machine = await runner(maintainer, "machine", "linux", true);
+		await connected(machine, [account("main")]);
+		const pick = async () =>
+			((await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string }).id;
+		const now = Date.now();
+
+		// The runner disconnects after the stop, so its attempt reports no result; the lease expiring cancels it.
+		const lost = await pick();
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), now);
+		await store.report(db, machine, [account("main")], [{ job: lost, attempt: 1 }], now);
+		expect((await post(`/${lost}/cancel`, {})).status).toBe(204);
+		expect(github.labels).toEqual(["quest:merge"]);
+		await store.dispatch(db, maintainer, new Map(), now);
+		expect((await store.dispatch(db, maintainer, new Map(), now + 2 * GRACE)).ended).toEqual([lost]);
+		await landing.ended(testEnv, lost);
+		expect(github.labels).toEqual([]);
+		expect(await state(lost)).toMatchObject({ state: "cancelled", hold: null });
+
+		// A status that omits an acknowledged attempt asked to stop cancels it too.
+		const omitted = await pick();
+		await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), now);
+		await store.report(db, machine, [account("main")], [{ job: omitted, attempt: 1 }], now);
+		expect((await post(`/${omitted}/cancel`, {})).status).toBe(204);
+		expect((await store.report(db, machine, [account("main")], [], now)).ended).toEqual([omitted]);
+		await landing.ended(testEnv, omitted);
+		expect(github.labels).toEqual([]);
+	});
+
+	it("refuses to merge a draft", async () => {
+		await db
+			.prepare("UPDATE github_project_activity SET data=json_set(data,'$.isDraft',json('true')) WHERE id='21'")
+			.run();
+		const refused = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(refused.status).toBe(409);
+		expect(await refused.json()).toEqual({ error: "Mark the draft ready for review before merging it" });
+		expect(github.labels).toEqual([]);
 	});
 
 	it("refuses to iterate on a pull request head without a flake", async () => {

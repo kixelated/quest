@@ -29,18 +29,29 @@
             config.allowUnfreePredicate = pkg: nixpkgs.lib.getName pkg == "claude-code";
           };
           quest = pkgs.callPackage ./nix/package.nix { };
-          # `quest runner` with the agent CLIs it drives pinned by this flake's lock.
+          # `quest runner` with the agent CLIs it drives pinned by this flake's lock, and on
+          # Linux the bubblewrap and socat Claude Code's sandbox runs its jobs' commands in.
           runner = pkgs.symlinkJoin {
             name = "quest-runner-${quest.version}";
             paths = [ quest ];
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postBuild = ''
-              wrapProgram $out/bin/quest --set-default QUEST_RUNNER_CLAUDE ${pkgs.lib.getExe pkgs.claude-code}
+              wrapProgram $out/bin/quest \
+                --set-default QUEST_RUNNER_CLAUDE ${pkgs.lib.getExe pkgs.claude-code} \
+                --set-default QUEST_RUNNER_OPENCODE ${pkgs.lib.getExe pkgs.opencode} ${pkgs.lib.optionalString pkgs.stdenv.isLinux "--prefix PATH : ${
+                  pkgs.lib.makeBinPath [
+                    pkgs.bubblewrap
+                    pkgs.socat
+                  ]
+                }"}
             '';
             meta = quest.meta;
           };
+          manifest = pkgs.lib.importJSON ./package.json;
           # package.json's packageManager pins Bun for CI runners without Nix.
-          bunVersion = pkgs.lib.removePrefix "bun@" (pkgs.lib.importJSON ./package.json).packageManager;
+          bunVersion = pkgs.lib.removePrefix "bun@" manifest.packageManager;
+          # The runner drives the pinned opencode through the SDK of the same release.
+          opencodeSdk = manifest.dependencies."@opencode-ai/sdk";
         in
         {
           packages = {
@@ -69,6 +80,13 @@
             bun-version = pkgs.runCommand "bun-version" { } ''
               if [ "${pkgs.bun.version}" != "${bunVersion}" ]; then
                 echo "package.json pins bun@${bunVersion}, but the flake provides Bun ${pkgs.bun.version}" >&2
+                exit 1
+              fi
+              touch "$out"
+            '';
+            opencode-sdk = pkgs.runCommand "opencode-sdk" { } ''
+              if [ "${pkgs.opencode.version}" != "${opencodeSdk}" ]; then
+                echo "package.json pins @opencode-ai/sdk ${opencodeSdk}, but the runner pins opencode ${pkgs.opencode.version}" >&2
                 exit 1
               fi
               touch "$out"

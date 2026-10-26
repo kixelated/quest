@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import * as push from "../push/notify";
+import * as landing from "./landing";
 import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
@@ -120,13 +121,15 @@ export class RunnerHub extends DurableObject<Env> {
 			const reported = (ws.deserializeAttachment() as Attachment).slots;
 			if (reported !== null) slots.set(runner, reported);
 		}
-		const { assign, cancel, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
+		const { assign, cancel, ended, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
 		for (const { runner, job } of assign) {
 			const message = { type: "assign", job, instructions: instructions(job.workflow) };
 			connections.get(runner)?.send(JSON.stringify(message));
 		}
 		for (const { runner, job, attempt } of cancel)
 			connections.get(runner)?.send(JSON.stringify({ type: "cancel", job, attempt }));
+		// An abandoned attempt that was asked to cancel reports no result, so its hold is released here.
+		for (const job of ended) this.ctx.waitUntil(landing.ended(this.env, job));
 		if (wake === null) await this.ctx.storage.deleteAlarm();
 		else await this.ctx.storage.setAlarm(wake);
 	}
@@ -137,7 +140,8 @@ export class RunnerHub extends DurableObject<Env> {
 		const now = Date.now();
 		switch (message.type) {
 			case "status": {
-				const attempts = await store.report(db, runner, message.accounts, message.attempts, now);
+				const { attempts, ended } = await store.report(db, runner, message.accounts, message.attempts, now);
+				for (const job of ended) this.ctx.waitUntil(landing.ended(this.env, job));
 				attachment.slots = message.slots;
 				ws.serializeAttachment(attachment);
 				return { attempts };
@@ -172,6 +176,8 @@ export class RunnerHub extends DurableObject<Env> {
 				// A limit waits on an account choice; a failure waits on a retry.
 				if (state === "waiting" || state === "failed")
 					this.ctx.waitUntil(push.job(this.env, message.job, state === "waiting" ? "account" : "failed"));
+				// A merge job that ended without a landing in progress gives its pull request back.
+				if (state && state !== "waiting") this.ctx.waitUntil(landing.ended(this.env, message.job));
 				return {};
 			}
 		}

@@ -1,4 +1,4 @@
-import { branchQuest, handedBack, parse, ready } from "quest/core";
+import { branchQuest, handedBack, landed, parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
@@ -31,6 +31,8 @@ export type Pull = Entity & {
 	reviewDecision: string | null;
 	/** GitHub's merge readiness for the App, such as CLEAN, BLOCKED, or DIRTY; absent in older observations. */
 	mergeStateStatus?: string;
+	/** The `quest:*` label a session holds it with, such as a queued merge's; absent in older observations. */
+	hold?: string | null;
 	reviews: { totalCount: number };
 	latestReviews: {
 		nodes: { state: string; author: { login: string } | null; commit: { oid: string } | null }[];
@@ -38,11 +40,18 @@ export type Pull = Entity & {
 	};
 	commits: { nodes: { commit: { oid: string; statusCheckRollup: { state: string } | null } }[] };
 };
+/** A quest branch, its tip, and the merged PRs from it, newest first. */
+type QuestRef = {
+	name: string;
+	prefix: string;
+	target: { oid: string } | null;
+	associatedPullRequests: { nodes: { headRefOid: string }[] };
+};
 export type ActivityPage = {
 	issues?: Connection<Entity>;
 	pullRequests?: Connection<Pull>;
 	open?: Connection<Pull>;
-	refs?: Connection<{ name: string; prefix: string }>;
+	refs?: Connection<QuestRef>;
 	/** Stale entities read by number, in the order requested; null when GitHub no longer has one. */
 	[stale: `s${number}`]: Entity | Pull | null | undefined;
 };
@@ -80,7 +89,7 @@ export const RETENTION = 30 * 24 * 60 * 60 * 1000;
 
 const entityFields =
 	"databaseId:fullDatabaseId number title state updatedAt closedAt author { login } comments { totalCount }";
-const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
+const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus labels(first:20) { nodes { name } } reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
 export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {
@@ -107,7 +116,7 @@ export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = [])
 	if (occupancy.refs !== false) {
 		variables.push("$refs: String");
 		fields.push(
-			'refs(refPrefix:"refs/heads/quest/",first:100,after:$refs) { nodes { name prefix } pageInfo { hasNextPage endCursor } }',
+			'refs(refPrefix:"refs/heads/quest/",first:100,after:$refs) { nodes { name prefix target { oid } associatedPullRequests(states:MERGED,first:10,orderBy:{field:CREATED_AT,direction:DESC}) { nodes { headRefOid } } } pageInfo { hasNextPage endCursor } }',
 		);
 	}
 	// Numbers come from validated webhook pointers and are interpolated as integers.
@@ -157,11 +166,16 @@ function validate(kind: "issue" | "pull", item: Entity) {
 	}
 }
 
-/** What is kept of an observed entity: a PR's body only as whether it hands its draft back. */
+/**
+ * What is kept of an observed entity: a PR's body only as whether it hands
+ * its draft back, and its labels only as the `quest:*` one a session holds it with.
+ */
 function observed(kind: "issue" | "pull", item: Entity): Entity {
 	if (kind === "issue") return item;
-	const { body, ...pull } = item as Pull & { body?: unknown };
-	return { ...pull, handedBack: typeof body === "string" && handedBack(body) } as Pull;
+	const { body, labels, ...pull } = item as Pull & { body?: unknown; labels?: { nodes: { name: unknown }[] } };
+	const names = (labels?.nodes ?? []).map((label) => label.name);
+	const hold = names.find((name): name is string => typeof name === "string" && name.startsWith("quest:")) ?? null;
+	return { ...pull, handedBack: typeof body === "string" && handedBack(body), hold } as Pull;
 }
 
 /**
@@ -218,8 +232,18 @@ export async function reconcile(
 	};
 	if (occupancy.refs !== false)
 		for (const ref of page.refs!.nodes) {
-			if (typeof ref.name !== "string" || ref.prefix !== "refs/heads/quest/")
+			const tip = ref.target?.oid;
+			const merged = ref.associatedPullRequests?.nodes;
+			if (
+				typeof ref.name !== "string" ||
+				ref.prefix !== "refs/heads/quest/" ||
+				typeof tip !== "string" ||
+				!Array.isArray(merged)
+			)
 				throw new GitHubError("Invalid branch observation");
+			// A branch left at a merged PR's head holds nothing: its work landed.
+			const pulls = merged.map((pull) => ({ head: pull.headRefOid, merged: true }));
+			if (landed(tip, pulls) !== undefined) continue;
 			// Ref.name is relative to the requested prefix.
 			updated.occupancy.claims.push(`quest/${ref.name}`);
 		}

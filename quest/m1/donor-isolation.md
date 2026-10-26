@@ -7,7 +7,7 @@ with constrained network and filesystem access, without exposing host secrets.
 
 ## Plan
 
-- m0 [sandboxes](/quest/m0/kix/sandbox.md) job commands at the OS level and
+- m0 [sandboxes](/quest/m0/kix/sandbox/README.md) job commands at the OS level and
   builds untrusted devShells in a VM. This quest adds a stronger whole-job
   boundary for shared runners running other people's projects. Nix devShells
   give reproducibility, not an isolation boundary for arbitrary commands.

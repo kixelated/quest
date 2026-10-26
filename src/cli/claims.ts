@@ -4,7 +4,7 @@
 // records a claim the same way, judging readiness by the upstream tree.
 import { execFileSync } from "node:child_process";
 
-import { handedBack } from "../core";
+import { handedBack, landed } from "../core";
 import {
 	type GitHubDependencies,
 	type ObjectValue,
@@ -234,7 +234,7 @@ export async function held(root: string, up: Upstream, branches: string[]): Prom
 			if (
 				up.github &&
 				source.repository &&
-				(await merged(up.github.client, up.github.repository, source.repository, branch, tip))
+				(await mergedPull(up.github.client, up.github.repository, source.repository, branch, tip)) !== null
 			) {
 				if (source === pushTo) landed.set(branch, tip);
 			} else {
@@ -247,17 +247,25 @@ export async function held(root: string, up: Upstream, branches: string[]): Prom
 	return { claims: found.filter((claim): claim is Claim => claim !== null), landed };
 }
 
-/** Whether `tip` is the head of a PR from `head`'s `branch` that merged into `repository`. */
-async function merged(
+/** The URL of the PR from `head`'s `branch` that merged into `repository` with `tip` as its head, or `null`. */
+export async function mergedPull(
 	github: GitHub,
 	repository: Repository,
 	head: Repository,
 	branch: string,
 	tip: string,
-): Promise<boolean> {
+): Promise<string | null> {
 	const query = new URLSearchParams({ state: "closed", head: `${head.owner}:${branch}`, per_page: "100" });
 	const rows = await github.all(`${repositoryPath(repository)}/pulls?${query}`);
-	return rows.some((row) => typeof row.merged_at === "string" && object(row.head).sha === tip);
+	const pull = landed(
+		tip,
+		rows.map((row) => ({
+			head: string(object(row.head).sha),
+			merged: typeof row.merged_at === "string",
+			url: string(row.html_url),
+		})),
+	);
+	return pull?.url ?? null;
 }
 
 /** Where a claim lands: the remote, its upstream, and the upstream default branch's tip and quest tree. */
