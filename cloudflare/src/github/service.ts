@@ -1348,6 +1348,7 @@ export class GitHubService {
 		return {
 			id: row.id,
 			state: row.state,
+			base: row.baseRefName,
 			head: row.headRefOid,
 			mergeState: row.mergeStateStatus,
 			queue: row.isMergeQueueEnabled === true,
@@ -1427,12 +1428,40 @@ export class GitHubService {
 		});
 	}
 
+	/** Whether `branch` requires the `quest land` check, read from branch protection and rulesets. */
+	async #gated(token: string, repo: GitHubRepository, branch: string): Promise<boolean> {
+		const path = repositoryPath(repo);
+		const ref = encodeURIComponent(branch);
+		type Contexts = { context: string }[];
+		const { protection } = await this.#api<{
+			protection?: {
+				required_status_checks?: { enforcement_level?: string; contexts?: string[]; checks?: Contexts };
+			};
+		}>(token, `${path}/branches/${ref}`);
+		const legacy = protection?.required_status_checks;
+		const contexts =
+			legacy && legacy.enforcement_level !== "off"
+				? (legacy.checks?.map((check) => check.context) ?? legacy.contexts ?? [])
+				: [];
+		const rules = await this.#api<{ type: string; parameters?: { required_status_checks?: Contexts } }[]>(
+			token,
+			`${path}/rules/branches/${ref}?per_page=100`,
+		);
+		const ruled = rules.flatMap((rule) =>
+			rule.type === "required_status_checks" ? (rule.parameters?.required_status_checks ?? []) : [],
+		);
+		return [...contexts, ...ruled.map((check) => check.context)].includes(LAND_CHECK);
+	}
+
 	/**
 	 * Land a merge job's pull request at exactly `head`, while the job still
 	 * holds it: enable auto-merge bound to that head, which enters the merge
 	 * queue when the base has one, or merge at once when GitHub would refuse
 	 * auto-merge because nothing is left to wait for. `method` is the one the
 	 * repository's instructions name, or else the first the repository allows.
+	 * A base that requires the `quest land` check queues it for that gate
+	 * instead, as `quest merge --land` does: squash auto-merge whose commit body
+	 * pins the head.
 	 */
 	landPullRequest(
 		repo: GitHubRepository,
@@ -1456,16 +1485,18 @@ export class GitHubService {
 					);
 				if (holds.head !== sha(input.head))
 					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				const gated = await this.#gated(token, repo, holds.base);
 				const mutation =
-					!holds.queue && IMMEDIATE.includes(holds.mergeState)
+					!gated && !holds.queue && IMMEDIATE.includes(holds.mergeState)
 						? "mergePullRequest"
 						: "enablePullRequestAutoMerge";
 				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
-					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId } }`,
+					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
 					variables: {
 						id: holds.id,
 						sha: input.head,
-						method: (input.method ?? mergeMethod(current)).toUpperCase(),
+						method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
+						body: gated ? `${LAND_PIN}: ${input.head}` : null,
 					},
 				});
 				if (result.errors?.length) {
@@ -1496,14 +1527,18 @@ const HOLD_PREFIX = "quest:";
 export const MERGE_LABEL = "quest:merge";
 /** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
 const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
+/** The check a base gated by `quest land` requires, and the commit body trailer that queues a head for it; see `quest land --help`. */
+const LAND_CHECK = "quest land";
+const LAND_PIN = "Quest-Land-Head";
 const HOLDS = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) {
- id state headRefOid mergeStateStatus isMergeQueueEnabled autoMergeRequest { enabledAt } mergeQueueEntry { state }
+ id state baseRefName headRefOid mergeStateStatus isMergeQueueEnabled autoMergeRequest { enabledAt } mergeQueueEntry { state }
  labels(first: 100) { nodes { name } }
  timelineItems(last: 100, itemTypes: [LABELED_EVENT, AUTO_MERGE_ENABLED_EVENT, ADDED_TO_MERGE_QUEUE_EVENT]) { nodes { __typename
   ... on LabeledEvent { id label { name } } ... on AutoMergeEnabledEvent { id } ... on AddedToMergeQueueEvent { id } } } } } }`;
 type HoldRow = {
 	id: string;
 	state: string;
+	baseRefName: string;
 	headRefOid: string;
 	mergeStateStatus: string;
 	isMergeQueueEnabled: boolean | null;
@@ -1515,6 +1550,7 @@ type HoldRow = {
 type Holds = {
 	id: string;
 	state: string;
+	base: string;
 	head: string;
 	mergeState: string;
 	queue: boolean;

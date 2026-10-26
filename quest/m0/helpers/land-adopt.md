@@ -3,7 +3,7 @@
 ## Goal
 
 PRs to kixelated/quest's `main` land only through
-[`quest land`](/quest/m0/helpers/land.md), on a hosted runner, running
+`quest land`, on a hosted runner, running
 `just check` and `just test` once per batch. GitHub's merge button cannot
 land around it.
 
@@ -17,11 +17,7 @@ user-owned, it cannot use GitHub's merge queue
   guarded by a test that refuses `contents: write` anywhere but the land job,
   as moq.pro's `queue.test.ts` does. The admin role keeps its emergency
   bypass. Ruleset writes are the user's.
-- The ruleset requires a check that PR heads never carry, so auto-merge only
-  waits for the gate.
+- The ruleset requires the `quest land` check, which PR heads never carry, so
+  auto-merge only waits for the gate.
 - Update `CONTRIBUTING.md`'s landing section; the user asked for it through
   this plan.
-
-## Required
-
-- [Batched merge gate: quest land](/quest/m0/helpers/land.md) - the engine

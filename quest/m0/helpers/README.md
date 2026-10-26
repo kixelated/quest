@@ -67,7 +67,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [Status holds](/quest/m0/helpers/status-holds.md) - `quest status` shows a PR's `quest:*` hold
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 - [Sibling PRs through a server-side merge](/quest/m0/helpers/queue-siblings.md) - children of one epic land back to back through a merge queue without conflicting on its link list
-- [Batched merge gate: quest land](/quest/m0/helpers/land.md) - a repository's CI lands every queued PR as one tested squash chain, fast-forwarding the base to the longest passing prefix
 - [kixelated/quest lands through quest land](/quest/m0/helpers/land-adopt.md) - this repository's `main` changes only through its own gate
 
 ## Related

@@ -451,8 +451,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		"Take a PR to fix it until it lands",
 		"--land enables auto-merge bound to that full head SHA, which enters the base's merge queue when it has " +
 			"one, or merges at once when nothing is left to wait for. It refuses once the head has moved. It makes a " +
-			"merge commit unless --squash or --rebase picks another method; a merge queue applies its own. The label " +
-			"stays on while the PR is queued or auto-merging, until it merges.",
+			"merge commit unless --squash or --rebase picks another method; a merge queue applies its own. On a base " +
+			`that requires the \`${LAND_CHECK}\` check, it queues the PR for \`quest land\` instead: squash ` +
+			"auto-merge whose commit body pins the head. The label stays on while the PR is queued or auto-merging, " +
+			"until it merges.",
 	)
 		.option("--land <sha>", "Land this full 40-character head SHA; needs the token")
 		.addOption(new Option("--squash", "Squash and merge").conflicts("rebase"))

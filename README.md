@@ -312,7 +312,8 @@ CI results are read for the current head. The first required check to fail
 prints `checks:failed` right away. `checks:passed` prints once nothing on the
 head is still going (no pending check and no unfinished GitHub Actions run, which
 may still create jobs), every check and workflow the base branch names is
-present, and every required check passed; it names the last check to finish,
+present (except `quest land`'s, which no head carries), and every required
+check passed; it names the last check to finish,
 when the head went idle. Each prints once per head, with the check's name
 (spaces as `_`) in the actor field and its details URL. Results count as
 `quest status` counts them, so neutral and skipped results pass. Each job of a
@@ -382,7 +383,7 @@ comes last, and a missing value prints as `-`:
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `auto-merge` | Method, who enabled it, and when. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
-| `landing-stopped` | GitHub's reason the latest merge-queue entry or auto-merge ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when. |
+| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#land-a-batch-with-quest-land) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when. |
 | `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
@@ -429,11 +430,143 @@ after a swap, the error names the new token.
 It enables auto-merge bound to that SHA, which enters GitHub's merge queue
 when the base has one, or merges at once when nothing is left to wait for. It
 makes a merge commit; `--squash` or `--rebase` picks another method, and a
-merge queue applies its own. `quest:merge` stays on while the PR is queued or
+merge queue applies its own. On a base that requires the `quest land` check, it
+queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead. `quest:merge` stays on while the PR is queued or
 auto-merging; once the PR leaves the queue unmerged, the next command removes
 it. The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.
+
+## Land a batch with quest land
+
+`quest land` is a batched merge gate that a GitHub repository runs from its own
+CI, including a user-owned one that cannot use GitHub's merge queue. It lands
+every queued PR as one tested batch: it builds them, in order, into a chain of
+squash commits on the base, resolving quest files with `quest resolve`, runs
+the repository's check once on the chain's tip, and fast-forwards the base to
+the longest passing prefix. The base only ever holds a tree the gate tested,
+and each landed PR shows as merged.
+
+A gated base requires the `quest land` status check, which nothing reports on
+a PR head, so GitHub's auto-merge only waits and its merge button cannot land
+around the gate. Only the gate's push credential bypasses that rule. There,
+`quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
+auto-merge whose commit body pins the head it approved
+(`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
+the pin is its current head, so a push by anyone but the gate dequeues it.
+The queue is in the order auto-merge was enabled.
+
+Each run of the gate has three phases, so PR code never sees a push credential:
+
+```sh
+quest land resolve > plan.json              # read the queue, with a read-only token
+quest land check plan.json -- just check > result.json  # build and test, with no push credential
+quest land push plan.json result.json       # land what passed, eject what cannot land
+```
+
+`check` runs the command on the chain's tip. When it fails, it runs it on the
+first half, and so on, until a prefix passes or one PR fails alone, with no
+retries and no batch-size limit. `push` rebuilds the chain itself and refuses a
+result that did not test exactly its prefixes. It moves each PR's branch, with
+a lease on the head that was tested, to that PR's squash commit, then
+fast-forwards the base to the tip: a fork's branch first, then every other
+branch and the base in one atomic push. A moved head stops the landing, and the
+prefix before it lands only if a check passed on exactly that prefix, since a
+later PR can mask an earlier one's failure. A failed landing moves fork
+branches back, so they stay queued. The rest of the queue waits for the next run.
+
+An ejected PR loses its auto-merge and `quest:merge` label and gets a comment
+with the reason, which `quest status` prints under `landing-stopped`:
+
+| Reason | Why |
+| --- | --- |
+| `merge_conflict` | It conflicts with the base or the PRs before it, beyond what `quest resolve` settles. |
+| `failed_checks` | The check failed with it alone on the base, or a required check failed on its head. |
+| `checks_pending` | A required check had not passed on its head. |
+| `review_required`, `changes_requested` | Its review decision blocks it. |
+| `no_maintainer_edits` | It comes from a fork the gate cannot push to. |
+| `head_moved` | Its head moved after it was queued or while it was checked. |
+| `not_pinned` | Auto-merge was enabled without `quest merge --land`. |
+| `push_failed` | The gate could not move its fork's branch. |
+
+Required reviews and the base's other required checks still apply, since the
+gate's push bypasses them. A workflow runs the phases in three jobs, with
+`quest` on PATH in each, installed from a source the PR cannot modify:
+
+```yaml
+name: Land
+on:
+  pull_request_target:
+    types: [auto_merge_enabled]
+  workflow_dispatch:
+# One run at a time; waiting triggers collapse into one run that reads the whole queue.
+concurrency:
+  group: land
+permissions: {}
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, pull-requests: read, checks: read, statuses: read }
+    outputs:
+      plan: ${{ steps.resolve.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Install quest here.
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "plan=$(quest land resolve)" >> "$GITHUB_OUTPUT"
+  check:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    outputs:
+      result: ${{ steps.check.outputs.result }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Install quest here, outside the checkout.
+      - id: check
+        env:
+          PLAN: ${{ needs.resolve.outputs.plan }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
+          echo "result=$(quest land check "$RUNNER_TEMP/plan.json" -- just check)" >> "$GITHUB_OUTPUT"
+  land:
+    needs: [resolve, check]
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write, issues: write, actions: write }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Install quest here.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ needs.resolve.outputs.plan }}
+          RESULT: ${{ needs.check.outputs.result }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
+          printf '%s' "$RESULT" > "$RUNNER_TEMP/result.json"
+          quest land push "$RUNNER_TEMP/plan.json" "$RUNNER_TEMP/result.json" > "$RUNNER_TEMP/landing"
+          cat "$RUNNER_TEMP/landing"
+          # The queue changed, so run again for the rest.
+          if [ -s "$RUNNER_TEMP/landing" ]; then gh workflow run land.yml --ref "$GITHUB_REF_NAME"; fi
+```
+
+The land job's token pushes the base and PR branches; give it the bypass,
+such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
+from an environment only the base branch can use. Pushing to a fork's branch
+needs a credential the fork accepts maintainer edits from. `resolve` reads
+the repository from `origin` and fails unless its base requires the
+`quest land` check. Ejection comments link the run.
 
 ## Gate expensive commands
 

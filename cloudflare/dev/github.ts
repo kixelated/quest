@@ -227,6 +227,7 @@ function holdsTarget(repo: Repo, pull: Pull) {
 	return {
 		id: nodeId(repo, pull),
 		state: pull.merged ? "MERGED" : pull.closed ? "CLOSED" : "OPEN",
+		baseRefName: "main",
 		headRefOid: headOf(repo, pull),
 		mergeStateStatus: mergeState(pull),
 		isMergeQueueEnabled: false,

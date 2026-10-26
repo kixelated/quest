@@ -1131,7 +1131,10 @@ describe("merge jobs", () => {
 		expect(project.branches["contributor/fix"]).toBe(head);
 		expect(landed).toEqual({ merged: false });
 		expect(lands()).toEqual([
-			{ mutation: "enablePullRequestAutoMerge", variables: { id: "PR_10002", sha: head, method: "MERGE" } },
+			{
+				mutation: "enablePullRequestAutoMerge",
+				variables: { id: "PR_10002", sha: head, method: "MERGE", body: null },
+			},
 		]);
 
 		// Its landing is queued when the job ends, so it keeps holding the pull request.
@@ -1143,6 +1146,21 @@ describe("merge jobs", () => {
 		await landing.release(testEnv, 10, "pulls/2");
 		expect(pull().labels).toEqual([]);
 		expect(await job(id)).toMatchObject({ hold: null });
+	});
+
+	it("queues for quest land on a base that requires its check, even when nothing else is left to wait for", async () => {
+		const id = await merging();
+		pull().merge = "CLEAN";
+		project.required = ["quest land"];
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "merge" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: false } });
+		expect(lands()).toEqual([
+			{
+				mutation: "enablePullRequestAutoMerge",
+				variables: { id: "PR_10002", sha: prHead, method: "SQUASH", body: `Quest-Land-Head: ${prHead}` },
+			},
+		]);
+		expect(pull().autoMerge?.commitBody).toBe(`Quest-Land-Head: ${prHead}`);
 	});
 
 	it("merges at once when nothing is left to wait for, unless the project is paused", async () => {
