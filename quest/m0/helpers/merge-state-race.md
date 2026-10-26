@@ -32,11 +32,10 @@ GitHub has not computed yet reads `UNKNOWN` and falls through to
 - Test each path: an `UNKNOWN` state that GitHub refuses as clean merges at
   once, an `UNKNOWN` state that accepts auto-merge stays on auto-merge, and a
   refusal for any other reason is reported unchanged.
-- [kixelated/quest#229](https://github.com/kixelated/quest/pull/229) adds a
-  gated branch to `land()` ahead of this choice; whichever lands second merges
-  the other in.
+- `land()` sends a base gated by `quest land` to auto-merge ahead of this
+  choice ([kixelated/quest#229](https://github.com/kixelated/quest/pull/229)),
+  so it applies only to ungated bases.
 
 ## Related
 
 - [Landing rules](/quest/m0/helpers/landing.md) - also changes what `quest merge --land` refuses
-- [Batched merge gate: quest land](/quest/m0/helpers/land.md) - gated bases always enable auto-merge, so this choice applies only to ungated ones
