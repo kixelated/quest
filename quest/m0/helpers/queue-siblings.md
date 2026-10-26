@@ -26,6 +26,14 @@ and a tolerant check must tell a finished quest from a mistyped link.
 The fix belongs in quest, not in each repository's process. Rejected:
 landing one sibling at a time, which serializes batches.
 
+Narrowed 2026-10-26 (user): [`quest land`](/quest/m0/helpers/land.md) runs
+the merge driver while it builds its chain, so a repository on that gate no
+longer hits the link-list conflict. This quest keeps the dead-link
+`quest check` failure on every gate, which caused 6 of moq's queue failures
+from 2026-10-23 to 10-26, and the link-list conflict for repositories that
+still merge through GitHub's merge queue. Its third option below is what
+`quest land` does.
+
 Open (this quest decides, with a recommendation to the user):
 
 - Change the link-list format so deleting one entry never touches its
@@ -42,4 +50,5 @@ landing through a merge that does not run the driver.
 
 ## Related
 
+- [Batched merge gate: quest land](/quest/m0/helpers/land.md) - resolves the link-list conflict for gated repositories
 - [Land only heads tested against the current base](/quest/m0/helpers/landing.md) - the same landing path
