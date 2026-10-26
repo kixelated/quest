@@ -2,7 +2,7 @@
 description: Iterate on an open PR to settle its open decisions, fix CI and review findings, and push.
 ---
 
-Before you begin, run `quest guide` and `quest skill plan`, and read their output completely.
+Before you begin, run `quest guide` and `quest skill grill`, and read their output completely.
 
 You own this PR until it is landable.
 Parse the arguments to determine the PR number. Any other text is the user's feedback on the PR; interpret it against the diff.
@@ -18,10 +18,9 @@ A review round is one pushed head that drew reviews, counted from the PR's full 
 On every fourth round, report your judgment of the approach and what remains before fixing more findings, recommending to continue, rethink the approach, or drop the PR; that choice is the user's.
 Record a design change you make, including a rethink the user picks, in a PR comment that starts with `Design change:`.
 
-Scope the changes this PR needs with the plan skill's interview, starting from the user's feedback, your judgment of the approach, and any review findings that need a decision.
-Skip its quest and PR steps: record the settled decisions in this PR's description as the paper trail, then implement them immediately.
-A sub-agent that cannot prompt picks the recommended option only for decisions the repository's instructions don't reserve for the maintainer, and lists those choices in the PR description and its report.
-Reserved decisions, and any truly consequential choice, stay open in the PR with a recommendation.
+Settle every decision this PR needs with the grill skill's interview, starting from the user's feedback: those its `## Decisions needed` section lists, those your judgment of the approach or the review findings raise, and any you find along the way.
+Record the settled decisions in this PR's description as the paper trail, then implement them.
+A sub-agent that cannot prompt leaves each in `## Decisions needed` with a recommendation.
 
 Fix merge conflicts and failing CI checks.
 Address the automated review findings already posted, without waiting on optional reviewers: fix those you agree with and comment on any you decline.

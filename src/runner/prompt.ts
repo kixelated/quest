@@ -108,7 +108,8 @@ function workflow(job: Job): string {
 	const name = { start: "start", iterate: "iterate", merge: "merge", plan: "plan", bootstrap: null }[job.workflow];
 	const parts = [`# Quest guide\n\n${GUIDE.trim()}`];
 	if (name) parts.push(`# The ${name} workflow\n\n${skill(name)!.body.trim()}`);
-	if (job.workflow === "iterate") parts.push(`# The plan workflow\n\n${skill("plan")!.body.trim()}`);
+	if (job.workflow === "plan" || job.workflow === "iterate")
+		parts.push(`# The grill workflow\n\n${skill("grill")!.body.trim()}`);
 	return parts.join("\n\n");
 }
 
