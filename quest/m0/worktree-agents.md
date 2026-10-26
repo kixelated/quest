@@ -1,4 +1,4 @@
-# [M] Release agent checkouts at handoffs and completion
+# [L] Release agent checkouts at handoffs and completion
 
 ## Goal
 
@@ -9,9 +9,61 @@ merge.
 
 ## Plan
 
+Remaining work:
+
+- Claude hooks: a `quest` subcommand (for example `quest worktree hook
+  <event>`) handles `WorktreeCreate` and `WorktreeRemove` through `quest
+  worktree create` and `remove`, releases the stopped subagent's checkout on
+  `SubagentStop`, and restores it on `SubagentStart`. `/quest-spawn` cleanup
+  calls `quest worktree remove`, since Claude never removes a hook-created
+  subagent worktree.
+- `quest init` adds the static hook entries to `.claude/settings.json`,
+  merging into an existing file, and `quest uninstall` removes exactly those
+  entries.
+- Derived defaults for a checkout the hook creates, which gets only a `name`.
+- Codex through `quest agent` running the harness inside `quest worktree run`.
+- Exercise both harnesses with a finished worker under a still-live parent,
+  a suspended decision, a crash, and a restored session. Confirm live that
+  `SubagentStop`'s `cwd` is the subagent's worktree, and that a hook-created
+  worktree passes Claude's isolation identity check. Reconcile existing
+  cleanup mechanisms instead of adding an unrelated competing sweeper. Run
+  these from a session that is not itself worktree-isolated: Claude's
+  isolation checks refuse git in any other repository, including a scratch
+  test repository.
+
+Decisions:
+
 - Decided 2026-10-15: use `quest worktree` for checkout lifetime and `quest gate`
   for expensive phases. Disk capacity gates checkout allocation, not the number
   of reasoning agents.
+- Decided 2026-10-26 (user): Claude integrates through a
+  `WorktreeCreate`/`WorktreeRemove` hook pair backed by `quest worktree`, with
+  `SubagentStop` releasing and `SubagentStart` restoring. It matches the
+  ownership model, and native cleanup does not reclaim finished workers. The
+  accepted cost: the hook replaces every Claude worktree in the repository.
+  Rejected: pruning build output in place on `SubagentStop`, and prose alone.
+- Decided 2026-10-26 (user): the hooks live in the repository's
+  `.claude/settings.json`, written by `quest init`, not in user settings. The
+  entries are static stubs that only call a `quest` subcommand, with all logic
+  in the binary like the skill stubs, so upgrades never rewrite them. The m0
+  Plan's vendoring bullet was amended to allow this.
+- Decided 2026-10-26 (user): a hook-created checkout derives its defaults.
+  Scratch is the main checkout's top-level ignored entries, excluding
+  `.worktrees/`, `.claude/worktrees/`, and nested repositories. The reserve is
+  the main checkout's disk usage. An unset `capacity` admits whatever the
+  free-space check admits, instead of refusing everything.
+- Decided 2026-10-26 (user): Codex, which documents no worktree hooks, is
+  covered by `quest agent` running it inside `quest worktree run`, which
+  releases on exit and restores on resume. Codex app threads stay on Codex's
+  native archive.
+- Decided 2026-10-26 (user): agents are capped only at the harness's
+  concurrent sub-agent limit, stated once in the guide; the core-count cap is
+  gone, since `quest gate` holds expensive commands. The 2026-10-15 decision
+  stands over [kixelated/quest#227](https://github.com/kixelated/quest/pull/227)'s
+  wording, which kept the core count only incidentally.
+
+Context:
+
 - Landed: `quest worktree run` supervises a job and releases its scratch,
   `remove` deletes a finished checkout without losing work (a squash-merged
   head counts only with exact PR-head evidence), and `stop` ends a crashed
@@ -38,27 +90,11 @@ merge.
   session exits, `ExitWorktree`, background-session deletes, and remote-control
   cleanup. `SubagentStop` fires when a subagent finishes responding, which
   covers both completion and a suspended decision, and `SubagentStart` fires on
-  resume; their `cwd` follows the agent, but whether it is the subagent's
-  worktree must be confirmed live. Without a hook, Claude removes a clean
+  resume; their `cwd` follows the agent. Without a hook, Claude removes a clean
   subagent worktree only when it finishes with no changes and otherwise leaves
   it to the `cleanupPeriodDays` sweep.
 - Codex can archive recoverably but refuses unsupported nested repositories,
-  and keeps its 15 most recent managed worktrees by default. Integrate its
-  actual supported lifecycle.
+  and keeps its 15 most recent managed worktrees by default.
   Sources: [Claude worktrees](https://code.claude.com/docs/en/worktrees),
   [Claude removal hooks](https://code.claude.com/docs/en/hooks#worktreeremove),
   [Codex worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees).
-- Open: whether Claude integrates through `WorktreeCreate`/`WorktreeRemove`
-  and `SubagentStop`/`SubagentStart` hooks, an in-place prune on
-  `SubagentStop`, or prose alone; whether `quest init` installs the hooks into
-  the repository's settings or the user installs them; how a hook-created
-  checkout learns its reservation and scratch paths, and what an unset
-  capacity admits, since `quest worktree create` refuses everything until
-  `capacity` is set; and whether Codex is covered through `quest agent`
-  running inside `quest worktree run`.
-- Exercise both harnesses with a finished worker under a still-live parent,
-  a suspended decision, a crash, and a restored session. Reconcile existing
-  cleanup mechanisms instead of adding an unrelated competing sweeper. Run
-  these from a session that is not itself worktree-isolated: Claude's
-  isolation checks refuse git in any other repository, including a scratch
-  test repository.
