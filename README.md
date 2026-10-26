@@ -491,9 +491,16 @@ with the reason, which `quest status` prints under `landing-stopped`:
 | `not_pinned` | Auto-merge was enabled without `quest merge --land`. |
 | `push_failed` | The gate could not move its fork's branch. |
 
-Required reviews and the base's other required checks still apply, since the
-gate's push bypasses them. A workflow runs the phases in three jobs, with
-`quest` on PATH in each, installed from a source the PR cannot modify:
+The gate's push bypasses the base's rulesets, so the gate upholds them itself.
+It requires each PR's review decision to allow it, and each of the base's other
+required checks to pass on its head, counting every check and only those from
+the app a rule names. Its push satisfies `creation`, `update`, `deletion`,
+`non_fast_forward`, and `required_linear_history`, and `copilot_code_review`
+blocks nothing. `resolve` fails, before anything lands, on any other rule type
+and on `pull_request` settings the review decision does not cover: last-push
+approval, conversation resolution, merge methods without squash, and required
+reviewers. A workflow runs the phases in three jobs, with `quest` on PATH in
+each, installed from a source the PR cannot modify:
 
 ```yaml
 name: Land

@@ -133,7 +133,9 @@ export async function land(
 	const { hold, snapshot } = await acquire(labels, "merge", token, current);
 	return holding(hold, async () => {
 		current(snapshot);
-		const gated = (await requirements(labels.github, pr, snapshot.base)).names.has(LAND_CHECK);
+		const gated = (await requirements(labels.github, pr, snapshot.base)).checks.some(
+			(check) => check.name === LAND_CHECK,
+		);
 		if (gated) {
 			if (method !== "squash") deps.warn(`${snapshot.url} lands through quest land, which squashes`);
 			await labels.github.graphql(

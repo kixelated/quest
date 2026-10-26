@@ -224,12 +224,20 @@ export class GitHub {
 	}
 }
 
+/** A check a base branch requires. */
+export interface RequiredCheck {
+	name: string;
+	/** The GitHub App whose check run alone satisfies it, or null for any source. */
+	app: number | null;
+}
+
 /** What a base branch requires, read from branch protection and rulesets. */
 export interface Requirements {
-	/** Required check names. */
-	names: Set<string>;
+	checks: RequiredCheck[];
 	/** Workflow files that must pass as a whole, so each of their jobs is required. */
 	workflows: string[];
+	/** Every rule the branch's active rulesets apply: `type`, `parameters`, and the ruleset's source. */
+	rules: ObjectValue[];
 }
 
 /** What `branch` of `repository` requires, read with read access from branch protection and rulesets. */
@@ -238,24 +246,35 @@ export async function requirements(github: GitHub, repository: Repository, branc
 	const ref = encodeURIComponent(branch);
 	const protection = object(object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {});
 	const legacy = object(protection.required_status_checks ?? {});
+	const source = (app: unknown) => (typeof app === "number" && app > 0 ? app : null);
 	// Classic protection may list only `contexts`, without the newer `checks`.
-	const contexts =
-		legacy.checks === undefined
-			? (Array.isArray(legacy.contexts) ? legacy.contexts : []).map(string)
-			: array(legacy.checks).map((row) => string(row.context));
+	const classic: RequiredCheck[] =
+		legacy.enforcement_level === "off"
+			? []
+			: legacy.checks === undefined
+				? (Array.isArray(legacy.contexts) ? legacy.contexts : []).map((name) => ({
+						name: string(name),
+						app: null,
+					}))
+				: array(legacy.checks).map((row) => ({ name: string(row.context), app: source(row.app_id) }));
 	const rules = await github.all(`${base}/rules/branches/${ref}?per_page=100`);
+	const checks = [
+		...classic,
+		...rules
+			.filter((rule) => rule.type === "required_status_checks")
+			.flatMap((rule) => array(object(rule.parameters).required_status_checks))
+			.map((row) => ({ name: string(row.context), app: source(row.integration_id) })),
+	];
 	return {
-		names: new Set([
-			...(legacy.enforcement_level === "off" ? [] : contexts),
-			...rules
-				.filter((rule) => rule.type === "required_status_checks")
-				.flatMap((rule) => array(object(rule.parameters).required_status_checks))
-				.map((row) => string(row.context)),
-		]),
+		checks: checks.filter(
+			(check, index) =>
+				checks.findIndex((other) => other.name === check.name && other.app === check.app) === index,
+		),
 		workflows: rules
 			.filter((rule) => rule.type === "workflows")
 			.flatMap((rule) => array(object(rule.parameters).workflows))
 			.map((row) => string(row.path)),
+		rules,
 	};
 }
 

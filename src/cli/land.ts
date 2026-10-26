@@ -14,6 +14,7 @@ import {
 	object,
 	type ObjectValue,
 	type Repository,
+	type RequiredCheck,
 	array,
 	requirements,
 	string,
@@ -100,6 +101,14 @@ export interface Result {
 	checks: Tested[];
 }
 
+/** A page of a commit's check runs and commit statuses, with the app behind each run. */
+const CONTEXTS = `pageInfo { hasNextPage endCursor }
+	nodes {
+		__typename
+		... on CheckRun { name status conclusion detailsUrl checkSuite { app { databaseId } } }
+		... on StatusContext { context state targetUrl }
+	}`;
+
 const QUEUE = `query($owner: String!, $name: String!, $base: String!, $qualified: String!, $after: String) {
 	repository(owner: $owner, name: $name) {
 		ref(qualifiedName: $qualified) { target { oid } }
@@ -109,18 +118,51 @@ const QUEUE = `query($owner: String!, $name: String!, $base: String!, $qualified
 				id number url title isDraft headRefName headRefOid maintainerCanModify reviewDecision
 				headRepository { nameWithOwner }
 				autoMergeRequest { enabledAt commitBody }
-				commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: 100) {
-					pageInfo { hasNextPage }
-					nodes {
-						__typename
-						... on CheckRun { name status conclusion detailsUrl }
-						... on StatusContext { context state targetUrl }
-					}
-				} } } } }
+				commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: 100) { ${CONTEXTS} } } } } }
 			}
 		}
 	}
 }`;
+
+/** The pages of a commit's checks after the first. */
+const MORE_CONTEXTS = `query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String) {
+	repository(owner: $owner, name: $name) {
+		object(oid: $oid) { ... on Commit { statusCheckRollup { contexts(first: 100, after: $after) { ${CONTEXTS} } } } }
+	}
+}`;
+
+/**
+ * The ruleset rule types the gate upholds although its push bypasses them, and how: each PR's
+ * review decision and required checks are its own to enforce, and the rest its push satisfies.
+ */
+export const UPHELD: Record<string, string> = {
+	creation: "the gate never creates the base",
+	update: "only the gate's push, which the rule must let bypass, updates the base",
+	deletion: "the gate never deletes the base",
+	non_fast_forward: "the gate only fast-forwards the base",
+	required_linear_history: "the gate lands squash commits in a line",
+	pull_request: "each PR's review decision must not block it",
+	required_status_checks: "each required check must pass on each PR's head, from the app the rule names",
+	copilot_code_review: "it requests a review and blocks nothing",
+};
+
+/** What `rule` sets that the gate does not uphold, or null when it upholds all of it. */
+function unheld(rule: ObjectValue): string | null {
+	const type = string(rule.type);
+	if (!(type in UPHELD)) return type;
+	if (type !== "pull_request") return null;
+	// The review decision covers approvals, code owners, and stale reviews, but not these.
+	const parameters = rule.parameters == null ? {} : object(rule.parameters);
+	const methods = parameters.allowed_merge_methods;
+	const reviewers = parameters.required_reviewers;
+	const settings = [
+		parameters.require_last_push_approval === true && "require_last_push_approval",
+		parameters.required_review_thread_resolution === true && "required_review_thread_resolution",
+		Array.isArray(methods) && !methods.includes("squash") && "allowed_merge_methods without squash",
+		Array.isArray(reviewers) && reviewers.length > 0 && "required_reviewers",
+	].filter((setting) => setting !== false);
+	return settings.length > 0 ? `${type} (${settings.join(", ")})` : null;
+}
 
 /**
  * Read the queue: open PRs to `base` with auto-merge enabled, in the order it
@@ -148,13 +190,22 @@ export async function resolveQueue(
 				).defaultBranchRef,
 			).name,
 		);
-	const required = (await requirements(github, repository, ref)).names;
-	if (!required.has(LAND_CHECK)) {
+	const needs = await requirements(github, repository, ref);
+	if (!needs.checks.some((check) => check.name === LAND_CHECK)) {
 		throw new Error(
 			`${name}'s ${ref} does not require the ${LAND_CHECK} check, so GitHub could merge a queued PR around the gate`,
 		);
 	}
-	required.delete(LAND_CHECK);
+	const refused = needs.rules.flatMap((rule) => {
+		const what = unheld(rule);
+		return what === null ? [] : [`${what} from ruleset ${String(rule.ruleset_id)}`];
+	});
+	if (refused.length > 0) {
+		throw new Error(
+			`${name}'s ${ref} has ruleset rules the gate does not uphold, and its push bypasses them: ${refused.join("; ")}. It upholds only ${Object.keys(UPHELD).join(", ")}`,
+		);
+	}
+	const required = needs.checks.filter((check) => check.name !== LAND_CHECK);
 
 	let sha: string | undefined;
 	const nodes: ObjectValue[] = [];
@@ -221,7 +272,7 @@ export async function resolveQueue(
 		} else if (node.reviewDecision === "CHANGES_REQUESTED") {
 			eject("changes_requested", "a reviewer requested changes");
 		} else {
-			const unmet = checks(node, required);
+			const unmet = checks(await contexts(github, repository, node), required);
 			if (unmet.failing.length > 0) {
 				eject("failed_checks", `required checks failed on its head: ${unmet.failing.join(", ")}`);
 			} else if (unmet.pending.length > 0) {
@@ -237,30 +288,64 @@ export async function resolveQueue(
 	return plan;
 }
 
-/** The required checks on a PR node's head that failed, and those pending or not yet reported. */
-function checks(node: ObjectValue, required: Set<string>): { failing: string[]; pending: string[] } {
+/**
+ * Every check run and commit status on a PR node's head: the queue's first page, then the rest by
+ * the head's SHA, which also reads them all when the head moved between the queue's fields.
+ */
+async function contexts(github: GitHub, repository: Repository, node: ObjectValue): Promise<ObjectValue[]> {
+	const head = string(node.headRefOid);
 	const commit = object(object(array(object(node.commits).nodes)[0]).commit);
-	const rollup = commit.statusCheckRollup === null ? null : object(commit.statusCheckRollup);
-	const contexts = rollup === null ? null : object(rollup.contexts);
-	if (contexts !== null && object(contexts.pageInfo).hasNextPage === true) {
-		throw new Error(`${string(node.url)} has more than 100 checks on its head, more than the gate reads`);
+	const found: ObjectValue[] = [];
+	let rollup = commit.oid === head ? commit.statusCheckRollup : undefined;
+	let after: string | null = null;
+	for (;;) {
+		if (rollup === undefined) {
+			const data = await github.graphql(MORE_CONTEXTS, {
+				owner: repository.owner,
+				name: repository.repo,
+				oid: head,
+				after,
+			});
+			const target = object(data.repository).object;
+			if (target === null) throw new Error(`${string(node.url)}'s head ${head} is missing`);
+			rollup = object(target).statusCheckRollup;
+		}
+		if (rollup === null) return found;
+		const page = object(object(rollup).contexts);
+		found.push(...array(page.nodes));
+		const info = object(page.pageInfo);
+		if (info.hasNextPage !== true) return found;
+		after = string(info.endCursor);
+		rollup = undefined;
 	}
-	const results = new Map<string, "passed" | "failing" | "pending">();
-	for (const context of contexts === null ? [] : array(contexts.nodes)) {
-		const { check, outcome } = classifyCheck(context);
-		if (!required.has(check.name)) continue;
-		// A name reported twice, as by a rerun, counts only once every report passes.
-		const known = results.get(check.name);
-		if (known === undefined || known === "passed") results.set(check.name, outcome);
-	}
+}
+
+/** The required checks a head failed, and those pending or not yet reported, each from its app. */
+function checks(contexts: ObjectValue[], required: RequiredCheck[]): { failing: string[]; pending: string[] } {
 	const failing: string[] = [];
 	const pending: string[] = [];
-	for (const name of [...required].sort()) {
-		const outcome = results.get(name) ?? "pending";
-		if (outcome === "failing") failing.push(name);
-		else if (outcome === "pending") pending.push(name);
+	for (const need of required) {
+		let result: "passed" | "failing" | "pending" = "pending";
+		let reported = false;
+		for (const context of contexts) {
+			const { check, outcome } = classifyCheck(context);
+			if (check.name !== need.name || (need.app !== null && appOf(context) !== need.app)) continue;
+			// A name reported twice, as by a rerun, counts only once every report passes.
+			if (!reported || result === "passed") result = outcome;
+			reported = true;
+		}
+		const name = need.app === null ? need.name : `${need.name} (from app ${need.app})`;
+		if (result === "failing") failing.push(name);
+		else if (result === "pending") pending.push(name);
 	}
-	return { failing, pending };
+	return { failing: failing.sort(), pending: pending.sort() };
+}
+
+/** The GitHub App behind a check run; a commit status has none the gate can verify. */
+function appOf(context: ObjectValue): number | null {
+	if (context.__typename !== "CheckRun" || context.checkSuite == null) return null;
+	const app = object(context.checkSuite).app;
+	return app == null ? null : Number(object(app).databaseId);
 }
 
 /** A queued PR's squash commit on the chain. */

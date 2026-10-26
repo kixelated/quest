@@ -9,7 +9,6 @@ import {
 	object,
 	type ObjectValue,
 	type PullRequest,
-	type Requirements,
 	requirements,
 	string,
 } from "./github";
@@ -107,6 +106,12 @@ interface Cursor {
 	pushes: { sha: string; time: number }[];
 	/** Check results reached at or after `since` are reported once per head, as `<sha>:<outcome>`. */
 	checks: { since: number; reported: string[] };
+}
+
+/** The check names and workflow files a base branch requires. */
+interface Needs {
+	names: Set<string>;
+	workflows: string[];
 }
 
 /** One check run or commit status on the head, with its result once it has one. */
@@ -356,11 +361,17 @@ async function watch(
 	 * check has yet to start, or whether the repository requires none. The gate's own check is never
 	 * on a PR head, so a gated base waits only for the rest.
 	 */
-	const known = new Map<string, Requirements>();
-	const required = async (branch: string): Promise<Requirements> => {
-		const found = known.get(branch) ?? (await requirements(github, pr, branch));
-		known.set(branch, found);
-		return { ...found, names: new Set([...found.names].filter((name) => name !== LAND_CHECK)) };
+	const known = new Map<string, Needs>();
+	const required = async (branch: string): Promise<Needs> => {
+		const cached = known.get(branch);
+		if (cached) return cached;
+		const found = await requirements(github, pr, branch);
+		const needs = {
+			names: new Set(found.checks.map((check) => check.name).filter((name) => name !== LAND_CHECK)),
+			workflows: found.workflows,
+		};
+		known.set(branch, needs);
+		return needs;
 	};
 
 	const timeline = pager(`${base}/issues/${pr.number}/timeline?per_page=${PAGE}`);
@@ -514,13 +525,7 @@ function check(row: ObjectValue): Check {
  * reported once per head when reached at or after the starting point. A base branch that requires
  * no checks requires them all.
  */
-function checkActivities(
-	head: string,
-	all: Check[],
-	needs: Requirements,
-	state: Cursor["checks"],
-	prUrl: string,
-): Activity[] {
+function checkActivities(head: string, all: Check[], needs: Needs, state: Cursor["checks"], prUrl: string): Activity[] {
 	const inWorkflow = (entry: Check) => entry.workflow !== undefined && needs.workflows.includes(entry.workflow);
 	const required =
 		needs.names.size || needs.workflows.length ? all.filter((entry) => entry.required || inWorkflow(entry)) : all;

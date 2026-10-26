@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { type Pull, type World, fakeGitHub } from "../cloudflare/dev/github";
+import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "../cloudflare/dev/github";
 import type { GitHubDependencies } from "../src/cli/github";
-import { type Plan, checkQueue, parsePlan, parseResult, pin, pushQueue, resolveQueue } from "../src/cli/land";
+import { type Plan, UPHELD, checkQueue, parsePlan, parseResult, pin, pushQueue, resolveQueue } from "../src/cli/land";
 import { type Output, main } from "../src/cli/main";
 import { tempDir } from "./fixture";
 
@@ -395,6 +395,99 @@ describe("quest land", () => {
 		await expect(resolveQueue(REPOSITORY, undefined, await forge.deps())).rejects.toThrow(
 			"does not require the quest land check",
 		);
+	});
+
+	test("reads every page of a head's checks", async () => {
+		const forge = new Forge();
+		const other = (count: number) =>
+			Array.from({ length: count }, (_, index) => ({ name: `job ${index}`, conclusion: "SUCCESS", url: "u" }));
+		forge.pull(
+			"Late pass",
+			{ "1.txt": "1\n" },
+			{ pull: { runs: [...other(250), { name: "test", conclusion: "SUCCESS", url: "u" }] } },
+		);
+		forge.pull(
+			"Late fail",
+			{ "2.txt": "2\n" },
+			{
+				pull: {
+					runs: [
+						{ name: "test", conclusion: "SUCCESS", url: "u" },
+						...other(150),
+						{ name: "test", conclusion: "FAILURE", url: "u" },
+					],
+				},
+			},
+		);
+		forge.pull("Missing", { "3.txt": "3\n" }, { pull: { runs: other(201) } });
+		const plan = await resolveQueue(REPOSITORY, "main", await forge.deps());
+		expect(plan.queue.map((entry) => entry.number)).toEqual([1]);
+		expect(plan.eject.map((ejected) => [ejected.number, ejected.reason])).toEqual([
+			[2, "failed_checks"],
+			[3, "checks_pending"],
+		]);
+	});
+
+	test("counts a required check only from the app its rule names", async () => {
+		const forge = new Forge();
+		forge.repo.rules = [
+			{
+				type: "required_status_checks",
+				ruleset_id: 3,
+				parameters: { required_status_checks: [{ context: "lint", integration_id: 99 }] },
+			},
+		];
+		const lint = (run: Partial<NonNullable<Pull["runs"]>[number]>) => ({
+			pull: {
+				runs: [
+					{ name: "test", conclusion: "SUCCESS", url: "u" },
+					{ name: "lint", conclusion: "SUCCESS", url: "u", ...run },
+				],
+			},
+		});
+		forge.pull("Pinned app", { "1.txt": "1\n" }, lint({ app: 99 }));
+		forge.pull("Other app", { "2.txt": "2\n" }, lint({ app: ACTIONS_APP }));
+		forge.pull("Status", { "3.txt": "3\n" }, lint({ context: true }));
+		const plan = await resolveQueue(REPOSITORY, "main", await forge.deps());
+		expect(plan.queue.map((entry) => entry.number)).toEqual([1]);
+		expect(plan.eject.map((ejected) => [ejected.number, ejected.reason])).toEqual([
+			[2, "checks_pending"],
+			[3, "checks_pending"],
+		]);
+		expect(plan.eject[0].detail).toContain("lint (from app 99)");
+	});
+
+	test("refuses ruleset rules it does not uphold before reading the queue", async () => {
+		const forge = new Forge();
+		forge.pull("Ready", { "1.txt": "1\n" });
+		forge.repo.rules = [
+			{ type: "deletion", ruleset_id: 1, parameters: null },
+			{ type: "non_fast_forward", ruleset_id: 1, parameters: null },
+			{
+				type: "pull_request",
+				ruleset_id: 2,
+				parameters: { required_approving_review_count: 1, require_code_owner_review: true },
+			},
+		];
+		expect((await resolveQueue(REPOSITORY, "main", await forge.deps())).queue).toHaveLength(1);
+		forge.repo.rules.push(
+			{
+				type: "workflows",
+				ruleset_id: 4,
+				parameters: { workflows: [{ path: ".github/workflows/ci.yml", repository_id: 10 }] },
+			},
+			{
+				type: "pull_request",
+				ruleset_id: 5,
+				parameters: { required_review_thread_resolution: true, allowed_merge_methods: ["merge"] },
+			},
+		);
+		const refused = resolveQueue(REPOSITORY, "main", await forge.deps());
+		await expect(refused).rejects.toThrow(
+			"workflows from ruleset 4; pull_request (required_review_thread_resolution, allowed_merge_methods without squash) from ruleset 5",
+		);
+		await expect(refused).rejects.toThrow(`It upholds only ${Object.keys(UPHELD).join(", ")}`);
+		expect(forge.repo.pulls[0].landing).toBe(true);
 	});
 
 	test("refuses a check result for any other chain", async () => {

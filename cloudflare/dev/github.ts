@@ -22,7 +22,7 @@ export type Pull = Issue & {
 	branch: string;
 	checks: "SUCCESS" | "FAILURE" | "PENDING" | null;
 	/** The check runs behind `checks`. */
-	runs?: { name: string; conclusion: string; url: string }[];
+	runs?: { name: string; conclusion: string; url: string; app?: number; context?: boolean }[];
 	review: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
 	reviews?: { state: string; author: string; body?: string }[];
 	threads?: Thread[];
@@ -83,6 +83,8 @@ export type Repo = {
 	trees: Record<string, Tree>;
 	/** Check names the default branch's rulesets require. */
 	required?: string[];
+	/** The default branch's other ruleset rules, as `GET /rules/branches/main` lists them. */
+	rules?: Record<string, unknown>[];
 };
 export type World = {
 	app: { id: number; slug: string };
@@ -271,21 +273,36 @@ function queueTarget(repo: Repo, pull: Pull, forks: string) {
 				{
 					commit: {
 						oid: headOf(repo, pull),
-						statusCheckRollup: pull.checks && {
-							contexts: page(
-								(pull.runs ?? []).map((run) => ({
-									__typename: "CheckRun",
-									name: run.name,
-									status: "COMPLETED",
-									conclusion: run.conclusion,
-									detailsUrl: run.url,
-								})),
-							),
-						},
+						statusCheckRollup: pull.checks && { contexts: contextPage(pull, null) },
 					},
 				},
 			],
 		},
+	};
+}
+
+/** The fake's GitHub Actions app, which reports a run unless it names another. */
+export const ACTIONS_APP = 15368;
+
+/** One page of a head's check runs and commit statuses, as `statusCheckRollup.contexts` pages them. */
+function contextPage(pull: Pull, after: unknown) {
+	const start = typeof after === "string" ? Number(after) : 0;
+	const all = (pull.runs ?? []).map((run) =>
+		run.context
+			? { __typename: "StatusContext", context: run.name, state: run.conclusion, targetUrl: run.url }
+			: {
+					__typename: "CheckRun",
+					name: run.name,
+					status: "COMPLETED",
+					conclusion: run.conclusion,
+					detailsUrl: run.url,
+					checkSuite: { app: { databaseId: run.app ?? ACTIONS_APP } },
+				},
+	);
+	const end = start + 100;
+	return {
+		nodes: all.slice(start, end),
+		pageInfo: { hasNextPage: end < all.length, endCursor: end < all.length ? String(end) : null },
 	};
 }
 
@@ -304,6 +321,18 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>, 
 	if (query.includes("timelineItems(")) {
 		const pull = repo.pulls.find((p) => p.number === variables.number);
 		return { data: { repository: { pullRequest: pull ? holdsTarget(repo, pull) : null } } };
+	}
+	if (query.includes("object(oid: $oid)")) {
+		const pull = repo.pulls.find((p) => headOf(repo, p) === variables.oid);
+		return {
+			data: {
+				repository: {
+					object: pull
+						? { statusCheckRollup: pull.checks && { contexts: contextPage(pull, variables.after) } }
+						: null,
+				},
+			},
+		};
 	}
 	if (query.includes("defaultBranchRef")) return { data: { repository: { defaultBranchRef: { name: "main" } } } };
 	if (query.includes("queue:pullRequests(")) {
@@ -657,11 +686,12 @@ export function fakeGitHub(world: World) {
 			return json({ name: "main", protection: { enabled: false } });
 		if (tail.startsWith("/rules/branches/main") && method === "GET") {
 			const contexts = (repo.required ?? []).map((context) => ({ context }));
-			return json(
-				contexts.length
+			return json([
+				...(contexts.length
 					? [{ type: "required_status_checks", parameters: { required_status_checks: contexts } }]
-					: [],
-			);
+					: []),
+				...(repo.rules ?? []),
+			]);
 		}
 		if (tail.startsWith(`/git/trees/${treeOf(repo)}`) && method === "GET") return json(tree(repo));
 		// Upstream branches: those the world lists, and those of its pull requests that are not on a fork.
