@@ -106,6 +106,8 @@ Unlike a blocked quest it stays ready, so it resurfaces every time ready work is
 ## Execution
 
 Start only ready quests.
+First question whether the quest is still needed: its problem may no longer be real, or a later change may have made its plan the wrong solution.
+If so, stop and propose rewriting or deleting it.
 `quest unblocked` ranks the ready quests, and `quest unblocked <path>` prints what blocks one.
 With `--unclaimed`, it skips quests someone holds and lists them on stderr.
 
@@ -193,7 +195,7 @@ Finish with a clean checkout: intended changes committed and pushed, incidental 
 Run expensive builds and test suites through `quest gate <command>`, which waits until the host has room for them; never poll the load average or cap agents by core count yourself.
 Run no more sub-agents at once than the harness allows; queue the rest and start one as each reports.
 
-Wait on background work with a blocking command that ends on its terminal state, not timed polls.
+Wait on a PR's CI or reviews with `quest wait`, and on other background work with a blocking command that ends on its terminal state, not timed polls.
 Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout.
 A sub-agent ends its turn only with a final result or a question, never with background work still running.
 Back out when progress stalls rather than burn tokens.
