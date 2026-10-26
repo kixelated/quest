@@ -40,8 +40,10 @@ driver.
   once its head is on the base, so history stays linear and each PR shows as
   merged. Verify that GitHub behavior against a scratch repository first. If
   it does not hold, stop and report rather than fall back to closing PRs.
-  Stop at the first failed lease, landing only the prefix before it. The
-  gate's own head pushes must not dequeue the PR they move.
+  A failed lease stops the landing. The prefix before it lands only if a
+  check passed on exactly that prefix, since a later PR can mask an earlier
+  one's failure; otherwise nothing lands. The gate's own head pushes must not
+  dequeue the PR they move.
 - **Batches.** Every queued PR, with no size constant. On failure, test the
   first half; a passing prefix lands at once and the rest continues. A PR
   that fails alone is ejected with a comment linking the run. No retries.
@@ -59,9 +61,10 @@ driver.
   so it is ejected with a comment asking for them.
 - Update `--help`, the README, and the merge skill's landing prose. The user
   asked for those skill edits through this plan.
-- Test chain building, prefix bisection, ejection, a failed lease, and a
-  quest-file conflict resolved by the driver, against the shared fake GitHub
-  (`cloudflare/dev/github.ts`) and a local git repository.
+- Test chain building, prefix bisection, ejection, a failed lease (including
+  A failing alone and A+B passing when B's lease fails, which lands nothing),
+  and a quest-file conflict resolved by the driver, against the shared fake
+  GitHub (`cloudflare/dev/github.ts`) and a local git repository.
 
 Adopters, each through its own plan: [kixelated/quest](/quest/m0/helpers/land-adopt.md),
 [moq-dev/moq](https://github.com/moq-dev/moq/blob/main/quest/m0/ci/land.md),
