@@ -40,10 +40,9 @@ every user would have to add it.
   supply its own `claude.exe` and receive the key), and launch npm `.cmd` shims,
   which `spawn` cannot run without a shell. Then run the fake-CLI tests on the
   native Windows jobs.
-- The command does no load or CPU admission. The skill keeps holding launches
-  as it does for sub-agents, until agent lifecycle integration removes those
-  rules.
+- The command does no load or CPU admission, and the skill no longer caps
+  agents: the guide routes their expensive commands through `quest gate`.
 
 ## Related
 
-- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the skill's load-average launch rules, so neither the skill nor the command polls load
+- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaims the checkouts of finished and suspended agents, including headless ones

@@ -73,4 +73,4 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Related
 
-- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the agent-level load-average rules
+- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaims finished and suspended agent checkouts through their harness

@@ -32,7 +32,6 @@ Run each `/quest-ready`, `/quest-merge`, or `/quest-iterate` in its own sub-agen
 Each sub-agent blocks on its own waits and reports back only when done or blocked.
 For GitHub CI, review, or merge activity, it uses one `quest wait` and resumes with the
 returned cursor as described by `quest skill merge`, rather than polling GitHub.
-Limit the number of active agents to the CPU core count.
 
 Merge sub-agents report once their PR is landing; do not watch the queue or wait for merges.
 An open PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.

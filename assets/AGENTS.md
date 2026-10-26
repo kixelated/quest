@@ -182,7 +182,8 @@ Remove the `quest` label from issues no other quest tracks.
 
 ## Workspace
 
-Work in your own worktree.
+Work in your own worktree, reusing a suitable one you already own.
+Read-only discovery needs no new checkout when your context or a checkout you own already answers it.
 Put PR bodies, review drafts, logs, patches, helper scripts, and temporary clones in its `.tmp/`, so they disappear with the worktree.
 If the repository doesn't ignore `.tmp/`, add it to the file `git rev-parse --git-path info/exclude` names.
 Never write them to `/tmp`, beside the checkout, elsewhere in it, or in a directory other agents share, such as a session scratchpad.
@@ -190,6 +191,9 @@ Pass PR bodies to `gh` on stdin (`--body-file -`).
 
 Before ending a task, pausing for a decision, or handing off, commit a checkpoint of the source changes, and report what remains and which checks passed or did not run.
 Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
+
+Run expensive builds and test suites through `quest gate <command>`, which waits until the host has room for them; never poll the load average or cap agents by core count yourself.
+Run no more sub-agents at once than the harness allows; queue the rest and start one as each reports.
 
 Wait on a PR's CI or reviews with `quest wait`, and on other background work with a blocking command that ends on its terminal state, not timed polls.
 Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout.
