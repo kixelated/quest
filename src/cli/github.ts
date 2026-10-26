@@ -238,6 +238,8 @@ export interface Requirements {
 	workflows: string[];
 	/** Every rule the branch's active rulesets apply: `type`, `parameters`, and the ruleset's source. */
 	rules: ObjectValue[];
+	/** Whether classic branch protection may be on; its settings beyond required checks need admin rights to read. */
+	classic: boolean;
 }
 
 /** What `branch` of `repository` requires, read with read access from branch protection and rulesets. */
@@ -275,6 +277,8 @@ export async function requirements(github: GitHub, repository: Repository, branc
 			.flatMap((rule) => array(object(rule.parameters).workflows))
 			.map((row) => string(row.path)),
 		rules,
+		// Unknown counts as on, so a reader that needs the settings reads them rather than assume none.
+		classic: protection.enabled !== false,
 	};
 }
 

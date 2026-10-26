@@ -498,9 +498,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"An ejected PR loses auto-merge and `quest:merge`, and gets a comment with the reason, which " +
 				"`quest status` prints under landing-stopped: merge_conflict (a conflict `quest resolve` cannot " +
 				"settle), failed_checks (the check failed with it alone on the base, or a required check failed on " +
-				"its head), checks_pending, review_required, changes_requested, no_maintainer_edits (a fork the " +
+				"its head), checks_pending, review_required, changes_requested, unresolved_conversations, " +
+				"no_maintainer_edits (a fork the " +
 				"gate cannot push to), head_moved, not_pinned (auto-merge enabled without `quest merge --land`), " +
-				"or push_failed. Required reviews and the base's other required checks still apply.\n\n" +
+				"or push_failed. Required reviews, conversation resolution, and the base's other required checks " +
+				"still apply.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token, and origin for the repository. Exits 0 when done, " +
 				"2 for invalid arguments, and 1 for other failures.",
 		);
@@ -510,7 +512,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Read the queue from GitHub with a read-only token and print it as a JSON plan: the base's commit, " +
 				"the queued PRs in order, and the PRs to eject with their reasons. Fails unless the base requires " +
-				`the \`${LAND_CHECK}\` check.`,
+				`the \`${LAND_CHECK}\` check, and on a ruleset rule or classic protection setting the gate does not ` +
+				"uphold. Classic protection needs a token with administration read.",
 		)
 		.option("--base <branch>", "The base branch (default: the repository's default branch)")
 		.action((options: { base?: string }) => {

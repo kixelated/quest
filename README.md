@@ -486,21 +486,35 @@ with the reason, which `quest status` prints under `landing-stopped`:
 | `failed_checks` | The check failed with it alone on the base, or a required check failed on its head. |
 | `checks_pending` | A required check had not passed on its head. |
 | `review_required`, `changes_requested` | Its review decision blocks it. |
+| `unresolved_conversations` | The base requires conversation resolution, and it has unresolved review threads. |
 | `no_maintainer_edits` | It comes from a fork the gate cannot push to. |
 | `head_moved` | Its head moved after it was queued or while it was checked. |
 | `not_pinned` | Auto-merge was enabled without `quest merge --land`. |
 | `push_failed` | The gate could not move its fork's branch. |
 
-The gate's push bypasses the base's rulesets, so the gate upholds them itself.
-It requires each PR's review decision to allow it, and each of the base's other
-required checks to pass on its head, counting every check and only those from
-the app a rule names. Its push satisfies `creation`, `update`, `deletion`,
-`non_fast_forward`, and `required_linear_history`, and `copilot_code_review`
-blocks nothing. `resolve` fails, before anything lands, on any other rule type
-and on `pull_request` settings the review decision does not cover: last-push
-approval, conversation resolution, merge methods without squash, and required
-reviewers. A workflow runs the phases in three jobs, with `quest` on PATH in
-each, installed from a source the PR cannot modify:
+The gate's push bypasses the base's rulesets and classic branch protection, so
+the gate upholds them itself. It requires each PR's review decision to allow
+it, each of the base's other required checks to pass on its head, counting
+every check and only those from the app a rule names, and, when the base
+requires conversation resolution, each of its review threads to be resolved.
+Its push satisfies `creation`, `update`, `deletion`, `non_fast_forward`, and
+`required_linear_history`, and `copilot_code_review` blocks nothing. `resolve`
+fails, before anything lands, on any other rule type and on `pull_request`
+settings the review decision does not cover: last-push approval, merge methods
+without squash, and required reviewers.
+
+On a base with classic protection, `resolve` reads its settings, which needs
+administration read (a GitHub App's "Administration: read", or a token with
+admin rights), and fails if it cannot. It upholds required status checks (strict
+included), required reviews (approving count, code owners, and dismissing stale
+reviews), conversation resolution, linear history, and blocked creations, and
+allows force pushes, deletions, and fork syncing. It fails on any other setting
+that is on, such as signed commits, push restrictions, a locked branch,
+last-push approval, or `enforce_admins`: only an admin's push bypasses classic
+protection, and only while it does not apply to admins.
+
+A workflow runs the phases in three jobs, with `quest` on PATH in each,
+installed from a source the PR cannot modify:
 
 ```yaml
 name: Land
@@ -525,6 +539,7 @@ jobs:
       # Install quest here.
       - id: resolve
         env:
+          # Under classic protection, a token with administration read instead.
           GH_TOKEN: ${{ github.token }}
         run: echo "plan=$(quest land resolve)" >> "$GITHUB_OUTPUT"
   check:
@@ -572,8 +587,10 @@ jobs:
 
 The land job's token pushes the base and PR branches; give it the bypass,
 such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
-from an environment only the base branch can use. Pushing to a fork's branch
-needs a credential the fork accepts maintainer edits from. `resolve` reads
+from an environment only the base branch can use. Under classic protection,
+the land job needs a token with admin rights, and the resolve job one with
+administration read, which `github.token` cannot have. Pushing to a fork's
+branch needs a credential the fork accepts maintainer edits from. `resolve` reads
 the repository from `origin` and fails unless its base requires the
 `quest land` check. Ejection comments link the run.
 

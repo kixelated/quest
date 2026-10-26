@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import { repositoryPath } from "./claims";
 import {
 	GitHub,
+	GitHubDeadline,
 	type GitHubDependencies,
 	object,
 	type ObjectValue,
@@ -44,6 +45,7 @@ export type Reason =
 	| "checks_pending"
 	| "review_required"
 	| "changes_requested"
+	| "unresolved_conversations"
 	| "no_maintainer_edits"
 	| "head_moved"
 	| "not_pinned"
@@ -133,7 +135,8 @@ const MORE_CONTEXTS = `query($owner: String!, $name: String!, $oid: GitObjectID!
 
 /**
  * The ruleset rule types the gate upholds although its push bypasses them, and how: each PR's
- * review decision and required checks are its own to enforce, and the rest its push satisfies.
+ * review decision, review threads, and required checks are its own to enforce, and the rest its
+ * push satisfies.
  */
 export const UPHELD: Record<string, string> = {
 	creation: "the gate never creates the base",
@@ -141,7 +144,8 @@ export const UPHELD: Record<string, string> = {
 	deletion: "the gate never deletes the base",
 	non_fast_forward: "the gate only fast-forwards the base",
 	required_linear_history: "the gate lands squash commits in a line",
-	pull_request: "each PR's review decision must not block it",
+	pull_request:
+		"each PR's review decision must not block it, and its review threads must be resolved if the rule says so",
 	required_status_checks: "each required check must pass on each PR's head, from the app the rule names",
 	copilot_code_review: "it requests a review and blocks nothing",
 };
@@ -157,11 +161,80 @@ function unheld(rule: ObjectValue): string | null {
 	const reviewers = parameters.required_reviewers;
 	const settings = [
 		parameters.require_last_push_approval === true && "require_last_push_approval",
-		parameters.required_review_thread_resolution === true && "required_review_thread_resolution",
 		Array.isArray(methods) && !methods.includes("squash") && "allowed_merge_methods without squash",
 		Array.isArray(reviewers) && reviewers.length > 0 && "required_reviewers",
 	].filter((setting) => setting !== false);
 	return settings.length > 0 ? `${type} (${settings.join(", ")})` : null;
+}
+
+/**
+ * The classic branch protection settings the gate upholds although its push bypasses them, and
+ * how. Only an admin's push bypasses classic protection, and `enforce_admins` stops even that one.
+ */
+export const UPHELD_CLASSIC: Record<string, string> = {
+	required_status_checks:
+		"each required check must pass on each PR's head, from the app it names, and the gate checks the chain on the current base",
+	required_pull_request_reviews: "each PR's review decision must not block it",
+	required_conversation_resolution: "each PR's review threads must be resolved",
+	required_linear_history: "the gate lands squash commits in a line",
+	block_creations: "the gate never creates the base",
+	allow_force_pushes: "it only loosens the base",
+	allow_deletions: "it only loosens the base",
+	allow_fork_syncing: "it only loosens a locked base",
+};
+
+/** The settings of a base's classic protection that the gate does not uphold. */
+function unheldClassic(protection: ObjectValue): string[] {
+	return Object.entries(protection).flatMap(([setting, value]) => {
+		if (setting === "url") return [];
+		// A setting is on unless it says it is off; one without `enabled`, such as `restrictions`, is on when present.
+		if (value == null || object(value).enabled === false) return [];
+		if (!(setting in UPHELD_CLASSIC)) return [setting];
+		// As for rulesets, the review decision does not cover approval of the last push.
+		return setting === "required_pull_request_reviews" && object(value).require_last_push_approval === true
+			? [`${setting} (require_last_push_approval)`]
+			: [];
+	});
+}
+
+/**
+ * The base's classic protection, or null when it has none. Reading it needs administration read,
+ * and an unreadable protection is never taken as none.
+ */
+async function classicProtection(github: GitHub, repository: Repository, ref: string): Promise<ObjectValue | null> {
+	const path = `${repositoryPath(repository)}/branches/${encodeURIComponent(ref)}/protection`;
+	const unreadable = (why: string) =>
+		new Error(
+			`cannot read ${repository.owner}/${repository.repo}'s classic branch protection on ${ref}, which needs administration read (a GitHub App's "Administration: read", or a token with admin rights): ${why}`,
+		);
+	let response: Response;
+	try {
+		response = await github.request(path, { allow: [404] });
+	} catch (error) {
+		if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+		throw unreadable(error.message);
+	}
+	const body = object(await response.json());
+	if (response.status === 200) return body;
+	if (body.message === "Branch not protected") return null;
+	throw unreadable(`GitHub HTTP 404; ${String(body.message)}`);
+}
+
+/** A page of a PR's review threads, by its node ID. */
+const THREADS = `query($id: ID!, $after: String) {
+	node(id: $id) { ... on PullRequest { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved } } } }
+}`;
+
+/** How many of a PR's review threads are unresolved. */
+async function unresolved(github: GitHub, id: string): Promise<number> {
+	let count = 0;
+	for (let after: string | null = null; ;) {
+		const threads = object(object(object((await github.graphql(THREADS, { id, after })).node).reviewThreads));
+		count += array(threads.nodes).filter((thread) => thread.isResolved !== true).length;
+		const info = object(threads.pageInfo);
+		if (info.hasNextPage !== true) return count;
+		after = string(info.endCursor);
+	}
 }
 
 /**
@@ -205,6 +278,23 @@ export async function resolveQueue(
 			`${name}'s ${ref} has ruleset rules the gate does not uphold, and its push bypasses them: ${refused.join("; ")}. It upholds only ${Object.keys(UPHELD).join(", ")}`,
 		);
 	}
+	// Classic protection's required checks are already among `needs.checks`.
+	const classic = needs.classic ? await classicProtection(github, repository, ref) : null;
+	const unmodeled = classic === null ? [] : unheldClassic(classic);
+	if (unmodeled.length > 0) {
+		throw new Error(
+			`${name}'s ${ref} has classic branch protection settings the gate does not uphold, and its push bypasses them: ${unmodeled.join(", ")}. It upholds only ${Object.keys(UPHELD_CLASSIC).join(", ")}`,
+		);
+	}
+	const resolution =
+		(classic?.required_conversation_resolution != null &&
+			object(classic.required_conversation_resolution).enabled === true) ||
+		needs.rules.some(
+			(rule) =>
+				rule.type === "pull_request" &&
+				rule.parameters != null &&
+				object(rule.parameters).required_review_thread_resolution === true,
+		);
 	const required = needs.checks.filter((check) => check.name !== LAND_CHECK);
 
 	let sha: string | undefined;
@@ -271,6 +361,8 @@ export async function resolveQueue(
 			eject("review_required", "it still needs an approving review");
 		} else if (node.reviewDecision === "CHANGES_REQUESTED") {
 			eject("changes_requested", "a reviewer requested changes");
+		} else if (resolution && (await unresolved(github, entry.id)) > 0) {
+			eject("unresolved_conversations", "it has unresolved review threads; resolve them and land it again");
 		} else {
 			const unmet = checks(await contexts(github, repository, node), required);
 			if (unmet.failing.length > 0) {

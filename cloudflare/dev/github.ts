@@ -85,6 +85,8 @@ export type Repo = {
 	required?: string[];
 	/** The default branch's other ruleset rules, as `GET /rules/branches/main` lists them. */
 	rules?: Record<string, unknown>[];
+	/** The default branch's classic protection, as `GET /branches/main/protection` returns it; none when absent. */
+	protection?: Record<string, any>;
 };
 export type World = {
 	app: { id: number; slug: string };
@@ -448,7 +450,7 @@ function workflowsOf(repo: Repo, sha: string): Record<string, string> {
 	return files;
 }
 
-type Permission = "metadata" | "contents" | "issues" | "pull_requests" | "checks" | "statuses";
+type Permission = "metadata" | "contents" | "issues" | "pull_requests" | "checks" | "statuses" | "administration";
 /** What an installation token may do: the repositories (`owner/name`) and permissions it was minted for. */
 type Grant = { repositories: Set<string>; permissions: Partial<Record<Permission, string>> };
 
@@ -604,6 +606,11 @@ export function fakeGitHub(world: World) {
 											autoMergeRequest: pull.landing
 												? { enabledAt: pull.autoMerge?.enabledAt ?? updatedAt }
 												: null,
+											reviewThreads: page(
+												(pull.threads ?? []).map((thread) => ({
+													isResolved: !!thread.resolved,
+												})),
+											),
 										},
 									},
 								});
@@ -681,9 +688,27 @@ export function fakeGitHub(world: World) {
 			});
 		}
 		if (tail === "/commits/main") return json({ sha: commitOf(repo), commit: { tree: { sha: treeOf(repo) } } });
-		// Requirements live in rulesets; classic branch protection is not modeled.
-		if (tail === "/branches/main" && method === "GET")
-			return json({ name: "main", protection: { enabled: false } });
+		// Read access sees whether classic protection is on and its required checks; the rest needs administration.
+		if (tail === "/branches/main" && method === "GET") {
+			const checks = repo.protection?.required_status_checks;
+			return json({
+				name: "main",
+				protection: repo.protection
+					? {
+							enabled: true,
+							required_status_checks: {
+								enforcement_level: checks ? "non_admins" : "off",
+								contexts: checks?.contexts ?? [],
+								checks: checks?.checks ?? [],
+							},
+						}
+					: { enabled: false },
+			});
+		}
+		if (tail === "/branches/main/protection" && method === "GET") {
+			if (!scope.permissions.administration) return forbidden();
+			return repo.protection ? json(repo.protection) : json({ message: "Branch not protected" }, 404);
+		}
 		if (tail.startsWith("/rules/branches/main") && method === "GET") {
 			const contexts = (repo.required ?? []).map((context) => ({ context }));
 			return json([

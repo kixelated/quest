@@ -10,7 +10,17 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "../cloudflare/dev/github";
 import type { GitHubDependencies } from "../src/cli/github";
-import { type Plan, UPHELD, checkQueue, parsePlan, parseResult, pin, pushQueue, resolveQueue } from "../src/cli/land";
+import {
+	type Plan,
+	UPHELD,
+	UPHELD_CLASSIC,
+	checkQueue,
+	parsePlan,
+	parseResult,
+	pin,
+	pushQueue,
+	resolveQueue,
+} from "../src/cli/land";
 import { type Output, main } from "../src/cli/main";
 import { tempDir } from "./fixture";
 
@@ -204,14 +214,21 @@ class Forge {
 		}
 	}
 
-	async deps(): Promise<GitHubDependencies> {
+	/** A token for the gate, with `permissions` beyond reading and writing the queue. */
+	async deps(permissions: Record<string, string> = {}): Promise<GitHubDependencies> {
 		const fetch = fakeGitHub(this.world);
 		const minted = await fetch("https://api.github.com/app/installations/5/access_tokens", {
 			method: "POST",
 			headers: { Authorization: "Bearer a.b.c" },
 			body: JSON.stringify({
 				repositories: ["project"],
-				permissions: { contents: "write", pull_requests: "write", issues: "write", metadata: "read" },
+				permissions: {
+					contents: "write",
+					pull_requests: "write",
+					issues: "write",
+					metadata: "read",
+					...permissions,
+				},
 			}),
 		});
 		const { token } = (await minted.json()) as { token: string };
@@ -484,9 +501,65 @@ describe("quest land", () => {
 		);
 		const refused = resolveQueue(REPOSITORY, "main", await forge.deps());
 		await expect(refused).rejects.toThrow(
-			"workflows from ruleset 4; pull_request (required_review_thread_resolution, allowed_merge_methods without squash) from ruleset 5",
+			"workflows from ruleset 4; pull_request (allowed_merge_methods without squash) from ruleset 5",
 		);
 		await expect(refused).rejects.toThrow(`It upholds only ${Object.keys(UPHELD).join(", ")}`);
+		expect(forge.repo.pulls[0].landing).toBe(true);
+	});
+
+	test("enforces classic protection's checks and conversation resolution", async () => {
+		const forge = new Forge();
+		forge.repo.protection = {
+			url: "https://api.github.com/repos/upstream/project/branches/main/protection",
+			required_status_checks: { strict: true, contexts: ["lint"], checks: [{ context: "lint", app_id: 99 }] },
+			required_pull_request_reviews: {
+				dismiss_stale_reviews: true,
+				require_code_owner_reviews: true,
+				required_approving_review_count: 1,
+				require_last_push_approval: false,
+			},
+			required_signatures: { enabled: false },
+			enforce_admins: { enabled: false },
+			required_linear_history: { enabled: true },
+			required_conversation_resolution: { enabled: true },
+			lock_branch: { enabled: false },
+		};
+		const runs = (lint: boolean) => [
+			{ name: "test", conclusion: "SUCCESS", url: "u" },
+			...(lint ? [{ name: "lint", conclusion: "SUCCESS", url: "u", app: 99 }] : []),
+		];
+		const thread = (resolved: boolean) => ({ path: "1.txt", line: 1, resolved, comments: [] });
+		forge.pull("Ready", { "1.txt": "1\n" }, { pull: { runs: runs(true), threads: [thread(true)] } });
+		forge.pull("Unchecked", { "2.txt": "2\n" }, { pull: { runs: runs(false) } });
+		forge.pull("Unresolved", { "3.txt": "3\n" }, { pull: { runs: runs(true), threads: [thread(false)] } });
+		forge.pull("Unreviewed", { "4.txt": "4\n" }, { pull: { runs: runs(true), review: "REVIEW_REQUIRED" } });
+		const plan = await resolveQueue(REPOSITORY, "main", await forge.deps({ administration: "read" }));
+		expect(plan.queue.map((entry) => entry.number)).toEqual([1]);
+		expect(plan.eject.map((ejected) => [ejected.number, ejected.reason])).toEqual([
+			[2, "checks_pending"],
+			[3, "unresolved_conversations"],
+			[4, "review_required"],
+		]);
+	});
+
+	test("refuses classic protection settings it does not uphold, or cannot read", async () => {
+		const forge = new Forge();
+		forge.pull("Ready", { "1.txt": "1\n" });
+		forge.repo.protection = {
+			required_pull_request_reviews: { required_approving_review_count: 1, require_last_push_approval: true },
+			required_signatures: { enabled: true },
+			enforce_admins: { enabled: true },
+			restrictions: { users: [], teams: [], apps: [] },
+			allow_force_pushes: { enabled: true },
+		};
+		await expect(resolveQueue(REPOSITORY, "main", await forge.deps())).rejects.toThrow(
+			'needs administration read (a GitHub App\'s "Administration: read", or a token with admin rights): GitHub HTTP 403',
+		);
+		const refused = resolveQueue(REPOSITORY, "main", await forge.deps({ administration: "read" }));
+		await expect(refused).rejects.toThrow(
+			"required_pull_request_reviews (require_last_push_approval), required_signatures, enforce_admins, restrictions.",
+		);
+		await expect(refused).rejects.toThrow(`It upholds only ${Object.keys(UPHELD_CLASSIC).join(", ")}`);
 		expect(forge.repo.pulls[0].landing).toBe(true);
 	});
 
