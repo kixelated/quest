@@ -70,8 +70,9 @@ operator-paid-hosting decisions:
   approvals, or custom merge executor. GitHub merges require a maintainer's
   explicit choice and the repository's checks and protections.
 - **A real GitHub App bot.** The service publishes as its App identity and
-  keeps GitHub credentials off runners. The bot identity and the account
-  owning its contribution forks are separate concepts.
+  keeps GitHub credentials off runners. It pushes job branches to the
+  enrolled repository itself, with no service forks (decided 2026-10-27,
+  user, in [Upstream branches](/quest/m0/kix/upstream-branches.md)).
 - **Ready means eligible.** After a maintainer opts in, ready quests on the
   default branch may be implemented. Draft plans are not eligible. Project
   pause stops new work. An explicit spawn decision can prioritize ready work
@@ -102,9 +103,6 @@ fixes what it finds:
 - On macOS, two accounts in separate `CLAUDE_CONFIG_DIR` homes keep separate
   Keychain credentials, and `claude auth status --json` reports each one's own
   `authMethod` and email.
-- `git fetch <upstream> <sha>` reaches a commit kix published on the service
-  fork, which a reassigned job's new runner relies on. If GitHub refuses it,
-  have the hub send the fork's clone URL with `assign`.
 - A rejected `rate_limit_event` and its `resetsAt` arrive when a plan runs
   out, so the account sits out until its reset instead of the one-hour
   fallback.
@@ -123,11 +121,14 @@ fixes what it finds:
 
 ## Required
 
+- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
+- [Upstream branches](/quest/m0/kix/upstream-branches.md) - jobs publish on the enrolled repository itself, with no service forks
+- [Operator setup](/quest/m0/kix/operator-setup.md) - pilot installations and a verified test PR on kixelated/quest and moq-dev/moq
 - [Context pages](/quest/m0/kix/context-pages.md) - a job's `context` read returns every comment, review, and check of a busy PR
 - [Merge holds](/quest/m0/kix/merge-holds.md) - ended merge jobs never leave a `quest:merge` hold, through one shared hold rule
-- [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
-- [Operator setup](/quest/m0/kix/operator-setup.md) - fork namespace, pilot installations, and a verified test PR
-- [Per-project forks](/quest/m0/kix/forks.md) - each project publishes through its own fork, recorded by repository ID
+- [App sign-in](/quest/m0/kix/app-sign-in.md) - one GitHub screen signs in and installs the App, with no separate OAuth app
+- [Pick repositories](/quest/m0/kix/pick-repos.md) - after installing, the maintainer enables repositories from a list
+- [Setup PR](/quest/m0/kix/setup-pr.md) - enrolling a repository without Quest makes the App open its `quest init` pull request
 - [Job sandbox](/quest/m0/kix/sandbox/README.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR
