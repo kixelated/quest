@@ -21,7 +21,7 @@ how the service works.
   notifications, including adding it to the iOS home screen.
 - Cite current official provider terms for using subscriptions with each
   CLI, and say plainly that kix never holds provider tokens.
-- Include operator registration, fork ownership, and recovery in an
+- Include operator registration and recovery in an
   operator section. Keep those details out of the maintainer's normal
   decision flow.
 - Extend the guide when cloud runners, API-key funding, and donations ship;
