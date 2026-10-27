@@ -929,6 +929,16 @@ test("classic protection that lists only contexts still names required checks", 
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
 });
 
+test("a gated base's quest land check, which no head carries, never holds back checks:passed", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }])],
+		ruled: ["check", "quest land"],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z checks:passed check /);
+});
+
 test("optional checks never stand in for required checks that have not started", async () => {
 	const fixture = setup(
 		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],

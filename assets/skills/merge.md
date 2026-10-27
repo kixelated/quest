@@ -54,9 +54,11 @@ On a finding, fix the branch: delete the finished quest with `quest rm`, or rewr
 Then push, re-check, and continue; ask the user only when what remains is unclear.
 Leave a summary of the changes and decisions made, then land the head you checked with `quest merge <pr> <token> --land <full 40-character head SHA>`.
 It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
+On a base that requires the `quest land` check, it queues the PR for `quest land`, the repository's batched merge gate, which squashes.
 The `quest:merge` label stays on while the PR is queued or auto-merging.
 Report once it is landing; do not wait for it to merge, since the queue re-checks it without you.
 A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
 After `merge_conflict` or `failed_checks`, the pick still holds: fix it and land it again.
+After `checks_pending`, wait for its required checks to pass and land it again.
 Any other reason, such as a person removing it, is the user's call, so report why instead of landing it again.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.

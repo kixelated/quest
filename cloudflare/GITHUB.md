@@ -189,8 +189,10 @@ on a decision.
   the job's hold, then enables auto-merge bound to that head, entering the
   merge queue when the base has one, or merges it at once when GitHub would
   refuse auto-merge because nothing is left to wait for. It uses the method the
-  job names, else the first the repository allows. A refusal pauses the job on
-  a decision, in GitHub's words.
+  job names, else the first the repository allows. A base that requires the
+  `quest land` check queues the PR for that gate instead, as `quest merge
+--land` does: squash auto-merge whose commit body pins the head. A refusal
+  pauses the job on a decision, in GitHub's words.
 - The label stays while the job runs or waits, and while the PR is queued or
   auto-merging. When the job ends without a landing in progress, or a
   `pull_request` webhook arrives and GitHub shows the landing ended unmerged,

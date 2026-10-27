@@ -26,6 +26,8 @@ class FakePull {
 	head = HEAD;
 	mergeState = "BLOCKED";
 	queue = false;
+	/** Check names the base branch's rulesets require. */
+	required: string[] = [];
 	autoMerge: ObjectValue | null = null;
 	queueEntry: ObjectValue | null = null;
 	labels: string[] = [];
@@ -82,6 +84,16 @@ class FakePull {
 			this.labels = this.labels.filter((label) => label !== name);
 			return json(200, []);
 		}
+		if (url.pathname === "/repos/example/project/branches/main") return json(200, { protection: {} });
+		if (url.pathname === "/repos/example/project/rules/branches/main") {
+			const checks = this.required.map((context) => ({ context }));
+			return json(
+				200,
+				checks.length
+					? [{ type: "required_status_checks", parameters: { required_status_checks: checks } }]
+					: [],
+			);
+		}
 		if (url.pathname === "/repos/example/project/pulls/7" && method === "PATCH") {
 			this.body = String(body.body);
 			this.writes.push("edit body");
@@ -94,7 +106,9 @@ class FakePull {
 		if (query.startsWith("mutation")) {
 			const name = /\{\s*(\w+)\(/.exec(query)![1];
 			if (variables.id !== "PR_7") throw new Error("mutation on the wrong PR");
-			this.writes.push(variables.method ? `${name} ${variables.sha} ${variables.method}` : name);
+			const method = variables.method ?? /mergeMethod: (\w+)/.exec(query)?.[1];
+			const body = variables.body ? ` ${String(variables.body)}` : "";
+			this.writes.push(method ? `${name} ${variables.sha} ${method}${body}` : name);
 			if (name === "markPullRequestReadyForReview") this.draft = false;
 			if (name === "mergePullRequest") this.state = "MERGED";
 			if (name === "enablePullRequestAutoMerge") {
@@ -112,6 +126,7 @@ class FakePull {
 						state: this.state,
 						isDraft: this.draft,
 						body: this.body,
+						baseRefName: "main",
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,
 						isMergeQueueEnabled: this.queue,
@@ -263,6 +278,16 @@ describe("merge --land", () => {
 		await land(PR, token, HEAD, "squash", pull.deps(warnings));
 		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} SQUASH`);
 		expect(warnings).toEqual([`${URL_} lands through a merge queue, which applies its own merge method`]);
+	});
+
+	test("queues a gated base's PR for quest land: squash auto-merge pinning the head", async () => {
+		const pull = new FakePull();
+		pull.required = ["test", "quest land"];
+		const warnings: string[] = [];
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "merge", pull.deps(warnings));
+		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} SQUASH Quest-Land-Head: ${HEAD}`);
+		expect(warnings).toEqual([`${URL_} lands through quest land, which squashes`]);
 	});
 
 	test("refuses a head that moved", async () => {
