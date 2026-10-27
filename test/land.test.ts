@@ -487,6 +487,23 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		expect([one.merged, two.merged]).toEqual([undefined, undefined]);
 	});
 
+	test("reports a PR withdrawn while checked, so the rest gets another run", async () => {
+		const forge = new Forge();
+		const one = forge.pull("Add b", { "b.txt": "b\n" });
+		const two = forge.pull("Add c", { "c.txt": "c\n" });
+		const base = forge.main();
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
+		one.landing = false;
+		expect(await pushQueue(forge.clone(), plan, result, RUN, deps)).toEqual(["withdrawn 1"]);
+		forge.settle();
+		expect(forge.main()).toBe(base);
+		expect([one.merged, two.merged]).toEqual([undefined, undefined]);
+		const next = await resolveQueue(REPOSITORY, undefined, deps);
+		expect(next.queue.map((entry) => entry.number)).toEqual([2]);
+	});
+
 	test("moves heads back when reading them fails", async () => {
 		const forge = new Forge();
 		const one = forge.pull("Add b", { "b.txt": "b\n" });

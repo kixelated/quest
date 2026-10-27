@@ -635,6 +635,8 @@ export async function pushQueue(
 			break;
 		}
 	}
+	// One line per PR: `landed <number> <commit>`, `ejected <number> <reason>`, or `withdrawn <number>`.
+	const output: string[] = [];
 	if (count > 0) {
 		// The queue can change while the gate checks it: land only PRs still queued as they were.
 		const [owner, repo] = plan.repository.split("/");
@@ -645,14 +647,14 @@ export async function pushQueue(
 			if (now?.head === entry.head && now.enabledAt === entry.enabledAt) continue;
 			const ejected = fresh.eject.find((ejected) => ejected.number === entry.number);
 			if (ejected !== undefined) ejections.push(ejected);
+			// Leave it unqueued, but report it so the rest of the queue gets another run.
+			else output.push(`withdrawn ${entry.number}`);
 			count = passed.has(index) ? index : 0;
 			break;
 		}
 	}
 
 	const github = new GitHub(deps);
-	// One line per PR: `landed <number> <commit>` or `ejected <number> <reason>`.
-	const output: string[] = [];
 	for (const ejection of ejections) {
 		if (await eject(github, plan, ejection, run)) output.push(`ejected ${ejection.number} ${ejection.reason}`);
 	}

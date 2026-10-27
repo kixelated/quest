@@ -470,7 +470,8 @@ quest land push plan.json result.json       # land what passed, eject what canno
 first half, and so on, until a prefix passes or one PR fails alone, with no
 retries and no batch-size limit. `push` rebuilds the chain itself and refuses a
 result that did not test exactly its prefixes. It reads the queue again and
-lands only PRs still queued as they were when checked. It moves each PR's branch, with
+lands only PRs still queued as they were when checked, and prints a PR that
+left the queue as `withdrawn` so the workflow runs again for the rest. It moves each PR's branch, with
 a lease on the head that was tested, to that PR's squash commit: a fork's
 branch first, then every other branch in one atomic push. Once GitHub shows
 every PR at its new head, it fast-forwards the base to the tip. GitHub marks a
