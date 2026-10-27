@@ -591,7 +591,12 @@ jobs:
 
 The land job's token pushes the base and PR branches; give it the bypass,
 such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
-from an environment only the base branch can use. Under classic protection,
+from an environment only the base branch can use. Where the ruleset
+refuses GitHub Actions as a bypass actor, as an organization's can, use an App
+installed on the repository. Ejecting a PR disables its auto-merge, which needs
+`contents: write` on the token in `GH_TOKEN` even when another credential
+pushes. The check job holds only a read token, so it can run on a self-hosted
+runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,
 the land job needs a token with admin rights, and the resolve job one with
 administration read, which `github.token` cannot have. Pushing to a fork's
 branch needs a credential the fork accepts maintainer edits from. `resolve` reads
