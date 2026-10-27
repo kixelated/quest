@@ -37,6 +37,11 @@ scope and after required repository checks and reviews pass. Never block on a
 CodeRabbit review; it is optional.
 Quest execution stops at PR creation; it merges only when the user picks /quest-merge.
 
+PRs land on `main` only through `quest land` (see the README): queue one with
+`quest merge <pr> <token> --land <sha>`, and the Land workflow runs `just check`
+and `just test` once per batch. The admin bypass of `main`'s ruleset is for
+emergencies.
+
 Every AI-authored GitHub post must end with `(written by <model>)`, naming the
 running model. This is separate from commit co-author trailers.
 
