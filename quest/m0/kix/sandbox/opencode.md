@@ -1,25 +1,52 @@
-# [M] Sandbox opencode jobs' commands
+# [L] Sandbox opencode jobs' commands
 
 ## Goal
 
 opencode jobs' commands run inside the same boundary as Claude Code's: writes
 only to the checkout and the attempt's private directory, network only to
 the policy's hosts, and no read access to account logins or other homes.
+The `opencode serve` process, which holds the account's provider
+credentials, the server password, and the kix tools' token, stays outside
+that boundary, and its own file tools stay inside the checkout.
 
 ## Plan
 
-Decided 2026-10-15: opencode has no native sandbox, so run `opencode serve`
-under Anthropic's sandbox-runtime with the runner's `Sandbox` policy
-(`src/runner/sandbox.ts`). Today its commands run unconfined on the host, in
-the revision's devShell with the attempt's private HOME.
+Decided 2026-10-27 (user) in `/quest-plan`, replacing the 2026-10-15 plan to
+run the whole `opencode serve` under sandbox-runtime: that would put
+`auth.json`, the providers' hosts, `OPENCODE_SERVER_PASSWORD`, and the bearer
+token in `OPENCODE_CONFIG_CONTENT` inside the commands' boundary. Mirror
+Claude Code instead, whose sandbox covers shell commands while the CLI and
+its file tools follow permission rules. Checked against the pinned opencode
+1.19.0 and sandbox-runtime 0.0.81.
 
-- The runner reaches the server on localhost, and opencode needs its
-  providers' hosts, so check both under sandbox-runtime's network isolation.
-- Keep the account's login out of what the commands can read: verify how
-  much of its XDG home the wrapped process exposes, and deny reads of every
-  other account home.
-- Commands inherit the per-turn `OPENCODE_SERVER_PASSWORD`, and the kix
-  tools' bearer token in `OPENCODE_CONFIG_CONTENT`; keep both out of reach.
+- Commands: set opencode's `shell` config to a runner script that runs
+  `srt -s <settings> -c <cmd>`, with settings generated from the runner's
+  `Sandbox` policy (`src/runner/sandbox.ts`) and srt pinned in the runner's
+  closure. opencode's permission parsing still sees the agent's own command,
+  and the same key covers the `!` shell. Rejected: rewriting `args.command`
+  in a `tool.execute.before` plugin, since opencode's checks would then parse
+  the wrapper, and replacing the bash tool, which would reimplement its
+  timeout, truncation, and process-tree kill. Each command pays srt's startup
+  (about 0.5 to 1 s measured); srt runs outermost, so no nesting is needed.
+- File tools: today `permission: { "*": "allow" }` overrides opencode's
+  `external_directory` check, so the read tool can read the account's
+  `auth.json`. Add `external_directory: "deny"` and `webfetch: "deny"` after
+  `"*"` (the last matching rule wins). opencode's check is lexical, so a
+  symlink in the checkout escapes it: the runner's plugin also realpaths
+  file-tool path arguments in `tool.execute.before` and throws outside the
+  checkout and the attempt's directory.
+- Repo-controlled code: set `OPENCODE_DISABLE_PROJECT_CONFIG`, the
+  counterpart of Claude Code's `--setting-sources user`, so a project's
+  `opencode.json` and `.opencode/` plugins, tools, and local MCP servers do
+  not run in the server. Turn off `lsp` and `formatter`, which run the
+  repository's tools unconfined. The flag also drops `AGENTS.md`, so the
+  runner adds the checkout's instruction file back through `instructions`.
+- One quest, not split: each piece alone leaves the boundary open.
 - Rerun the hostile-repository boundary test from
   [kixelated/quest#212](https://github.com/kixelated/quest/pull/212) against
-  an opencode account, and update the README's residual-risk note.
+  an opencode account on Linux, including a symlink to `auth.json`, a
+  project plugin, and a `.opencode` MCP server. Then remove the "opencode
+  runs unconfined" notes from the README, `src/runner/opencode.ts`, and
+  `src/runner/cli.ts`, and the epic's 2026-10-24 decision.
+- [macOS sandbox](/quest/m0/kix/sandbox/macos.md) reruns the test for
+  opencode under Seatbelt.
