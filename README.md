@@ -322,22 +322,26 @@ failed merge. A label change prints as `labeled:<name>` or `unlabeled:<name>`
 (spaces as `_`), so a queue that dequeues by removing its label wakes the
 waiter; the authenticated account's own label changes are ignored. Actors are
 printed without deciding
-whose review counts. Edits to existing comments or reviews are outside this
-command's scope.
+whose review counts. Edited issue comments print as `edited`, at their update
+time; edits to the authenticated account's own comments are ignored. Comment
+edits have their own cursor position and are read across every page, so editing
+an older bot status comment wakes a resumed wait. Review edits remain outside
+this command's scope.
 
 CI results are read for the current head. The first required check to fail
 prints `checks:failed` right away. `checks:passed` prints once nothing on the
 head is still going (no pending check and no unfinished GitHub Actions run, which
 may still create jobs), every check and workflow the base branch names is
 present (except `quest land`'s, which no head carries), and every required
-check passed; it names the last check to finish,
-when the head went idle. Each prints once per head, with the check's name
+check passed; it names the last required check that passed and is dated when
+the head went idle. Each prints once per head, with the check's name
 (spaces as `_`) in the actor field and its details URL. Results count as
 `quest status` counts them, so neutral and skipped results pass. Each job of a
 workflow a ruleset requires is required.
 Requiredness comes from the base branch's protection and rulesets, readable
-with read access; optional checks never wake the wait, unless the base branch
-requires none, in which case every check is required. A result counts when it
+with read access. A failed optional check prints separately as `check:failed`,
+with its own name and details URL; it never names the aggregate required pass.
+If the base branch requires no checks, every check is required. A result counts when it
 was reached at or after the starting point, so a wait started after CI finished
 still reports it; a push starts over for the new head, and the cursor records
 what was reported, so resuming never replays it.
@@ -386,6 +390,7 @@ auto-merge -
 merge-queue -
 landing-stopped -
 checks success passed=14 failing=0 pending=0
+review-rounds 2 -
 review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
 review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
 thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
@@ -404,6 +409,7 @@ comes last, and a missing value prints as `-`:
 | `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#land-a-batch-with-quest-land) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when. |
 | `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
+| `review-rounds` | Count of distinct commits with submitted reviews since the latest comment starting `Design change:`, followed by that marker's time, author, and URL (`-` when absent). Pending reviews and reviews without a commit do not count. This reports history, not whose review satisfies repository policy. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
@@ -415,7 +421,8 @@ The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 is one branch protection or a ruleset requires for this PR. `--json` prints the
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
-`landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
+`landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviewRounds`
+(`count`, and `since` with the marker's `at`, `actor`, `url`, or `null`), `reviews`, `reactions`,
 `threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
@@ -820,8 +827,8 @@ untrusted. A job resumes with another maintainer's answer
 only once you approve it in the inbox. opencode runs as `opencode serve` on
 localhost behind a password made for each turn.
 
-The flake's `runner` package is a `quest` whose Claude Code and opencode (and on
-Linux, bubblewrap and socat) are pinned by this repository's lock
+The flake's `runner` package pins Claude Code 2.1.305 from its official release
+manifest; opencode (and on Linux, bubblewrap and socat) follow this repository's lock
 (`nix run github:kixelated/quest#runner -- runner`);
 otherwise `claude` and `opencode` come from `QUEST_RUNNER_CLAUDE` and
 `QUEST_RUNNER_OPENCODE`, or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
