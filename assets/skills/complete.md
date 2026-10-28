@@ -41,7 +41,8 @@ Any other reason, such as a person removing it, is the user's call, so ask about
 Keep going until all PRs have been decided, then wait for all spawned sub-agents to finish.
 Refresh the open PR list whenever a sub-agent reports, and once more before finishing; ask about each new PR in scope the same way.
 
-As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions, offering `/quest-plan` for a PR's suggested follow-ups once it merges.
+As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions.
+Collect each merged PR's suggested follow-ups, and once every sub-agent has finished, run `/quest-plan` on them without asking first; its interview lets the user drop any.
 Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.
 
 Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
