@@ -1,5 +1,15 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
-import { check, isQuest, parse, ready } from "quest/core";
+import {
+	MERGE_LABEL,
+	isHoldLabel,
+	latestHold,
+	heldToken,
+	spentMergeHold,
+	check,
+	isQuest,
+	parse,
+	ready,
+} from "quest/core";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 import {
@@ -1410,7 +1420,7 @@ export class GitHubService {
 			mergeState: row.mergeStateStatus,
 			queue: row.isMergeQueueEnabled === true,
 			landing: row.autoMergeRequest !== null || row.mergeQueueEntry !== null,
-			labels: row.labels.nodes.map((label) => label.name).filter((name) => name.startsWith(HOLD_PREFIX)),
+			labels: row.labels.nodes.map((label) => label.name).filter(isHoldLabel),
 			events: row.timelineItems.nodes.map((event) => ({
 				id: event.id,
 				label: event.__typename === "LabeledEvent" ? (event.label?.name ?? "") : null,
@@ -1443,7 +1453,7 @@ export class GitHubService {
 		return this.#authorized(repo, userId, { issues: "write", pull_requests: "read" }, async (token) => {
 			let holds = await this.#holds(token, repo, pull);
 			if (holds.state !== "OPEN") throw new GitHubError("The pull request is no longer open");
-			if (spent(holds)) {
+			if (spentMergeHold(holds)) {
 				await this.#unhold(token, repo, pull);
 				holds = { ...holds, labels: holds.labels.filter((name) => name !== MERGE_LABEL) };
 			}
@@ -1453,11 +1463,11 @@ export class GitHubService {
 				labels: [MERGE_LABEL],
 			});
 			holds = await this.#holds(token, repo, pull);
-			const ours = added(holds, MERGE_LABEL);
+			const ours = latestHold(holds.events, MERGE_LABEL);
 			if (!ours) throw new GitHubError("GitHub does not show the quest:merge label kix added");
 			const rival = holds.labels.find((name) => {
 				if (name === MERGE_LABEL) return false;
-				const event = added(holds, name);
+				const event = latestHold(holds.events, name);
 				return !event || holds.events.indexOf(event) < holds.events.indexOf(ours);
 			});
 			if (rival) {
@@ -1477,8 +1487,7 @@ export class GitHubService {
 	releasePullRequest(repo: GitHubRepository, pull: number, hold: string) {
 		return this.#withRepository(repo, { issues: "write", pull_requests: "read" }, async (token) => {
 			const holds = await this.#holds(token, repo, pull);
-			if (holds.state !== "OPEN" || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== hold)
-				return true;
+			if (holds.state !== "OPEN" || heldToken(holds, MERGE_LABEL) !== hold) return true;
 			if (holds.landing) return false;
 			await this.#unhold(token, repo, pull);
 			return true;
@@ -1536,7 +1545,7 @@ export class GitHubService {
 					throw new GitHubError("Contributions are paused");
 				const holds = await this.#holds(token, repo, pull);
 				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
-				if (!input.hold || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== input.hold)
+				if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
 					throw new PublicationBlocked(
 						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
 					);
@@ -1579,9 +1588,6 @@ function mergeMethod(current: Repository): MergeMethod {
 	throw new GitHubError("The repository allows no merge method");
 }
 
-/** The label prefix and merge label `quest iterate`, `ready`, and `merge` hold pull requests with. */
-const HOLD_PREFIX = "quest:";
-export const MERGE_LABEL = "quest:merge";
 /** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
 const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 /** The check a base gated by `quest land` requires, and the commit body trailer that queues a head for it; see `quest land --help`. */
@@ -1618,18 +1624,6 @@ type Holds = {
 	/** Oldest first; `label` is null for a landing that started. */
 	events: { id: string; label: string | null }[];
 };
-
-/** The latest event that added `label`. */
-function added(holds: Holds, label: string) {
-	return [...holds.events].reverse().find((event) => event.label === label);
-}
-
-/** A `quest:merge` label is spent once a landing started after it was added and ended unmerged. */
-function spent(holds: Holds) {
-	const event = added(holds, MERGE_LABEL);
-	if (!event || holds.landing || !holds.labels.includes(MERGE_LABEL)) return false;
-	return holds.events.slice(holds.events.indexOf(event) + 1).some((later) => later.label === null);
-}
 
 function heldBy(label: string) {
 	return `Another session holds this pull request with ${label}; pick it again once it is released`;

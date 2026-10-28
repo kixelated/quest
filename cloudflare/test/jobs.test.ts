@@ -1122,6 +1122,114 @@ describe("job routes", () => {
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(201);
 	});
 
+	it.each(["completed", "failed", "cancelled"] as const)(
+		"sweeps a %s merge job whose lifecycle callback missed its hold",
+		async (outcome) => {
+			const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+			const machine = await runner(maintainer, "machine", "linux", true);
+			await connected(machine, [account("main")]);
+			await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
+			await store.finish(db, machine, id, 1, { outcome, summary: "Ended", result: undefined }, Date.now());
+			// No event-driven release is called: the schedule is the backstop.
+			expect(github.labels).toEqual(["quest:merge"]);
+			await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+			expect(github.labels).toEqual([]);
+			expect(await state(id)).toMatchObject({ hold: null });
+		},
+	);
+
+	it.each(["queued", "running", "waiting"])("keeps a %s job's live hold during the sweep", async (state) => {
+		const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+		await db.prepare("UPDATE jobs SET state=? WHERE id=?").bind(state, id).run();
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await store.readJob(db, id)).toMatchObject({ hold: "LE_1", state });
+	});
+
+	it("preserves a landing and a replacement hold while sweeping ended jobs", async () => {
+		const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(id).run();
+		github.landing = true;
+		github.events.push({ id: "AUTO", label: null });
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({ hold: "LE_1" });
+		github.landing = false;
+		// Another session removed and re-added the label. The old token may be cleared, never its label.
+		github.events.push({ id: "REPLACEMENT", label: "quest:merge" });
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it.each(["lease", "status"])(
+		"sweeps a stopped attempt abandoned through %s without its release callback",
+		async (path) => {
+			const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+			const machine = await runner(maintainer, "machine", "linux", true);
+			await connected(machine, [account("main")]);
+			const now = Date.now();
+			await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), now);
+			await store.report(db, machine, [account("main")], [{ job: id, attempt: 1 }], now);
+			await post(`/${id}/cancel`, {});
+			if (path === "lease") {
+				await store.dispatch(db, maintainer, new Map(), now);
+				expect((await store.dispatch(db, maintainer, new Map(), now + 2 * GRACE)).ended).toEqual([id]);
+			} else expect((await store.report(db, machine, [account("main")], [], now)).ended).toEqual([id]);
+			expect(github.labels).toEqual(["quest:merge"]);
+			await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+			expect(github.labels).toEqual([]);
+			expect(await state(id)).toMatchObject({ hold: null, state: "cancelled" });
+		},
+	);
+
+	it("retains a token acquired after cancellation so the sweep can retry its failed immediate release", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			const path = new URL(String(input)).pathname;
+			if (path.endsWith("/issues/2/labels") && init?.method === "POST") {
+				const queued = await db
+					.prepare("SELECT id FROM jobs WHERE workflow='merge' AND state='queued'")
+					.first<{ id: string }>();
+				await post(`/${queued!.id}/cancel`, {});
+			}
+			if (path.includes("/issues/2/labels/") && init?.method === "DELETE")
+				return new Response(null, { status: 503 });
+			return mock(input, init);
+		});
+		const response = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(response.status).toBe(403);
+		const { id } = (await db.prepare("SELECT id FROM jobs WHERE workflow='merge'").first<{ id: string }>())!;
+		expect(await state(id)).toMatchObject({ hold: "LE_1", state: "cancelled" });
+		expect(github.labels).toEqual(["quest:merge"]);
+		vi.mocked(globalThis.fetch).mockImplementation(mock);
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual([]);
+		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it("directly releases an acquired token when disconnect removed the project and job", async () => {
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (new URL(String(input)).pathname.endsWith("/issues/2/labels") && init?.method === "POST")
+				await db.prepare("DELETE FROM github_projects WHERE id=10").run();
+			return mock(input, init);
+		});
+		const response = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(response.status).toBe(201);
+		const { id } = (await response.json()) as { id: string };
+		expect(await store.readJob(db, id)).toBeNull();
+		expect(github.labels).toEqual([]);
+	});
+
+	it("keeps daily output retention separate from the frequent hold sweep", async () => {
+		await env.OUTPUT.put("output/gone/1/0", "orphan");
+		await db.prepare("INSERT INTO output_cleanup(job,at) VALUES('gone',0)").run();
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(await env.OUTPUT.head("output/gone/1/0")).not.toBeNull();
+		await worker.scheduled(createScheduledController({ cron: "17 4 * * *" }), testEnv);
+		expect(await env.OUTPUT.head("output/gone/1/0")).toBeNull();
+	});
+
 	it("holds a pull request picked for merge until its job stops, unless another session holds it", async () => {
 		const created = await post("", { workflow: "merge", target: "pulls/2" });
 		expect(created.status).toBe(201);
