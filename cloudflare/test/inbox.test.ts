@@ -6,6 +6,7 @@ import { QUIET, cards } from "../src/inbox/activity";
 import { questHref } from "../src/inbox/model";
 import * as output from "../src/jobs/output";
 import * as store from "../src/jobs/store";
+import { INBOX_HEADER } from "../src/jobs/hub";
 import { privateKey } from "./github-key";
 import { identity, oauth, origin } from "./login-fixtures";
 import { commit, delivery, head, maintainerOf, project, pull } from "./project-fixtures";
@@ -23,6 +24,39 @@ beforeEach(async () => {
 	({ user, cookie, github, mock } = await maintainerOf());
 });
 afterEach(() => vi.restoreAllMocks());
+const sockets: WebSocket[] = [];
+afterEach(() => {
+	for (const socket of sockets.splice(0)) socket.close();
+});
+
+async function socket(response: Response) {
+	expect(response.status).toBe(101);
+	const ws = response.webSocket!;
+	ws.accept();
+	sockets.push(ws);
+	const messages: string[] = [];
+	const waiting: ((message: string) => void)[] = [];
+	ws.addEventListener("message", (event) => {
+		const value = event.data as string;
+		const next = waiting.shift();
+		if (next) next(value);
+		else messages.push(value);
+	});
+	return {
+		ws,
+		messages,
+		next: (): Promise<string> =>
+			messages.length ? Promise.resolve(messages.shift()!) : new Promise((resolve) => waiting.push(resolve)),
+		closed: new Promise<number>((resolve) => ws.addEventListener("close", (event) => resolve(event.code))),
+	};
+}
+function live(session = cookie, site = origin, upgrade = true) {
+	return app.request(
+		`${origin}/inbox/live`,
+		{ headers: { Cookie: session, Origin: site, ...(upgrade ? { Upgrade: "websocket" } : {}) } },
+		testEnv,
+	);
+}
 
 async function inbox(query: Record<string, string> = {}, session = cookie) {
 	const response = await app.request(
@@ -401,6 +435,7 @@ describe("decision inbox", () => {
 		const { question } = await store.ask(db, runner, id, 1, { summary: "Asked.", session: "s", prompt }, 3);
 		const co = await other(true);
 		expect((await visit(co.session)).status).toBe(200);
+		const viewer = await socket(await live());
 		const ctx = createExecutionContext();
 		const answered = await app.request(
 			`${origin}${jobs}/${id}/answer`,
@@ -418,6 +453,8 @@ describe("decision inbox", () => {
 		await waitOnExecutionContext(ctx);
 		expect(answered.status).toBe(303);
 		expect(await store.readJob(db, id)).toMatchObject({ state: "waiting" });
+		// The requester's open inbox refreshes to show the answer awaiting approval.
+		expect(await viewer.next()).toBe("changed");
 		// The co-maintainer sees it wait; only the requester is asked to approve.
 		const theirs = thread(await inbox({ project: "10", item: "quest/first.md" }, co.session));
 		expect(theirs).toContain("resumes once its requester approves the answer");
@@ -642,7 +679,7 @@ describe("decision inbox", () => {
 			id,
 			1,
 			{ outcome: "completed", summary: "Shipped.", result: { head: null, followups: ["Cache <i>it</i>", 7] } },
-			3,
+			Date.now(),
 		);
 		const target = `plans/${id}`;
 		const html = await inbox();
@@ -665,6 +702,56 @@ describe("decision inbox", () => {
 		expect(interview).toContain("Plan the follow-ups that the start job on quest/first.md suggested.");
 		expect(interview).toContain("Queued");
 		expect(interview).not.toContain("Plan these follow-ups");
+	});
+
+	it("expires offers and stale forms exactly 30 days after completion, despite later metadata", async () => {
+		const now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+		const completed = now - store.FOLLOWUP_AGE + 1;
+		const { id, runner } = await running();
+		await store.claim(db, runner, id, 1, null, head, completed - 1);
+		await store.finish(
+			db,
+			runner,
+			id,
+			1,
+			{
+				outcome: "completed",
+				summary: "Shipped.",
+				result: { followups: ["A useful follow-up"] },
+			},
+			completed,
+		);
+		// A lost publication response settles later; that metadata must not renew the offer.
+		await store.settle(db, id, head, true, now);
+		await db.prepare("UPDATE jobs SET hold='later-hold' WHERE id=?").bind(id).run();
+		await store.released(db, id, "later-hold");
+		expect(await store.listFollowups(db, 10, now)).toMatchObject([{ id, completedAt: completed }]);
+		expect(await store.followupRequest(db, 10, id, now)).not.toBeNull();
+		const target = `plans/${id}`;
+		expect(thread(await inbox({ project: "10", item: target }))).toContain("Plan these follow-ups");
+		for (const at of [completed + store.FOLLOWUP_AGE, completed + store.FOLLOWUP_AGE + 1]) {
+			expect(await store.listFollowups(db, 10, at)).toEqual([]);
+			expect(await store.followupRequest(db, 10, id, at)).toBeNull();
+		}
+		clock.mockReturnValue(completed + store.FOLLOWUP_AGE);
+		expect(await inbox()).not.toContain("A useful follow-up");
+		const stale = await submit(jobs, [
+			["workflow", "plan"],
+			["target", target],
+			["revision", commit],
+		]);
+		expect(stale.status).toBe(409);
+		expect(await stale.text()).toContain("Nothing is left to plan here");
+		expect(await store.active(db, 10, target)).toBe(false);
+		// Expiry leaves the completed job and its original result event intact.
+		expect(await store.readJob(db, id)).toMatchObject({
+			state: "completed",
+			head,
+			updatedAt: now,
+			result: { followups: ["A useful follow-up"] },
+			events: expect.arrayContaining([expect.objectContaining({ kind: "result", at: completed })]),
+		});
 	});
 
 	it("offers no retry for a failed quest that is no longer ready", async () => {
@@ -829,6 +916,79 @@ describe("agent cards", () => {
 	const read = (id: string, session?: string) =>
 		app.request(`${origin}${jobs}/${id}/output`, { headers: session ? { Cookie: session } : {} }, testEnv);
 
+	it("authorizes live connections and keeps browser connections out of runner routing", async () => {
+		expect((await live("")).status).toBe(401);
+		expect((await live(cookie, "https://elsewhere.test")).status).toBe(403);
+		expect((await live(cookie, origin, false)).status).toBe(426);
+		const viewer = await socket(await live());
+		const hub = env.RUNNERS.get(env.RUNNERS.idFromName(user));
+		expect(await hub.online()).toEqual([]);
+		viewer.ws.send(JSON.stringify({ id: 1, type: "status", accounts: [], attempts: [], slots: 10 }));
+		expect(await viewer.closed).toBe(1008);
+		expect(await hub.online()).toEqual([]);
+	});
+
+	it("sends only fixed live hints to known maintainers and rereads escaped, authorized cards", async () => {
+		const { id, runner } = await running();
+		const co = await other(true);
+		await visit(co.session);
+		const mine = await socket(await live());
+		const theirs = await socket(await live(co.session));
+		const outsider = await other(false);
+		const outside = await socket(await live(outsider.session));
+		const machine = await socket(
+			await app.request(
+				`${origin}/api/runner/connect`,
+				{
+					headers: {
+						Authorization: `Bearer ${runner.token}`,
+						Upgrade: "websocket",
+						[INBOX_HEADER]: outsider.id,
+					},
+				},
+				testEnv,
+			),
+		);
+		// A runner-supplied viewer header is stripped; the connection remains a runner.
+		expect(await env.RUNNERS.get(env.RUNNERS.idFromName(user)).online()).toEqual([runner.id]);
+		expect(await env.RUNNERS.get(env.RUNNERS.idFromName(outsider.id)).online()).toEqual([]);
+		machine.ws.send(
+			JSON.stringify({
+				id: 1,
+				type: "checkpoint",
+				job: id,
+				attempt: 1,
+				summary: "Fresh <script>alert(1)</script>",
+				session: "s",
+			}),
+		);
+		expect(JSON.parse(await machine.next())).toMatchObject({ type: "reply", id: 1 });
+		expect(await mine.next()).toBe("changed");
+		expect(await theirs.next()).toBe("changed");
+		expect(outside.messages).toEqual([]);
+		await output.append(env, runner, { job: id, attempt: 1, seq: 0, text: "private raw output" }, Date.now());
+		const fragment = () => app.request(`${origin}/inbox/agents`, { headers: { Cookie: cookie } }, testEnv);
+		expect((await app.request(`${origin}/inbox/agents`, {}, testEnv)).status).toBe(401);
+		const response = await fragment();
+		expect(response.headers.get("Cache-Control")).toBe("no-store");
+		const html = await response.text();
+		expect(html).toContain("Fresh &lt;script&gt;alert(1)&lt;/script&gt;");
+		expect(html).not.toContain("private raw output");
+		expect(html).toContain(`data-output="${jobs}/${id}/output"`);
+		github.role = "write";
+		expect(await (await fragment()).text()).not.toContain("Fresh");
+	});
+
+	it("offers the viewer's runner choice when starting and iterating", async () => {
+		const { runner } = await running();
+		await db.prepare("DELETE FROM jobs").run();
+		for (const item of ["quest/first.md", "pulls/2", "issues/1"]) {
+			const html = thread(await inbox({ project: "10", item }));
+			expect(html).toContain('name="pin"');
+			expect(html).toContain(`value="${runner.id}:spare"`);
+		}
+	});
+
 	it("shows each job's state, runner, account, and latest summary beside the decisions", async () => {
 		expect(agents(await inbox())).toContain("No agent is working on your projects right now.");
 		const { id, runner } = await running();
@@ -953,6 +1113,15 @@ describe("agent cards", () => {
 		await running();
 		html = await board();
 		expect(html).toMatch(/waypoint-agent[\s\S]*First[\s\S]*Agent: Runner offline/);
+		expect(html).toContain("waypoint-accepted waypoint-agent");
+		const detail = await app.request(
+			`${origin}/projects/github/upstream/project/board/quest/first`,
+			{ headers: { Cookie: cookie } },
+			testEnv,
+		);
+		expect(await detail.text()).toContain("An active job claims this quest");
+		await db.prepare("UPDATE jobs SET state='queued'").run();
+		expect(await board()).toContain("Queued");
 		// Iterating on the quest's pull request keeps the quest highlighted.
 		await db.prepare("DELETE FROM jobs").run();
 		await db

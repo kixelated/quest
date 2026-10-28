@@ -151,7 +151,7 @@ describe("Worker", () => {
 		expect(response.headers.get("referrer-policy")).toBe("same-origin");
 		expect(await response.text()).toContain('href="/sign-in?next=%2F"');
 	});
-	it("starts GitHub OAuth with persisted state and cookies", async () => {
+	it("starts GitHub App OAuth without OAuth-app scopes, with persisted state and cookies", async () => {
 		const response = await SELF.fetch(`${origin}/sign-in`, {
 			method: "POST",
 			headers: { Origin: origin },
@@ -161,11 +161,12 @@ describe("Worker", () => {
 		const location = new URL(response.headers.get("location")!);
 		expect(location.origin).toBe("https://github.com");
 		expect(location.searchParams.get("client_id")).toBe("test-client-id");
+		expect(location.searchParams.get("scope") ?? "").toBe("");
 		expect(location.searchParams.get("redirect_uri")).toBe(`${origin}/api/auth/callback/github`);
 		expect(location.searchParams.get("state")).toBeTruthy();
 		expect(response.headers.get("set-cookie")).toContain("better-auth.state=");
 	});
-	it("completes GitHub OAuth, persists the D1 session, and signs out", async () => {
+	it("signs a private-email user in with an expiring GitHub App token and signs out", async () => {
 		const start = await SELF.fetch(`${origin}/sign-in`, {
 			method: "POST",
 			headers: { Origin: origin },
@@ -173,13 +174,19 @@ describe("Worker", () => {
 		});
 		const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
 		const stateCookie = start.headers.get("set-cookie")!.split(";")[0];
-		const outbound = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+		const outbound = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
 			const url = input instanceof Request ? input.url : String(input);
 			if (url === "https://github.com/login/oauth/access_token") {
+				const credentials = new URLSearchParams(String(init?.body));
+				expect(credentials.get("client_id")).toBe("test-client-id");
+				expect(credentials.get("client_secret")).toBe("test-client-secret");
 				return Response.json({
-					access_token: "mock-token",
+					access_token: "ghu_mock-token",
+					refresh_token: "ghr_mock-refresh",
+					expires_in: 28800,
+					refresh_token_expires_in: 15897600,
 					token_type: "bearer",
-					scope: "read:user,user:email",
+					scope: "",
 				});
 			}
 			if (url === "https://api.github.com/user") {
@@ -187,7 +194,7 @@ describe("Worker", () => {
 					id: 1234,
 					login: "contributor",
 					name: "Contributor",
-					email: "contributor@example.com",
+					email: null,
 					avatar_url: null,
 				});
 			}
@@ -228,6 +235,18 @@ describe("Worker", () => {
 		});
 		expect(response.status).toBe(403);
 		expect(response.headers.get("location")).toBeNull();
+	});
+	it("returns installation authorization to state-bound sign-in without exchanging its code", async () => {
+		const outbound = vi.spyOn(globalThis, "fetch");
+		const before = await env.DB.prepare("SELECT count(*) AS count FROM user").first<{ count: number }>();
+		const response = await SELF.fetch(`${origin}/api/auth/callback/github?code=install-code`, {
+			redirect: "manual",
+		});
+		expect(response.status).toBe(303);
+		expect(response.headers.get("location")).toBe("/sign-in?next=/projects");
+		expect(outbound).not.toHaveBeenCalled();
+		const users = await env.DB.prepare("SELECT count(*) AS count FROM user").first<{ count: number }>();
+		expect(users?.count).toBe(before?.count);
 	});
 	it("rejects OAuth callbacks without a valid state", async () => {
 		const before = await env.DB.prepare("SELECT count(*) AS count FROM user").first<{ count: number }>();

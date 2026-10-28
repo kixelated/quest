@@ -529,7 +529,7 @@ export function fakeGitHub(world: World) {
 		const me = world.users[0]!;
 		if (url.origin === "https://spdx.org") return json({ licenseId: "MIT", isOsiApproved: true });
 		if (url.origin === "https://github.com" && path === "/login/oauth/access_token")
-			return json({ access_token: "fake-user-token", token_type: "bearer", scope: "read:user,user:email" });
+			return json({ access_token: "fake-user-token", token_type: "bearer", scope: "" });
 		if (url.origin !== "https://api.github.com") return missing(method, request.url);
 		const text = await request.text();
 		const body = text ? (JSON.parse(text) as Record<string, any>) : {};
