@@ -55,7 +55,10 @@ async function state(id: string) {
 }
 /** One dispatch pass over connected runners and their free slots, whose runners acknowledge what they receive. */
 async function run(slots: Record<string, number>, now: number, owner = "owner", deliver = true) {
-	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now, async (job) => !!job.trusted);
+	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now, async (job) => ({
+		head: job.head,
+		trusted: !!job.trusted,
+	}));
 	if (deliver)
 		for (const { job } of pass.assign)
 			await db.prepare("UPDATE jobs SET delivered=1 WHERE id=?").bind(job.id).run();

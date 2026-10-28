@@ -298,6 +298,23 @@ export function route(job: Job, offers: Offer[]): Offer | null {
 	return eligible.find((offer) => offer.free && !offer.limited) ?? null;
 }
 
+export type AssignmentSource = Pick<
+	Job,
+	| "id"
+	| "repository"
+	| "workflow"
+	| "target"
+	| "revision"
+	| "branch"
+	| "actor"
+	| "trusted"
+	| "head"
+	| "pending"
+	| "pull"
+	| "createdAt"
+>;
+export type VerifiedSource = { head: string | null; trusted: boolean };
+
 export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner: string; name: string };
 
 /**
@@ -315,9 +332,7 @@ export async function dispatch(
 	owner: string,
 	slots: Map<string, number>,
 	now: number,
-	verify: (
-		job: Pick<Job, "repository" | "target" | "revision" | "head" | "trusted">,
-	) => Promise<boolean> = async () => false,
+	verify: (job: AssignmentSource) => Promise<VerifiedSource> = async (job) => ({ head: job.head, trusted: false }),
 ) {
 	const connected = JSON.stringify([...slots.keys()]);
 	const [, , cancelled, , candidates, offers, cancels, pending] = await db.batch([
@@ -378,7 +393,9 @@ export async function dispatch(
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
 		if (onPull(job.workflow)) {
-			job.trusted = (await verify(job)) ? 1 : 0;
+			const source = await verify(job);
+			job.head = source.head;
+			job.trusted = source.trusted ? 1 : 0;
 			verified.add(job.id);
 			await db
 				.prepare("UPDATE jobs SET trusted=? WHERE id=? AND state='queued' AND attempt=? AND head IS ?")
@@ -430,7 +447,13 @@ export async function dispatch(
 		const job = await readJob(db, id);
 		if (!job || job.state !== "running" || job.cancel) continue;
 		if (onPull(job.workflow) && !verified.has(job.id)) {
-			const trusted = (await verify(job)) ? 1 : 0;
+			const source = await verify(job);
+			job.head = source.head;
+			if (job.pending === source.head) {
+				job.pending = null;
+				job.pendingAt = null;
+			}
+			const trusted = source.trusted ? 1 : 0;
 			const machine = accounts.find((offer) => offer.runner === runner);
 			const eligible = trusted || (machine?.platform === "linux" && machine.vm);
 			const update = await db

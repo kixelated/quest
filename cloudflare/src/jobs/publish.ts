@@ -206,7 +206,11 @@ async function decide(db: D1Database, runner: Runner, input: Publication, prompt
  * commit whose outcome went unrecorded is adopted first, so an interrupted
  * publication is never mistaken for someone else's write.
  */
-async function verify(db: D1Database, job: store.Publishing, input: Publication, branch: Branch) {
+export async function publicationHead(
+	db: D1Database,
+	job: Pick<store.Job, "id" | "head" | "pending" | "branch">,
+	branch: Branch,
+) {
 	const current = await branch.head();
 	let head = job.head;
 	if (current !== head && job.pending && current === job.pending) {
@@ -219,7 +223,6 @@ async function verify(db: D1Database, job: store.Publishing, input: Publication,
 				? `${branch.repository.owner}/${branch.repository.name} already has the branch ${job.branch} from earlier work.`
 				: `The branch ${job.branch} changed outside this job.`,
 		);
-	if (input.head !== head) throw new HeadMoved(head);
 	return head;
 }
 
@@ -269,7 +272,8 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 	try {
 		// A pull request opens from the branch, so a delivery alone still checks where it is.
 		head = await github.contribute(upstream, job.actor, job, async (branch) => {
-			const head = await verify(db, job, input, branch);
+			const head = await publicationHead(db, job, branch);
+			if (input.head !== head) throw new HeadMoved(head);
 			return input.changes.length || input.merge ? commit(db, runner, job, input, branch, head) : head;
 		});
 	} catch (error) {

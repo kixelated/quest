@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Commit, type Repo, type World, fakeGitHub, intercept } from "../dev/github";
 import { GitHubService } from "../src/github/service";
 import * as store from "../src/jobs/store";
+import { verify as verifyAssignment } from "../src/jobs/trust";
 import { privateKey } from "./github-key";
 
 const db = env.DB;
@@ -47,6 +48,9 @@ beforeEach(async () => {
 			"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('owner','Owner','owner@example.test',1,0,0)",
 		),
 		db.prepare(
+			"INSERT INTO account(id,accountId,providerId,userId,createdAt,updatedAt) VALUES('owner-github','7','github','owner',0,0)",
+		),
+		db.prepare(
 			"INSERT INTO github_projects(id,owner,name,installation,state,enrolledBy,updatedAt) VALUES(10,'upstream','project',5,'enabled','owner',0)",
 		),
 	]);
@@ -86,7 +90,7 @@ async function runner(name: string, platform: store.Platform, vm = false) {
 
 const dispatch = (machines: store.Runner[]) =>
 	store.dispatch(db, "owner", new Map(machines.map((r) => [r.id, 1])), 1, (job) =>
-		service().jobTrust(repository, job.target, job.head ?? job.revision),
+		verifyAssignment({ ...env, GITHUB_APP_PRIVATE_KEY: privateKey }, job),
 	);
 
 describe("authenticated PR provenance", () => {
@@ -224,6 +228,53 @@ describe("authenticated PR provenance", () => {
 		expect(pass.cancel).toEqual([{ runner: mac.id, job: id, attempt: 1 }]);
 		expect(await store.readJob(db, id)).toMatchObject({ trusted: 0, state: "queued" });
 	});
+
+	it.each(["landed", "unconfirmed", "changed"])(
+		"reassigns safely after a %s pending publication loses its response",
+		async (outcome) => {
+			const id = await queued();
+			const first = await runner("first", "linux");
+			await dispatch([first]);
+			await store.report(
+				db,
+				first,
+				[{ id: "account", provider: "anthropic", kind: "subscription", label: "First", limited: false }],
+				[{ job: id, attempt: 1 }],
+				1,
+			);
+			const pending = "d".repeat(40);
+			repo.commits[pending] = { ...commit([head]), signature: null };
+			await store.claim(db, first, id, 1, head, pending, 2);
+			if (outcome === "landed") repo.branches.fix = pending;
+			if (outcome === "changed") {
+				const other = "e".repeat(40);
+				repo.commits[other] = { ...commit([head]), signature: null };
+				repo.branches.fix = other;
+			}
+			// Its disconnected runner's lease expires. Recovery must precede trust and routing.
+			const verify = (job: store.AssignmentSource) =>
+				verifyAssignment({ ...env, GITHUB_APP_PRIVATE_KEY: privateKey }, job);
+			await store.dispatch(db, "owner", new Map(), 3, verify);
+			const replacement = await runner("replacement", "darwin");
+			const pass = await store.dispatch(db, "owner", new Map([[replacement.id, 1]]), store.GRACE + 4, verify);
+			if (outcome === "changed") {
+				expect(pass.assign).toEqual([]);
+				expect(await store.readJob(db, id)).toMatchObject({ head, pending, trusted: 0, state: "queued" });
+			} else {
+				const expected = outcome === "landed" ? pending : head;
+				expect(pass.assign).toMatchObject([
+					{ runner: replacement.id, job: { id, head: expected, trusted: 1, attempt: 2 } },
+				]);
+				expect(await store.readJob(db, id)).toMatchObject({
+					head: expected,
+					pending: outcome === "landed" ? null : pending,
+				});
+			}
+			expect((await db.prepare("SELECT sha FROM job_commits").all()).results).toEqual(
+				outcome === "landed" ? [{ sha: pending }] : [],
+			);
+		},
+	);
 
 	it("trusts confirmed kix publications, retaining earlier commits but refusing unconfirmed and failed pushes", async () => {
 		const id = await queued();

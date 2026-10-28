@@ -1,10 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
-import { GitHubService } from "../github/service";
 import * as push from "../push/notify";
 import * as landing from "./landing";
 import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
+import * as trust from "./trust";
 import { JobError } from "./store";
 import { instructions } from "./trail";
 
@@ -122,24 +122,8 @@ export class RunnerHub extends DurableObject<Env> {
 			const reported = (ws.deserializeAttachment() as Attachment).slots;
 			if (reported !== null) slots.set(runner, reported);
 		}
-		const github = new GitHubService(this.env);
-		const { assign, cancel, ended, wake } = await store.dispatch(
-			this.env.DB,
-			owner,
-			slots,
-			Date.now(),
-			async (job) => {
-				const repo = await this.env.DB.prepare("SELECT id,owner,name FROM github_projects WHERE id=?")
-					.bind(job.repository)
-					.first<{ id: number; owner: string; name: string }>();
-				if (!repo) return false;
-				try {
-					return await github.jobTrust(repo, job.target, job.head ?? job.revision);
-				} catch {
-					// No current proof means no trusted execution, including during a GitHub outage.
-					return false;
-				}
-			},
+		const { assign, cancel, ended, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now(), (job) =>
+			trust.verify(this.env, job),
 		);
 		for (const { runner, job } of assign) {
 			const message = { type: "assign", job, instructions: instructions(job.workflow) };
