@@ -94,7 +94,7 @@ export function followupEntity(project: Enrollment, job: store.Followups): Entit
 		href: job.pull ? `${web}/pull/${job.pull}` : web,
 		activity: null,
 		version: `followups:${job.id}`,
-		at: job.updatedAt,
+		at: job.completedAt,
 		followups: job.followups,
 	};
 }

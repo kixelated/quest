@@ -13,10 +13,11 @@ import { type Enrollment, GitHubError, GitHubService } from "./github/service";
 import { readActivity } from "./github/state";
 import { ProjectsPage, ProjectSetupPage, ProjectStopControls, ProjectStatePage, projectURL } from "./projects";
 import { githubWebhooks } from "./github/webhook";
-import { cards, highlights } from "./inbox/activity";
+import { activeHighlights, cards, highlights } from "./inbox/activity";
 import * as inbox from "./inbox/model";
-import { InboxPage } from "./inbox/page";
+import { AgentCards, InboxPage } from "./inbox/page";
 import { purge, retain } from "./jobs/output";
+import { INBOX_HEADER } from "./jobs/hub";
 import * as landing from "./jobs/landing";
 import { BootstrapRequired, fromForm, hub, inboxURL, jobs, nextURL, resume, stop } from "./jobs/routes";
 import { JobError, active, listActivityJobs, listRunners, moveAccount, registerRunner } from "./jobs/store";
@@ -267,6 +268,37 @@ app.post("/projects/github/:owner/:repository/pulls/:number/merge", async (c) =>
 	return c.redirect(nextURL("merge"), 303);
 });
 
+// The browser may subscribe only to its signed-in user's notification hub, never as a runner.
+app.get("/inbox/live", async (c) => {
+	if (c.req.header("Origin") !== new URL(c.env.AUTH_URL).origin) return c.json({ error: "Invalid origin" }, 403);
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Sign in required" }, 401);
+	if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.json({ error: "WebSocket required" }, 426);
+	const response = await hub(c.env, session.user.id).fetch(
+		new Request(c.req.url, {
+			headers: { Upgrade: "websocket", [INBOX_HEADER]: session.user.id },
+		}),
+	);
+	return new Response(null, {
+		status: response.status,
+		webSocket: response.webSocket,
+		headers: new Headers(response.headers),
+	});
+});
+
+// Every live fragment read repeats the same current-maintainer checks as the full inbox.
+app.get("/inbox/agents", async (c) => {
+	c.header("Cache-Control", "no-store");
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Sign in required" }, 401);
+	const user = session.user.id;
+	const { readable, items, activity, runners } = await inbox.load(c.env, user);
+	const now = Date.now();
+	return c.html(
+		<AgentCards cards={cards(readable, activity, runners, items, now)} runners={runners} user={user} now={now} />,
+	);
+});
+
 // The signed-in home: one decision at a time across the maintainer's projects.
 app.get("/inbox", async (c) => {
 	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
@@ -347,28 +379,33 @@ app.post("/runners/accounts", async (c) => {
 	await hub(c.env, owner).dispatch(owner);
 	return c.redirect("/runners", 303);
 });
+/** Active quest state and map highlights come from the inbox's authorized card data. */
+async function readLiveBoard(env: Env, view: inbox.ProjectView) {
+	const jobs = await listActivityJobs(env.DB, view.project.id, inbox.openPulls(view));
+	const runners = await inbox.presence(
+		env,
+		jobs.map((job) => job.actor),
+	);
+	const list = cards([view], [jobs], runners, [], Date.now());
+	return { board: readBoard(view.state!.project, activeHighlights(list)), agents: highlights(list) };
+}
+
 app.get("/projects/github/:owner/:repository/board", async (c) => {
 	const { repo, state } = await liveProject(c);
 	if (!state) return c.redirect(`${projectURL(c.req.param("owner"), c.req.param("repository"))}/state`, 303);
-	// The map highlights the quests agents work on, from the same jobs as the inbox's cards.
-	const view = { project: repo, state, error: null };
-	const jobs = await listActivityJobs(c.env.DB, repo.id, inbox.openPulls(view));
-	const runners = await inbox.presence(
-		c.env,
-		jobs.map((job) => job.actor),
-	);
+	const live = await readLiveBoard(c.env, { project: repo, state, error: null });
 	return page(
 		c,
 		{ title: `${state.project.title} quest log`, description: "Pinned repository quest tree." },
 		<BoardPage
-			board={readBoard(state.project)}
+			board={live.board}
 			show={SHOWN.find(([kind]) => kind === c.req.query("show"))?.[0] ?? null}
-			agents={highlights(cards([view], [jobs], runners, [], Date.now()))}
+			agents={live.agents}
 		/>,
 	);
 });
 app.get("/projects/github/:owner/:repository/board/quest/*", async (c) => {
-	const { state } = await liveProject(c);
+	const { repo, state } = await liveProject(c);
 	if (!state) return c.notFound();
 	let segments: string[];
 	try {
@@ -377,7 +414,7 @@ app.get("/projects/github/:owner/:repository/board/quest/*", async (c) => {
 		return c.notFound();
 	}
 	if (segments.some((segment) => segment.includes("/"))) return c.notFound();
-	const board = readBoard(state.project);
+	const { board } = await readLiveBoard(c.env, { project: repo, state, error: null });
 	const doc = findQuest(board, segments.join("/"));
 	if (!doc) return c.notFound();
 	if (doc.path === "quest/README.md") return c.redirect(state.project.href!);
