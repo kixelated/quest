@@ -708,7 +708,7 @@ command waits as long as the host stays busy.
 branch before it is pushed for review: Codex when run from Claude Code, and
 Claude Code when run from Codex. `--harness` names the reviewer instead; an
 unknown harness, or a missing or logged-out CLI, is an error rather than a
-same-model review. The reviewer uses its CLI's own login and config, with a
+same-model review. The reviewer uses its CLI's own login, with a
 pinned model and effort: a default tier for routine work and, with `--deep`, a
 stronger one for a high-stakes change such as security, a wire format or public
 API, or a risk of data loss. `quest review --help` lists them; `--model` and
@@ -738,7 +738,9 @@ over.
 The reviewer is read-only: Codex in its `read-only` sandbox, ignoring
 execpolicy rules, and Claude Code with only read tools and the Bash commands it
 judges read-only, in `dontAsk` mode. Claude Code loads no settings files, so no
-allow rule, even the user's own, widens that. The base is fetched first, since
+allow rule, even the user's own, widens that. Codex skips the user's config,
+whose project trust would load the checkout's `.codex/config.toml` and start its
+MCP servers outside the sandbox. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,

@@ -234,6 +234,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 		expect(call.argv).toContain('sandbox_mode="read-only"');
 		expect(call.argv).toContain("project_doc_max_bytes=0");
 		expect(call.argv).toContain("--ignore-rules");
+		expect(call.argv).toContain("--ignore-user-config");
 		expect(call.argv[call.argv.indexOf("-m") + 1]).toBe("gpt-6.1-sol");
 		expect(call.argv).toContain('model_reasoning_effort="medium"');
 		expect(call.argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");

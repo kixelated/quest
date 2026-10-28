@@ -287,7 +287,10 @@ const claudeEnv = () => ({ CLAUDE_CODE_PROMPT_CACHE_TTL: "1h" });
 
 /**
  * Codex runs in its read-only sandbox and never asks for approval, ignoring
- * execpolicy rules that could allow a command past it. A zero project-doc
+ * execpolicy rules that could allow a command past it. It skips the user's
+ * config, keeping its login: that config's project trust would load the
+ * checkout's `.codex/config.toml`, whose MCP servers run outside the sandbox
+ * before the review starts, even in a worktree of a trusted clone. A zero project-doc
  * budget keeps the checkout's AGENTS.md out, and the base's instructions
  * arrive as developer instructions instead.
  */
@@ -351,6 +354,7 @@ function codexFlags(context: Context): string[] {
 		"-c",
 		'approval_policy="never"',
 		"--ignore-rules",
+		"--ignore-user-config",
 		"-c",
 		"project_doc_max_bytes=0",
 		"-c",
