@@ -890,6 +890,10 @@ macOS, Linux, and [native Windows](docs/windows.md).
 The hosted service is moving to [kix.quest](https://kix.quest): maintainers
 plan issues, start ready quests, and act on GitHub PRs through a decision UI.
 Hosted work will use explicitly selected maintainer or donor API funding.
+Automatic project history passes read updates since their prior issue/PR
+boundaries, including timestamp ties. Explicit Refresh starts or resumes a full
+history pass; successive refreshes repair cached issues deleted without a
+webhook. Open draft bodies are read only to classify `## Decisions needed`.
 [The first milestone](quest/m0/README.md) lists the quests that remain.
 
 ## Contributing

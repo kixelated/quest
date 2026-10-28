@@ -187,7 +187,9 @@ function github(
 				const page = options.activity ?? activity();
 				const repository: Record<string, unknown> = { ...page };
 				const errors: unknown[] = options.activityErrors ? [{ message: "partial" }] : [];
-				for (const [, alias, field, number] of query.matchAll(/(s\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
+				for (const [, alias, field, number] of query.matchAll(
+					/([sb]\d+):(issue|pullRequest)\(number:(\d+)\)/g,
+				)) {
 					const nodes = (field === "issue" ? [page.issues] : [page.pullRequests, page.open]).flatMap(
 						(c) => c?.nodes ?? [],
 					);
@@ -195,7 +197,10 @@ function github(
 						options.entities && Number(number) in options.entities
 							? options.entities[Number(number)]
 							: (nodes.find((node) => node.number === Number(number)) ?? null);
-					repository[alias!] = found;
+					repository[alias!] =
+						found && alias!.startsWith("b")
+							? { ...found, body: (found as { body?: string }).body ?? "" }
+							: found;
 					if (!found) errors.push({ type: "NOT_FOUND", path: ["repository", alias] });
 				}
 				return Response.json({ data: { repository }, errors: errors.length ? errors : undefined });
@@ -1020,21 +1025,206 @@ describe("enrolled project observations", () => {
 			await expect(github(options).service.projectState(repo, "enrollment-test")).rejects.toThrow();
 		},
 	);
-	it("retains notification identity when an entity disappears from authoritative reconciliation", async () => {
+	async function automatic(service: GitHubService) {
+		await env.DB.prepare(
+			"INSERT INTO github_project_state(repository,epoch,requested) VALUES(10,'automatic-test',1) ON CONFLICT(repository) DO UPDATE SET requested=1",
+		).run();
+		await service.observe(repo.id);
+		return service.projectState(repo, "enrollment-test");
+	}
+
+	it("continues across watermark ties and stops strictly below them without losing old rows", async () => {
+		await enrolled();
+		const row = (id: number, updatedAt: string) => ({ ...issue(id, id), updatedAt });
+		const date = (day: number) => `2026-10-${String(day).padStart(2, "0")}T12:00:00Z`;
+		const page = (nodes: ReturnType<typeof issue>[], more = false, cursor: string | null = null): ActivityPage => ({
+			issues: connection(nodes, more, cursor),
+			pullRequests: connection([]),
+			open: connection([]),
+			refs: connection([]),
+		});
+		await automatic(github({ activity: page([row(100, date(10)), row(101, date(9))], true, "first") }).service);
+		await automatic(github({ activity: page([row(102, date(1))]) }).service);
+		const first = github({ activity: page([row(103, date(11)), row(104, date(9))], true, "ties") });
+		expect((await automatic(first.service))!.complete).toBe(false);
+		expect(
+			first.calls.find((call) => call.path === "/graphql" && !call.body.query.includes("object(oid:"))!.body
+				.query,
+		).toContain("field:UPDATED_AT,direction:DESC");
+		const last = await automatic(
+			github({
+				activity: page([row(105, date(9)), { ...row(102, date(1)), title: "not a new update" }], true, "older"),
+			}).service,
+		);
+		expect(last!.complete).toBe(true);
+		expect(last!.activity.map((item) => item.id).sort()).toEqual(["100", "101", "102", "103", "104", "105"]);
+		expect(last!.activity.every((item) => item.missing === 0)).toBe(true);
+		expect(last!.activity.find((item) => item.id === "102")!.data!.title).toBe(issue().title);
+	});
+
+	it("replays an update that moved ahead of the cursor during the preceding pass", async () => {
+		await enrolled();
+		const date = (day: number) => `2026-10-${String(day).padStart(2, "0")}T12:00:00Z`;
+		const rows = [
+			{ ...issue(100, 1), updatedAt: date(10) },
+			{ ...issue(101, 3), updatedAt: date(9) },
+		];
+		await automatic(
+			github({
+				activity: {
+					issues: connection(rows, true, "cursor"),
+					pullRequests: connection([]),
+					open: connection([]),
+					refs: connection([]),
+				},
+			}).service,
+		);
+		// Entity 102 updates after the first page and jumps ahead of the cursor, so this page cannot see it.
+		await automatic(
+			github({
+				activity: {
+					issues: connection([{ ...issue(103, 5), updatedAt: date(1) }]),
+					open: connection([]),
+					refs: connection([]),
+				},
+			}).service,
+		);
+		const moved = { ...issue(102, 4), title: "updated during paging", updatedAt: date(11) };
+		const next = await automatic(
+			github({
+				activity: {
+					issues: connection([moved, ...rows, { ...issue(103, 5), updatedAt: date(1) }]),
+					pullRequests: connection([]),
+					open: connection([]),
+					refs: connection([]),
+				},
+			}).service,
+		);
+		expect(next!.complete).toBe(true);
+		expect(next!.activity.find((item) => item.id === "102")!.data!.title).toBe("updated during paging");
+		expect(next!.activity).toHaveLength(4);
+	});
+
+	it("keeps independent issue and pull-request update boundaries", async () => {
+		await enrolled();
+		const old = { ...pull(), state: "CLOSED", updatedAt: "2026-10-01T12:00:00Z" };
+		await automatic(
+			github({
+				activity: {
+					issues: connection([{ ...issue(), updatedAt: "2026-10-20T12:00:00Z" }]),
+					pullRequests: connection([old]),
+					open: connection([]),
+					refs: connection([]),
+				},
+			}).service,
+		);
+		const changed = { ...old, title: "PR changed independently", updatedAt: "2026-10-02T12:00:00Z" };
+		const next = await automatic(
+			github({
+				activity: {
+					issues: connection([]),
+					pullRequests: connection([changed]),
+					open: connection([]),
+					refs: connection([]),
+				},
+			}).service,
+		);
+		expect((await readActivity(env.DB, 10)).items.find((item) => item.id === "200")!.data!.title).toBe(
+			changed.title,
+		);
+		expect(next!.activity.find((item) => item.id === "100")!.missing).toBe(0);
+	});
+
+	it("expires cached closed history even when an incremental page has no updates", async () => {
+		await enrolled();
+		const page = activity();
+		Object.assign(page.pullRequests!.nodes[0]!, { state: "CLOSED", closedAt: new Date().toISOString() });
+		page.open = connection([]);
+		await github({ activity: page }).service.projectState(repo, "enrollment-test", true);
+		await env.DB.prepare(
+			"UPDATE github_project_activity SET data=json_set(data,'$.closedAt',?) WHERE repository=10 AND id='200'",
+		)
+			.bind(new Date(Date.now() - RETENTION - 1000).toISOString())
+			.run();
+		await automatic(
+			github({
+				activity: {
+					issues: connection([]),
+					pullRequests: connection([]),
+					open: connection([]),
+					refs: connection([]),
+				},
+			}).service,
+		);
+		expect((await readActivity(env.DB, 10)).items.some((item) => item.id === "200")).toBe(false);
+	});
+
+	it("reads bodies once per open draft and never in metadata/history pages", async () => {
+		await enrolled();
+		const page = activity();
+		Object.assign(page.pullRequests!.nodes[0]!, { isDraft: true, body: "## Decisions needed\n\nChoose." });
+		const closed = { ...pull("closed", 203), state: "CLOSED", isDraft: true, body: "private old body" };
+		page.pullRequests!.nodes.push(closed);
+		const { service, calls } = github({ activity: page });
+		const result = await service.projectState(repo, "enrollment-test", true);
+		const queries = calls.filter((call) => call.path === "/graphql" && !call.body.query.includes("object(oid:"));
+		expect(queries).toHaveLength(2);
+		expect(queries[0]!.body.query).not.toMatch(/\bbody\b/);
+		expect(queries[1]!.body.query).toContain("b0:pullRequest(number:2)");
+		expect(queries[1]!.body.query).not.toContain("number:3");
+		expect(queries[1]!.body.query).not.toContain("number:5");
+		expect((result!.activity.find((item) => item.id === "200")!.data as { handedBack: boolean }).handedBack).toBe(
+			true,
+		);
+	});
+
+	it("does not publish mixed draft-body and metadata revisions", async () => {
+		await enrolled();
+		const page = activity();
+		const draft = Object.assign(page.pullRequests!.nodes[0]!, { isDraft: true, body: "## Decisions needed" });
+		const { service } = github({
+			activity: page,
+			entities: { 2: { ...draft, updatedAt: "2026-10-16T12:00:00Z" } },
+		});
+		await expect(service.projectState(repo, "enrollment-test", true)).rejects.toThrow();
+		expect(await service.projectState(repo, "enrollment-test")).toBeNull();
+	});
+
+	it("restarts legacy creation-ordered history cursors before using update order", async () => {
 		await enrolled();
 		await github().service.projectState(repo, "enrollment-test", true);
-		const next = await github({
+		await env.DB.prepare(
+			"UPDATE github_project_state SET scan=json_set(scan,'$.history',json(?)) WHERE repository=10",
+		)
+			.bind(JSON.stringify({ id: "legacy", issues: "old-cursor", pulls: false, complete: false }))
+			.run();
+		const { service, calls } = github();
+		expect((await service.projectState(repo, "enrollment-test", true))!.complete).toBe(true);
+		const query = calls.find((call) => call.path === "/graphql" && !call.body.query.includes("object(oid:"))!;
+		expect(query.body.variables.issues).toBeNull();
+		expect(query.body.variables.pulls).toBeNull();
+	});
+
+	it("keeps unchanged entities when an incremental history page contains no updates", async () => {
+		await enrolled();
+		await github().service.projectState(repo, "enrollment-test", true);
+		const empty = github({
 			activity: {
 				issues: connection([]),
 				pullRequests: connection([]),
 				open: connection([]),
 				refs: connection([]),
 			},
-		}).service.projectState(repo, "enrollment-test", true);
+		});
+		const next = await automatic(empty.service);
 		expect(next!.activity).toHaveLength(3);
-		expect(next!.activity.every((item) => item.missing === 1)).toBe(true);
+		expect(next!.activity.every((item) => item.missing === 0)).toBe(true);
 		expect(next!.project.changes).toEqual([]);
-		expect(next!.project.issues).toEqual([]);
+		expect(next!.project.issues).toHaveLength(1);
+		// A missed delete webhook cannot appear in the update connection. Explicit Refresh repairs it.
+		const repaired = await empty.service.projectState(repo, "enrollment-test", true);
+		expect(repaired!.activity.every((item) => item.missing === 1)).toBe(true);
+		expect(repaired!.project.issues).toEqual([]);
 	});
 
 	it("retains observations while paused, clears candidates, and cascades caches on disconnect", async () => {

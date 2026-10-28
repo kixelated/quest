@@ -397,7 +397,7 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>, 
 		}
 	// Entities a webhook named, read by number as GitHub does: an issue number
 	// that is a pull request, or a missing one, is NOT_FOUND at its alias.
-	for (const [, alias, field, number] of query.matchAll(/(s\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
+	for (const [, alias, field, number] of query.matchAll(/([sb]\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
 		const pull = repo.pulls.find((p) => p.number === Number(number));
 		const issue = repo.issues.find((i) => i.number === Number(number));
 		const found = field === "pullRequest" ? pull && pullNode(repo, pull) : issue && entity(repo, issue);
