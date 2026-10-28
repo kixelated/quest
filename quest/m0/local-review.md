@@ -43,14 +43,20 @@ Decided 2026-10-28 (user, /quest-plan):
   overrides the built-in reviewers' defaults. The Codex plugin's
   `adversarial-review` prompt is a good starting point for a repository that
   wants one. Later rounds resume the same session with the new head
-  and the author's free-text responses (fixes and refutations). The reviewer
-  accepts a refutation unless it defends the finding with new evidence.
-  Without them, rejected findings would recur every round.
+  and the author's free-text responses (fixes and refutations). Without
+  them, rejected findings would recur every round. A refutation stands only
+  when it cites evidence (`path:line`, a command's output, or a recorded
+  maintainer decision) the reviewer cannot rebut. An uncited one is a claim
+  to verify, and its finding stays: the 2026-10-28 trial below showed a
+  reviewer dropping a real finding on an unverifiable refutation.
 - Read-only: Codex in its `read-only` sandbox; Claude restricted to read
   tools and read-only git commands. Never a write tool or a permission bypass.
+  The sandbox has no network, so `quest review` fetches the base before it
+  launches the reviewer.
 - Cache: always resume. Request Claude's 1h prompt-cache TTL and OpenAI's
   24h retention explicitly. The PR shows from usage output that a resumed
-  round reads the cache. A cold resume is accepted: it costs one rewrite and is
+  round reads the cache. `codex exec review --json` reports zero usage, so
+  measure the resumed turns. A cold resume is accepted: it costs one rewrite and is
   still cheaper than a fresh review.
 - Instructions come from the base: `REVIEW.md` is optional and read with
   `git show <base>:REVIEW.md`. For a head whose `AGENTS.md`/`CLAUDE.md`
@@ -60,6 +66,11 @@ Decided 2026-10-28 (user, /quest-plan):
   restoring the base's files in a scratch worktree. If none is clean, ask in
   the PR. `quest init` does not scaffold `REVIEW.md`. Without one, a round
   adds no rules to the built-in review.
+- Trial, 2026-10-28 (Codex reviewer, by hand): `codex exec review --base`
+  then `codex exec resume <id> --output-schema` worked, with 68-83% of each
+  resumed turn's input read from cache. On a plan-only diff both turns found
+  nothing; on [moq-dev/moq#7126](https://github.com/moq-dev/moq/pull/7126)
+  they found one real issue. The Claude side is untested.
 - The authoring model decides whether a change is too trivial to review. A
   skip is recorded in `## Review` with its reason, and that record satisfies
   the guide's review rule like a review does.
