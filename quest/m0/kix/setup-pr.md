@@ -9,9 +9,9 @@ enabled when it merges.
 
 ## Plan
 
-Decided 2026-10-27 (user), option A of the onboarding round recorded in
-[App sign-in](/quest/m0/kix/app-sign-in.md), chosen over running setup as a
-runner job, which needs a runner before a project can enroll:
+Decided 2026-10-27 (user), option A of the onboarding round that also
+adopted GitHub App sign-in, chosen over running setup as a runner job, which
+needs a runner before a project can enroll:
 
 - A repository without Quest gets the bot's setup PR. What state is it in
   until that PR merges?
