@@ -15,4 +15,6 @@ additional login providers. This milestone does not gate the first release.
 - [Donor isolation](/quest/m1/donor-isolation.md) - stronger boundaries for untrusted shared jobs
 - [ChatGPT hosted runs](/quest/m1/chatgpt-hosted.md) - conditional on provider approval and current terms
 - [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - resolve hosted-use approval before implementation
-- [Worker dev setup](/quest/m1/worker-dev.md) - per-server cookies, seeded raw output, one fake GitHub, each test run alone
+- [Worker dev setup](/quest/m1/worker-dev.md) - per-server cookies, seeded raw output, static assets, one fake GitHub, each test run alone
+- [Gate ownership everywhere](/quest/m1/gate-ownership.md) - delegated sub-cgroups for nested gates and Windows Job Objects
+- [Fewer git processes on Windows](/quest/m1/windows-git.md) - batched git lookups in the CLI and reused fixture repositories in tests
