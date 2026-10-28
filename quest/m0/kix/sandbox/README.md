@@ -74,6 +74,7 @@ Shipped in [kixelated/quest#212](https://github.com/kixelated/quest/pull/212)
 
 - [Claude Code pin](/quest/m0/kix/sandbox/claude-pin.md) - the runner's pinned Claude Code moves to the version the sandbox docs describe
 - [Trusted PR heads](/quest/m0/kix/sandbox/trust.md) - PR heads whose commits all come from maintainers or kix jobs run on any runner
+- [Head approval](/quest/m0/kix/sandbox/head-approval.md) - a maintainer approves an exact head, such as one kix pushed, for host runners
 - [opencode sandboxing](/quest/m0/kix/sandbox/opencode.md) - opencode jobs' commands run in the same sandbox as Claude Code's
 - [macOS sandbox](/quest/m0/kix/sandbox/macos.md) - the boundary verified under Seatbelt, then the answer-approval gate removed
 - [Ubuntu AppArmor](/quest/m0/kix/sandbox/apparmor.md) - the sandbox starts on stock Ubuntu, or the runner refuses at startup
