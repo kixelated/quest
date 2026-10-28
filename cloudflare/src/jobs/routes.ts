@@ -3,7 +3,7 @@ import { questBranch } from "quest/core";
 import { createAuth } from "../auth";
 import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
-import { type ProjectState, type Pull, continued, startable } from "../github/state";
+import { type ProjectState, type Pull, startable } from "../github/state";
 import { RUNNER_HEADER } from "./hub";
 import * as landing from "./landing";
 import * as output from "./output";
@@ -278,7 +278,7 @@ function resolve(
 				item.data?.state === "OPEN",
 		);
 	if (workflow === "start") {
-		if (typeof target !== "string" || !startable(state, target, failed && continued(state, failed)))
+		if (typeof target !== "string" || !startable(state, target, failed))
 			throw new JobError("Only ready, unclaimed quests on the default branch can start");
 		const branch = questBranch(target);
 		if (!refName(branch)) throw new JobError("Rename the quest so its path can be a branch name");

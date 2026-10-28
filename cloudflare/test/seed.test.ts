@@ -7,7 +7,7 @@ import { commitOf, fakeGitHub, headOf, intercept, type World } from "../dev/gith
 import { seed, world } from "../dev/seed";
 import { app } from "../src/index";
 import { inboxURL } from "../src/jobs/routes";
-import { cancel, createJob, createRunner, dispatch, report } from "../src/jobs/store";
+import { cancel, createJob, createRunner, dispatch, finish, report } from "../src/jobs/store";
 import { privateKey } from "./github-key";
 import { origin } from "./login-fixtures";
 
@@ -228,6 +228,75 @@ it("gets failed and blocked jobs moving again from the inbox", async () => {
 	expect(planned.status).toBe(303);
 	expect(await latest(followups)).toMatchObject({ state: "queued" });
 });
+
+it.each([true, false])(
+	"retries a published branch without a PR only while its head is still the job's: %j",
+	async (unchanged) => {
+		const { request, user, rocket, page, post } = await seeded();
+		const now = Date.now();
+		const { id, token } = await createRunner(db, user, "test", "linux", true, now);
+		const machine = { id, owner: user, name: "test", platform: "linux" as const, vm: 1 };
+		await report(
+			db,
+			machine,
+			[{ id: "main", provider: "anthropic", kind: "subscription", label: "main", limited: false }],
+			[],
+			now,
+		);
+		await dispatch(db, user, new Map([[id, 1]]), now);
+		const body = JSON.stringify({
+			job: "seed-start-offline",
+			attempt: 1,
+			head: null,
+			message: "feat: offline",
+			changes: [{ path: "src/offline.ts", content: Buffer.from("export {};\n").toString("base64") }],
+		});
+		const response = await request("/api/runner/publish", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				"Content-Length": String(new TextEncoder().encode(body).length),
+			},
+			body,
+		});
+		expect(response.status).toBe(200);
+		const { head } = (await response.json()) as { head: string };
+		expect(rocket.pulls.some((pull) => pull.branch === "quest/m1/offline")).toBe(false);
+		await finish(
+			db,
+			machine,
+			"seed-start-offline",
+			1,
+			{ outcome: "failed", summary: "Failed before PR", result: undefined },
+			now,
+		);
+		if (!unchanged) rocket.branches["quest/m1/offline"] = "e".repeat(40);
+		await post("/refresh", {});
+		const failed = await page("quest/m1/offline.md");
+		expect(failed.includes("no longer ready to start")).toBe(!unchanged);
+		const retried = await post("/jobs", {
+			workflow: "start",
+			target: "quest/m1/offline.md",
+			revision: commitOf(rocket),
+		});
+		if (unchanged) {
+			expect(retried.status).toBe(303);
+			expect(await latest("quest/m1/offline.md")).toMatchObject({
+				state: "queued",
+				head,
+				continues: "seed-start-offline",
+			});
+		} else {
+			expect(retried.status).toBe(409);
+			expect(await latest("quest/m1/offline.md")).toMatchObject({
+				id: "seed-start-offline",
+				state: "failed",
+				head,
+			});
+		}
+	},
+);
 
 it("does not retry a failed job through a different same-repository PR claim", async () => {
 	const { page } = await seeded((data) => {

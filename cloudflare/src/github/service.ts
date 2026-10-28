@@ -603,7 +603,7 @@ export class GitHubService {
 			occupancy:
 				previous && !previous.occupancy.complete && row!.invalidated !== 1
 					? previous.occupancy
-					: { open: null, refs: null, pulls: [], claims: [], complete: false },
+					: { open: null, refs: null, pulls: [], claims: [], heads: {}, complete: false },
 		};
 		// What webhooks named is read by number, so it is current after one read
 		// however far the history pass is from it.

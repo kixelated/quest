@@ -1,4 +1,4 @@
-import { type Pull, continued, startable } from "../github/state";
+import { type Pull, startable } from "../github/state";
 import { type Prompt, parsePrompt } from "../jobs/prompt";
 import { type Done, PLAN_LIMITS, PUBLICATION_REPLY, inboxURL } from "../jobs/routes";
 import { Marker, Notifications } from "../layout";
@@ -332,8 +332,8 @@ function blocked(item: Item, view: ProjectView | undefined) {
 	if (!state?.project.available)
 		return `${failed || "GitHub reported changes. "}Refresh to start new work from current state.`;
 	// A retry continues its failed job's pull request, so that claim does not block it.
-	const retry = item.need === "retry" && item.job ? continued(state, item.job) : null;
-	if (item.kind === "quest" && !startable(state, item.target, retry))
+	const retrying = item.need === "retry" ? item.job : null;
+	if (item.kind === "quest" && !startable(state, item.target, retrying))
 		return "This quest is no longer ready to start, such as when it is claimed or removed.";
 	if ((item.kind === "issue" || item.kind === "pull") && !item.activity?.data)
 		return `${failed}Refresh to read this from GitHub.`;
