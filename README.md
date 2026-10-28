@@ -728,14 +728,15 @@ asked for its 1-hour cache. The session is kept per branch in the clone's
 common Git directory, so any worktree of the clone resumes it; `--new` starts
 over.
 
-The reviewer is read-only: Codex in its `read-only` sandbox, and Claude Code
-with only read tools and the Bash commands it judges read-only, in `dontAsk`
-mode. The base is fetched first, since the sandbox has no network. The reviewer
-follows the base's `AGENTS.md` and `CLAUDE.md`, at the root and in each
-directory holding a changed path, never the checkout's: Claude Code loads only
-user settings and Codex loads no project docs, so a change cannot instruct its
-own reviewer. `REVIEW.md` is optional, and chooses the review's stance, such as
-adversarial.
+The reviewer is read-only: Codex in its `read-only` sandbox, ignoring
+execpolicy rules, and Claude Code with only read tools and the Bash commands it
+judges read-only, in `dontAsk` mode. Claude Code loads no settings files, so no
+allow rule, even the user's own, widens that; pass `--model` and `--effort` to
+override its defaults. The base is fetched first, since the sandbox has no
+network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
+root and in each directory holding a changed path, never the checkout's, so a
+change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,
+given every round, and chooses the review's stance, such as adversarial.
 
 It prints the reviewer and model, session, round, base, head, a `usage` line
 per turn (input tokens, the part read from the prompt cache, and output), the

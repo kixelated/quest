@@ -841,8 +841,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"same session with the new head and --responses, the author's fixes and refutations of the last " +
 				"round's findings, required while that round reported any. --new starts a new session. The session is " +
 				"kept per branch in the clone's common Git directory, so any worktree of the clone resumes it.\n\n" +
-				"The reviewer is read-only: Codex in its read-only sandbox, Claude Code with only read tools and the " +
-				"Bash commands it judges read-only. It follows the base's AGENTS.md and CLAUDE.md, from the root and " +
+				"The reviewer is read-only: Codex in its read-only sandbox without execpolicy rules, Claude Code with " +
+				"no settings files, only read tools, and the Bash commands it judges read-only. It follows the base's AGENTS.md and CLAUDE.md, from the root and " +
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer. The base is fetched first, since the sandbox has no network.\n\n" +
 				"Prints the reviewer and model, session, round, base, head, a usage line per turn (input tokens, the " +

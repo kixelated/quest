@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { type Output, main } from "../src/cli/main";
-import { findings, runningHarness } from "../src/cli/review";
+import { baseInstructions, findings, runningHarness } from "../src/cli/review";
 import { tempDir } from "./fixture";
 
 afterEach(() => {
@@ -241,6 +241,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	for (const call of [first, second]) {
 		expect(call.argv).toContain('sandbox_mode="read-only"');
 		expect(call.argv).toContain("project_doc_max_bytes=0");
+		expect(call.argv).toContain("--ignore-rules");
 		expect(call.argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");
 		// The session's own variables never reach the reviewer.
 		expect(call.env.CLAUDECODE).toBeUndefined();
@@ -277,7 +278,8 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	for (const call of [first, second]) {
 		const at = (flag: string) => call.argv[call.argv.indexOf(flag) + 1];
 		expect(at("--permission-mode")).toBe("dontAsk");
-		expect(at("--setting-sources")).toBe("user");
+		// No settings file, so not even the user's own allow rules apply.
+		expect(at("--setting-sources")).toBe("");
 		expect(at("--tools")).toBe("Read,Grep,Glob,Bash,Agent");
 		expect(at("--model")).toBe("opus");
 		expect(at("--effort")).toBe("high");
@@ -310,6 +312,7 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(resumed.argv.slice(0, 2)).toEqual(["exec", "resume"]);
 	expect(resumed.argv.at(-2)).toBe("thread-1");
 	expect(resumed.stdin).toContain("Fixed at src/lib.ts:1.");
+	expect(resumed.stdin).toContain("BASE-REVIEW rule");
 	expect(resumed.stdin).toContain(git(s.repo, "rev-parse", "HEAD"));
 	expect(calls.filter((c) => c.argv[1] === "review")).toHaveLength(1);
 
@@ -337,4 +340,24 @@ test("findings are checked field by field", () => {
 	expect(findings({ structured: { findings: [{ ...FINDING, line: null }] } })).toEqual([{ ...FINDING, line: null }]);
 	expect(() => findings({ structured: { findings: [{ ...FINDING, line: 0 }] } })).toThrow("does not match");
 	expect(() => findings({ text: '{"verdict":"approve"}' })).toThrow("no findings list");
+});
+
+test("each changed directory keeps its own instructions, and a directory's symlink is given once", () => {
+	const repo = tempDir();
+	execFileSync("git", ["init", "-q", "-b", "main", repo]);
+	write(repo, "AGENTS.md", "root\n");
+	write(repo, "a/AGENTS.md", "same\n");
+	write(repo, "b/AGENTS.md", "same\n");
+	write(repo, "c/AGENTS.md", "c rules\n");
+	symlinkSync("AGENTS.md", join(repo, "c", "CLAUDE.md"));
+	write(repo, "d/AGENTS.md", "untouched\n");
+	git(repo, "add", ".");
+	git(repo, "commit", "-qm", "base");
+	const files = baseInstructions(repo, "HEAD", ["a/x.ts", "b/y.ts", "c/z.ts"]);
+	expect(files).toEqual([
+		{ path: "AGENTS.md", text: "root" },
+		{ path: "a/AGENTS.md", text: "same" },
+		{ path: "b/AGENTS.md", text: "same" },
+		{ path: "c/AGENTS.md", text: "c rules" },
+	]);
 });

@@ -188,11 +188,12 @@ const count = (value: unknown) => (typeof value === "number" ? value : 0);
 const text = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 /**
- * Claude Code reads only the user's settings, so the checkout's CLAUDE.md,
- * hooks, and project settings never load. It has no write tools, and
- * `dontAsk` denies every Bash command Claude Code does not itself judge
- * read-only, such as `git diff --output`. Every turn passes the same flags, so
- * the resumed turn reads the review's prompt cache.
+ * Claude Code reads no settings files: the checkout's would let a change
+ * instruct or hook its reviewer, and an allow rule in any of them, such as the
+ * user's own `Bash(gh pr merge *)`, would run under `dontAsk`. It keeps its
+ * login. It has no write tools, and `dontAsk` denies every Bash command Claude
+ * Code does not itself judge read-only, such as `git diff --output`. Every turn
+ * passes the same flags, so the resumed turn reads the review's prompt cache.
  */
 const claude: Reviewer = {
 	status: ["claude", "auth", "status"],
@@ -259,7 +260,7 @@ function claudeFlags(context: Context): string[] {
 		"--permission-mode",
 		"dontAsk",
 		"--setting-sources",
-		"user",
+		"",
 		"--strict-mcp-config",
 		"--tools",
 		"Read,Grep,Glob,Bash,Agent",
@@ -274,9 +275,10 @@ function claudeFlags(context: Context): string[] {
 const claudeEnv = () => ({ CLAUDE_CODE_PROMPT_CACHE_TTL: "1h" });
 
 /**
- * Codex runs in its read-only sandbox and never asks for approval. A zero
- * project-doc budget keeps the checkout's AGENTS.md out, and the base's
- * instructions arrive as developer instructions instead.
+ * Codex runs in its read-only sandbox and never asks for approval, ignoring
+ * execpolicy rules that could allow a command past it. A zero project-doc
+ * budget keeps the checkout's AGENTS.md out, and the base's instructions
+ * arrive as developer instructions instead.
  */
 const codex: Reviewer = {
 	status: ["codex", "login", "status"],
@@ -337,6 +339,7 @@ function codexFlags(context: Context): string[] {
 		'sandbox_mode="read-only"',
 		"-c",
 		'approval_policy="never"',
+		"--ignore-rules",
 		"-c",
 		"project_doc_max_bytes=0",
 		"-c",
@@ -437,8 +440,8 @@ const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"];
 /**
  * The base's agent instructions for this change: `AGENTS.md` and `CLAUDE.md`
  * at the root and in every directory holding a changed path. A symlink is
- * followed once within the base; a file identical to one already given is
- * given once.
+ * followed once within the base, and a directory's two files are given once
+ * when identical.
  */
 export function baseInstructions(root: string, base: string, changed: string[]): { path: string; text: string }[] {
 	const dirs = new Set([""]);
@@ -463,7 +466,10 @@ export function baseInstructions(root: string, base: string, changed: string[]):
 			if (source.startsWith("../") || !exists(root, base, source)) continue;
 		}
 		const content = show(root, base, source);
-		if (!given.some((other) => other.text === content)) given.push({ path, text: content });
+		const dir = posix.dirname(path);
+		if (!given.some((other) => posix.dirname(other.path) === dir && other.text === content)) {
+			given.push({ path, text: content });
+		}
 	}
 	return given;
 }
@@ -488,28 +494,49 @@ const REPORT =
 	"Name each finding's file by its repository-relative path and its line at that head, or null when no single line fits. " +
 	"Its body gives the concrete scenario: the input or state, and the wrong result. Report an empty list when nothing holds.";
 
-/** The first round's follow-up: apply the base's REVIEW.md, if any, and report in the schema. */
-export function firstPrompt(head: string, rules: { sha: string; text: string } | null): string {
-	const parts = [
-		`Report your review as JSON matching the response schema: every finding that holds at the head ${head}.`,
-	];
-	if (rules !== null) {
-		parts.push(
-			`The repository's review rules follow, read from REVIEW.md at the base commit ${rules.sha}. ` +
-				"They take precedence over the review's defaults: drop the findings they exclude, and review the change " +
-				"again for anything they ask for that the review above missed.",
-			`<review-rules>\n${rules.text}\n</review-rules>`,
-		);
-	}
-	parts.push(REPORT);
-	return parts.join("\n\n");
+/** The base's REVIEW.md, if it has one. */
+export interface Rules {
+	sha: string;
+	text: string;
 }
 
-/** A later round's only turn: re-review the new head, weighing the author's responses. */
-export function laterPrompt(base: string, previous: string, head: string, responses: string | undefined): string {
+/**
+ * The base's review rules, given every round since the base may move between
+ * rounds. They take precedence over the built-in review's defaults.
+ */
+function rulesParts(rules: Rules | null, first: boolean): string[] {
+	if (rules === null) return [];
+	const apply = first
+		? "drop the findings they exclude, and review the change again for anything they ask for that the review above missed."
+		: "drop the findings they exclude, and check anything they ask for.";
+	return [
+		`The repository's review rules follow, read from REVIEW.md at the base commit ${rules.sha}. ` +
+			`They take precedence over the review's defaults: ${apply}`,
+		`<review-rules>\n${rules.text}\n</review-rules>`,
+	];
+}
+
+/** The first round's follow-up: apply the base's REVIEW.md, if any, and report in the schema. */
+export function firstPrompt(head: string, rules: Rules | null): string {
+	return [
+		`Report your review as JSON matching the response schema: every finding that holds at the head ${head}.`,
+		...rulesParts(rules, true),
+		REPORT,
+	].join("\n\n");
+}
+
+/** A later round's only turn: re-review the new head under the base's current rules, weighing the author's responses. */
+export function laterPrompt(
+	base: string,
+	previous: string,
+	head: string,
+	responses: string | undefined,
+	rules: Rules | null,
+): string {
 	const parts = [
 		`The branch is now at ${head}; your last review covered ${previous}. ` +
-			`Review the change ${base}...HEAD again under the same instructions and rules.`,
+			`Review the change ${base}...HEAD again under the instructions above.`,
+		...rulesParts(rules, false),
 	];
 	if (responses !== undefined) {
 		parts.push(
@@ -645,6 +672,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		schemaFile,
 	};
 
+	const rules = exists(root, baseSha, "REVIEW.md") ? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") } : null;
 	const started = deps.now();
 	const usage: Usage[] = [];
 	let session: string;
@@ -656,13 +684,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		session = first.session;
 		model = first.model ?? model;
 		if (reported(first.usage)) usage.push({ turn: "review", ...first.usage });
-		const rules = exists(root, baseSha, "REVIEW.md")
-			? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") }
-			: null;
 		reply = await turn(reviewer, reviewer.resume(context, session, firstPrompt(head, rules)), root, env);
 	} else {
 		session = state.session;
-		const prompt = laterPrompt(baseRef, previous.head, head, options.responses);
+		const prompt = laterPrompt(baseRef, previous.head, head, options.responses, rules);
 		reply = await turn(reviewer, reviewer.resume(context, session, prompt), root, env);
 	}
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
