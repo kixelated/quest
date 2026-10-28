@@ -16,7 +16,6 @@ Decided 2026-10-22 (user) as a follow-up of
 - Page by update time from the last pass's high-water mark, and read bodies
   only for open drafts, whose `## Decisions needed` section decides whether
   the board shows them as claimed or handed back.
-- m1, next to [batched inbox reads](/quest/m1/inbox-reads.md): m0 pilots are
-  small enough that full passes are affordable.
+- m1: m0 pilots are small enough that full passes are affordable.
 - Dropped (user): caching installation tokens across an inbox load, until
   pilots show slow inboxes.
