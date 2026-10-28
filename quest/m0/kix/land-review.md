@@ -21,11 +21,14 @@ Decided 2026-10-28 (user, /quest-plan trust audit):
   kixelated/quest, a Codex review or 👍 on the head, in `CONTRIBUTING.md`),
   follow it. Otherwise require a review from someone other than the PR's
   author and the App.
-- Where GitHub branch protection already requires reviews, defer to it rather
-  than duplicating it.
+- Defer to GitHub branch protection only where it enforces the same
+  current-head rule: it requires approval of the most recent push, or it
+  dismisses stale approvals. Protection that accepts an approval of an older
+  head does not count; keep kix's exact-head check there.
 - Test landing with a review of an older head, with a conflict-free base merge
-  since the review, with a hand-resolved conflict since the review, and with
-  only an AI comment from the author's account.
+  since the review, with a hand-resolved conflict since the review, with only
+  an AI comment from the author's account, and under protection that requires
+  reviews without dismissing stale ones.
 
 ## Related
 
