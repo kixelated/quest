@@ -228,11 +228,17 @@ function AgentForm(props: { item: Item; prompt: Prompt }) {
 
 /** A publication decision's prompt. kix wrote it, but its paths came from the runner. */
 function publication(question: QuestionView) {
-	const prompt = question.prompt as { refused?: unknown; blocked?: unknown; restart?: unknown } | null;
+	const prompt = question.prompt as {
+		refused?: unknown;
+		blocked?: unknown;
+		restart?: unknown;
+		continuation?: { head?: unknown };
+	} | null;
 	return {
 		refused: Array.isArray(prompt?.refused) ? (prompt.refused as { path: string; reason: string }[]) : [],
 		blocked: typeof prompt?.blocked === "string" ? prompt.blocked : null,
 		restart: prompt?.restart === true,
+		continuation: typeof prompt?.continuation?.head === "string" ? prompt.continuation.head : null,
 	};
 }
 
@@ -242,7 +248,7 @@ function publication(question: QuestionView) {
  */
 function PublicationForm(props: { item: Item }) {
 	const { item } = props;
-	const { refused, blocked, restart } = publication(item.question!);
+	const { refused, blocked, restart, continuation } = publication(item.question!);
 	return (
 		<form method="post" action={`${jobsURL(item)}/${item.job!.id}/answer`} class="decision-form">
 			<input type="hidden" name="question" value={item.question!.id} />
@@ -264,6 +270,19 @@ function PublicationForm(props: { item: Item }) {
 				<textarea id="publication-text" name="text" rows={3} maxlength={PUBLICATION_REPLY} required />
 			</fieldset>
 			<button class="button primary">Send to the agent</button>
+			{continuation && (
+				<>
+					<input type="hidden" name="head" value={continuation} />
+					<p>
+						Continue from <code>{continuation}</code>. On the same runner, unpublished work is preserved and
+						merged with this head; conflicts need another decision. A replacement runner starts from the
+						latest published checkpoint.
+					</p>
+					<button class="button quiet" name="continue" value="1" formnovalidate>
+						Continue from this head
+					</button>
+				</>
+			)}
 			{restart && (
 				<>
 					<p class="note-small muted">
@@ -393,7 +412,7 @@ function Refresh(props: { project: Item["project"] }) {
 	);
 }
 
-function Actions(props: { item: Item; view: ProjectView | undefined }) {
+function Actions(props: { item: Item; view: ProjectView | undefined; runners: Runners }) {
 	const { item, view } = props;
 	const base = projectURL(item.project.owner, item.project.name);
 	const starts = item.need === "start" || item.need === "retry";
@@ -417,6 +436,7 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 					<input type="hidden" name="workflow" value="merge" />
 					<input type="hidden" name="target" value={item.target} />
 					<input type="hidden" name="revision" value={merge.pull.headRefOid} />
+					<Pin runners={props.runners} id={`merge-${item.project.id}-pin`} />
 					<button class="button primary">Merge this PR</button>
 				</form>
 			)}
@@ -431,6 +451,7 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 						<input type="hidden" name="workflow" value={job.workflow} />
 						{job.target && <input type="hidden" name="target" value={job.target} />}
 						<input type="hidden" name="revision" value={job.revision} />
+						<Pin runners={props.runners} id={`job-${item.project.id}-pin`} />
 						<button class={merge && job.workflow !== "merge" ? "button quiet" : "button primary"}>
 							{item.need === "retry" ? "Try again" : job.label}
 						</button>
@@ -458,7 +479,13 @@ function Actions(props: { item: Item; view: ProjectView | undefined }) {
 	);
 }
 
-function Thread(props: { item: Item; view: ProjectView | undefined; runners: Runners; user: string }) {
+function Thread(props: {
+	item: Item;
+	view: ProjectView | undefined;
+	runners: Runners;
+	ownRunners: Runners;
+	user: string;
+}) {
 	const { item, runners } = props;
 	const status = progress(item, runners, props.user);
 	return (
@@ -525,7 +552,7 @@ function Thread(props: { item: Item; view: ProjectView | undefined; runners: Run
 						The agent's question could not be read. Stop the job or wait for the runner to ask again.
 					</p>
 				))}
-			<Actions item={item} view={props.view} />
+			<Actions item={item} view={props.view} runners={props.ownRunners} />
 		</article>
 	);
 }
@@ -678,7 +705,7 @@ function AgentCard(props: { card: Card; runners: Runners; user: string; now: num
 	const when = ago(now, card.at);
 	const output = `${jobsURL(card)}/${job.id}/output`;
 	return (
-		<li class={`agent agent-${card.phase}`}>
+		<li class={`agent agent-${card.phase}`} data-job={job.id}>
 			<p class="ql-eyebrow">
 				{card.project.owner}/{card.project.name} · {label}
 			</p>
@@ -724,6 +751,24 @@ function AgentCard(props: { card: Card; runners: Runners; user: string; now: num
 	);
 }
 
+/** The same escaped card markup serves the initial page and authorized live refreshes. */
+export function AgentCards(props: Pick<InboxProps, "cards" | "runners" | "user" | "now">) {
+	return props.cards.length ? (
+		<ol class="log">
+			{props.cards.map((card) => (
+				<AgentCard
+					card={card}
+					runners={props.runners.get(card.job.actor) ?? []}
+					user={props.user}
+					now={props.now}
+				/>
+			))}
+		</ol>
+	) : (
+		<p class="muted">No agent is working on your projects right now.</p>
+	);
+}
+
 export function InboxPage(props: InboxProps) {
 	const { active } = props;
 	const view = active && props.projects.find((v) => v.project.id === active.project.id);
@@ -757,6 +802,7 @@ export function InboxPage(props: InboxProps) {
 						item={active}
 						view={view ?? undefined}
 						runners={props.runners.get(active.job?.actor ?? "") ?? []}
+						ownRunners={props.runners.get(props.user) ?? []}
 						user={props.user}
 					/>
 				)}
@@ -769,20 +815,10 @@ export function InboxPage(props: InboxProps) {
 			</div>
 			<aside class="agents" aria-labelledby="agents-title">
 				<h2 id="agents-title">Agents</h2>
-				{props.cards.length ? (
-					<ol class="log">
-						{props.cards.map((card) => (
-							<AgentCard
-								card={card}
-								runners={props.runners.get(card.job.actor) ?? []}
-								user={props.user}
-								now={props.now}
-							/>
-						))}
-					</ol>
-				) : (
-					<p class="muted">No agent is working on your projects right now.</p>
-				)}
+				<p data-live-status class="note-small muted" role="status" hidden></p>
+				<div data-agent-cards data-live="/inbox/live" data-cards="/inbox/agents">
+					<AgentCards cards={props.cards} runners={props.runners} user={props.user} now={props.now} />
+				</div>
 			</aside>
 			<div class="inbox-rest">
 				{working.length > 0 && (

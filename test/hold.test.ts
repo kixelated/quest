@@ -10,6 +10,7 @@ import { Refusal } from "../src/cli/start";
 const PR = { owner: "example", repo: "project", number: 7 };
 const URL_ = "https://github.com/example/project/pull/7";
 const HEAD = "a".repeat(40);
+const BASE = "b".repeat(40);
 
 interface Event {
 	__typename: "LabeledEvent" | "AutoMergeEnabledEvent" | "AddedToMergeQueueEvent";
@@ -26,6 +27,9 @@ class FakePull {
 	head = HEAD;
 	mergeState = "BLOCKED";
 	queue = false;
+	comparison = "ahead";
+	base = BASE;
+	readonly comparisons: string[] = [];
 	/** Check names the base branch's rulesets require. */
 	required: string[] = [];
 	autoMerge: ObjectValue | null = null;
@@ -36,6 +40,8 @@ class FakePull {
 	readonly writes: string[] = [];
 	/** Runs before each label is added, as when another session adds one at the same moment. */
 	beforeAdd?: () => void;
+	beforeAutoMerge?: () => string | undefined;
+	reads = 0;
 	private clock = Date.parse("2026-10-21T12:00:00Z");
 
 	/** Add a label as GitHub does: re-adding one already on the PR records no event. */
@@ -85,6 +91,10 @@ class FakePull {
 			return json(200, []);
 		}
 		if (url.pathname === "/repos/example/project/branches/main") return json(200, { protection: {} });
+		if (url.pathname === `/repos/example/project/compare/main...${this.head}`) {
+			this.comparisons.push(`${url.pathname}${url.search}`);
+			return json(200, { status: this.comparison, base_commit: { sha: this.base } });
+		}
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
 			const checks = this.required.map((context) => ({ context }));
 			return json(
@@ -112,11 +122,14 @@ class FakePull {
 			if (name === "markPullRequestReadyForReview") this.draft = false;
 			if (name === "mergePullRequest") this.state = "MERGED";
 			if (name === "enablePullRequestAutoMerge") {
+				const reason = this.beforeAutoMerge?.();
+				if (reason) return { errors: [{ message: reason }] };
 				this.autoMerge = { enabledAt: "2026-10-21T12:00:00Z" };
 				this.event("AutoMergeEnabledEvent");
 			}
 			return { data: { [name]: { clientMutationId: null } } };
 		}
+		this.reads++;
 		return {
 			data: {
 				repository: {
@@ -126,6 +139,7 @@ class FakePull {
 						state: this.state,
 						isDraft: this.draft,
 						body: this.body,
+						updatedAt: new Date(this.clock).toISOString(),
 						baseRefName: "main",
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,
@@ -251,6 +265,31 @@ describe("ready --done", () => {
 });
 
 describe("merge --land", () => {
+	test.each(["behind", "diverged"])(
+		"refuses a stale ungated head (%s), then accepts it after a base merge",
+		async (status) => {
+			const pull = new FakePull();
+			pull.comparison = status;
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			const refusal = await refused(land(PR, token, HEAD, "squash", pull.deps()));
+			expect(refusal).toContain(`head ${HEAD} does not contain main at ${BASE}`);
+			expect(pull.writes.at(-1)).toBe("add quest:merge");
+			pull.head = "c".repeat(40);
+			pull.comparison = "ahead";
+			await land(PR, token, pull.head, "squash", pull.deps());
+			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${pull.head} SQUASH`);
+		},
+	);
+
+	test("accepts a head identical to the current base", async () => {
+		const pull = new FakePull();
+		pull.comparison = "identical";
+		pull.base = HEAD;
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "merge", pull.deps());
+		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+	});
+
 	test("enables auto-merge with a merge commit by default, bound to the head", async () => {
 		const pull = new FakePull();
 		const { token } = await take(PR, "merge", undefined, pull.deps());
@@ -283,12 +322,80 @@ describe("merge --land", () => {
 	test("queues a gated base's PR for quest land: squash auto-merge pinning the head", async () => {
 		const pull = new FakePull();
 		pull.required = ["test", "quest land"];
+		pull.comparison = "diverged";
 		const warnings: string[] = [];
 		const { token } = await take(PR, "merge", undefined, pull.deps());
 		await land(PR, token, HEAD, "merge", pull.deps(warnings));
 		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} SQUASH Quest-Land-Head: ${HEAD}`);
 		expect(warnings).toEqual([`${URL_} lands through quest land, which squashes`]);
+		expect(pull.comparisons).toEqual([]);
 	});
+
+	test.each(["CLEAN", "HAS_HOOKS", "UNSTABLE"])(
+		"rereads an UNKNOWN state once after a clean refusal, then merges %s at the same head",
+		async (state) => {
+			const pull = new FakePull();
+			pull.mergeState = "UNKNOWN";
+			pull.beforeAutoMerge = () => {
+				pull.mergeState = state;
+				return "Pull request is in clean status";
+			};
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			const before = pull.reads;
+			await land(PR, token, HEAD, "squash", pull.deps());
+			expect(pull.writes.slice(-2)).toEqual([
+				`enablePullRequestAutoMerge ${HEAD} SQUASH`,
+				`mergePullRequest ${HEAD} SQUASH`,
+			]);
+			expect(pull.reads - before).toBe(2); // The usual hold read, then one reread after refusal.
+			expect(pull.state).toBe("MERGED");
+		},
+	);
+
+	test("keeps UNKNOWN on auto-merge when GitHub accepts it", async () => {
+		const pull = new FakePull();
+		pull.mergeState = "UNKNOWN";
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		const before = pull.reads;
+		await land(PR, token, HEAD, "merge", pull.deps());
+		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+		expect(pull.reads - before).toBe(1);
+		expect(pull.state).toBe("OPEN");
+	});
+
+	test.each(["Pull request is in clean status", "Auto merge is not allowed for this repository"])(
+		"preserves a refused UNKNOWN auto-merge: %s",
+		async (reason) => {
+			const pull = new FakePull();
+			pull.mergeState = "UNKNOWN";
+			pull.beforeAutoMerge = () => reason;
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			const before = pull.reads;
+			await expect(land(PR, token, HEAD, "merge", pull.deps())).rejects.toThrow(reason);
+			expect(pull.reads - before).toBe(reason.includes("clean status") ? 2 : 1);
+			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+		},
+	);
+
+	test.each(["head", "hold", "gate", "queue"])(
+		"does not merge after the clean refusal changes its %s",
+		async (change) => {
+			const pull = new FakePull();
+			pull.mergeState = "UNKNOWN";
+			pull.beforeAutoMerge = () => {
+				pull.mergeState = "CLEAN";
+				if (change === "head") pull.head = "b".repeat(40);
+				if (change === "hold") pull.labels = [];
+				if (change === "gate") pull.required = ["quest land"];
+				if (change === "queue") pull.queue = true;
+				return "Pull request is in clean status";
+			};
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			await expect(land(PR, token, HEAD, "merge", pull.deps())).rejects.toThrow();
+			expect(pull.state).toBe("OPEN");
+			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+		},
+	);
 
 	test("refuses a head that moved", async () => {
 		const pull = new FakePull();

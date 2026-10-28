@@ -12,7 +12,7 @@ Every follow-up the user picks goes through this interview, including edits to e
 A background agent that cannot prompt never creates or edits quests itself, so this skill can run in the foreground.
 
 Search other quests and epics to keep the larger plan consistent.
-When the work changes what a user sees (a wire, an API, a flag, a dashboard), ask whether it needs documentation the feature quest cannot carry inline (a new page or guide), and recommend a quest for that; docs a change makes stale stay in that change.
+Docs a change makes stale stay in that change.
 
 Begin the interview by scoping the goal: the observable outcome, why it matters, and its important boundaries and non-goals.
 Restate the goal in one sentence and get it confirmed before moving on to implementation decisions.

@@ -10,8 +10,7 @@ land around it. A PR from a fork lands through it too.
 ## Plan
 
 Decided 2026-10-26 (user): the repository adopts its own gate first. Being
-user-owned, it cannot use GitHub's merge queue
-([landing](/quest/m0/helpers/landing.md)).
+user-owned, it cannot use GitHub's merge queue.
 
 [kixelated/quest#236](https://github.com/kixelated/quest/pull/236) added the
 Land workflow, a test that only its land job uses the `land` environment, and
@@ -40,7 +39,3 @@ verification.
   owns, not an organization.
 - The PR that finishes this quest lands through the gate, verifying the
   same-repository path.
-
-## Related
-
-- [quest land upholds only the rules GitHub lets it](/quest/m0/helpers/land-rules.md) - the README setup guidance this follows

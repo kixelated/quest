@@ -650,6 +650,14 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		expect(forge.repo.pulls[0].landing).toBe(true);
 	});
 
+	test("refuses an update rule rather than widening who can move the base", async () => {
+		const forge = new Forge();
+		forge.pull("Ready", { "1.txt": "1\n" });
+		forge.repo.rules = [{ type: "update", ruleset_id: 7, parameters: null }];
+		await expect(resolveQueue(REPOSITORY, "main", await forge.deps())).rejects.toThrow("update from ruleset 7");
+		expect(forge.repo.pulls[0].landing).toBe(true);
+	});
+
 	test("enforces classic protection's checks and conversation resolution", async () => {
 		const forge = new Forge();
 		forge.repo.protection = {

@@ -1,12 +1,21 @@
-import { branchQuest, handedBack, landed, parse, ready } from "quest/core";
+import { branchQuest, handedBack, isHoldLabel, landed, parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
 
 type Cursor = string | null | false;
+type Marks = { issues: string | null; pulls: string | null };
 export type Scan = {
-	/** Pages every issue and PR, so edits to old entities and deletions are found. */
-	history: { id: string; issues: Cursor; pulls: Cursor; complete: boolean };
+	/** Newest updates first; inclusive watermarks preserve ties and replay updates that move ahead during a pass. */
+	history: {
+		id: string;
+		issues: Cursor;
+		pulls: Cursor;
+		complete: boolean;
+		since?: Marks;
+		watermark?: Marks;
+		full?: boolean;
+	};
 	/** Pages only what availability depends on: open PRs and quest branches. */
 	occupancy: { open: Cursor; refs: Cursor; pulls: string[]; claims: string[]; complete: boolean };
 };
@@ -89,7 +98,7 @@ export const RETENTION = 30 * 24 * 60 * 60 * 1000;
 
 const entityFields =
 	"databaseId:fullDatabaseId number title state updatedAt closedAt author { login } comments { totalCount }";
-const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus labels(first:20) { nodes { name } } reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
+const pullFields = `${entityFields} headRefName headRefOid isDraft reviewDecision mergeStateStatus labels(first:20) { nodes { name } } reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
 export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {
@@ -98,13 +107,13 @@ export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = [])
 	if (history.issues !== false) {
 		variables.push("$issues: String");
 		fields.push(
-			`issues(first:50,after:$issues,orderBy:{field:CREATED_AT,direction:ASC}) { nodes { ${entityFields} } pageInfo { hasNextPage endCursor } }`,
+			`issues(first:50,after:$issues,orderBy:{field:UPDATED_AT,direction:DESC}) { nodes { ${entityFields} } pageInfo { hasNextPage endCursor } }`,
 		);
 	}
 	if (history.pulls !== false) {
 		variables.push("$pulls: String");
 		fields.push(
-			`pullRequests(first:50,after:$pulls,orderBy:{field:CREATED_AT,direction:ASC}) { nodes { ${pullFields} } pageInfo { hasNextPage endCursor } }`,
+			`pullRequests(first:50,after:$pulls,orderBy:{field:UPDATED_AT,direction:DESC}) { nodes { ${pullFields} } pageInfo { hasNextPage endCursor } }`,
 		);
 	}
 	if (occupancy.open !== false) {
@@ -174,7 +183,7 @@ function observed(kind: "issue" | "pull", item: Entity): Entity {
 	if (kind === "issue") return item;
 	const { body, labels, ...pull } = item as Pull & { body?: unknown; labels?: { nodes: { name: unknown }[] } };
 	const names = (labels?.nodes ?? []).map((label) => label.name);
-	const hold = names.find((name): name is string => typeof name === "string" && name.startsWith("quest:")) ?? null;
+	const hold = names.find((name): name is string => typeof name === "string" && isHoldLabel(name)) ?? null;
 	return { ...pull, handedBack: typeof body === "string" && handedBack(body), hold } as Pull;
 }
 
@@ -215,12 +224,35 @@ export async function reconcile(
 ) {
 	const now = Date.now();
 	const { history, occupancy } = scan;
+	const since = history.since ?? { issues: null, pulls: null };
+	const watermark = { ...(history.watermark ?? since) };
+	const progress = (kind: keyof Marks, connection: Connection<Entity> | undefined, cursor: Cursor): Cursor => {
+		const after = next(connection, cursor);
+		if (cursor === false) return false;
+		for (const item of connection!.nodes) validate(kind === "issues" ? "issue" : "pull", item);
+		const lower = since[kind];
+		// Keep a conservative boundary from the first page, frozen for the entire pass.
+		// Later updates can move ahead of the cursor, but are at or above this boundary
+		// and will be replayed next time. Never advance from a later page or stale read.
+		if (cursor === null && connection!.nodes.length) {
+			const oldest = connection!.nodes.reduce((a, b) =>
+				Date.parse(a.updatedAt) < Date.parse(b.updatedAt) ? a : b,
+			).updatedAt;
+			watermark[kind] = lower && Date.parse(lower) > Date.parse(oldest) ? lower : oldest;
+		}
+		return lower && connection!.nodes.some((item) => Date.parse(item.updatedAt) < Date.parse(lower))
+			? false
+			: after;
+	};
 	const updated: Scan = {
 		history: {
 			id: history.id,
-			issues: next(page.issues, history.issues),
-			pulls: next(page.pullRequests, history.pulls),
+			issues: progress("issues", page.issues, history.issues),
+			pulls: progress("pulls", page.pullRequests, history.pulls),
 			complete: false,
+			since,
+			watermark,
+			full: history.full,
 		},
 		occupancy: {
 			open: next(page.open, occupancy.open),
@@ -260,6 +292,8 @@ export async function reconcile(
 		if (cursor === false) continue;
 		for (const item of connection!.nodes) {
 			validate(kind, item);
+			const lower = since[kind === "issue" ? "issues" : "pulls"];
+			if (!open && lower && Date.parse(item.updatedAt) < Date.parse(lower)) continue;
 			entities.set(`${kind}/${item.databaseId}`, { kind, item: observed(kind, item), stale: 0 });
 			if (open) updated.occupancy.pulls.push(item.databaseId);
 		}
@@ -308,9 +342,9 @@ export async function reconcile(
 			.bind(repo.id, now, now, history.id, JSON.stringify(kept), repo.id, revision, epoch),
 		db
 			.prepare(
-				`DELETE FROM github_project_activity WHERE repository=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE json_extract(value,'$.kind')=github_project_activity.kind AND json_extract(value,'$.id')=github_project_activity.id AND json_extract(value,'$.stale')=github_project_activity.stale) AND ${current}`,
+				`DELETE FROM github_project_activity WHERE repository=? AND (EXISTS(SELECT 1 FROM json_each(?) WHERE json_extract(value,'$.kind')=github_project_activity.kind AND json_extract(value,'$.id')=github_project_activity.id AND json_extract(value,'$.stale')=github_project_activity.stale) OR (stale=0 AND json_extract(data,'$.state')<>'OPEN' AND json_extract(data,'$.closedAt')<?)) AND ${current}`,
 			)
-			.bind(repo.id, JSON.stringify(pruned), repo.id, revision, epoch),
+			.bind(repo.id, JSON.stringify(pruned), new Date(now - RETENTION).toISOString(), repo.id, revision, epoch),
 		db
 			.prepare(
 				`UPDATE github_project_activity SET missing=1,stale=CASE WHEN stale=json_extract(value,'$.stale') THEN 0 ELSE stale END
@@ -319,9 +353,18 @@ export async function reconcile(
 			.bind(JSON.stringify(gone), repo.id, repo.id, revision, epoch),
 		db
 			.prepare(
-				`UPDATE github_project_activity SET missing=1 WHERE repository=? AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND ${current}`,
+				// An entity updated mid-pass can move ahead of an update-ordered cursor, so absence is
+				// not deletion: mark it stale, and the next read checks it by number before it goes missing.
+				`UPDATE github_project_activity SET stale=stale+1 WHERE repository=? AND missing=0 AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND ${current}`,
 			)
-			.bind(repo.id, history.id, updated.history.complete ? 1 : 0, repo.id, revision, epoch),
+			.bind(
+				repo.id,
+				history.id,
+				updated.history.complete && since.issues === null && since.pulls === null ? 1 : 0,
+				repo.id,
+				revision,
+				epoch,
+			),
 		db
 			.prepare(
 				"UPDATE github_project_state SET snapshot=?,scan=?,observedAt=?,invalidated=0,failure=NULL,revision=revision+1 WHERE repository=? AND revision=? AND epoch=?",

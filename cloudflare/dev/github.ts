@@ -157,51 +157,66 @@ function pullNode(repo: Repo, pull: Pull) {
 	};
 }
 
-const comments = (list: Comment[] = []) => ({
-	nodes: list.map((c) => ({ author: c.author === null ? null : { login: c.author }, body: c.body, createdAt: c.at })),
-});
+/** One connection page, using opaque positions just as the service uses GitHub's cursors. */
+function connection<T>(nodes: T[], size: number, after: unknown = null) {
+	const start = typeof after === "string" ? Number(after) : 0;
+	const end = start + size;
+	return {
+		nodes: nodes.slice(start, end),
+		pageInfo: { hasNextPage: end < nodes.length, endCursor: end < nodes.length ? String(end) : null },
+	};
+}
+
+const comments = (list: Comment[] = [], size = 100, after: unknown = null) =>
+	connection(
+		list.map((c) => ({ author: c.author === null ? null : { login: c.author }, body: c.body, createdAt: c.at })),
+		size,
+		after,
+	);
 
 /** An issue with its discussion, as a job's agent reads it. */
-const issueTarget = (item: Issue) => ({
+const issueTarget = (item: Issue, after: unknown = null) => ({
 	number: item.number,
 	title: item.title,
 	state: item.closed ? "CLOSED" : "OPEN",
 	body: item.body ?? "",
 	author: { login: item.author },
-	comments: comments(item.comments),
+	comments: comments(item.comments, 100, after),
 });
+
+const threadId = (repo: Repo, pull: Pull, index: number) => `PRT_${databaseId(repo, pull.number)}_${index}`;
 
 /** A pull request with its discussion, reviews, threads, and checks, as a job's agent reads it. */
 function pullTarget(repo: Repo, pull: Pull, after: unknown) {
 	const oid = headOf(repo, pull);
-	// Review threads are read 100 at a time, each page `after` the cursor of the one before.
-	const threads = pull.threads ?? [];
-	const start = typeof after === "string" ? Number(after) : 0;
-	const end = Math.min(start + 100, threads.length);
 	return {
-		...issueTarget(pull),
+		...issueTarget(pull, after),
 		isDraft: !!pull.draft,
 		baseRefName: "main",
 		headRefName: pull.branch,
 		headRefOid: oid,
-		reviews: {
-			nodes: (pull.reviews ?? []).map((r) => ({
+		reviews: connection(
+			(pull.reviews ?? []).map((r) => ({
 				author: { login: r.author },
 				state: r.state,
 				body: r.body ?? "",
 				submittedAt: updatedAt,
 			})),
-		},
-		reviewThreads: {
-			pageInfo: { hasNextPage: end < threads.length, endCursor: String(end) },
-			nodes: threads.slice(start, end).map((t) => ({
+			50,
+			after,
+		),
+		reviewThreads: connection(
+			(pull.threads ?? []).map((t, index) => ({
+				id: threadId(repo, pull, index),
 				isResolved: !!t.resolved,
 				isOutdated: !!t.outdated,
 				path: t.path,
 				line: t.line,
-				comments: comments(t.comments),
+				comments: comments(t.comments, 50),
 			})),
-		},
+			100,
+			after,
+		),
 		commits: {
 			nodes: [
 				{
@@ -209,15 +224,7 @@ function pullTarget(repo: Repo, pull: Pull, after: unknown) {
 						oid,
 						statusCheckRollup: pull.checks && {
 							state: pull.checks,
-							contexts: {
-								nodes: (pull.runs ?? []).map((run) => ({
-									__typename: "CheckRun",
-									name: run.name,
-									status: "COMPLETED",
-									conclusion: run.conclusion,
-									detailsUrl: run.url,
-								})),
-							},
+							contexts: contextPage(pull, null),
 						},
 					},
 				},
@@ -390,14 +397,14 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>, 
 			const issue = repo.issues.find((i) => i.number === variables.number);
 			const found =
 				field === "pullRequest"
-					? pull && pullTarget(repo, pull, variables.threads)
-					: issue && issueTarget(issue);
+					? pull && pullTarget(repo, pull, variables.after)
+					: issue && issueTarget(issue, variables.after);
 			result[field] = found ?? null;
 			if (!found) errors.push({ type: "NOT_FOUND", path: ["repository", field] });
 		}
 	// Entities a webhook named, read by number as GitHub does: an issue number
 	// that is a pull request, or a missing one, is NOT_FOUND at its alias.
-	for (const [, alias, field, number] of query.matchAll(/(s\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
+	for (const [, alias, field, number] of query.matchAll(/([sb]\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
 		const pull = repo.pulls.find((p) => p.number === Number(number));
 		const issue = repo.issues.find((i) => i.number === Number(number));
 		const found = field === "pullRequest" ? pull && pullNode(repo, pull) : issue && entity(repo, issue);
@@ -522,7 +529,7 @@ export function fakeGitHub(world: World) {
 		const me = world.users[0]!;
 		if (url.origin === "https://spdx.org") return json({ licenseId: "MIT", isOsiApproved: true });
 		if (url.origin === "https://github.com" && path === "/login/oauth/access_token")
-			return json({ access_token: "fake-user-token", token_type: "bearer", scope: "read:user,user:email" });
+			return json({ access_token: "fake-user-token", token_type: "bearer", scope: "" });
 		if (url.origin !== "https://api.github.com") return missing(method, request.url);
 		const text = await request.text();
 		const body = text ? (JSON.parse(text) as Record<string, any>) : {};
@@ -590,6 +597,20 @@ export function fakeGitHub(world: World) {
 							return json({ data: { markPullRequestReadyForReview: { clientMutationId: null } } });
 						}
 				return json({ errors: [{ type: "NOT_FOUND" }] });
+			}
+			// Later pages of one review thread's comments, addressed by its node ID.
+			if (query.includes("... on PullRequestReviewThread")) {
+				for (const repo of world.repos)
+					for (const pull of repo.pulls)
+						for (const [index, thread] of (pull.threads ?? []).entries())
+							if (threadId(repo, pull, index) === variables.id) {
+								if (!scope.repositories.has(`${repo.owner}/${repo.name}`))
+									return json({ errors: [{ type: "NOT_FOUND" }] });
+								return json({
+									data: { node: { comments: comments(thread.comments, 50, variables.after) } },
+								});
+							}
+				return json({ data: { node: null } });
 			}
 			// A pull request by node ID, or turning its auto-merge off.
 			if (query.includes("node(id:") || query.includes("disablePullRequestAutoMerge(")) {
@@ -946,6 +967,22 @@ export function fakeGitHub(world: World) {
 		if (tail === "/git/blobs" && method === "POST") {
 			if (body.encoding !== "base64" || typeof body.content !== "string") return invalid("Invalid blob");
 			return json({ sha: blob(Buffer.from(body.content, "base64")) }, 201);
+		}
+		const treeId = tail.match(/^\/git\/trees\/([0-9a-f]{40})$/)?.[1];
+		if (treeId && method === "GET" && knownTree(treeId)) {
+			const entries = (id: string): Map<string, Record<string, any>> => {
+				const written = network.trees[id];
+				if (!written)
+					return new Map(
+						(id === treeOf(network) ? tree(network).tree : []).map((entry) => [entry.path, entry]),
+					);
+				const result = entries(written.base);
+				for (const entry of written.entries as Record<string, any>[])
+					if (entry.sha === null) result.delete(entry.path);
+					else result.set(entry.path, { ...entry, sha: entry.sha ?? blob(entry.content ?? "") });
+				return result;
+			};
+			return json({ sha: treeId, truncated: false, tree: [...entries(treeId).values()] });
 		}
 		if (tail === "/git/trees" && method === "POST") {
 			if (!knownTree(body.base_tree) || !Array.isArray(body.tree)) return invalid("Invalid tree");

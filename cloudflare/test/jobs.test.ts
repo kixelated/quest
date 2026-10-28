@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { app } from "../src/index";
 import * as landing from "../src/jobs/landing";
 import * as output from "../src/jobs/output";
+import { wake } from "../src/jobs/wake";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
 import { parse } from "../src/jobs/protocol";
@@ -1027,6 +1028,10 @@ describe("job routes", () => {
 			.prepare("UPDATE jobs SET state='completed',summary='Shipped it.',result=? WHERE id=?")
 			.bind(JSON.stringify({ head: null, followups: ["Cache the parser", "Document `--fast`"] }), id)
 			.run();
+		await db
+			.prepare("INSERT INTO job_events(job,attempt,kind,body,at) VALUES(?,0,'result',?,?)")
+			.bind(id, JSON.stringify({ outcome: "completed", summary: "Shipped it." }), Date.now())
+			.run();
 		expect(await store.listFollowups(db, 10)).toMatchObject([
 			{ id, followups: ["Cache the parser", "Document `--fast`"] },
 		]);
@@ -1046,6 +1051,29 @@ describe("job routes", () => {
 		expect(await store.listFollowups(db, 10)).toEqual([]);
 		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(plan.id).run();
 		expect((await post("", { workflow: "plan", target: `plans/${id}` })).status).toBe(409);
+	});
+
+	it("lists all recent follow-up offers instead of the newest 50", async () => {
+		const now = Date.now();
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<60)
+ INSERT INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,state,result,createdAt,updatedAt)
+ SELECT 'recent-'||i,10,'start','quest/extra-'||i||'.md',?,'quest/extra-'||i,?,1,'completed',?,?-i,? FROM n`,
+			)
+			.bind(commit, maintainer, JSON.stringify({ followups: ["Still useful"] }), now, now)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO job_events(job,attempt,kind,body,at) SELECT id,attempt,'result',?,createdAt FROM jobs WHERE id LIKE 'recent-%'",
+			)
+			.bind(JSON.stringify({ outcome: "completed", summary: "Done" }))
+			.run();
+		const offers = await store.listFollowups(db, 10, now);
+		expect(offers).toHaveLength(60);
+		expect(offers[0]).toMatchObject({ id: "recent-1", completedAt: now - 1 });
+		expect(offers.at(-1)).toMatchObject({ id: "recent-60", completedAt: now - 60 });
+		expect(await store.followupRequest(db, 10, "recent-60", now)).not.toBeNull();
 	});
 
 	it("starts an epic on its README branch while a child's branch is claimed", async () => {
@@ -1120,6 +1148,114 @@ describe("job routes", () => {
 		// Iterating on the bootstrap PR checks its head, which adds the flake.
 		expect((await post("", { workflow: "iterate", target: "pulls/2" })).status).toBe(201);
 		expect((await post("", { workflow: "bootstrap" })).status).toBe(201);
+	});
+
+	it.each(["completed", "failed", "cancelled"] as const)(
+		"sweeps a %s merge job whose lifecycle callback missed its hold",
+		async (outcome) => {
+			const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+			const machine = await runner(maintainer, "machine", "linux", true);
+			await connected(machine, [account("main")]);
+			await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), Date.now());
+			await store.finish(db, machine, id, 1, { outcome, summary: "Ended", result: undefined }, Date.now());
+			// No event-driven release is called: the schedule is the backstop.
+			expect(github.labels).toEqual(["quest:merge"]);
+			await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+			expect(github.labels).toEqual([]);
+			expect(await state(id)).toMatchObject({ hold: null });
+		},
+	);
+
+	it.each(["queued", "running", "waiting"])("keeps a %s job's live hold during the sweep", async (state) => {
+		const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+		await db.prepare("UPDATE jobs SET state=? WHERE id=?").bind(state, id).run();
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await store.readJob(db, id)).toMatchObject({ hold: "LE_1", state });
+	});
+
+	it("preserves a landing and a replacement hold while sweeping ended jobs", async () => {
+		const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(id).run();
+		github.landing = true;
+		github.events.push({ id: "AUTO", label: null });
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({ hold: "LE_1" });
+		github.landing = false;
+		// Another session removed and re-added the label. The old token may be cleared, never its label.
+		github.events.push({ id: "REPLACEMENT", label: "quest:merge" });
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual(["quest:merge"]);
+		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it.each(["lease", "status"])(
+		"sweeps a stopped attempt abandoned through %s without its release callback",
+		async (path) => {
+			const { id } = (await (await post("", { workflow: "merge", target: "pulls/2" })).json()) as { id: string };
+			const machine = await runner(maintainer, "machine", "linux", true);
+			await connected(machine, [account("main")]);
+			const now = Date.now();
+			await store.dispatch(db, maintainer, new Map([[machine.id, 1]]), now);
+			await store.report(db, machine, [account("main")], [{ job: id, attempt: 1 }], now);
+			await post(`/${id}/cancel`, {});
+			if (path === "lease") {
+				await store.dispatch(db, maintainer, new Map(), now);
+				expect((await store.dispatch(db, maintainer, new Map(), now + 2 * GRACE)).ended).toEqual([id]);
+			} else expect((await store.report(db, machine, [account("main")], [], now)).ended).toEqual([id]);
+			expect(github.labels).toEqual(["quest:merge"]);
+			await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+			expect(github.labels).toEqual([]);
+			expect(await state(id)).toMatchObject({ hold: null, state: "cancelled" });
+		},
+	);
+
+	it("retains a token acquired after cancellation so the sweep can retry its failed immediate release", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			const path = new URL(String(input)).pathname;
+			if (path.endsWith("/issues/2/labels") && init?.method === "POST") {
+				const queued = await db
+					.prepare("SELECT id FROM jobs WHERE workflow='merge' AND state='queued'")
+					.first<{ id: string }>();
+				await post(`/${queued!.id}/cancel`, {});
+			}
+			if (path.includes("/issues/2/labels/") && init?.method === "DELETE")
+				return new Response(null, { status: 503 });
+			return mock(input, init);
+		});
+		const response = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(response.status).toBe(403);
+		const { id } = (await db.prepare("SELECT id FROM jobs WHERE workflow='merge'").first<{ id: string }>())!;
+		expect(await state(id)).toMatchObject({ hold: "LE_1", state: "cancelled" });
+		expect(github.labels).toEqual(["quest:merge"]);
+		vi.mocked(globalThis.fetch).mockImplementation(mock);
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(github.labels).toEqual([]);
+		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it("directly releases an acquired token when disconnect removed the project and job", async () => {
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (new URL(String(input)).pathname.endsWith("/issues/2/labels") && init?.method === "POST")
+				await db.prepare("DELETE FROM github_projects WHERE id=10").run();
+			return mock(input, init);
+		});
+		const response = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(response.status).toBe(201);
+		const { id } = (await response.json()) as { id: string };
+		expect(await store.readJob(db, id)).toBeNull();
+		expect(github.labels).toEqual([]);
+	});
+
+	it("keeps daily output retention separate from the frequent hold sweep", async () => {
+		await env.OUTPUT.put("output/gone/1/0", "orphan");
+		await db.prepare("INSERT INTO output_cleanup(job,at) VALUES('gone',0)").run();
+		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
+		expect(await env.OUTPUT.head("output/gone/1/0")).not.toBeNull();
+		await worker.scheduled(createScheduledController({ cron: "17 4 * * *" }), testEnv);
+		expect(await env.OUTPUT.head("output/gone/1/0")).toBeNull();
 	});
 
 	it("holds a pull request picked for merge until its job stops, unless another session holds it", async () => {
@@ -1383,5 +1519,52 @@ describe("job routes", () => {
 		});
 		const listed = await app.request(`${origin}/api/runners`, { headers: { Cookie: cookie } }, testEnv);
 		expect(JSON.stringify(await listed.json())).not.toContain(token);
+	});
+});
+
+describe("merge wait webhook wakeups", () => {
+	it("wakes only the current merge attempt for the enrolled repository and matching head or PR", async () => {
+		const machine = await runner("owner", "webhooks");
+		await connected(machine, [account("main")]);
+		const id = await job(10, "owner", { workflow: "merge", target: "pulls/2", branch: "feature", revision: head });
+		await store.held(db, id, "merge-token");
+		const socket = await connect(machine.token);
+		socket.send(status(1, "main"));
+		expect(await socket.next()).toMatchObject({ type: "reply", id: 1 });
+		expect(await socket.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
+		socket.send(status(2, "main", [{ job: id, attempt: 1 }], 0));
+		await socket.next();
+		// Other repositories, installations, PRs and check heads cannot wake this job.
+		await wake(env, 99, 5, "pull_request_review", { pull_request: { number: 2 } });
+		await wake(env, 10, 99, "pull_request_review", { pull_request: { number: 2 } });
+		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 3 } });
+		await wake(env, 10, 5, "check_run", { check_run: { head_sha: commit, pull_requests: {} } });
+		await delivery("check_run", { installation: { id: 5 }, repository: { id: 10 }, check_run: { head_sha: head } });
+		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
+		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		for (const [event, action] of [
+			["pull_request_review_thread", "resolved"],
+			["pull_request_review_thread", "unresolved"],
+			["pull_request_review_comment", "created"],
+			["pull_request_review_comment", "edited"],
+			["pull_request_review_comment", "deleted"],
+		]) {
+			expect(
+				(
+					await delivery(event!, {
+						installation: { id: 5 },
+						repository: { id: 10 },
+						action,
+						pull_request: { id: 201, number: 2 },
+					})
+				).status,
+			).toBe(202);
+			expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		}
+		await db.prepare("UPDATE jobs SET state='waiting' WHERE id=?").bind(id).run();
+		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
+		socket.send(status(3, "main", [], 0));
+		expect(await socket.next()).toMatchObject({ type: "reply", id: 3 });
 	});
 });

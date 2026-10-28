@@ -30,7 +30,7 @@ function label(status: Status, limit = Infinity): string {
 		case "turn-in":
 			return "Ready to turn in";
 		case "accepted":
-			return "Claimed";
+			return status.job ?? "Claimed";
 		case "available":
 			return "Available";
 		case "pending":
@@ -346,8 +346,12 @@ function Actions(props: { board: Board; quest: Quest; user: User | null; path: s
 	}
 	if (status.kind === "accepted")
 		return (
-			<Panel title="Claimed">
-				{status.change ? (
+			<Panel title={status.job ?? "Claimed"}>
+				{status.job ? (
+					<p>
+						An active job claims this quest. Follow its progress in the <a href="/inbox">inbox</a>.
+					</p>
+				) : status.change ? (
 					<p>
 						{status.change.author} is working on this in a <a href={status.change.href}>draft PR</a>. It
 						waits on you once they mark it ready or hand back decisions.

@@ -28,8 +28,3 @@ Decided 2026-10-24 (user) from the merge wave that landed
   skill's design checkpoint counts today with `gh pr view --json`.
 - Dropped (user): removing the `quest:merge` label after a PR merges; holds
   only count on open PRs, so the leftover label is cosmetic.
-
-## Related
-
-- [Landing rules](/quest/m0/helpers/landing.md) - the checkpoint that reads the round count
-- [Status holds](/quest/m0/helpers/status-holds.md) - also extends `quest status`

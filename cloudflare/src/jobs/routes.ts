@@ -4,12 +4,12 @@ import { createAuth } from "../auth";
 import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
 import { type ProjectState, type Pull, continued, startable } from "../github/state";
-import { RUNNER_HEADER } from "./hub";
+import { INBOX_HEADER, RUNNER_HEADER } from "./hub";
 import * as landing from "./landing";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
 import { data, id, text } from "./protocol";
-import { HeadMoved, LIMITS, parsePublication, publish, pullOf, restart } from "./publish";
+import { HeadMoved, LIMITS, parsePublication, publish, pullOf, restart, validateContinuation } from "./publish";
 import * as store from "./store";
 import { JobError } from "./store";
 
@@ -102,6 +102,7 @@ jobs.get("/api/runner/connect", async (c) => {
 	if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.json({ error: "WebSocket required" }, 426);
 	const headers = new Headers(c.req.raw.headers);
 	headers.delete("Authorization");
+	headers.delete(INBOX_HEADER);
 	headers.set(RUNNER_HEADER, JSON.stringify(runner));
 	const upgraded = await hub(c.env, runner.owner).fetch(new Request(c.req.raw, { headers }));
 	// Rewrap so shared middleware can still set headers on the upgrade.
@@ -377,7 +378,8 @@ jobs.post(base, async (c) => {
 			throw error;
 		}
 		// A stop that came first found no hold to release, so the label goes back now.
-		if (!recorded) await github.releasePullRequest(repo, pull, token);
+		if (!recorded && (await github.releasePullRequest(repo, pull, token)))
+			await store.released(c.env.DB, created.id, token);
 	}
 	await hub(c.env, user).dispatch(user);
 	return reply(c, form, "start", created, created.created ? 201 : 200);
@@ -394,7 +396,16 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 		await hub(c.env, job.actor).dispatch(job.actor);
 		return reply(c, form, "start", { id: created }, 201);
 	}
-	const answer = question && (form ? formReply(question, form) : body.answer);
+	let continuation: store.Continuation | null = null;
+	if (question && body.continue !== undefined) {
+		if (body.continue !== (form ? "1" : true)) throw new JobError("Invalid continuation");
+		continuation = store.continuationOf(question.prompt, { continue: body.head });
+		if (!continuation) throw new JobError("Choose the offered head");
+		await validateContinuation(c.env, user, repo, job, question, continuation);
+	}
+	const answer = continuation
+		? { continue: continuation.head }
+		: question && (form ? formReply(question, form) : body.answer);
 	if (!question || answer === undefined) throw new JobError("Question and answer required");
 	const { resumed } = await store.answer(
 		c.env.DB,
@@ -405,23 +416,28 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 		question.kind === "agent"
 			? parseAnswer(parsePrompt(question.prompt), answer)
 			: question.kind === "publication"
-				? publicationReply(answer)
+				? continuation
+					? answer
+					: publicationReply(answer)
 				: data(answer, 1024),
 		Date.now(),
 	);
-	// Jobs run on their requester's runners, whoever answers.
-	if (resumed) await hub(c.env, job.actor).dispatch(job.actor);
-	else c.executionCtx.waitUntil(push.job(c.env, job.id, "approval"));
+	// Jobs run on their requester's runners, whoever answers; an answer awaiting approval still refreshes open inboxes.
+	await hub(c.env, job.actor).dispatch(job.actor);
+	if (!resumed) c.executionCtx.waitUntil(push.job(c.env, job.id, "approval"));
 	return reply(c, form, "answer", null);
 });
 
 // Until the job sandbox ships, another maintainer's answer resumes the job
 // only once its requester, whose runner acts on it, approves it.
 jobs.post(`${base}/:job/approve`, async (c) => {
-	const { user, job } = await owned(c);
+	const { user, repo, job } = await owned(c);
 	const { body, form } = await input(c);
 	const question = id(body.question);
 	if (!question) throw new JobError("Question required");
+	const pending = job.questions.find((item) => item.id === question);
+	const continuation = pending?.kind === "publication" ? store.continuationOf(pending.prompt, pending.answer) : null;
+	if (continuation) await validateContinuation(c.env, user, repo, job, pending!, continuation);
 	await store.approve(c.env.DB, job.id, question, user, Date.now());
 	await hub(c.env, job.actor).dispatch(job.actor);
 	return reply(c, form, "approve", null);
