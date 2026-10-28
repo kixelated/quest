@@ -6,7 +6,7 @@ Jobs on PR heads containing non-maintainer commits route to Linux runners,
 which build the PR's devShell in a per-job VM before its commands run in the
 OS sandbox every Claude Code job already uses. opencode jobs' commands run in
 that sandbox too. kix classifies PR heads whose commits all
-come from maintainers or kix jobs as trusted, so those run on any runner. The
+carry a current maintainer's valid signature as trusted, so those run on any runner. The
 sandbox is verified on macOS, and the owner's approval of another
 maintainer's answer is lifted once it is.
 
@@ -72,7 +72,6 @@ Shipped in [kixelated/quest#212](https://github.com/kixelated/quest/pull/212)
 
 ## Required
 
-- [Trusted PR heads](/quest/m0/kix/sandbox/trust.md) - PR heads whose commits all come from maintainers or kix jobs run on any runner
 - [Head approval](/quest/m0/kix/sandbox/head-approval.md) - a maintainer approves an exact head, such as one kix pushed, for host runners
 - [opencode sandboxing](/quest/m0/kix/sandbox/opencode.md) - opencode jobs' commands run in the same sandbox as Claude Code's
 - [macOS sandbox](/quest/m0/kix/sandbox/macos.md) - the boundary verified under Seatbelt, then the answer-approval gate removed

@@ -16,7 +16,7 @@ Decided 2026-10-28 (user, /quest-plan trust audit, from Codex Security's P1 on
 - **Publication is not trust.** kix publishes whatever the runner sends. A
   prompt-injected agent or a compromised runner could therefore publish a
   `flake.nix` that host Nix evaluates outside the sandbox. So "kix pushed it"
-  never grants host trust. [Trusted PR heads](/quest/m0/kix/sandbox/trust.md)
+  never grants host trust. [kixelated/quest#243](https://github.com/kixelated/quest/pull/243)
   trusts only commits signed by current maintainers and drops the publication
   ledger.
 - This quest adds the explicit path. Show the approval as a decision item
@@ -28,7 +28,3 @@ Decided 2026-10-28 (user, /quest-plan trust audit, from Codex Security's P1 on
 - Test approval of a kix-pushed head, a head that moves after approval, an
   approver who loses the role, and an approval from someone who isn't a
   maintainer.
-
-## Required
-
-- [Trusted PR heads](/quest/m0/kix/sandbox/trust.md) - signature-only host trust, which this extends

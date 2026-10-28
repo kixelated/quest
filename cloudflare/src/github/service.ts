@@ -812,7 +812,7 @@ export class GitHubService {
 	 * open at the observed head, and whether its revision has a flake for the
 	 * runner's devShell.
 	 */
-	jobSource<T extends { target: string; revision: string }>(
+	jobSource<T extends { target: string; revision: string; trusted: boolean }>(
 		repo: GitHubRepository,
 		userId: string,
 		resolve: (state: ProjectState) => T,
@@ -839,6 +839,7 @@ export class GitHubService {
 				if (live.state !== "open" || (kind === "pulls" && live.head?.sha !== job.revision))
 					throw new GitHubError("This changed on GitHub since it was read; refresh and review it again");
 			}
+			if (kind === "pulls") job.trusted = await this.#pullTrust(token, repo, Number(target), job.revision);
 			let flake = true;
 			try {
 				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
@@ -848,6 +849,109 @@ export class GitHubService {
 			}
 			return { job, enabled: enrolled === "enabled", flake };
 		});
+	}
+
+	/** Recheck a queued PR head against current signatures and repository roles. */
+	jobTrust(repo: GitHubRepository, target: string, revision: string) {
+		return this.#withRepository(repo, { contents: "read", pull_requests: "read" }, async (token, current) => {
+			this.#public(current);
+			return this.#pullTrust(token, repo, pullNumber(target), revision);
+		});
+	}
+
+	async #pullTrust(token: string, repo: GitHubRepository, pull: number, revision: string) {
+		type Signer = { databaseId: number; login: string };
+		type Commit = { oid: string; signature: { isValid: boolean; signer: Signer | null } | null };
+		type Comparison = {
+			baseTarget: { oid: string };
+			headTarget: { oid: string };
+			commits: {
+				totalCount: number;
+				nodes: Commit[];
+				pageInfo: { hasNextPage: boolean; endCursor: string | null };
+			};
+		};
+		type Page = {
+			pullRequest: { state: string; headRefOid: string } | null;
+			defaultBranchRef: { name: string; target: { oid: string } | null; compare: Comparison | null } | null;
+		};
+		// A PR's base is contributor-controlled. Compare the exact head against the
+		// repository's trusted default branch so retargeting cannot hide ancestors.
+		const query = `query($owner:String!,$name:String!,$number:Int!,$revision:String!,$after:String) {
+ repository(owner:$owner,name:$name) {
+ pullRequest(number:$number) { state headRefOid }
+ defaultBranchRef { name target { oid } compare(headRef:$revision) {
+ baseTarget { oid } headTarget { oid }
+ commits(first:100,after:$after) {
+ totalCount nodes { oid signature { isValid signer { databaseId login } } }
+ pageInfo { hasNextPage endCursor }
+ } } } } }`;
+		let after: string | null = null;
+		let base: string | undefined;
+		let branch: string | undefined;
+		let count: number | undefined;
+		const cursors = new Set<string>();
+		const commits = new Set<string>();
+		const maintainers = new Map<number, boolean>();
+		do {
+			const response: { data?: { repository?: Page }; errors?: unknown[] } = await this.#api(
+				token,
+				"/graphql",
+				"POST",
+				{
+					query,
+					variables: { owner: repo.owner, name: repo.name, number: pull, revision: sha(revision), after },
+				},
+			);
+			if (response.errors?.length) throw new GitHubError("Could not verify pull request commits");
+			const repository: Page | undefined = response.data?.repository;
+			const live = repository?.pullRequest;
+			const anchor = repository?.defaultBranchRef;
+			const comparison = anchor?.compare;
+			if (!live || live.state !== "OPEN" || live.headRefOid !== revision || !anchor?.target || !comparison)
+				return false;
+			base ??= sha(anchor.target.oid);
+			branch ??= anchor.name;
+			const page = comparison.commits;
+			count ??= page.totalCount;
+			if (
+				base !== anchor.target.oid ||
+				branch !== anchor.name ||
+				count !== page.totalCount ||
+				comparison.baseTarget.oid !== base ||
+				comparison.headTarget.oid !== revision
+			)
+				return false;
+			for (const commit of page.nodes) {
+				if (commits.has(commit.oid)) throw new GitHubError("Repeated pull request commit");
+				commits.add(sha(commit.oid));
+				// Only a valid signature counts, never author email. kix's own commits
+				// are signed as the App, which is no maintainer, so they stay untrusted.
+				const signer = commit.signature?.isValid && commit.signature.signer;
+				if (!signer || !positiveId(signer.databaseId) || !name(signer.login)) return false;
+				if (!maintainers.has(signer.databaseId)) {
+					const permission = await this.#api<{ user: { id: number }; permission: string; role_name: string }>(
+						token,
+						`${repositoryPath(repo)}/collaborators/${signer.login}/permission`,
+					).catch((error: unknown) => {
+						if (error instanceof GitHubError && error.status === 404) return null;
+						throw error;
+					});
+					maintainers.set(
+						signer.databaseId,
+						!!permission &&
+							permission.user.id === signer.databaseId &&
+							(permission.permission === "admin" || permission.role_name === "maintain"),
+					);
+				}
+				if (!maintainers.get(signer.databaseId)) return false;
+			}
+			if (!page.pageInfo.hasNextPage) break;
+			after = page.pageInfo.endCursor;
+			if (!after || cursors.has(after)) throw new GitHubError("Missing or repeated pull request commit cursor");
+			cursors.add(after);
+		} while (true);
+		return commits.size === count && (count === 0 || commits.has(revision));
 	}
 
 	previewProject(repo: GitHubRepository, userId: string) {
