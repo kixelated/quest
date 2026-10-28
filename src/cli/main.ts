@@ -98,7 +98,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"min(4 GiB, RAM/4). Each admission in the last minute counts as one more unit of load and one " +
 				"budget less memory: commands start at once while those still fit, and 5 seconds apart while " +
 				"only the raw measures do. Nested calls run immediately. Limits come from the host; there is " +
-				"no configuration.",
+				"no configuration.\n\n" +
+				"Once the command exits, or is cancelled and exits, its remaining descendants are killed; a second " +
+				"signal kills them all at once. Linux with a systemd 254+ user manager owns every descendant through " +
+				"a systemd user scope. macOS, and Linux without one, own the command's process group in a new session " +
+				"without a controlling terminal, so a descendant that leaves the group or session escapes. Windows " +
+				"owns only the command. Exits with the command's status, or 128 plus the signal's number once cancelled.",
 		)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")

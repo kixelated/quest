@@ -127,6 +127,10 @@ jobs:
       - name: Check the binary's lifecycle
         shell: bash
         run: bash scripts/lifecycle-check.sh "$RUNNER_TEMP/quest"
+      # Ubuntu 22.04's systemd 249 is too old for Quest's scopes, so it checks the process-group fallback.
+      - name: Check that the gate owns its command's descendants
+        shell: bash
+        run: bash scripts/gate-check.sh "$RUNNER_TEMP/quest"
 
   windows:
     name: check (${{ matrix.target }})

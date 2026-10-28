@@ -660,19 +660,40 @@ an account missing from it, as in arbitrary-UID containers, uses
 `/tmp/quest-<uid>/admissions/<hostname>`, and refuses that directory unless only
 its UID can write it.
 
-Admission is the gate's only job: it holds no slot or lock while the command
-runs and does not track the command's descendants. A nested invocation runs
-immediately inside the admitted command. Internal compiler or test worker
-parallelism remains the command's responsibility.
+The gate holds no slot or lock while the command runs, but it owns the
+command's descendants. Once the command exits, or the gate is cancelled and the
+command exits, any descendant still running is killed, so a cancelled build or
+test run leaves nothing behind. A second SIGINT, SIGTERM, or SIGHUP kills them
+all at once. How far ownership reaches depends on the host:
+
+- Linux with a systemd 254+ user manager, unified cgroup v2, and Linux 5.14+
+  runs the command in its own systemd user scope, as `quest worktree run` does,
+  and owns every descendant, including ones that start their own process group
+  or session. Only a process that asks another service manager to start it
+  escapes.
+- macOS, and Linux without such a user manager (as in most containers and on
+  Ubuntu 22.04), run the command as the leader of a new session and own its
+  process group. A descendant that moves to another process group or session,
+  as a daemon does, is outside it. The session has no controlling terminal: the
+  command keeps the terminal as its streams, but cannot open `/dev/tty`, and
+  Ctrl-Z suspends only Quest.
+- Windows owns only the command itself.
+
+A nested invocation runs immediately inside the admitted command, and a gate
+inside another Quest scope, such as `quest worktree run`, leaves ownership to
+that scope: an owner of its own would take the command out of the enclosing
+one's reach. Internal compiler or test worker parallelism remains the command's
+responsibility.
 
 This repository's `just check`, `just test`, `just worker-check`, and
 `just worker-test` run through the gate.
 
-Arguments, working directory, environment and terminal streams pass through to
-the executable, and waiting happens before it starts. A terminal's Ctrl-C
-reaches the command once, directly; SIGTERM and SIGHUP sent to Quest are
-forwarded. There is no fairness guarantee or timeout: a command waits as long as
-the host stays busy.
+Arguments, working directory, environment, terminal streams, and the exit
+status pass through, and waiting happens before the command starts. A
+terminal's Ctrl-C reaches the command's process group once; SIGTERM and SIGHUP
+sent to Quest are forwarded to the command, and a cancelled gate exits with
+128 plus the signal's number. There is no fairness guarantee or timeout: a
+command waits as long as the host stays busy.
 
 ## Headless agents
 

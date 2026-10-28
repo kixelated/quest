@@ -18,4 +18,3 @@ additional login providers. This milestone does not gate the first release.
 - [Live inbox](/quest/m1/inbox-polish.md) - live agent cards, active quests on the log, runner choice for every job, expiring offers
 - [Worker dev setup](/quest/m1/worker-dev.md) - per-server cookies, seeded raw output, one fake GitHub, each test run alone
 - [Incremental history](/quest/m1/history-pass.md) - each history pass reads only what changed since the last
-- [Gate owns descendants](/quest/m1/gate-owns-descendants.md) - cancelling `quest gate` leaves none of its command's processes behind, on Linux and macOS
