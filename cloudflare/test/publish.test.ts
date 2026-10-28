@@ -1178,6 +1178,75 @@ describe("merge jobs", () => {
 		expect(pull()).toMatchObject({ merged: true, closed: true });
 	});
 
+	it("lands an UNKNOWN head after GitHub refuses auto-merge as clean, with one reread", async () => {
+		const id = await merging();
+		pull().merge = "UNKNOWN";
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (String(init?.body ?? "").includes("enablePullRequestAutoMerge(")) {
+				pull().merge = "CLEAN";
+				return Response.json({ errors: [{ message: "Pull request is in clean status" }] });
+			}
+			return github(input, init);
+		});
+		const reads = () =>
+			requests().filter((r) => r.path === "/graphql" && r.body.query.includes("timelineItems(")).length;
+		const before = reads();
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: true } });
+		expect(lands().map((l) => [l.mutation, l.variables.sha, l.variables.method])).toEqual([
+			["enablePullRequestAutoMerge", prHead, "SQUASH"],
+			["mergePullRequest", prHead, "SQUASH"],
+		]);
+		expect(reads() - before).toBe(2);
+	});
+
+	it("leaves an accepted UNKNOWN head on auto-merge", async () => {
+		const id = await merging();
+		pull().merge = "UNKNOWN";
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: false } });
+		expect(lands().map((l) => l.mutation)).toEqual(["enablePullRequestAutoMerge"]);
+	});
+
+	it.each(["Pull request is in clean status", "Auto merge is not allowed for this repository"])(
+		"preserves an UNKNOWN auto-merge refusal: %s",
+		async (reason) => {
+			const id = await merging();
+			pull().merge = "UNKNOWN";
+			refuseLanding(reason);
+			const reads = () =>
+				requests().filter((r) => r.path === "/graphql" && r.body.query.includes("timelineItems(")).length;
+			const before = reads();
+			const response = await publish({ job: id, attempt: 1, head: prHead, land: {} });
+			expect(response.status).toBe(202);
+			expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+				type: "publication",
+				blocked: `GitHub refused to land the pull request: ${reason}`,
+			});
+			expect(lands().map((l) => l.mutation)).toEqual(["enablePullRequestAutoMerge"]);
+			expect(reads() - before).toBe(reason.includes("clean status") ? 2 : 1);
+		},
+	);
+
+	it.each(["head", "hold", "gate"])("does not merge if its %s changes after a clean refusal", async (change) => {
+		const id = await merging();
+		pull().merge = "UNKNOWN";
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (String(init?.body ?? "").includes("enablePullRequestAutoMerge(")) {
+				pull().merge = "CLEAN";
+				if (change === "head") project.branches[pull().branch] = "c".repeat(40);
+				if (change === "hold") pull().labels = [];
+				if (change === "gate") project.required = ["quest land"];
+				return Response.json({ errors: [{ message: "Pull request is in clean status" }] });
+			}
+			return github(input, init);
+		});
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: {} });
+		expect(response.status).toBe(202);
+		expect(lands().map((l) => l.mutation)).toEqual(["enablePullRequestAutoMerge"]);
+		expect(pull().merged).not.toBe(true);
+	});
+
 	it("refuses only the workflow changes its merge makes to the pull request's head", async () => {
 		// The pull request and its base branch both changed a workflow.
 		const workflow = ".github/workflows/ci.yml";

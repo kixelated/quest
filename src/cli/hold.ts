@@ -2,6 +2,7 @@
 // time. It holds one `quest:<state>` label, and the ID of the timeline event
 // that added the label is its hold token, since sessions often share an account.
 import { HOLD_PREFIX, MERGE_LABEL, handedBack, isHoldLabel, latestHold, heldToken, spentMergeHold } from "../core";
+import { cleanAutoMergeRefusal, immediateMerge } from "../github/merge";
 import { repositoryPath } from "./claims";
 import {
 	array,
@@ -18,9 +19,6 @@ import { Refusal, ago } from "./start";
 
 export type State = "iterate" | "ready" | "merge";
 export type Method = "merge" | "squash" | "rebase";
-
-/** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
-const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 
 /** The PR, its `quest:*` labels, and the timeline events that add a label or start a landing. */
 const READ = `query HoldOwnership($owner: String!, $repo: String!, $number: Int!) {
@@ -219,16 +217,34 @@ export async function land(
 		if (snapshot.queue && method !== "merge") {
 			deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
 		}
-		const mutation =
-			!snapshot.queue && IMMEDIATE.includes(snapshot.mergeState)
-				? "mergePullRequest"
-				: "enablePullRequestAutoMerge";
-		await labels.github.graphql(
-			`mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) {
+		const submit = (mutation: "mergePullRequest" | "enablePullRequestAutoMerge") =>
+			labels.github.graphql(
+				`mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) {
 				${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId }
 			}`,
-			{ id: snapshot.id, sha: snapshot.head, method: method.toUpperCase() },
-		);
+				{ id: snapshot.id, sha: snapshot.head, method: method.toUpperCase() },
+			);
+		if (immediateMerge(snapshot.mergeState, snapshot.queue)) {
+			await submit("mergePullRequest");
+			return;
+		}
+		try {
+			await submit("enablePullRequestAutoMerge");
+		} catch (error) {
+			if (snapshot.queue || !cleanAutoMergeRefusal(error instanceof Error ? error.message : null)) throw error;
+			// GitHub may finish computing UNKNOWN while it handles auto-merge. Reread once, without polling.
+			const fresh = await labels.read();
+			current(fresh);
+			held(fresh, hold.token);
+			if (
+				fresh.state !== "OPEN" ||
+				fresh.draft ||
+				!immediateMerge(fresh.mergeState, fresh.queue) ||
+				(await requirements(labels.github, pr, fresh.base)).checks.some((check) => check.name === LAND_CHECK)
+			)
+				throw error;
+			await submit("mergePullRequest");
+		}
 	});
 }
 

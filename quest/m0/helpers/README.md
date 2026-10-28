@@ -66,12 +66,10 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Required
 
-- [Merge state race](/quest/m0/helpers/merge-state-race.md) - `--land` and merge jobs land a PR whose merge state GitHub is still computing, on the first try
 - [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - wake on edited bot comments, honest `checks:passed`, review rounds in `quest status`
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 - [Sibling PRs through a server-side merge](/quest/m0/helpers/queue-siblings.md) - children of one epic land back to back through a merge queue without conflicting on its link list
 - [kixelated/quest lands through quest land](/quest/m0/helpers/land-adopt.md) - this repository's `main` changes only through its own gate
-- [quest land upholds only the rules GitHub lets it](/quest/m0/helpers/land-rules.md) - `resolve` refuses `update` rules, and the README names only credentials and check sources GitHub accepts
 
 ## Related
 
