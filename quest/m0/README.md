@@ -43,7 +43,6 @@ ownership-manifest design:
 - [CI flakes](/quest/m0/ci-flakes.md) - native Windows tests and Release's macOS checks fail only on real breakage
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended Claude checkouts through its hooks
-- [Codex checkouts](/quest/m0/codex-checkouts.md) - Codex agents started by `quest agent` release their checkouts on exit
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

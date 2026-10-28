@@ -1,5 +1,16 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
-import { check, isQuest, parse, ready } from "quest/core";
+import {
+	MERGE_LABEL,
+	isHoldLabel,
+	latestHold,
+	heldToken,
+	spentMergeHold,
+	check,
+	isQuest,
+	parse,
+	ready,
+} from "quest/core";
+import { cleanAutoMergeRefusal, immediateMerge } from "../../../src/github/merge";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 import {
@@ -110,7 +121,13 @@ export interface Branch {
 	 * `merge`, it is a merge commit of `parent` and `merge`, and `changes` are
 	 * relative to `merge`'s files.
 	 */
-	commit(parent: string, changes: Change[], message: string, merge?: string): Promise<string>;
+	commit(
+		parent: string,
+		changes: Change[],
+		message: string,
+		merge?: string,
+		submodules?: { path: string; sha: string }[],
+	): Promise<string>;
 	/** Whether the branch this one merges into, upstream, already holds `commit`. */
 	based(commit: string): Promise<boolean>;
 	/** The tree ID of `commit`'s `.github/workflows`, or null when it has none. */
@@ -874,24 +891,28 @@ export class GitHubService {
 		if (!kind) throw new GitHubError("Only issue and pull request jobs have a target to read");
 		const permissions: Permissions =
 			kind === "issues" ? { issues: "read" } : { pull_requests: "read", checks: "read", statuses: "read" };
-		const comments = "comments(last: 100) { nodes { author { login } body createdAt } }";
-		// One page of review threads; a pull request's later pages are read `after` the one before.
-		const threads =
-			"reviewThreads(first: 100, after: $threads) { nodes { isResolved isOutdated path line comments(first: 50) { nodes { author { login } body createdAt } } } pageInfo { hasNextPage endCursor } }";
+		const pageInfo = "pageInfo { hasNextPage endCursor }";
+		const commentFields = "nodes { author { login } body createdAt }";
+		const comments = `comments(first: 100, after: $after) { ${commentFields} ${pageInfo} }`;
+		const reviews = `reviews(first: 50, after: $after) { nodes { author { login } state body submittedAt } ${pageInfo} }`;
+		const threads = `reviewThreads(first: 100, after: $after) { nodes { id isResolved isOutdated path line comments(first: 50) { ${commentFields} ${pageInfo} } } ${pageInfo} }`;
+		const contexts = (after: boolean) =>
+			`contexts(first: 100${after ? ", after: $after" : ""}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } ${pageInfo} }`;
 		const query =
 			kind === "issues"
 				? `issue(number: $number) { number title state body author { login } ${comments} }`
-				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments}
- reviews(last: 50) { nodes { author { login } state body submittedAt } }
- ${threads}
- commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } } } } } } }`;
+				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments} ${reviews} ${threads}
+ commits(last: 1) { nodes { commit { oid statusCheckRollup { state ${contexts(false)} } } } } }`;
+		type Connection<T> = { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 		type Comment = { author: { login: string } | null; body: string; createdAt?: string; submittedAt?: string };
+		type Review = Comment & { state: string };
 		type Thread = {
+			id: string;
 			isResolved: boolean;
 			isOutdated: boolean;
 			path: string;
 			line: number | null;
-			comments: { nodes: Comment[] };
+			comments: Connection<Comment>;
 		};
 		type Check = {
 			__typename: string;
@@ -904,6 +925,7 @@ export class GitHubService {
 			description?: string | null;
 			targetUrl?: string | null;
 		};
+		type Rollup = { state: string; contexts: Connection<Check> };
 		type Item = {
 			number: number;
 			title: string;
@@ -914,82 +936,134 @@ export class GitHubService {
 			baseRefName?: string;
 			headRefName?: string;
 			headRefOid?: string;
-			comments: { nodes: Comment[] };
-			reviews?: { nodes: (Comment & { state: string })[] };
-			reviewThreads?: { nodes: Thread[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
-			commits?: {
-				nodes: {
-					commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: Check[] } } | null };
-				}[];
-			};
+			comments: Connection<Comment>;
+			reviews?: Connection<Review>;
+			reviewThreads?: Connection<Thread>;
+			commits?: { nodes: { commit: { oid: string; statusCheckRollup: Rollup | null } }[] };
 		};
 		return this.#authorized(repo, userId, permissions, async (token) => {
-			const read = async (fields: string, after: string | null = null) => {
-				const pull = kind === "pulls";
-				const result = await this.#api<{
-					data?: { repository: { issue?: Item | null; pullRequest?: Item | null } | null };
-					errors?: unknown[];
-				}>(token, "/graphql", "POST", {
-					query: `query($owner: String!, $name: String!, $number: Int!${pull ? ", $threads: String" : ""}) { repository(owner: $owner, name: $name) { ${fields} } }`,
-					variables: {
-						owner: repo.owner,
-						name: repo.name,
-						number: number(Number(value)),
-						...(pull && { threads: after }),
-					},
+			const request = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
+				const result = await this.#api<{ data?: T; errors?: unknown[] }>(token, "/graphql", "POST", {
+					query,
+					variables,
 				});
-				const item = result.data?.repository?.[pull ? "pullRequest" : "issue"];
-				if (result.errors?.length || !item) throw new GitHubError("This issue or pull request is unavailable");
+				if (result.errors?.length || !result.data)
+					throw new GitHubError("This issue or pull request is unavailable");
+				return result.data;
+			};
+			const read = async (fields: string, after: string | null = null) => {
+				const result = await request<{ repository: { issue?: Item | null; pullRequest?: Item | null } | null }>(
+					`query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { ${fields} } }`,
+					{ owner: repo.owner, name: repo.name, number: number(Number(value)), after },
+				);
+				const item = result.repository?.[kind === "pulls" ? "pullRequest" : "issue"];
+				if (!item) throw new GitHubError("This issue or pull request is unavailable");
 				return item;
 			};
+			// Each connection owns its cursor history, including nested comments and fixed-head checks.
+			const collect = async <T>(
+				first: Connection<T> | undefined,
+				next: (after: string) => Promise<Connection<T> | undefined>,
+				name: string,
+			): Promise<T[]> => {
+				const all: T[] = [];
+				const seen = new Set<string>();
+				let page = first;
+				for (;;) {
+					if (!page) throw new GitHubError(`This target's ${name} are unavailable`);
+					all.push(...page.nodes);
+					if (!page.pageInfo.hasNextPage) return all;
+					const cursor = page.pageInfo.endCursor;
+					if (!cursor || seen.has(cursor)) throw new GitHubError(`This target's ${name} are unavailable`);
+					seen.add(cursor);
+					page = await next(cursor);
+				}
+			};
 			const item = await read(query);
-			// Every thread is read before the unresolved ones are kept: a busy pull request has more than a page.
-			const all: Thread[] = [];
-			let after: string | null = null;
-			for (let page = item.reviewThreads; page;) {
-				all.push(...page.nodes);
-				if (!page.pageInfo.hasNextPage) break;
-				if (!page.pageInfo.endCursor || page.pageInfo.endCursor === after)
-					throw new GitHubError("This pull request's review threads are unavailable");
-				after = page.pageInfo.endCursor;
-				page = (await read(`pullRequest(number: $number) { ${threads} }`, after)).reviewThreads;
-				if (!page) throw new GitHubError("This pull request's review threads are unavailable");
-			}
 			const comment = (c: Comment) => ({
 				author: c.author?.login ?? null,
 				body: c.body,
 				at: c.createdAt ?? c.submittedAt ?? null,
 			});
+			const discussion = await collect(
+				item.comments,
+				async (after) =>
+					(
+						await read(
+							`${kind === "pulls" ? "pullRequest" : "issue"}(number: $number) { ${comments} }`,
+							after,
+						)
+					).comments,
+				"comments",
+			);
 			const common = {
 				number: item.number,
 				title: item.title,
 				state: item.state,
 				author: item.author?.login ?? null,
 				body: item.body,
-				comments: item.comments.nodes.map(comment),
+				comments: discussion.map(comment),
 			};
 			if (kind === "issues") return { kind: "issue" as const, ...common };
+			const allReviews = await collect(
+				item.reviews,
+				async (after) => (await read(`pullRequest(number: $number) { ${reviews} }`, after)).reviews,
+				"reviews",
+			);
+			const allThreads = await collect(
+				item.reviewThreads,
+				async (after) => (await read(`pullRequest(number: $number) { ${threads} }`, after)).reviewThreads,
+				"review threads",
+			);
+			const unresolved = [];
+			for (const thread of allThreads.filter((t) => !t.isResolved)) {
+				const replies = await collect(
+					thread.comments,
+					async (after) => {
+						const data = await request<{ node: { comments: Connection<Comment> } | null }>(
+							`query($id: ID!, $after: String) { node(id: $id) { ... on PullRequestReviewThread { comments(first: 50, after: $after) { ${commentFields} ${pageInfo} } } } }`,
+							{ id: thread.id, after },
+						);
+						return data.node?.comments;
+					},
+					"review thread comments",
+				);
+				unresolved.push({
+					path: thread.path,
+					line: thread.line,
+					outdated: thread.isOutdated,
+					comments: replies.map(comment),
+				});
+			}
 			const head = item.commits?.nodes.at(-1)?.commit;
+			const allChecks = head?.statusCheckRollup
+				? await collect(
+						head.statusCheckRollup.contexts,
+						async (after) => {
+							const data = await request<{
+								repository: { object: { statusCheckRollup: Rollup | null } | null } | null;
+							}>(
+								`query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String) { repository(owner: $owner, name: $name) { object(oid: $oid) { ... on Commit { statusCheckRollup { ${contexts(true)} } } } } }`,
+								{ owner: repo.owner, name: repo.name, oid: head.oid, after },
+							);
+							return data.repository?.object?.statusCheckRollup?.contexts;
+						},
+						"check contexts",
+					)
+				: [];
 			return {
 				kind: "pull" as const,
 				...common,
 				draft: item.isDraft ?? false,
 				base: item.baseRefName ?? null,
 				head: { ref: item.headRefName ?? null, oid: item.headRefOid ?? null },
-				reviews: (item.reviews?.nodes ?? []).map((r) => ({ ...comment(r), state: r.state })),
+				reviews: allReviews.map((r) => ({ ...comment(r), state: r.state })),
 				// Resolved threads need nothing more; outdated ones may still need an answer.
-				threads: all
-					.filter((t) => !t.isResolved)
-					.map((t) => ({
-						path: t.path,
-						line: t.line,
-						outdated: t.isOutdated,
-						comments: t.comments.nodes.map(comment),
-					})),
+				threads: unresolved,
 				checks: {
 					commit: head?.oid ?? null,
 					state: head?.statusCheckRollup?.state ?? null,
-					runs: (head?.statusCheckRollup?.contexts.nodes ?? []).map((c) =>
+					runs: allChecks.map((c) =>
 						c.__typename === "CheckRun"
 							? { name: c.name!, state: c.conclusion ?? c.status ?? null, url: c.detailsUrl ?? null }
 							: {
@@ -1146,12 +1220,32 @@ export class GitHubService {
 					throw error;
 				}
 			},
-			commit: async (parent, changes, message, merge) => {
+			commit: async (parent, changes, message, merge, submodules = []) => {
 				const base = await this.#api<{ tree: { sha: string } }>(
 					token,
 					`${path}/git/commits/${sha(merge ?? parent)}`,
 				);
 				const tree = [];
+				if (submodules.length) {
+					const source = await this.#api<{ tree: { sha: string } }>(
+						token,
+						`${path}/git/commits/${sha(parent)}`,
+					);
+					const existing = await this.#api<Tree>(
+						token,
+						`${path}/git/trees/${sha(source.tree.sha)}?recursive=1`,
+					);
+					if (existing.truncated)
+						throw new PublicationBlocked("The head's submodule tree is incomplete; no merge was published");
+					for (const pointer of submodules) {
+						const entry = existing.tree.find((entry) => entry.path === pointer.path);
+						if (entry?.mode !== "160000" || entry.type !== "commit" || entry.sha !== pointer.sha)
+							throw new PublicationBlocked(
+								`A merge can only retain the head's existing submodule pointer: ${pointer.path}`,
+							);
+						tree.push({ path: pointer.path, mode: "160000", type: "commit", sha: sha(entry.sha) });
+					}
+				}
 				for (const change of changes) {
 					const mode = change.mode;
 					if (change.content === null) {
@@ -1353,7 +1447,7 @@ export class GitHubService {
 			mergeState: row.mergeStateStatus,
 			queue: row.isMergeQueueEnabled === true,
 			landing: row.autoMergeRequest !== null || row.mergeQueueEntry !== null,
-			labels: row.labels.nodes.map((label) => label.name).filter((name) => name.startsWith(HOLD_PREFIX)),
+			labels: row.labels.nodes.map((label) => label.name).filter(isHoldLabel),
 			events: row.timelineItems.nodes.map((event) => ({
 				id: event.id,
 				label: event.__typename === "LabeledEvent" ? (event.label?.name ?? "") : null,
@@ -1386,7 +1480,7 @@ export class GitHubService {
 		return this.#authorized(repo, userId, { issues: "write", pull_requests: "read" }, async (token) => {
 			let holds = await this.#holds(token, repo, pull);
 			if (holds.state !== "OPEN") throw new GitHubError("The pull request is no longer open");
-			if (spent(holds)) {
+			if (spentMergeHold(holds)) {
 				await this.#unhold(token, repo, pull);
 				holds = { ...holds, labels: holds.labels.filter((name) => name !== MERGE_LABEL) };
 			}
@@ -1396,11 +1490,11 @@ export class GitHubService {
 				labels: [MERGE_LABEL],
 			});
 			holds = await this.#holds(token, repo, pull);
-			const ours = added(holds, MERGE_LABEL);
+			const ours = latestHold(holds.events, MERGE_LABEL);
 			if (!ours) throw new GitHubError("GitHub does not show the quest:merge label kix added");
 			const rival = holds.labels.find((name) => {
 				if (name === MERGE_LABEL) return false;
-				const event = added(holds, name);
+				const event = latestHold(holds.events, name);
 				return !event || holds.events.indexOf(event) < holds.events.indexOf(ours);
 			});
 			if (rival) {
@@ -1420,8 +1514,7 @@ export class GitHubService {
 	releasePullRequest(repo: GitHubRepository, pull: number, hold: string) {
 		return this.#withRepository(repo, { issues: "write", pull_requests: "read" }, async (token) => {
 			const holds = await this.#holds(token, repo, pull);
-			if (holds.state !== "OPEN" || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== hold)
-				return true;
+			if (holds.state !== "OPEN" || heldToken(holds, MERGE_LABEL) !== hold) return true;
 			if (holds.landing) return false;
 			await this.#unhold(token, repo, pull);
 			return true;
@@ -1477,33 +1570,56 @@ export class GitHubService {
 				// Landing is a contribution like opening a pull request, so a paused project lands nothing.
 				if ((await this.#state(repo, installation)) !== "enabled")
 					throw new GitHubError("Contributions are paused");
+				const check = (holds: Holds) => {
+					if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
+					if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
+						throw new PublicationBlocked(
+							"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
+						);
+					if (holds.head !== sha(input.head))
+						throw new PublicationBlocked("The pull request's head moved outside this job.");
+				};
 				const holds = await this.#holds(token, repo, pull);
-				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
-				if (!input.hold || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== input.hold)
-					throw new PublicationBlocked(
-						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
-					);
-				if (holds.head !== sha(input.head))
-					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				check(holds);
 				const gated = await this.#gated(token, repo, holds.base);
-				const mutation =
-					!gated && !holds.queue && IMMEDIATE.includes(holds.mergeState)
+				let mutation: "mergePullRequest" | "enablePullRequestAutoMerge" =
+					!gated && immediateMerge(holds.mergeState, holds.queue)
 						? "mergePullRequest"
 						: "enablePullRequestAutoMerge";
-				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
-					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
-					variables: {
-						id: holds.id,
-						sha: input.head,
-						method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
-						body: gated ? `${LAND_PIN}: ${input.head}` : null,
-					},
-				});
-				if (result.errors?.length) {
-					const reason = result.errors[0]?.message;
-					throw new PublicationBlocked(
-						`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
-					);
+				const submit = async () => {
+					const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
+						query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
+						variables: {
+							id: holds.id,
+							sha: input.head,
+							method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
+							body: gated ? `${LAND_PIN}: ${input.head}` : null,
+						},
+					});
+					if (result.errors?.length) {
+						const reason = result.errors[0]?.message;
+						throw new PublicationBlocked(
+							`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
+						);
+					}
+				};
+				try {
+					await submit();
+				} catch (error) {
+					if (
+						mutation !== "enablePullRequestAutoMerge" ||
+						gated ||
+						holds.queue ||
+						!cleanAutoMergeRefusal(error instanceof Error ? error.message : null)
+					)
+						throw error;
+					// The refusal can race GitHub computing UNKNOWN. Reread once, keeping the original head pinned.
+					const fresh = await this.#holds(token, repo, pull);
+					check(fresh);
+					if (!immediateMerge(fresh.mergeState, fresh.queue) || (await this.#gated(token, repo, fresh.base)))
+						throw error;
+					mutation = "mergePullRequest";
+					await submit();
 				}
 				await this.#invalidate(repo);
 				return { merged: mutation === "mergePullRequest" };
@@ -1522,11 +1638,6 @@ function mergeMethod(current: Repository): MergeMethod {
 	throw new GitHubError("The repository allows no merge method");
 }
 
-/** The label prefix and merge label `quest iterate`, `ready`, and `merge` hold pull requests with. */
-const HOLD_PREFIX = "quest:";
-export const MERGE_LABEL = "quest:merge";
-/** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
-const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 /** The check a base gated by `quest land` requires, and the commit body trailer that queues a head for it; see `quest land --help`. */
 const LAND_CHECK = "quest land";
 const LAND_PIN = "Quest-Land-Head";
@@ -1561,18 +1672,6 @@ type Holds = {
 	/** Oldest first; `label` is null for a landing that started. */
 	events: { id: string; label: string | null }[];
 };
-
-/** The latest event that added `label`. */
-function added(holds: Holds, label: string) {
-	return [...holds.events].reverse().find((event) => event.label === label);
-}
-
-/** A `quest:merge` label is spent once a landing started after it was added and ended unmerged. */
-function spent(holds: Holds) {
-	const event = added(holds, MERGE_LABEL);
-	if (!event || holds.landing || !holds.labels.includes(MERGE_LABEL)) return false;
-	return holds.events.slice(holds.events.indexOf(event) + 1).some((later) => later.label === null);
-}
 
 function heldBy(label: string) {
 	return `Another session holds this pull request with ${label}; pick it again once it is released`;
