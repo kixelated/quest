@@ -389,6 +389,7 @@ checks success passed=14 failing=0 pending=0
 review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
 review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
 thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+hold quest:merge LE_example 2026-10-16T17:57:16.000Z https://api.github.com/repos/kixelated/quest/issues/events/123456 1 hour ago
 ```
 
 Each line starts with its record type; any free text, a check name or a path,
@@ -406,6 +407,8 @@ comes last, and a missing value prints as `-`:
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+| `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
+| `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 `resolveReviewThread` take. Neutral and skipped checks pass. A required check
@@ -413,7 +416,7 @@ is one branch protection or a ruleset requires for this PR. `--json` prints the
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
-`threads`. Long lists are paged; reactions are the newest 100 per PR or review,
+`threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
@@ -471,8 +474,9 @@ and each landed PR shows as merged.
 A gated base requires the `quest land` status check, which nothing reports on
 a PR head, so GitHub's auto-merge only waits and its merge button cannot land
 around the gate. Only the gate's push credential bypasses that rule; pin the
-check's source to an app that never reports it, so no one can satisfy it with
-a status. There,
+check's source to an app installed on the repository that never reports it, so
+no one can satisfy it with a status. GitHub rejects an uninstalled app as a
+required check's source. There,
 `quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
 auto-merge whose commit body pins the head it approved
 (`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
@@ -522,11 +526,12 @@ the gate upholds them itself. It requires each PR's review decision to allow
 it, each of the base's other required checks to pass on its head, counting
 every check and only those from the app a rule names, and, when the base
 requires conversation resolution, each of its review threads to be resolved.
-Its push satisfies `creation`, `update`, `deletion`, `non_fast_forward`, and
+Its push satisfies `creation`, `deletion`, `non_fast_forward`, and
 `required_linear_history`, and `copilot_code_review` blocks nothing. `resolve`
 fails, before anything lands, on any other rule type and on `pull_request`
 settings the review decision does not cover: last-push approval, merge methods
-without squash, and required reviewers.
+without squash, and required reviewers. It refuses `update`: that rule
+restricts who can move the base, while the gate can land a PR any writer queues.
 
 On a base with classic protection, `resolve` reads its settings, which needs
 administration read (a GitHub App's "Administration: read", or a token with
@@ -610,12 +615,10 @@ jobs:
           if [ -s "$RUNNER_TEMP/landing" ]; then gh workflow run land.yml --ref "$GITHUB_REF_NAME"; fi
 ```
 
-The land job's token pushes the base and PR branches; give it the bypass,
-such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
-from an environment only the base branch can use. Where the ruleset
-refuses GitHub Actions as a bypass actor, as an organization's can, use an App
-installed on the repository. Ejecting a PR disables its auto-merge, which needs
-`contents: write` on the token in `GH_TOKEN` even when another credential
+The land job's token pushes the base and PR branches. Grant the ruleset's bypass
+to a GitHub App installed on the repository, and mint its token from an
+environment only the base branch can use. Ejecting a PR disables its auto-merge,
+which needs `contents: write` on the token in `GH_TOKEN` even when another credential
 pushes. The check job holds only a read token, so it can run on a self-hosted
 runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,
 the land job needs a token with admin rights, and the resolve job one with
@@ -779,13 +782,20 @@ them to force continuation.
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
-follow-ups, which the inbox offers you to plan. A job on an issue or
+follow-ups, which the inbox offers you to plan for 30 days after the job
+completes. Expired offers cannot start a plan, and the job's history remains.
+A job on an issue or
 pull request reads it through `context`, since the runner holds no GitHub
 token; a new plan reads your idea and pasted context there. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
 runner. Runners take only trusted revisions until they can build untrusted
-heads' devShells in a VM, and a job resumes with another maintainer's answer
+heads' devShells in a VM. A pull request's head is trusted only when every
+commit beyond the default branch has a valid signature from a current
+maintainer, so sign your commits (for example with
+[SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification#ssh-commit-signature-verification))
+for its iterate and merge jobs to run; a head kix has pushed to stays
+untrusted. A job resumes with another maintainer's answer
 only once you approve it in the inbox. opencode runs as `opencode serve` on
 localhost behind a password made for each turn.
 
@@ -934,6 +944,10 @@ macOS, Linux, and [native Windows](docs/windows.md).
 The hosted service is moving to [kix.quest](https://kix.quest): maintainers
 plan issues, start ready quests, and act on GitHub PRs through a decision UI.
 Hosted work will use explicitly selected maintainer or donor API funding.
+Automatic project history passes read updates since their prior issue/PR
+boundaries, including timestamp ties. Explicit Refresh starts or resumes a full
+history pass; successive refreshes repair cached issues deleted without a
+webhook. Open draft bodies are read only to classify `## Decisions needed`.
 [The first milestone](quest/m0/README.md) lists the quests that remain.
 
 ## Contributing

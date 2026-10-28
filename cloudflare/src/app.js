@@ -65,44 +65,48 @@ for (const form of document.querySelectorAll('form[action="/sign-out"]')) {
 // A job's raw output loads only when a maintainer opens its disclosure, a page
 // at a time, and the server rechecks their authority on every page. It is
 // shown as text, never markup.
-for (const details of document.querySelectorAll("details[data-output]")) {
-	const output = details.querySelector("pre");
-	const status = details.querySelector("[data-output-status]");
-	const more = details.querySelector("[data-output-more]");
-	let next = null;
-	let started = false;
-	async function load() {
-		more.disabled = true;
-		try {
-			const url = new URL(details.dataset.output, location.href);
-			if (next) url.searchParams.set("after", `${next.attempt}.${next.seq}`);
-			const response = await fetch(url, { headers: { Accept: "application/json" } });
-			const page = await response.json().catch(() => null);
-			if (!response.ok) throw new Error(page?.error || "The raw output could not be read.");
-			output.append(page.output.map((chunk) => chunk.text).join(""));
-			output.hidden = !output.textContent;
-			next = page.next;
-			more.hidden = !next;
-			status.textContent = !output.textContent
-				? "No raw output is stored for this job."
-				: page.truncated.length
-					? "Some output was dropped at the size limit."
-					: "";
-		} catch (error) {
-			status.textContent = error.message || "Something went wrong.";
-			// Opening the disclosure again retries a first page that failed.
-			if (!output.textContent) started = false;
-		} finally {
-			more.disabled = false;
+function bindRawOutput(root = document) {
+	for (const details of root.querySelectorAll("details[data-output]:not([data-output-bound])")) {
+		details.dataset.outputBound = "";
+		const output = details.querySelector("pre");
+		const status = details.querySelector("[data-output-status]");
+		const more = details.querySelector("[data-output-more]");
+		let next = null;
+		let started = false;
+		async function load() {
+			more.disabled = true;
+			try {
+				const url = new URL(details.dataset.output, location.href);
+				if (next) url.searchParams.set("after", `${next.attempt}.${next.seq}`);
+				const response = await fetch(url, { headers: { Accept: "application/json" } });
+				const page = await response.json().catch(() => null);
+				if (!response.ok) throw new Error(page?.error || "The raw output could not be read.");
+				output.append(page.output.map((chunk) => chunk.text).join(""));
+				output.hidden = !output.textContent;
+				next = page.next;
+				more.hidden = !next;
+				status.textContent = !output.textContent
+					? "No raw output is stored for this job."
+					: page.truncated.length
+						? "Some output was dropped at the size limit."
+						: "";
+			} catch (error) {
+				status.textContent = error.message || "Something went wrong.";
+				// Opening the disclosure again retries a first page that failed.
+				if (!output.textContent) started = false;
+			} finally {
+				more.disabled = false;
+			}
 		}
+		details.addEventListener("toggle", () => {
+			if (!details.open || started) return;
+			started = true;
+			load();
+		});
+		more.addEventListener("click", load);
 	}
-	details.addEventListener("toggle", () => {
-		if (!details.open || started) return;
-		started = true;
-		load();
-	});
-	more.addEventListener("click", load);
 }
+bindRawOutput();
 
 // Whether the server notifies this browser's subscription for whoever is
 // signed in. It forgets one when a session signs out, and never hands one to
@@ -180,4 +184,100 @@ for (const control of controls) {
 			(error) => show(error.message || "Something went wrong."),
 		)
 		.catch(() => {});
+}
+
+// Live cards receive only invalidation hints. Every content read repeats the
+// server's current-maintainer checks and renders escaped summaries.
+for (const root of document.querySelectorAll("[data-agent-cards]")) {
+	const status = root.parentElement.querySelector("[data-live-status]");
+	let socket = null;
+	let stopped = false;
+	let refreshing = false;
+	let dirty = false;
+	let timer;
+	let retry = 1000;
+	const show = (message = "") => {
+		status.textContent = message;
+		status.hidden = !message;
+	};
+	async function refresh() {
+		dirty = true;
+		if (refreshing || stopped) return;
+		refreshing = true;
+		try {
+			do {
+				dirty = false;
+				const response = await fetch(root.dataset.cards, {
+					headers: { Accept: "text/html" },
+					cache: "no-store",
+				});
+				if (response.status === 401 || response.status === 403) {
+					stopped = true;
+					socket?.close();
+					root.replaceChildren();
+					show("Sign in again to read current agent updates.");
+					return;
+				}
+				if (!response.ok) throw new Error("Agent updates could not be refreshed.");
+				const fragment = document.createElement("template");
+				fragment.innerHTML = await response.text();
+				const previous = new Map(
+					[...root.querySelectorAll("[data-job]")].map((card) => [card.dataset.job, card]),
+				);
+				for (const card of fragment.content.querySelectorAll("[data-job]")) {
+					const oldOutput = previous.get(card.dataset.job)?.querySelector("details[data-output]");
+					const newOutput = card.querySelector("details[data-output]");
+					// Keep an open disclosure and its already authorized, loaded pages intact.
+					if (oldOutput && newOutput && oldOutput.dataset.output === newOutput.dataset.output)
+						newOutput.replaceWith(oldOutput);
+				}
+				root.replaceChildren(fragment.content);
+				bindRawOutput(root);
+				show();
+			} while (dirty && !stopped);
+		} catch (error) {
+			show(error.message || "Agent updates could not be refreshed.");
+		} finally {
+			refreshing = false;
+		}
+	}
+	function connect() {
+		if (stopped || document.hidden || (socket && socket.readyState < WebSocket.CLOSING)) return;
+		clearTimeout(timer);
+		const url = new URL(root.dataset.live, location.href);
+		url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+		socket = new WebSocket(url);
+		socket.addEventListener("open", () => {
+			retry = 1000;
+			refresh();
+		});
+		socket.addEventListener("message", (event) => {
+			if (event.data === "changed") refresh();
+		});
+		socket.addEventListener("close", () => {
+			if (stopped) return;
+			show("Live updates paused. Reconnecting…");
+			timer = setTimeout(connect, retry);
+			retry = Math.min(retry * 2, 30000);
+		});
+	}
+	window.addEventListener("online", connect);
+	document.addEventListener("visibilitychange", () => {
+		if (!document.hidden) {
+			connect();
+			refresh();
+		}
+	});
+	window.addEventListener("pagehide", () => {
+		stopped = true;
+		clearTimeout(timer);
+		socket?.close();
+	});
+	window.addEventListener("pageshow", (event) => {
+		if (event.persisted) {
+			stopped = false;
+			connect();
+		}
+	});
+	connect();
 }

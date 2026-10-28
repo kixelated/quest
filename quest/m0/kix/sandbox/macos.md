@@ -18,4 +18,11 @@ approval: the approval step is gone from kix, the inbox, and the runner.
   approval decision from the inbox, and the hold from kix, and update the
   "until the job sandbox ships" comments in `cloudflare/README.md`,
   `cloudflare/src/jobs/routes.ts`, and `store.ts`.
+- Decided 2026-10-27 (user) in `/quest-plan`: rerun the test for an opencode
+  account too, through its srt command wrapper, and lift the gate only once
+  both agents hold.
 - If the boundary does not hold, record what leaks here and keep the gate.
+
+## Required
+
+- [opencode sandboxing](/quest/m0/kix/sandbox/opencode.md) - opencode jobs' commands run in the same sandbox as Claude Code's

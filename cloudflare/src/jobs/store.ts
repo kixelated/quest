@@ -298,6 +298,9 @@ export function route(job: Job, offers: Offer[]): Offer | null {
 	return eligible.find((offer) => offer.free && !offer.limited) ?? null;
 }
 
+/** Whether a queued PR job's current head is still trusted. */
+export type Verify = (job: Pick<Job, "repository" | "target" | "revision" | "head" | "trusted">) => Promise<boolean>;
+
 export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner: string; name: string };
 
 /**
@@ -310,7 +313,13 @@ export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner
  * claim commits. Until acknowledged, an assignment holds one of the runner's
  * reported free slots, which it could not count yet.
  */
-export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
+export async function dispatch(
+	db: D1Database,
+	owner: string,
+	slots: Map<string, number>,
+	now: number,
+	verify: Verify = async () => false,
+) {
 	const connected = JSON.stringify([...slots.keys()]);
 	const [, , cancelled, , candidates, offers, cancels, pending] = await db.batch([
 		db
@@ -364,9 +373,20 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		if (free.has(runner)) free.set(runner, free.get(runner)! - n);
 	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
 	const accounts = offers!.results as Row[];
+	// The attempt and head each claim verified. A publication can still move the
+	// head after the claim, so the read below checks any other head again.
+	const verified = new Map<string, { attempt: number; head: string | null }>();
+	const revoked: (Attempt & { runner: string })[] = [];
 	// Every queued job is considered, so unroutable older ones cannot starve newer ones.
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
+		if (onPull(job.workflow)) {
+			job.trusted = (await verify(job)) ? 1 : 0;
+			await db
+				.prepare("UPDATE jobs SET trusted=? WHERE id=? AND state='queued' AND attempt=? AND head IS ?")
+				.bind(job.trusted, job.id, job.attempt, job.head)
+				.run();
+		}
 		const chosen = route(
 			job,
 			accounts.map((o) => ({ ...o, free: (free.get(o.runner) ?? 0) > 0, limited: !!o.limited })),
@@ -376,9 +396,19 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 			db
 				.prepare(
 					`UPDATE jobs SET state='running',attempt=attempt+1,runner=?,account=?,session=CASE WHEN runner=? AND account=? THEN session END,lease=NULL,delivered=0,updatedAt=?
- WHERE id=? AND attempt=? AND cancel=0 AND state='queued' AND EXISTS(SELECT 1 FROM github_projects WHERE id=jobs.repository AND state='enabled')`,
+ WHERE id=? AND attempt=? AND head IS ? AND trusted=? AND cancel=0 AND state='queued' AND EXISTS(SELECT 1 FROM github_projects WHERE id=jobs.repository AND state='enabled')`,
 				)
-				.bind(chosen.runner, chosen.account, chosen.runner, chosen.account, now, job.id, job.attempt),
+				.bind(
+					chosen.runner,
+					chosen.account,
+					chosen.runner,
+					chosen.account,
+					now,
+					job.id,
+					job.attempt,
+					job.head,
+					job.trusted,
+				),
 			// changes() is the update above, so only the pass that moved the job records it.
 			db
 				.prepare(
@@ -388,6 +418,7 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		]);
 		// The job or its project changed underneath this pass; the next one sees it.
 		if (update!.meta.changes !== 1) continue;
+		if (onPull(job.workflow)) verified.set(job.id, { attempt: job.attempt + 1, head: job.head });
 		free.set(chosen.runner, free.get(chosen.runner)! - 1);
 	}
 	const undelivered = await db
@@ -400,7 +431,26 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 	const assign: { runner: string; job: Claimed }[] = [];
 	for (const { id, runner, ...project } of undelivered.results) {
 		const job = await readJob(db, id);
-		if (job) assign.push({ runner, job: { ...job, ...project } });
+		if (!job || job.state !== "running" || job.cancel) continue;
+		const checked = verified.get(job.id);
+		if (onPull(job.workflow) && (checked?.attempt !== job.attempt || checked.head !== job.head)) {
+			const trusted = (await verify(job)) ? 1 : 0;
+			const machine = accounts.find((offer) => offer.runner === runner);
+			const eligible = trusted || (machine?.platform === "linux" && machine.vm);
+			const update = await db
+				.prepare(
+					"UPDATE jobs SET trusted=?,state=? WHERE id=? AND attempt=? AND head IS ? AND cancel=0 AND state='running' AND delivered=0",
+				)
+				.bind(trusted, eligible ? "running" : "queued", job.id, job.attempt, job.head)
+				.run();
+			if (update.meta.changes !== 1) continue;
+			if (!eligible) {
+				revoked.push({ runner, job: job.id, attempt: job.attempt });
+				continue;
+			}
+			job.trusted = trusted;
+		}
+		assign.push({ runner, job: { ...job, ...project } });
 	}
 	const wake = await db
 		.prepare("SELECT MIN(lease) AS at FROM jobs WHERE actor=? AND state='running' AND lease IS NOT NULL")
@@ -408,9 +458,9 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		.first<{ at: number | null }>();
 	return {
 		assign,
-		cancel: cancels!.results as (Attempt & { runner: string })[],
+		cancel: [...(cancels!.results as (Attempt & { runner: string })[]), ...revoked],
 		ended: ended(cancelled!),
-		wake: wake?.at ?? null,
+		wake: revoked.length ? now : (wake?.at ?? null),
 	};
 }
 
@@ -822,6 +872,8 @@ export async function listInboxJobs(db: D1Database, repository: number, observed
 
 /** The most follow-ups a delivery suggests, and the longest one, in characters. */
 export const FOLLOWUPS = { count: 20, length: 1000 };
+/** Unplanned follow-up offers last 30 days from the job's completed result. */
+export const FOLLOWUP_AGE = 30 * 24 * 60 * 60_000;
 
 /** The follow-ups a completed job's result suggests: untrusted agent text, so only well-formed ones count. */
 export function followupsOf(result: unknown): string[] {
@@ -834,21 +886,27 @@ export function followupsOf(result: unknown): string[] {
 }
 
 /** A job that delivered suggested follow-ups, which a "plan these?" decision offers until it is planned. */
-export type Followups = Pick<Job, "id" | "workflow" | "target" | "summary" | "pull" | "updatedAt"> & {
+export type Followups = Pick<Job, "id" | "workflow" | "target" | "summary" | "pull"> & {
+	completedAt: number;
 	followups: string[];
 };
 
-/** Completed jobs whose suggested follow-ups were not planned yet, newest first: each one's plan target is `plans/<job>`. */
+// The result event is immutable; publication and hold metadata can change jobs.updatedAt later.
+const completedAt = `(SELECT MIN(e.at) FROM job_events e WHERE e.job=j.id AND e.attempt=j.attempt
+ AND e.kind='result' AND json_extract(e.body,'$.outcome')='completed')`;
+
+/** Recent completed jobs whose follow-ups were not planned: each one's plan target is `plans/<job>`. */
 const unplanned = `state='completed' AND json_array_length(result,'$.followups')>0
+ AND ${completedAt}>?
  AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=j.repository AND n.target='plans/'||j.id)`;
 
 /** The project's "plan these?" decisions, newest first. */
-export async function listFollowups(db: D1Database, repository: number): Promise<Followups[]> {
+export async function listFollowups(db: D1Database, repository: number, now = Date.now()): Promise<Followups[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT id,workflow,target,summary,pull,result,updatedAt FROM jobs j WHERE repository=? AND ${unplanned} ORDER BY updatedAt DESC,id LIMIT 50`,
+			`SELECT id,workflow,target,summary,pull,result,${completedAt} AS completedAt FROM jobs j WHERE repository=? AND ${unplanned} ORDER BY completedAt DESC,id`,
 		)
-		.bind(repository)
+		.bind(repository, now - FOLLOWUP_AGE)
 		.all<Omit<Followups, "followups"> & { result: string }>();
 	return results.flatMap(({ result, ...job }) => {
 		const followups = followupsOf(JSON.parse(result));
@@ -857,10 +915,10 @@ export async function listFollowups(db: D1Database, repository: number): Promise
 }
 
 /** The request a "plan these?" decision starts its interview from, or null once it was planned. */
-export async function followupRequest(db: D1Database, repository: number, job: string) {
+export async function followupRequest(db: D1Database, repository: number, job: string, now = Date.now()) {
 	const row = await db
 		.prepare(`SELECT workflow,target,summary,result FROM jobs j WHERE id=? AND repository=? AND ${unplanned}`)
-		.bind(job, repository)
+		.bind(job, repository, now - FOLLOWUP_AGE)
 		.first<Pick<Job, "workflow" | "target" | "summary"> & { result: string }>();
 	const followups = row ? followupsOf(JSON.parse(row.result)) : [];
 	if (!row || !followups.length) return null;
