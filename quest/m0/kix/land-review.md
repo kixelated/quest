@@ -18,7 +18,8 @@ Decided 2026-10-28 (user, /quest-plan trust audit):
 - Apply the guide's rule: a review counts only on the head being landed. The
   only exemptions are a conflict-free base merge and a reviewer's patch applied
   unchanged. Where a repository's policy names whose review counts (for
-  kixelated/quest, a Codex review or 👍 on the head, in `CONTRIBUTING.md`),
+  kixelated/quest, the PR body's `## Review` record naming the head, in
+  `CONTRIBUTING.md`),
   follow it. Otherwise require a review from someone other than the PR's
   author and the App.
 - Defer to GitHub branch protection only where it enforces the same
@@ -34,4 +35,3 @@ Decided 2026-10-28 (user, /quest-plan trust audit):
 
 - [Web execution](/quest/m0/kix/execution.md) - merge jobs this rule gates
 - [Require read-only pull-request CI](/quest/m0/kix/ci-read-only.md) - the trust model this completes
-- [Review locally with the other vendor's model](/quest/m0/local-review.md) - replaces the Codex policy example with the PR's `## Review` record

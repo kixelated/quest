@@ -702,6 +702,49 @@ sent to Quest are forwarded to the command, and a cancelled gate exits with
 128 plus the signal's number. There is no fairness guarantee or timeout: a
 command waits as long as the host stays busy.
 
+## Review locally
+
+`quest review` has the other vendor's model review the checkout's committed
+branch before it is pushed for review: Codex when run from Claude Code, and
+Claude Code when run from Codex. `--harness` names the reviewer instead; an
+unknown harness, or a missing or logged-out CLI, is an error rather than a
+same-model review. The reviewer uses its CLI's own login, config, model, and
+effort, with `--model` and `--effort` passed through.
+
+```sh
+quest review                                  # round 1 against origin's default branch
+quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
+quest review --base origin/release --new      # a new session against another base
+```
+
+The first round runs the reviewer's own review, `codex exec review --base` or
+Claude Code's `/code-review high <base>...HEAD`, then resumes that session for
+one turn that applies the base's `REVIEW.md`, if any, and reports the findings
+in one JSON schema. Later rounds resume the same session with the new head and
+`--responses`, the author's free-text fixes and refutations, which a round that
+reported findings requires. A refutation stands only when it cites evidence the
+reviewer can check. Resuming keeps the reviewer's prompt cache; Claude Code is
+asked for its 1-hour cache. The session is kept per branch in the clone's
+common Git directory, so any worktree of the clone resumes it; `--new` starts
+over.
+
+The reviewer is read-only: Codex in its `read-only` sandbox, and Claude Code
+with only read tools and the Bash commands it judges read-only, in `dontAsk`
+mode. The base is fetched first, since the sandbox has no network. The reviewer
+follows the base's `AGENTS.md` and `CLAUDE.md`, at the root and in each
+directory holding a changed path, never the checkout's: Claude Code loads only
+user settings and Codex loads no project docs, so a change cannot instruct its
+own reviewer. `REVIEW.md` is optional, and chooses the review's stance, such as
+adversarial.
+
+It prints the reviewer and model, session, round, base, head, a `usage` line
+per turn (input tokens, the part read from the prompt cache, and output), the
+finding count, then each finding as severity, `path:line`, and title over its
+indented body. `--json` prints the same as one object. It exits 0 once the round
+finishes, whatever it found, 2 for invalid arguments or a checkout or CLI that
+cannot be reviewed, and 1 for other failures. `/quest-review` runs the rounds,
+records them in the PR body's `## Review` section, and marks the PR ready.
+
 ## Headless agents
 
 `quest agent` runs one headless agent turn per call, billed to one of the keys
@@ -930,7 +973,7 @@ the version you pin decides what your agents follow:
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-spawn` | Triage ready quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
-| `quest-ready` | Mark a draft PR ready for review, wait for an automated review, then decide whether to merge. |
+| `quest-review` | Review a PR's branch locally with the other vendor's model, then mark it ready for review. |
 | `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
 | `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
 | `quest-afk` | Keep starting agreed work while you are away, leaving every decision for your return. |

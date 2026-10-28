@@ -16,7 +16,7 @@ Decided 2026-10-28 (user, /quest-plan of the follow-ups from a 25-PR /quest-comp
   still waited 45 minutes for a review. Name a check agents can run, such as
   comparing `git diff <base>...<head>` before and after the merge.
 - It applies to whichever review the policy counts, including the
-  `## Review` record from [local review](/quest/m0/local-review.md).
+  `## Review` record that `/quest-review` writes.
 
 Decided 2026-10-28 (user, /quest-merge of #267): the declined-finding and
 stalled-review rules for Codex cloud were dropped, since local review replaces

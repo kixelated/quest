@@ -37,14 +37,15 @@ scope and after required repository checks and reviews pass. Never block on a
 CodeRabbit review; it is optional.
 Quest execution stops at PR creation; it merges only when the user picks /quest-merge.
 
-A Codex review satisfies the guide's required review when Codex posts a GitHub
-review or a 👍 reaction on the exact head being landed, with no unresolved
-findings. A status comment saying a review completed does not count; if nothing
-was posted, ask the maintainer. A hand-resolved conflict needs a review of the
-new head, but does not require a maintainer review specifically. The guide's
-exemptions for a conflict-free base merge or a reviewer's suggested patch
-applied unchanged still apply. Dependabot PRs that only bump patch versions or
-a lockfile need no review.
+The PR body's `## Review` record of a local `quest review` round satisfies the
+guide's required review when it names the exact head being landed, with no
+finding left unfixed or unrefuted; so does a recorded skip of a trivial change.
+A hand-resolved conflict needs a local review of the new head, but does not
+require a maintainer review specifically. The guide's exemptions for a
+conflict-free base merge or a reviewer's suggested patch applied unchanged
+still apply. Online reviewers' findings already posted are addressed at merge,
+never waited for. Dependabot PRs that only bump patch versions or a lockfile
+need no review.
 
 PRs land on `main` only through `quest land` (see the README): queue one with
 `quest merge <pr> <token> --land <sha>`, and the Land workflow runs `just check`
