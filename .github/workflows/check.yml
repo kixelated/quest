@@ -70,8 +70,8 @@ jobs:
     strategy:
       fail-fast: false
       # Hosted macOS runners can queue past the timeout, which then reports a job
-      # that never ran as failed. Pull requests rely on Release's native macOS
-      # lifecycle checks instead; main still checks the flake's macOS build.
+      # that never ran as failed. Pull requests skip macOS here and in Release;
+      # main checks the flake's macOS build, and tags check the released binaries.
       matrix:
         runner: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-14"]') }}
     runs-on: ${{ matrix.runner }}
