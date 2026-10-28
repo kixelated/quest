@@ -253,12 +253,12 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 
 fakes("claude reviews read-only with the base's instructions, then reports in the schema", async () => {
 	const s = setup("CODEX_THREAD_ID");
-	const result = await quest("--root", s.repo, "review", "--model", "opus", "--effort", "high", "--json");
+	const result = await quest("--root", s.repo, "review", "--model", "opus", "--effort", "low", "--json");
 	expect(result.code).toBe(0);
 	const round = JSON.parse(result.stdout);
 	expect(round.reviewer).toBe("claude");
 	expect(round.model).toBe("opus");
-	expect(round.effort).toBe("high");
+	expect(round.effort).toBe("low");
 	expect(round.usage).toEqual([
 		{ turn: "review", input: 101, cached: 0, output: 51 },
 		{ turn: "findings", input: 100, cached: 80, output: 7 },
@@ -267,7 +267,7 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 
 	const [status, first, second] = s.calls();
 	expect(status.argv).toEqual(["auth", "status"]);
-	expect(first.stdin).toBe("/code-review high origin/main...HEAD");
+	expect(first.stdin).toBe("/code-review low origin/main...HEAD");
 	expect(second.argv).toContain("--json-schema");
 	expect(second.argv[second.argv.indexOf("--resume") + 1]).toBe(first.argv[first.argv.indexOf("--session-id") + 1]);
 	for (const call of [first, second]) {
@@ -277,7 +277,7 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 		expect(at("--setting-sources")).toBe("");
 		expect(at("--tools")).toBe("Read,Grep,Glob,Bash,Agent");
 		expect(at("--model")).toBe("opus");
-		expect(at("--effort")).toBe("high");
+		expect(at("--effort")).toBe("low");
 		expect(at("--append-system-prompt")).toContain("BASE-ROOT rule");
 		expect(at("--append-system-prompt")).not.toContain("HEAD-ROOT rule");
 		expect(call.env.CODEX_THREAD_ID).toBeUndefined();

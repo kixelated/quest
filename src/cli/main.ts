@@ -839,7 +839,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`with ${models("default")}. --strong, for a high-stakes change, picks ${models("strong")}. ` +
 				"--model and --effort override either.\n\n" +
 				"The first round runs the reviewer's own review (`codex exec review --base`, or Claude Code's " +
-				"`/code-review high <base>...HEAD`), then resumes that session for one turn that applies the base's " +
+				"`/code-review <effort> <base>...HEAD`), then resumes that session for one turn that applies the base's " +
 				"REVIEW.md, if any, and reports the findings in one JSON schema. Later rounds on the branch resume the " +
 				"same session with the new head and --responses, the author's fixes and refutations of the last " +
 				"round's findings, required while that round reported any. A resumed session keeps the instructions it " +

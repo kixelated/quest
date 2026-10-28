@@ -722,7 +722,7 @@ quest review --strong                         # the stronger model, for a high-s
 ```
 
 The first round runs the reviewer's own review, `codex exec review --base` or
-Claude Code's `/code-review high <base>...HEAD`, then resumes that session for
+Claude Code's `/code-review <effort> <base>...HEAD`, then resumes that session for
 one turn that applies the base's `REVIEW.md`, if any, and reports the findings
 in one JSON schema. Later rounds resume the same session with the new head and
 `--responses`, the author's free-text fixes and refutations, which a round that

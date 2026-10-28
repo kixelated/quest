@@ -212,9 +212,10 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 const claude: Reviewer = {
 	status: ["claude", "auth", "status"],
 	login: "claude auth login",
+	// The command's level sets its own effort, overriding `--effort`, so it is given the same one.
 	review: (context, session) => ({
 		argv: [...claudeFlags(context), "--session-id", session],
-		stdin: `/code-review high ${context.base}...HEAD`,
+		stdin: `/code-review ${context.effort} ${context.base}...HEAD`,
 		env: claudeEnv(),
 	}),
 	resume: (context, session, prompt) => ({
