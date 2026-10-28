@@ -377,7 +377,8 @@ jobs.post(base, async (c) => {
 			throw error;
 		}
 		// A stop that came first found no hold to release, so the label goes back now.
-		if (!recorded) await landing.release(c.env, repo.id, job.target);
+		if (!recorded && (await github.releasePullRequest(repo, pull, token)))
+			await store.released(c.env.DB, created.id, token);
 	}
 	await hub(c.env, user).dispatch(user);
 	return reply(c, form, "start", created, created.created ? 201 : 200);

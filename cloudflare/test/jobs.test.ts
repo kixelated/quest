@@ -1198,14 +1198,27 @@ describe("job routes", () => {
 			return mock(input, init);
 		});
 		const response = await post("", { workflow: "merge", target: "pulls/2" });
-		expect(response.status).toBe(201);
-		const { id } = (await response.json()) as { id: string };
+		expect(response.status).toBe(403);
+		const { id } = (await db.prepare("SELECT id FROM jobs WHERE workflow='merge'").first<{ id: string }>())!;
 		expect(await state(id)).toMatchObject({ hold: "LE_1", state: "cancelled" });
 		expect(github.labels).toEqual(["quest:merge"]);
 		vi.mocked(globalThis.fetch).mockImplementation(mock);
 		await worker.scheduled(createScheduledController({ cron: landing.SWEEP_CRON }), testEnv);
 		expect(github.labels).toEqual([]);
 		expect(await state(id)).toMatchObject({ hold: null });
+	});
+
+	it("directly releases an acquired token when disconnect removed the project and job", async () => {
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (new URL(String(input)).pathname.endsWith("/issues/2/labels") && init?.method === "POST")
+				await db.prepare("DELETE FROM github_projects WHERE id=10").run();
+			return mock(input, init);
+		});
+		const response = await post("", { workflow: "merge", target: "pulls/2" });
+		expect(response.status).toBe(201);
+		const { id } = (await response.json()) as { id: string };
+		expect(await store.readJob(db, id)).toBeNull();
+		expect(github.labels).toEqual([]);
 	});
 
 	it("keeps daily output retention separate from the frequent hold sweep", async () => {
