@@ -18,20 +18,38 @@ const MARKER_SIZE = 7;
  */
 export const DRIVER =
 	"if quest help resolve >/dev/null 2>&1; " +
-	`then quest resolve %A %O %B; ` +
-	`else git merge-file -L ${LABELS.ours} -L ${LABELS.base} -L ${LABELS.theirs} %A %O %B; fi`;
+	"then quest resolve %A %O %B --marker-size=%L --ours-label=%X --base-label=%S --theirs-label=%Y; " +
+	'quest_merge_status=$?; if [ "$quest_merge_status" -le 1 ]; then exit "$quest_merge_status"; fi; fi; ' +
+	"git merge-file --marker-size=%L -L %X -L %S -L %Y %A %O %B";
+
+export interface ResolveOptions {
+	markerSize?: number;
+	oursLabel?: string;
+	baseLabel?: string;
+	theirsLabel?: string;
+}
 
 /**
  * Merge `theirs` into `ours` from their common `base`, as `git merge-file`
  * does, writing the result to `ours`. Returns how many conflicts remain.
  */
-export function resolveFile(ours: string, base: string, theirs: string): number {
+export function resolveFile(ours: string, base: string, theirs: string, options: ResolveOptions = {}): number {
+	const markerSize = options.markerSize ?? MARKER_SIZE;
+	if (!Number.isSafeInteger(markerSize) || markerSize <= 0)
+		throw new Error("marker size must be a positive safe integer");
+	const labels = {
+		ours: options.oursLabel ?? LABELS.ours,
+		base: options.baseLabel ?? LABELS.base,
+		theirs: options.theirsLabel ?? LABELS.theirs,
+	};
+	if (Object.values(labels).some((label) => /[\r\n]/.test(label)))
+		throw new Error("conflict labels must be single lines");
 	// Markers longer than any run of marker characters in the inputs cannot be mistaken for content.
 	const texts = [ours, base, theirs].map((file) => readFileSync(file, "utf8"));
 	const longest = Math.max(
 		...texts.flatMap((text) => text.split("\n").map((line) => /^([<|=>])\1*/.exec(line)?.[0].length ?? 0)),
 	);
-	const size = Math.max(MARKER_SIZE, longest + 1);
+	const size = Math.max(markerSize, longest + 1);
 
 	const merged = spawnSync(
 		"git",
@@ -41,11 +59,11 @@ export function resolveFile(ours: string, base: string, theirs: string): number 
 			"--diff3",
 			`--marker-size=${size}`,
 			"-L",
-			LABELS.ours,
+			labels.ours,
 			"-L",
-			LABELS.base,
+			labels.base,
 			"-L",
-			LABELS.theirs,
+			labels.theirs,
 			ours,
 			base,
 			theirs,
@@ -58,8 +76,8 @@ export function resolveFile(ours: string, base: string, theirs: string): number 
 		throw new Error(`git merge-file failed: ${merged.stderr.trim()}`);
 	}
 
-	const resolved = resolveLists(ours, chunks(merged.stdout, size));
-	writeFileSync(ours, render(resolved, MARKER_SIZE, diff3()));
+	const resolved = resolveLists(ours, chunks(merged.stdout, size, labels));
+	writeFileSync(ours, render(resolved, markerSize, diff3(), labels));
 	return resolved.filter((chunk) => !Array.isArray(chunk)).length;
 }
 
