@@ -124,7 +124,6 @@ fixes what it finds:
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
 - [Upstream branches](/quest/m0/kix/upstream-branches.md) - jobs publish on the enrolled repository itself, with no service forks
 - [Operator setup](/quest/m0/kix/operator-setup.md) - pilot installations and a verified test PR on kixelated/quest and moq-dev/moq
-- [Context pages](/quest/m0/kix/context-pages.md) - a job's `context` read returns every comment, review, and check of a busy PR
 - [Pick repositories](/quest/m0/kix/pick-repos.md) - after installing, the maintainer enables repositories from a list
 - [Setup PR](/quest/m0/kix/setup-pr.md) - enrolling a repository without Quest makes the App open its `quest init` pull request
 - [Job sandbox](/quest/m0/kix/sandbox/README.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
