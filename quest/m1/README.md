@@ -16,7 +16,6 @@ additional login providers. This milestone does not gate the first release.
 - [ChatGPT hosted runs](/quest/m1/chatgpt-hosted.md) - conditional on provider approval and current terms
 - [ChatGPT approval](/quest/m1/chatgpt-waitlist.md) - resolve hosted-use approval before implementation
 - [Merge-job extensions](/quest/m1/merge-jobs.md) - submodule pointers, continuing from a moved head, and webhook wakeups
-- [Live inbox](/quest/m1/inbox-polish.md) - live agent cards, active quests on the log, runner choice for every job, expiring offers
 - [Worker dev setup](/quest/m1/worker-dev.md) - per-server cookies, seeded raw output, one fake GitHub, each test run alone
 - [Merge driver tuning](/quest/m1/resolve-tuning.md) - measure `quest resolve` on moq's history and match git's markers
 - [Batched inbox reads](/quest/m1/inbox-reads.md) - a fixed number of D1 queries per project on each inbox load
