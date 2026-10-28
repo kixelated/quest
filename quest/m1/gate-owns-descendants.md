@@ -21,3 +21,32 @@ Decided 2026-10-25 (maintainer): m1, since only moq.pro's local gate adoption
 waits on it. Best-effort PID traversal does not count. If only a narrower
 contract is possible on macOS (for example, not following processes that leave
 the session), state it in the gate docs.
+
+Assessment 2026-10-27: the existing Linux `systemdScopes` backend works from an
+arbitrary checkout and preserves the command's exit status. Reuse its
+handshake and cgroup ownership; do not fall back to PID traversal or process
+groups on Linux when that backend is unavailable.
+
+Implementation waits for
+[kixelated/quest#254](https://github.com/kixelated/quest/pull/254), which changes
+the same `Scopes.run` API to accept optional protocol IO and an environment.
+After it lands, propose one shared options shape that also accepts an
+`AbortSignal` while retaining inherited streams when no protocol consumer is
+supplied. The gate needs both its nested-admission environment and cancellation
+of the owned scope, rather than forwarding only to its immediate child. Do not
+start a competing backend rewrite or add a compatibility layer before that
+dependency lands. The gate itself remains unchanged.
+
+For macOS, document the narrower supported ownership contract and test it
+explicitly. Apple's
+[XNU event definitions](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event.h)
+say fork-following `NOTE_TRACK` is unsupported since macOS 10.5, and its
+[launchd contract](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5)
+cleans up only the job's process group. A private process group is the proposed
+boundary; descendants that change group or session would be outside that
+macOS guarantee. Keep the stronger Linux cgroup guarantee and wire live
+cancellation regressions into CI on both platforms before marking this done.
+
+## Required
+
+- [Codex agents release their checkouts](/quest/m0/codex-checkouts.md) - land the shared scope IO API before extending its cancellation options
