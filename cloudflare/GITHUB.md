@@ -2,8 +2,8 @@
 
 The operator registers one public Quest App from the reviewed
 [manifest](github-app-manifest.json). Project users install that existing App;
-they do not create their own bots. OAuth login remains separate. The App's
-installation identity authors service comments and pull requests. App secrets
+they do not create their own bots. The same App's OAuth client signs users in,
+while its installation identity authors service comments and pull requests. App secrets
 and installation tokens stay inside the Worker; agents receive neither.
 
 ## Permissions and events
@@ -19,8 +19,11 @@ and installation tokens stay inside the Worker; agents receive neither.
 
 The manifest subscribes to push, issues, issue comments, pull requests, reviews,
 checks and statuses. GitHub also sends installation lifecycle and repository
-selection events automatically. No organization, administration, workflow,
-checks-write, or user permissions are requested. These installation grants
+selection events automatically. The App also requests the **Email addresses: read**
+user permission, which Better Auth needs to sign in users whose email is private.
+It grants no repository authority: the user token is used only for the sign-in
+profile and email reads, and never for repository writes. No organization,
+administration, workflow, or checks-write permissions are requested. These installation grants
 are necessarily broader than individual operations: minted tokens always name
 one repository ID and the particular permissions required. Tokens are never
 cached and are revoked after use; failed cleanup is logged without secrets and
@@ -250,7 +253,9 @@ reconcile current provider state rather than replay issue/PR payloads as facts.
 
 ## Operator setup
 
-1. Review the manifest's name, homepage, webhook URL, permissions and events.
+1. Review the manifest's name, homepage, webhook URL, callback URL, permissions
+   and events. The callback is `https://kix.quest/api/auth/callback/github`;
+   **Request user authorization (OAuth) during installation** is enabled.
    Register the public App once under the service owner's account using
    [GitHub's manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)
    or enter the same settings in GitHub. For the manifest flow, submit the JSON
@@ -263,8 +268,10 @@ reconcile current provider state rather than replay issue/PR payloads as facts.
    Put the PEM private key and high-entropy webhook secret into Workers secrets
    named `GITHUB_APP_PRIVATE_KEY` and `GITHUB_WEBHOOK_SECRET` using
    `bun run wrangler secret put NAME` from `cloudflare/`. Keep multiline PEM
-   intact. Keep the existing `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` for OAuth
-   login; they are separate credentials. Never commit conversion responses,
+   intact. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` to this same App's
+   OAuth client ID and client secret (the manifest conversion returns
+   `client_id` and `client_secret`). No separate OAuth app is used. The App ID
+   and OAuth client ID are different values. Never commit conversion responses,
    PEM keys, installation tokens or `.dev.vars`.
 3. Set `GITHUB_FORK_OWNER` to the service-controlled namespace. Fork each
    pilot upstream into it under the same repository name, disable Actions on
@@ -282,10 +289,19 @@ reconcile current provider state rather than replay issue/PR payloads as facts.
    Use GitHub's delivery/redelivery UI to retry failed deliveries. Rotate the
    private key and webhook secret through Workers secrets and the App settings.
 
+Sign-in starts at kix.quest and keeps Better Auth's persisted state and cookie
+checks. An authorization callback started by installing the App directly on
+GitHub has no sign-in state from kix.quest: its code is discarded and the
+visitor returns to the sign-in form, then completes a fresh state-bound flow.
+Installation and sign-in do not enroll a repository; the maintainer still opts
+in on `/projects` after a live authority check.
+
 For local tests, fixtures sign bodies and mock all GitHub API responses. No
 production credentials, GitHub account or installation are required.
 
 References: [installation tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation),
+[App user authorization](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app),
+[Better Auth GitHub Apps](https://better-auth.com/docs/authentication/github#setting-up-your-github-app),
 [JWTs](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app),
 [webhook validation](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries),
 [repository permissions](https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user),

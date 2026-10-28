@@ -126,7 +126,6 @@ fixes what it finds:
 - [Operator setup](/quest/m0/kix/operator-setup.md) - pilot installations and a verified test PR on kixelated/quest and moq-dev/moq
 - [Context pages](/quest/m0/kix/context-pages.md) - a job's `context` read returns every comment, review, and check of a busy PR
 - [Merge holds](/quest/m0/kix/merge-holds.md) - ended merge jobs never leave a `quest:merge` hold, through one shared hold rule
-- [App sign-in](/quest/m0/kix/app-sign-in.md) - one GitHub screen signs in and installs the App, with no separate OAuth app
 - [Pick repositories](/quest/m0/kix/pick-repos.md) - after installing, the maintainer enables repositories from a list
 - [Setup PR](/quest/m0/kix/setup-pr.md) - enrolling a repository without Quest makes the App open its `quest init` pull request
 - [Job sandbox](/quest/m0/kix/sandbox/README.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
