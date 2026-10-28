@@ -1220,29 +1220,68 @@ describe("merge jobs", () => {
 		expect(project.branches["contributor/fix"]).toBe(head);
 	});
 
-	it("refuses a merge that would revert submodules it cannot publish", async () => {
+	it("carries the head's existing submodule pointer into a merge tree", async () => {
 		const id = await merging();
 		const main = "f".repeat(40);
+		const pointer = { path: "vendor/lib", sha: "7".repeat(40) };
+		const tree = "8".repeat(40);
+		project.trees[tree] = { base: "e".repeat(40), entries: [{ ...pointer, mode: "160000", type: "commit" }] };
+		project.commits[prHead]!.tree = tree;
 		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
 		project.branches.main = main;
-		const merge = { job: id, attempt: 1, head: prHead, message: "Merge main", changes: [], merge: main };
-		const refused = await publish({ ...merge, session: "s", submodules: ["vendor/lib"], land: {} });
-		expect(refused.status).toBe(202);
-		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
-			type: "publication",
-			refused: [
-				{
-					path: "vendor/lib",
-					reason: "kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version",
-				},
-			],
+		const merged = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			message: "Merge main",
+			changes: [],
+			merge: main,
+			submodules: [pointer],
 		});
-		expect(project.branches["contributor/fix"]).toBe(prHead);
-		expect(lands()).toEqual([]);
-		// Only a merge lists them.
-		const plain = await publish({ job: id, attempt: 1, head: prHead, submodules: ["vendor/lib"], land: {} });
-		expect(await plain.json()).toEqual({ error: "Only a merge lists the submodules it cannot publish" });
+		expect(merged.status).toBe(200);
+		const { head } = (await merged.json()) as { head: string };
+		expect(project.commits[head]!.parents).toEqual([prHead, main]);
+		expect(project.trees[project.commits[head]!.tree]!.entries).toEqual([
+			{ ...pointer, mode: "160000", type: "commit" },
+		]);
+		const plain = await publish({ job: id, attempt: 1, head, submodules: [pointer], land: {} });
+		expect(await plain.json()).toEqual({ error: "Only a merge carries existing submodule pointers" });
 	});
+
+	it.each([false, true])(
+		"rejects a runner submodule pointer not already on the head (existing=%s)",
+		async (existing) => {
+			const id = await merging();
+			const main = "f".repeat(40);
+			project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+			project.branches.main = main;
+			if (existing) {
+				const tree = "8".repeat(40);
+				project.trees[tree] = {
+					base: "e".repeat(40),
+					entries: [{ path: "vendor/lib", sha: "6".repeat(40), mode: "160000", type: "commit" }],
+				};
+				project.commits[prHead]!.tree = tree;
+			}
+			const refused = await publish({
+				job: id,
+				attempt: 1,
+				head: prHead,
+				message: "Merge main",
+				changes: [],
+				merge: main,
+				submodules: [{ path: "vendor/lib", sha: "7".repeat(40) }],
+				session: "s",
+			});
+			expect(refused.status).toBe(202);
+			expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+				type: "publication",
+				blocked: "A merge can only retain the head's existing submodule pointer: vendor/lib",
+			});
+			expect(project.branches["contributor/fix"]).toBe(prHead);
+			expect(lands()).toEqual([]);
+		},
+	);
 
 	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {
 		const reason = "Pull request Auto merge is not allowed for this repository";

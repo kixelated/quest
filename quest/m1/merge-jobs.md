@@ -11,14 +11,21 @@ Decided 2026-10-24 (user) as follow-ups of
 [kixelated/quest#209](https://github.com/kixelated/quest/pull/209), ranked
 after launch:
 
-- **Submodule pointers.** #209 refuses a merge publication whose snapshot
-  skipped a submodule change, since kix builds the merge commit's tree from
-  the base and would revert the PR's pointer. Carry the PR's existing
-  pointers into the merge tree instead, which means publishing submodule
-  pointers kix avoids today.
-- **Moved heads.** A head moved by anyone but the job pauses it into a
-  decision that needs a new pick. Let the maintainer continue from the new
-  head in that decision.
-- **Webhook wakeups.** The runner's `wait` tool polls every minute for up to
-  55 minutes. Wake a waiting job from the `pull_request`, review, and check
-  webhooks kix already receives.
+Remaining work:
+
+- **Moved heads.** Let the maintainer explicitly continue from a new live PR
+  head through the existing decision and approval flow. Revalidate its exact
+  identity and head, fence the question/attempt/old head, set the selected head
+  and revision untrusted, and use normal dispatch classification. External
+  heads never enter the trusted publication ledger.
+- Preserve and safely reapply unpublished workspace changes before adopting
+  the new head; conflicts become a maintainer decision. A paused job can move
+  between runners, so the transfer mechanism is awaiting the user's choice:
+  a fenced snapshot in existing R2, or a continuation pinned to its original
+  runner with an explicit availability limitation. No pin or artifact protocol
+  is authorized by silence.
+
+This PR implements the independent submodule-pointer and webhook-wakeup portions:
+merge publication retains only pointers verified against the PR's existing head;
+runner waits reread authoritative context after scoped webhook hints and
+reconnects, with a generation guard across reading and subscribing.

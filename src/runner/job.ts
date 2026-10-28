@@ -14,7 +14,7 @@ import { OutputUploader } from "./output";
 import { resumePrompt, startPrompt, systemPrompt } from "./prompt";
 import { type Job, type Message, type Outcome, clip } from "./protocol";
 import { type Sandbox, closeSandbox, openSandbox } from "./sandbox";
-import { fingerprint, WAIT_LIMIT, waitForChange } from "./wait";
+import { Changes, fingerprint, WAIT_LIMIT, waitForChange } from "./wait";
 import { Workspace } from "./workspace";
 
 /** What an attempt needs from its runner. */
@@ -100,6 +100,12 @@ export class Attempt {
 	#delivered: Delivery | undefined;
 	/** The fingerprint of the pull request as the agent last read it, which `wait` waits to change. */
 	#seen: string | null = null;
+	#changes = new Changes();
+
+	/** A webhook or reconnect is a hint to reread authoritative context, never approval to act. */
+	wake(): void {
+		this.#changes.wake();
+	}
 	#cancelled = false;
 	/** The hub no longer counts this attempt as this runner's. */
 	#stopped = false;
@@ -145,6 +151,7 @@ export class Attempt {
 	}
 
 	#halt(): void {
+		this.wake();
 		this.#preparing.abort();
 		this.#agent?.stop();
 	}
@@ -303,8 +310,7 @@ export class Attempt {
 		const next = this.#publishing.then(async () => {
 			const workspace = this.#workspace!;
 			let snapshot = await workspace.snapshot();
-			if (snapshot.skipped.length)
-				this.ctx.log(`${this.job.id}: cannot publish submodules: ${snapshot.skipped.join(", ")}`);
+
 			const idle = () => !snapshot.changes.length && !snapshot.merge && !pull && !land;
 			if (idle()) return { head: workspace.head };
 			const send = () =>
@@ -316,8 +322,8 @@ export class Attempt {
 					...((snapshot.changes.length || snapshot.merge) && { message }),
 					changes: snapshot.changes,
 					...(snapshot.merge && { merge: snapshot.merge }),
-					// A merge would revert the submodules it cannot send, so kix refuses it on a decision.
-					...(snapshot.merge && snapshot.skipped.length && { submodules: snapshot.skipped }),
+					// kix verifies these pointers against the existing head before carrying them into the merge tree.
+					...(snapshot.merge && snapshot.submodules.length && { submodules: snapshot.submodules }),
 					...(pull && { pull }),
 					...(land && { land }),
 				});
@@ -332,6 +338,7 @@ export class Attempt {
 			}
 			if (status === 202) {
 				this.#paused = true;
+				this.wake();
 				if (body.cancel) this.#cancelled = true;
 				return null;
 			}
@@ -423,6 +430,7 @@ export class Attempt {
 									typeof args.minutes === "number" && args.minutes > 0 ? args.minutes : 30;
 								const waited = await waitForChange(() => this.ctx.context(job.id, job.attempt), {
 									since: this.#seen,
+									changes: this.#changes,
 									until: Date.now() + Math.min(minutes * 60_000, WAIT_LIMIT),
 									stopped: () => this.#closed(),
 								});
@@ -530,6 +538,7 @@ export class Attempt {
 						throw error;
 					}
 					this.#paused = true;
+					this.wake();
 					if (reply.cancel) this.#agent?.stop();
 					return "kix sent your questions to the maintainer and paused this job. End your turn now without further work; this session resumes with their answers.";
 				},

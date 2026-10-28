@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { app } from "../src/index";
 import * as landing from "../src/jobs/landing";
 import * as output from "../src/jobs/output";
+import { wake } from "../src/jobs/wake";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
 import { parse } from "../src/jobs/protocol";
@@ -1383,5 +1384,33 @@ describe("job routes", () => {
 		});
 		const listed = await app.request(`${origin}/api/runners`, { headers: { Cookie: cookie } }, testEnv);
 		expect(JSON.stringify(await listed.json())).not.toContain(token);
+	});
+});
+
+describe("merge wait webhook wakeups", () => {
+	it("wakes only the current merge attempt for the enrolled repository and matching head or PR", async () => {
+		const machine = await runner("owner", "webhooks");
+		await connected(machine, [account("main")]);
+		const id = await job(10, "owner", { workflow: "merge", target: "pulls/2", branch: "feature", revision: head });
+		await store.held(db, id, "merge-token");
+		const socket = await connect(machine.token);
+		socket.send(status(1, "main"));
+		expect(await socket.next()).toMatchObject({ type: "reply", id: 1 });
+		expect(await socket.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
+		socket.send(status(2, "main", [{ job: id, attempt: 1 }], 0));
+		await socket.next();
+		// Other repositories, installations, PRs and check heads cannot wake this job.
+		await wake(env, 99, 5, "pull_request_review", { pull_request: { number: 2 } });
+		await wake(env, 10, 99, "pull_request_review", { pull_request: { number: 2 } });
+		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 3 } });
+		await wake(env, 10, 5, "check_run", { check_run: { head_sha: commit, pull_requests: {} } });
+		await delivery("check_run", { installation: { id: 5 }, repository: { id: 10 }, check_run: { head_sha: head } });
+		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
+		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		await db.prepare("UPDATE jobs SET state='waiting' WHERE id=?").bind(id).run();
+		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
+		socket.send(status(3, "main", [], 0));
+		expect(await socket.next()).toMatchObject({ type: "reply", id: 3 });
 	});
 });

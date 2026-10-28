@@ -40,8 +40,8 @@ export interface Snapshot {
 	 */
 	merge: string | null;
 	changes: Change[];
-	/** Paths that cannot be published, such as submodules. */
-	skipped: string[];
+	/** Gitlinks in the snapshot; merge publication retains only pointers already on its head. */
+	submodules: { path: string; sha: string }[];
 }
 
 export class Workspace {
@@ -114,13 +114,13 @@ export class Workspace {
 			const diff = (await git(["diff-tree", "-r", "-z", "--no-renames", merge ?? this.#record.base, tree]))
 				.stdout;
 			const changes: Change[] = [];
-			const skipped: string[] = [];
+			const submodules: Snapshot["submodules"] = [];
 			const fields = diff.split("\0");
 			for (let i = 0; i + 1 < fields.length; i += 2) {
 				const [, mode, , blob, status] = fields[i]!.split(" ");
 				const path = fields[i + 1]!;
 				if (status === "D") changes.push({ path, content: null });
-				else if (mode === "160000") skipped.push(path);
+				else if (mode === "160000") submodules.push({ path, sha: blob! });
 				else {
 					const content = (
 						await run("git", ["-C", this.dir, "cat-file", "blob", blob!], {
@@ -136,7 +136,7 @@ export class Workspace {
 					});
 				}
 			}
-			return { tree, merge, changes, skipped };
+			return { tree, merge, changes, submodules };
 		} finally {
 			rmSync(index, { force: true });
 		}

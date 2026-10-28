@@ -24,7 +24,7 @@ import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/ru
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
 import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
-import { fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
+import { Changes, fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -362,8 +362,8 @@ describe("workspace", () => {
 		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
 		const snapshot = await workspace.snapshot();
 		expect(snapshot.merge).not.toBeNull();
-		// Relative to the merged commit, the pull request's own submodule bump is a change kix cannot send.
-		expect(snapshot.skipped).toEqual(["sub"]);
+		// Relative to the merged commit, retain the pull request's existing pointer without uploading submodule contents.
+		expect(snapshot.submodules).toEqual([{ path: "sub", sha: git(join(dir, "sub"), "rev-parse", "HEAD") }]);
 	});
 
 	posix("prepares jobs on one repository at once without racing on its clone", async () => {
@@ -498,12 +498,11 @@ describe("waiting on a pull request", () => {
 			since: fingerprint(pull("PENDING")),
 			until: 1_000_000,
 			stopped: () => null,
-			interval: 10,
 			now: () => 0,
 			pause: async (ms) => slept.push(ms),
 		});
 		expect(waited).toEqual({ changed: true, context: pull("SUCCESS") });
-		expect(slept).toEqual([10, 10]);
+		expect(slept).toEqual([1_000_000, 1_000_000]);
 		expect(fingerprint(pull("SUCCESS", 1))).not.toBe(fingerprint(pull("SUCCESS")));
 		// A new review still counts once kix's window of the latest reviews is full.
 		const full = (newest: string) => ({
@@ -518,7 +517,6 @@ describe("waiting on a pull request", () => {
 		const options = {
 			since: null,
 			until: 25,
-			interval: 10,
 			now: () => clock,
 			pause: async (ms: number) => (clock += ms),
 		};
@@ -530,6 +528,48 @@ describe("waiting on a pull request", () => {
 			stopped: "Stopped.",
 		});
 	});
+});
+
+test("a webhook arriving during the context read is not lost before subscribing", async () => {
+	const changes = new Changes();
+	let reads = 0;
+	const result = await waitForChange(
+		async () => {
+			if (reads++ === 0) {
+				changes.wake();
+				return { state: "OPEN" };
+			}
+			return { state: "CLOSED" };
+		},
+		{ since: fingerprint({ state: "OPEN" }), until: Date.now() + 60_000, stopped: () => null, changes },
+	);
+	expect(result).toEqual({ changed: true, context: { state: "CLOSED" } });
+	expect(reads).toBe(2);
+});
+
+test("a webhook wait reads only on a wake and wakes immediately when its job stops", async () => {
+	const changes = new Changes();
+	let stopped: string | null = null;
+	let reads = 0;
+	const result = waitForChange(
+		async () => {
+			reads++;
+			return { state: "OPEN" };
+		},
+		{
+			since: null,
+			until: Date.now() + 60_000,
+			stopped: () => stopped,
+			changes,
+		},
+	);
+	await vi.waitFor(() => expect(reads).toBe(1));
+	changes.wake();
+	await vi.waitFor(() => expect(reads).toBe(2));
+	stopped = "Stopped.";
+	changes.wake();
+	expect(await result).toEqual({ stopped: "Stopped." });
+	expect(reads).toBe(2);
 });
 
 describe("opencode", () => {

@@ -34,12 +34,8 @@ export type Publication = {
 	 * become a merge commit of `head` and it, relative to its files.
 	 */
 	merge: string | null;
-	/**
-	 * Submodules the merge changes relative to `merge` that the runner cannot
-	 * send, since changes carry no submodules: publishing without them would
-	 * revert them to the merged-in commit's version.
-	 */
-	submodules: string[];
+	/** Existing head pointers carried into a tree built relative to the merged-in commit. */
+	submodules: { path: string; sha: string }[];
 	pull: { title: string; body: string; draft: boolean } | null;
 	/** A merge job lands its pull request at the published head, with the merge method its instructions name. */
 	land: { method: MergeMethod | null } | null;
@@ -55,8 +51,6 @@ export function validPath(path: string) {
 }
 
 const WORKFLOWS = "Changing GitHub Actions workflows needs the workflows permission, which the App does not request";
-const SUBMODULES =
-	"kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version";
 
 /**
  * Why `workflow` may not publish `path`, or null when it may. A refusal
@@ -115,10 +109,22 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 	if (
 		!Array.isArray(submodules) ||
 		submodules.length > LIMITS.changes ||
-		!submodules.every((path) => typeof path === "string" && validPath(path))
+		!submodules.every(
+			(item) =>
+				item &&
+				typeof item.path === "string" &&
+				validPath(item.path) &&
+				typeof item.sha === "string" &&
+				/^[a-f0-9]{40}$/.test(item.sha),
+		)
 	)
 		throw new JobError("Invalid submodule paths");
-	if (submodules.length && !merge) throw new JobError("Only a merge lists the submodules it cannot publish");
+	if (submodules.length && !merge) throw new JobError("Only a merge carries existing submodule pointers");
+	if (
+		new Set([...changes.map((change) => change.path), ...submodules.map((item) => item.path)]).size !==
+		changes.length + submodules.length
+	)
+		throw new JobError("Duplicate change path");
 	const message = changes.length || merge ? text(body.message, 64 * 1024) : null;
 	if ((changes.length || merge) && !message) throw new JobError("Commit message required");
 	let land: Publication["land"] = null;
@@ -151,7 +157,7 @@ export function parsePublication(body: Record<string, unknown>): Publication {
 		message,
 		changes,
 		merge,
-		submodules: submodules as string[],
+		submodules: submodules as Publication["submodules"],
 		pull,
 		land,
 	};
@@ -235,7 +241,7 @@ async function commit(
 	if (input.merge && !(await branch.based(input.merge)))
 		throw new JobError("A merge commit may only merge in a commit its upstream base branch already holds");
 	const parent = head ?? job.revision;
-	const next = await branch.commit(parent, input.changes, input.message!, input.merge ?? undefined);
+	const next = await branch.commit(parent, input.changes, input.message!, input.merge ?? undefined, input.submodules);
 	// GitHub checks a merge commit's workflow changes against the head it updates, its first parent.
 	if (input.merge && (await branch.workflows(parent)) !== (await branch.workflows(next)))
 		throw new PublicationBlocked(`Merging changes the pull request's workflows. ${WORKFLOWS}.`);
@@ -256,7 +262,6 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 		throw new JobError("Work on a pull request updates its head and opens no pull request");
 	if (input.land && job.workflow !== "merge") throw new JobError("Only a merge job lands its pull request");
 	const refused = [
-		...input.submodules.map((path) => ({ path, reason: SUBMODULES })),
 		...input.changes.flatMap((change) => {
 			const reason = refusal(job.workflow, change.path, !!input.merge);
 			return reason ? [{ path: change.path, reason }] : [];

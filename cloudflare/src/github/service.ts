@@ -110,7 +110,13 @@ export interface Branch {
 	 * `merge`, it is a merge commit of `parent` and `merge`, and `changes` are
 	 * relative to `merge`'s files.
 	 */
-	commit(parent: string, changes: Change[], message: string, merge?: string): Promise<string>;
+	commit(
+		parent: string,
+		changes: Change[],
+		message: string,
+		merge?: string,
+		submodules?: { path: string; sha: string }[],
+	): Promise<string>;
 	/** Whether the branch this one merges into, upstream, already holds `commit`. */
 	based(commit: string): Promise<boolean>;
 	/** The tree ID of `commit`'s `.github/workflows`, or null when it has none. */
@@ -1146,12 +1152,32 @@ export class GitHubService {
 					throw error;
 				}
 			},
-			commit: async (parent, changes, message, merge) => {
+			commit: async (parent, changes, message, merge, submodules = []) => {
 				const base = await this.#api<{ tree: { sha: string } }>(
 					token,
 					`${path}/git/commits/${sha(merge ?? parent)}`,
 				);
 				const tree = [];
+				if (submodules.length) {
+					const source = await this.#api<{ tree: { sha: string } }>(
+						token,
+						`${path}/git/commits/${sha(parent)}`,
+					);
+					const existing = await this.#api<Tree>(
+						token,
+						`${path}/git/trees/${sha(source.tree.sha)}?recursive=1`,
+					);
+					if (existing.truncated)
+						throw new PublicationBlocked("The head's submodule tree is incomplete; no merge was published");
+					for (const pointer of submodules) {
+						const entry = existing.tree.find((entry) => entry.path === pointer.path);
+						if (entry?.mode !== "160000" || entry.type !== "commit" || entry.sha !== pointer.sha)
+							throw new PublicationBlocked(
+								`A merge can only retain the head's existing submodule pointer: ${pointer.path}`,
+							);
+						tree.push({ path: pointer.path, mode: "160000", type: "commit", sha: sha(entry.sha) });
+					}
+				}
 				for (const change of changes) {
 					const mode = change.mode;
 					if (change.content === null) {
