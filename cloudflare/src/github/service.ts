@@ -874,24 +874,28 @@ export class GitHubService {
 		if (!kind) throw new GitHubError("Only issue and pull request jobs have a target to read");
 		const permissions: Permissions =
 			kind === "issues" ? { issues: "read" } : { pull_requests: "read", checks: "read", statuses: "read" };
-		const comments = "comments(last: 100) { nodes { author { login } body createdAt } }";
-		// One page of review threads; a pull request's later pages are read `after` the one before.
-		const threads =
-			"reviewThreads(first: 100, after: $threads) { nodes { isResolved isOutdated path line comments(first: 50) { nodes { author { login } body createdAt } } } pageInfo { hasNextPage endCursor } }";
+		const pageInfo = "pageInfo { hasNextPage endCursor }";
+		const commentFields = "nodes { author { login } body createdAt }";
+		const comments = `comments(first: 100, after: $after) { ${commentFields} ${pageInfo} }`;
+		const reviews = `reviews(first: 50, after: $after) { nodes { author { login } state body submittedAt } ${pageInfo} }`;
+		const threads = `reviewThreads(first: 100, after: $after) { nodes { id isResolved isOutdated path line comments(first: 50) { ${commentFields} ${pageInfo} } } ${pageInfo} }`;
+		const contexts = (after: boolean) =>
+			`contexts(first: 100${after ? ", after: $after" : ""}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } ${pageInfo} }`;
 		const query =
 			kind === "issues"
 				? `issue(number: $number) { number title state body author { login } ${comments} }`
-				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments}
- reviews(last: 50) { nodes { author { login } state body submittedAt } }
- ${threads}
- commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } } } } } } }`;
+				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments} ${reviews} ${threads}
+ commits(last: 1) { nodes { commit { oid statusCheckRollup { state ${contexts(false)} } } } } }`;
+		type Connection<T> = { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 		type Comment = { author: { login: string } | null; body: string; createdAt?: string; submittedAt?: string };
+		type Review = Comment & { state: string };
 		type Thread = {
+			id: string;
 			isResolved: boolean;
 			isOutdated: boolean;
 			path: string;
 			line: number | null;
-			comments: { nodes: Comment[] };
+			comments: Connection<Comment>;
 		};
 		type Check = {
 			__typename: string;
@@ -904,6 +908,7 @@ export class GitHubService {
 			description?: string | null;
 			targetUrl?: string | null;
 		};
+		type Rollup = { state: string; contexts: Connection<Check> };
 		type Item = {
 			number: number;
 			title: string;
@@ -914,82 +919,134 @@ export class GitHubService {
 			baseRefName?: string;
 			headRefName?: string;
 			headRefOid?: string;
-			comments: { nodes: Comment[] };
-			reviews?: { nodes: (Comment & { state: string })[] };
-			reviewThreads?: { nodes: Thread[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
-			commits?: {
-				nodes: {
-					commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: Check[] } } | null };
-				}[];
-			};
+			comments: Connection<Comment>;
+			reviews?: Connection<Review>;
+			reviewThreads?: Connection<Thread>;
+			commits?: { nodes: { commit: { oid: string; statusCheckRollup: Rollup | null } }[] };
 		};
 		return this.#authorized(repo, userId, permissions, async (token) => {
-			const read = async (fields: string, after: string | null = null) => {
-				const pull = kind === "pulls";
-				const result = await this.#api<{
-					data?: { repository: { issue?: Item | null; pullRequest?: Item | null } | null };
-					errors?: unknown[];
-				}>(token, "/graphql", "POST", {
-					query: `query($owner: String!, $name: String!, $number: Int!${pull ? ", $threads: String" : ""}) { repository(owner: $owner, name: $name) { ${fields} } }`,
-					variables: {
-						owner: repo.owner,
-						name: repo.name,
-						number: number(Number(value)),
-						...(pull && { threads: after }),
-					},
+			const request = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
+				const result = await this.#api<{ data?: T; errors?: unknown[] }>(token, "/graphql", "POST", {
+					query,
+					variables,
 				});
-				const item = result.data?.repository?.[pull ? "pullRequest" : "issue"];
-				if (result.errors?.length || !item) throw new GitHubError("This issue or pull request is unavailable");
+				if (result.errors?.length || !result.data)
+					throw new GitHubError("This issue or pull request is unavailable");
+				return result.data;
+			};
+			const read = async (fields: string, after: string | null = null) => {
+				const result = await request<{ repository: { issue?: Item | null; pullRequest?: Item | null } | null }>(
+					`query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { ${fields} } }`,
+					{ owner: repo.owner, name: repo.name, number: number(Number(value)), after },
+				);
+				const item = result.repository?.[kind === "pulls" ? "pullRequest" : "issue"];
+				if (!item) throw new GitHubError("This issue or pull request is unavailable");
 				return item;
 			};
+			// Each connection owns its cursor history, including nested comments and fixed-head checks.
+			const collect = async <T>(
+				first: Connection<T> | undefined,
+				next: (after: string) => Promise<Connection<T> | undefined>,
+				name: string,
+			): Promise<T[]> => {
+				const all: T[] = [];
+				const seen = new Set<string>();
+				let page = first;
+				for (;;) {
+					if (!page) throw new GitHubError(`This target's ${name} are unavailable`);
+					all.push(...page.nodes);
+					if (!page.pageInfo.hasNextPage) return all;
+					const cursor = page.pageInfo.endCursor;
+					if (!cursor || seen.has(cursor)) throw new GitHubError(`This target's ${name} are unavailable`);
+					seen.add(cursor);
+					page = await next(cursor);
+				}
+			};
 			const item = await read(query);
-			// Every thread is read before the unresolved ones are kept: a busy pull request has more than a page.
-			const all: Thread[] = [];
-			let after: string | null = null;
-			for (let page = item.reviewThreads; page;) {
-				all.push(...page.nodes);
-				if (!page.pageInfo.hasNextPage) break;
-				if (!page.pageInfo.endCursor || page.pageInfo.endCursor === after)
-					throw new GitHubError("This pull request's review threads are unavailable");
-				after = page.pageInfo.endCursor;
-				page = (await read(`pullRequest(number: $number) { ${threads} }`, after)).reviewThreads;
-				if (!page) throw new GitHubError("This pull request's review threads are unavailable");
-			}
 			const comment = (c: Comment) => ({
 				author: c.author?.login ?? null,
 				body: c.body,
 				at: c.createdAt ?? c.submittedAt ?? null,
 			});
+			const discussion = await collect(
+				item.comments,
+				async (after) =>
+					(
+						await read(
+							`${kind === "pulls" ? "pullRequest" : "issue"}(number: $number) { ${comments} }`,
+							after,
+						)
+					).comments,
+				"comments",
+			);
 			const common = {
 				number: item.number,
 				title: item.title,
 				state: item.state,
 				author: item.author?.login ?? null,
 				body: item.body,
-				comments: item.comments.nodes.map(comment),
+				comments: discussion.map(comment),
 			};
 			if (kind === "issues") return { kind: "issue" as const, ...common };
+			const allReviews = await collect(
+				item.reviews,
+				async (after) => (await read(`pullRequest(number: $number) { ${reviews} }`, after)).reviews,
+				"reviews",
+			);
+			const allThreads = await collect(
+				item.reviewThreads,
+				async (after) => (await read(`pullRequest(number: $number) { ${threads} }`, after)).reviewThreads,
+				"review threads",
+			);
+			const unresolved = [];
+			for (const thread of allThreads.filter((t) => !t.isResolved)) {
+				const replies = await collect(
+					thread.comments,
+					async (after) => {
+						const data = await request<{ node: { comments: Connection<Comment> } | null }>(
+							`query($id: ID!, $after: String) { node(id: $id) { ... on PullRequestReviewThread { comments(first: 50, after: $after) { ${commentFields} ${pageInfo} } } } }`,
+							{ id: thread.id, after },
+						);
+						return data.node?.comments;
+					},
+					"review thread comments",
+				);
+				unresolved.push({
+					path: thread.path,
+					line: thread.line,
+					outdated: thread.isOutdated,
+					comments: replies.map(comment),
+				});
+			}
 			const head = item.commits?.nodes.at(-1)?.commit;
+			const allChecks = head?.statusCheckRollup
+				? await collect(
+						head.statusCheckRollup.contexts,
+						async (after) => {
+							const data = await request<{
+								repository: { object: { statusCheckRollup: Rollup | null } | null } | null;
+							}>(
+								`query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String) { repository(owner: $owner, name: $name) { object(oid: $oid) { ... on Commit { statusCheckRollup { ${contexts(true)} } } } } }`,
+								{ owner: repo.owner, name: repo.name, oid: head.oid, after },
+							);
+							return data.repository?.object?.statusCheckRollup?.contexts;
+						},
+						"check contexts",
+					)
+				: [];
 			return {
 				kind: "pull" as const,
 				...common,
 				draft: item.isDraft ?? false,
 				base: item.baseRefName ?? null,
 				head: { ref: item.headRefName ?? null, oid: item.headRefOid ?? null },
-				reviews: (item.reviews?.nodes ?? []).map((r) => ({ ...comment(r), state: r.state })),
+				reviews: allReviews.map((r) => ({ ...comment(r), state: r.state })),
 				// Resolved threads need nothing more; outdated ones may still need an answer.
-				threads: all
-					.filter((t) => !t.isResolved)
-					.map((t) => ({
-						path: t.path,
-						line: t.line,
-						outdated: t.isOutdated,
-						comments: t.comments.nodes.map(comment),
-					})),
+				threads: unresolved,
 				checks: {
 					commit: head?.oid ?? null,
 					state: head?.statusCheckRollup?.state ?? null,
-					runs: (head?.statusCheckRollup?.contexts.nodes ?? []).map((c) =>
+					runs: allChecks.map((c) =>
 						c.__typename === "CheckRun"
 							? { name: c.name!, state: c.conclusion ?? c.status ?? null, url: c.detailsUrl ?? null }
 							: {

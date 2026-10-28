@@ -1317,6 +1317,7 @@ describe("job context", () => {
 			owner: "upstream",
 			name: "project",
 			number: 4,
+			after: null,
 		});
 		// Only the current attempt of a known runner reads it.
 		expect((await read(id, 2)).status).toBe(409);
@@ -1382,9 +1383,117 @@ describe("job context", () => {
 		expect(
 			requests()
 				.filter((r) => r.path === "/graphql")
-				.map((r) => r.body.variables.threads),
+				.map((r) => r.body.variables.after),
 		).toEqual([null, "100", "200"]);
 	});
+
+	it("reads every page of comments, reviews, nested replies, and mixed check contexts", async () => {
+		const pull = project.pulls[0]!;
+		pull.comments = Array.from({ length: 251 }, (_, i) => ({
+			author: i ? "reader" : null,
+			body: `comment ${i}`,
+			at,
+		}));
+		pull.reviews = Array.from({ length: 151 }, (_, i) => ({
+			author: "reviewer",
+			state: "COMMENTED",
+			body: `review ${i}`,
+		}));
+		pull.threads = Array.from({ length: 101 }, (_, i) => ({
+			path: `file${i}.ts`,
+			line: i,
+			resolved: i !== 100,
+			outdated: i === 100,
+			comments: Array.from({ length: i === 100 ? 151 : 1 }, (_, j) => ({
+				author: "reviewer",
+				body: `reply ${j}`,
+				at,
+			})),
+		}));
+		pull.runs = Array.from({ length: 251 }, (_, i) => ({
+			name: `check ${i}`,
+			conclusion: "SUCCESS",
+			url: `https://ci.test/${i}`,
+			context: i % 2 === 1,
+		}));
+		const id = await running({
+			workflow: "iterate",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		const response = await read(id, 1);
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as Record<string, any>;
+		expect(body.comments).toEqual(pull.comments.map((c) => c));
+		expect(body.reviews.map((r: { body: string }) => r.body)).toEqual(pull.reviews.map((r) => r.body));
+		expect(body.threads).toEqual([
+			{ path: "file100.ts", line: 100, outdated: true, comments: pull.threads[100]!.comments },
+		]);
+		expect(body.checks.runs).toEqual(
+			pull.runs.map((r) => ({
+				name: r.name,
+				state: r.conclusion,
+				url: r.url,
+				...(r.context && { description: null }),
+			})),
+		);
+	});
+
+	it.each(["comments", "reviews", "reviewThreads", "thread comments", "checks"])(
+		"refuses missing or cycling cursors in %s",
+		async (connection) => {
+			const pull = project.pulls[0]!;
+			pull.comments = Array.from({ length: 201 }, (_, i) => ({ author: "reader", body: String(i), at }));
+			pull.reviews = Array.from({ length: 101 }, () => ({ author: "reviewer", state: "COMMENTED" }));
+			pull.threads = Array.from({ length: 201 }, (_, i) => ({
+				path: String(i),
+				line: i,
+				comments: Array.from({ length: 101 }, () => ({ author: "reviewer", body: "reply", at })),
+			}));
+			pull.runs = Array.from({ length: 201 }, (_, i) => ({
+				name: String(i),
+				conclusion: "SUCCESS",
+				url: "https://ci.test",
+			}));
+			const id = await running({
+				workflow: "iterate",
+				target: "pulls/2",
+				revision: prHead,
+				branch: "contributor/fix",
+				trusted: false,
+			});
+			for (const invalid of ["missing", "cycle"] as const) {
+				let pages = 0;
+				vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+					const response = await github(input, init);
+					if (new URL(String(input)).pathname !== "/graphql") return response;
+					const data = (await response.json()) as Record<string, any>;
+					const item = data.data?.repository?.pullRequest;
+					const page =
+						connection === "thread comments"
+							? data.data?.node?.comments
+							: connection === "checks"
+								? (data.data?.repository?.object?.statusCheckRollup?.contexts ??
+									item?.commits?.nodes[0]?.commit?.statusCheckRollup?.contexts)
+								: item?.[connection];
+					if (page) {
+						pages++;
+						page.pageInfo = {
+							hasNextPage: true,
+							endCursor: invalid === "missing" ? null : pages % 2 ? "100" : "200",
+						};
+					}
+					return Response.json(data);
+				});
+				const response = await read(id, 1);
+				expect(response.status).toBe(403);
+				expect(await response.json()).toMatchObject({ error: expect.stringContaining("unavailable") });
+				expect(pages).toBeGreaterThan(0);
+			}
+		},
+	);
 
 	it("has nothing to read for a quest's job", async () => {
 		const id = await running();
