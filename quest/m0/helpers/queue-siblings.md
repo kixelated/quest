@@ -47,7 +47,3 @@ Open (this quest decides, with a recommendation to the user):
 Whatever it picks must keep `quest check`'s rule that a finished quest leaves
 no dangling reference once all siblings land. Test it with two sibling PRs
 landing through a merge that does not run the driver.
-
-## Related
-
-- [Land only heads tested against the current base](/quest/m0/helpers/landing.md) - the same landing path

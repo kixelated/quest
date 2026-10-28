@@ -1,4 +1,4 @@
-import { branchQuest, handedBack, landed, parse, ready } from "quest/core";
+import { branchQuest, handedBack, isHoldLabel, landed, parse, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
@@ -174,7 +174,7 @@ function observed(kind: "issue" | "pull", item: Entity): Entity {
 	if (kind === "issue") return item;
 	const { body, labels, ...pull } = item as Pull & { body?: unknown; labels?: { nodes: { name: unknown }[] } };
 	const names = (labels?.nodes ?? []).map((label) => label.name);
-	const hold = names.find((name): name is string => typeof name === "string" && name.startsWith("quest:")) ?? null;
+	const hold = names.find((name): name is string => typeof name === "string" && isHoldLabel(name)) ?? null;
 	return { ...pull, handedBack: typeof body === "string" && handedBack(body), hold } as Pull;
 }
 

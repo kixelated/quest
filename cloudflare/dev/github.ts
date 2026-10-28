@@ -947,6 +947,22 @@ export function fakeGitHub(world: World) {
 			if (body.encoding !== "base64" || typeof body.content !== "string") return invalid("Invalid blob");
 			return json({ sha: blob(Buffer.from(body.content, "base64")) }, 201);
 		}
+		const treeId = tail.match(/^\/git\/trees\/([0-9a-f]{40})$/)?.[1];
+		if (treeId && method === "GET" && knownTree(treeId)) {
+			const entries = (id: string): Map<string, Record<string, any>> => {
+				const written = network.trees[id];
+				if (!written)
+					return new Map(
+						(id === treeOf(network) ? tree(network).tree : []).map((entry) => [entry.path, entry]),
+					);
+				const result = entries(written.base);
+				for (const entry of written.entries as Record<string, any>[])
+					if (entry.sha === null) result.delete(entry.path);
+					else result.set(entry.path, { ...entry, sha: entry.sha ?? blob(entry.content ?? "") });
+				return result;
+			};
+			return json({ sha: treeId, truncated: false, tree: [...entries(treeId).values()] });
+		}
 		if (tail === "/git/trees" && method === "POST") {
 			if (!knownTree(body.base_tree) || !Array.isArray(body.tree)) return invalid("Invalid tree");
 			const created: Tree = { base: body.base_tree, entries: body.tree };
