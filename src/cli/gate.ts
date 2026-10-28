@@ -7,7 +7,7 @@ import { linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, stat
 import { availableParallelism, constants, cpus, hostname, loadavg, totalmem, userInfo } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Cancellation, cancelled, follow, forwards, interrupts, requested } from "./interrupt";
+import { type Cancellation, cancelled, follow, forwards, GROUP, interrupts, requested } from "./interrupt";
 import { systemdScopes } from "./supervise";
 
 /** One admitted command: a unique id and the wall-clock time it was admitted. */
@@ -379,8 +379,7 @@ export const direct: Owner = (command, env, cancel) =>
 	new Promise((resolve, reject) => {
 		const child = spawn(command[0], command.slice(1), { env, stdio: "inherit" });
 		const stop = () => {
-			const name = requested(cancel.signal);
-			if (forwards(name)) child.kill(name);
+			if (forwards(cancel.signal)) child.kill(requested(cancel.signal));
 		};
 		const cleanup = follow(cancel, stop, () => child.kill("SIGKILL"));
 		child.once("error", (error) => {
@@ -402,11 +401,15 @@ export const scope: Owner = (command, env, cancel) =>
  * does not move to another group or session. Once the command exits, the rest of its group is
  * killed. The session has no controlling terminal: the command keeps its inherited streams, but a
  * terminal's signals reach it only through Quest, so a terminal's Ctrl-C goes to the whole group,
- * as the terminal would have sent it.
+ * as the terminal would have sent it, and Quest inside the group leaves it there (see `GROUP`).
  */
 export const group: Owner = (command, env, cancel) =>
 	new Promise((resolve, reject) => {
-		const child = spawn(command[0], command.slice(1), { env, stdio: "inherit", detached: true });
+		const child = spawn(command[0], command.slice(1), {
+			env: { ...env, [GROUP]: "1" },
+			stdio: "inherit",
+			detached: true,
+		});
 		const signal = (name: NodeJS.Signals) => {
 			try {
 				process.kill(-child.pid!, name);
@@ -416,7 +419,7 @@ export const group: Owner = (command, env, cancel) =>
 		};
 		const stop = () => {
 			const name = requested(cancel.signal);
-			if (forwards(name)) child.kill(name);
+			if (forwards(cancel.signal)) child.kill(name);
 			else signal(name);
 		};
 		const terminate = () => signal("SIGKILL");

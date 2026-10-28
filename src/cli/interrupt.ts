@@ -81,15 +81,26 @@ function foreground(): boolean {
 }
 
 /**
- * Whether to pass a signal Quest received on to its child. A terminal's Ctrl-C
- * sends SIGINT to the whole foreground process group, child included, so
- * forwarding it would deliver it twice. SIGHUP and SIGTERM may be sent to Quest
- * alone, so they always pass; so does SIGINT while Quest is in the background.
- * A SIGINT sent with `kill` to a foreground Quest alone is therefore not
- * forwarded. Windows delivers Ctrl-C to every process on the console and has
- * no signal to forward: `child.kill()` terminates the child outright.
+ * Set for a command whose session Quest's group owner leads. The owner stands in for the session's
+ * terminal and delivers a terminal's Ctrl-C to the whole group, so it already reaches the child.
  */
-export function forwards(name: NodeJS.Signals): boolean {
+export const GROUP = "QUEST_GATE_GROUP";
+
+/**
+ * Whether to pass on the signal an aborted `Cancellation.signal` asks for. An
+ * abort without a signal's name came from the caller, not a signal the child
+ * may also have received, so it always passes. A terminal's Ctrl-C sends
+ * SIGINT to the whole foreground process group, child included, so forwarding
+ * it would deliver it twice; so does Quest's group owner (see `GROUP`). SIGHUP
+ * and SIGTERM may be sent to Quest alone, so they always pass; so does SIGINT
+ * while Quest is in the background. A SIGINT sent with `kill` to a foreground
+ * Quest alone is therefore not forwarded. Windows delivers Ctrl-C to every
+ * process on the console and has no signal to forward: `child.kill()`
+ * terminates the child outright.
+ */
+export function forwards(signal: AbortSignal, env = process.env): boolean {
+	const name = signal.reason;
+	if (typeof name !== "string" || !(name in constants.signals)) return true;
 	if (process.platform === "win32") return false;
-	return name !== "SIGINT" || !foreground();
+	return name !== "SIGINT" || !(env[GROUP] === "1" || foreground());
 }

@@ -240,9 +240,8 @@ export const systemdScopes: Scopes = {
 			const stop = () => {
 				if (interrupted) return;
 				interrupted = cancelled(cancel.signal);
-				const name = requested(cancel.signal);
 				if (admitted) {
-					if (forwards(name)) child.kill(name);
+					if (forwards(cancel.signal)) child.kill(requested(cancel.signal));
 				} else admission.destroy(); // The shell reads end-of-file and never starts the command.
 			};
 			const terminate = () => {

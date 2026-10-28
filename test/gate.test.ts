@@ -541,10 +541,18 @@ describe.skipIf(process.platform === "win32")("a process group", () => {
 	});
 });
 
+test("a cancellation without a signal's name always passes, even on Windows", () => {
+	expect(forwards(AbortSignal.abort())).toBe(true);
+	expect(forwards(AbortSignal.abort(), { QUEST_GATE_GROUP: "1" })).toBe(true);
+});
+
 test.skipIf(process.platform === "win32")("only a terminal's own SIGINT is left to reach the child", () => {
 	// Signals that may be sent to Quest alone always pass.
-	expect(forwards("SIGHUP")).toBe(true);
-	expect(forwards("SIGTERM")).toBe(true);
+	expect(forwards(AbortSignal.abort("SIGHUP"))).toBe(true);
+	expect(forwards(AbortSignal.abort("SIGTERM"))).toBe(true);
+	// The group owner already delivers a Ctrl-C to everything in its group.
+	expect(forwards(AbortSignal.abort("SIGINT"), { QUEST_GATE_GROUP: "1" })).toBe(false);
+	expect(forwards(AbortSignal.abort("SIGTERM"), { QUEST_GATE_GROUP: "1" })).toBe(true);
 	// pid (comm with spaces) state ppid pgrp session tty_nr tpgid ...
 	expect(foregroundStat("42 (a ) b) S 1 42 42 34816 42 4194560")).toBe(true);
 	expect(foregroundStat("42 (a ) b) S 1 42 42 34816 77 4194560")).toBe(false);
