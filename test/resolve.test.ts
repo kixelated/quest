@@ -8,18 +8,23 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import { chunks, render, resolveLists } from "../src/core";
-import { resolveFile } from "../src/cli/resolve";
+import { type ResolveOptions, resolveFile } from "../src/cli/resolve";
 import { heal, init, uninstall } from "../src/cli/setup";
 import { tempDir } from "./fixture";
 
 /** Merge three versions with the driver; the merged text and how many conflicts remain. */
-function merge(base: string, ours: string, theirs: string): { text: string; conflicts: number } {
+function merge(
+	base: string,
+	ours: string,
+	theirs: string,
+	options: ResolveOptions = {},
+): { text: string; conflicts: number } {
 	const dir = tempDir();
 	const [o, b, t] = ["ours", "base", "theirs"].map((name) => join(dir, name));
 	writeFileSync(o, ours);
 	writeFileSync(b, base);
 	writeFileSync(t, theirs);
-	const conflicts = resolveFile(o, b, t);
+	const conflicts = resolveFile(o, b, t, options);
 	return { text: readFileSync(o, "utf8"), conflicts };
 }
 
@@ -119,6 +124,35 @@ describe("resolve", () => {
 		expect(render(chunks(text, 7), 7, false)).toBe("a\n<<<<<<< ours\nb\n=======\nd\n>>>>>>> theirs\ne\n");
 	});
 
+	test("preserves requested labels and marker length while resolving list conflicts", () => {
+		const base = quest(
+			["a", "b", "c"].map((n) => item(n)),
+			"Base plan.",
+		);
+		const ours = quest(
+			["a", "c"].map((n) => item(n)),
+			"Our plan.",
+		);
+		const theirs = quest(
+			["a", "b", "x", "c"].map((n) => item(n)),
+			"Their plan.",
+		);
+		const result = merge(base, ours, theirs, {
+			markerSize: 11,
+			oursLabel: "HEAD",
+			baseLabel: "ancestor",
+			theirsLabel: "topic's-head",
+		});
+		expect(result.conflicts).toBe(1);
+		expect(result.text).toContain("<<<<<<<<<<< HEAD\n");
+		expect(result.text).toContain(">>>>>>>>>>> topic's-head\n");
+		expect(result.text).toContain(["a", "x", "c"].map((n) => item(n)).join("\n"));
+	});
+
+	test("rejects multiline labels before a conflict could be mistaken for clean text", () => {
+		expect(() => merge("base\n", "ours\n", "theirs\n", { oursLabel: "one\ntwo" })).toThrow("single lines");
+	});
+
 	test("resolves the list and keeps markers for prose", () => {
 		const base = quest(["a", "b", "c"].map((n) => item(n)));
 		const ours = quest(
@@ -176,7 +210,7 @@ function git(dir: string, ...args: string[]): string {
 }
 
 /** A repository whose quest file has diverged on `main` and `branch`. */
-function diverged(): string {
+function diverged(prose = false): string {
 	const dir = tempDir();
 	git(dir, "init", "-q", "-b", "main");
 	git(dir, "config", "user.name", "Quest test");
@@ -187,18 +221,33 @@ function diverged(): string {
 		git(dir, "add", "-A");
 		git(dir, "commit", "-q", "-m", "edit");
 	};
-	write(quest(["a", "b", "c"].map((n) => item(n))));
+	write(
+		quest(
+			["a", "b", "c"].map((n) => item(n)),
+			prose ? "Base plan." : "Plan.",
+		),
+	);
 	git(dir, "switch", "-q", "-c", "branch");
-	write(quest(["a", "b", "x", "c"].map((n) => item(n))));
+	write(
+		quest(
+			(prose ? ["a", "b", "c"] : ["a", "b", "x", "c"]).map((n) => item(n)),
+			prose ? "Our plan." : "Plan.",
+		),
+	);
 	git(dir, "switch", "-q", "main");
-	write(quest(["a", "c"].map((n) => item(n))));
+	write(
+		quest(
+			(prose ? ["a", "b", "c"] : ["a", "c"]).map((n) => item(n)),
+			prose ? "Their plan." : "Plan.",
+		),
+	);
 	git(dir, "switch", "-q", "branch");
 	return dir;
 }
 
 /** Merge `main` into the branch with `path` as PATH. */
-function mergeMain(dir: string, path: string) {
-	return spawnSync("git", ["-C", dir, "merge", "-q", "--no-edit", "main"], {
+function mergeMain(dir: string, path: string, branch = "main") {
+	return spawnSync("git", ["-C", dir, "merge", "-q", "--no-edit", branch], {
 		encoding: "utf8",
 		env: { ...process.env, PATH: path },
 	});
@@ -234,8 +283,45 @@ describe.skipIf(process.platform === "win32")("the merge driver", () => {
 		}
 		const merged = mergeMain(dir, tools);
 		expect(merged.status).toBe(1);
-		expect(readFileSync(join(dir, "quest/README.md"), "utf8")).toContain("<<<<<<< ours\n");
+		expect(readFileSync(join(dir, "quest/README.md"), "utf8")).toContain("<<<<<<< HEAD\n");
 	});
+
+	for (const mode of ["quest", "missing", "older"] as const) {
+		test(`matches native diff3 labels and custom marker size with ${mode} quest`, () => {
+			const dir = diverged(true);
+			init(dir);
+			writeFileSync(join(dir, ".gitattributes"), "quest/** merge=quest conflict-marker-size=13\n");
+			git(dir, "config", "merge.conflictStyle", "diff3");
+			git(dir, "add", "-A");
+			git(dir, "commit", "-q", "-m", "init");
+			git(dir, "branch", "-m", "main", "their'branch");
+			// Capture git's built-in output for exactly these commits, then replay with our driver.
+			const attributes = join(dir, ".git/info/attributes");
+			writeFileSync(attributes, "quest/** merge=text\n");
+			expect(mergeMain(dir, process.env.PATH!, "their'branch").status).toBe(1);
+			const expected = readFileSync(join(dir, "quest/README.md"), "utf8");
+			git(dir, "merge", "--abort");
+			writeFileSync(attributes, "");
+			const tools = tempDir();
+			for (const tool of ["git", "sh"]) {
+				const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+				writeFileSync(join(tools, tool), `#!/bin/sh\nexec '${found}' "$@"\n`);
+				chmodSync(join(tools, tool), 0o755);
+			}
+			if (mode !== "missing") {
+				writeFileSync(
+					join(tools, "quest"),
+					mode === "older"
+						? '#!/bin/sh\nif [ "$1" = help ]; then exit 0; fi\nexit 2\n'
+						: `#!/bin/sh\nexec '${process.execPath}' --config='${bunfig}' '${bin}' "$@"\n`,
+				);
+				chmodSync(join(tools, "quest"), 0o755);
+			}
+			const result = mergeMain(dir, mode === "quest" ? `${tools}:${process.env.PATH}` : tools, "their'branch");
+			expect(result.status, result.stderr).toBe(1);
+			expect(readFileSync(join(dir, "quest/README.md"), "utf8")).toBe(expected);
+		});
+	}
 
 	test("any command registers a driver .gitattributes names, and uninstall removes it", () => {
 		const dir = diverged();
