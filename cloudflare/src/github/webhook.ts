@@ -28,6 +28,8 @@ const observed = new Set([
 	"issue_comment",
 	"pull_request",
 	"pull_request_review",
+	"pull_request_review_thread",
+	"pull_request_review_comment",
 	"check_run",
 	"check_suite",
 	"status",

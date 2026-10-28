@@ -3,7 +3,18 @@ import { positiveId } from "../github/webhook";
 import { hub } from "./routes";
 
 export async function wake(env: Env, repository: number, installation: number, event: string, payload: any) {
-	if (!["pull_request", "pull_request_review", "issue_comment", "check_run", "check_suite", "status"].includes(event))
+	if (
+		![
+			"pull_request",
+			"pull_request_review",
+			"pull_request_review_thread",
+			"pull_request_review_comment",
+			"issue_comment",
+			"check_run",
+			"check_suite",
+			"status",
+		].includes(event)
+	)
 		return;
 	const numbers = (value: unknown): unknown[] => (Array.isArray(value) ? value.map((pull) => pull?.number) : []);
 	const pulls = [

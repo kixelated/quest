@@ -1408,6 +1408,25 @@ describe("merge wait webhook wakeups", () => {
 		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
 		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
 		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		for (const [event, action] of [
+			["pull_request_review_thread", "resolved"],
+			["pull_request_review_thread", "unresolved"],
+			["pull_request_review_comment", "created"],
+			["pull_request_review_comment", "edited"],
+			["pull_request_review_comment", "deleted"],
+		]) {
+			expect(
+				(
+					await delivery(event!, {
+						installation: { id: 5 },
+						repository: { id: 10 },
+						action,
+						pull_request: { id: 201, number: 2 },
+					})
+				).status,
+			).toBe(202);
+			expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
+		}
 		await db.prepare("UPDATE jobs SET state='waiting' WHERE id=?").bind(id).run();
 		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
 		socket.send(status(3, "main", [], 0));

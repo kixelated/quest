@@ -169,7 +169,18 @@ export class Workspace {
 						],
 						{ env: identity() },
 					);
-					await run("git", ["-C", dir, "commit", "--no-edit"], { env: identity() });
+					const merging = await run("git", [
+						"-C",
+						dir,
+						"rev-parse",
+						"--verify",
+						"--quiet",
+						"MERGE_HEAD",
+					]).then(
+						() => true,
+						() => false,
+					);
+					if (merging) await run("git", ["-C", dir, "commit", "--no-edit"], { env: identity() });
 				} catch (error) {
 					if (!(await workspace.conflicts()).length) throw error;
 					// Standard unmerged index entries block publication until the resumed agent resolves them.
@@ -240,6 +251,13 @@ export class Workspace {
 	async #checkpoint(job: string, snapshot: Snapshot): Promise<{ ref: string; sha: string } | null> {
 		if (!snapshot.changes.length && !snapshot.merge && !snapshot.submodules.length) return null;
 		const local = (await run("git", ["-C", this.dir, "rev-parse", "HEAD"])).stdout.trim();
+		// published() keeps a synthetic tree base. The real published head is
+		// needed too, so merging an external descendant uses that publication
+		// as its merge base rather than replaying already-published changes.
+		if (this.#record.head) await fetch(this.#git, this.#record.head);
+		const parents = [
+			...new Set([local, this.#record.base, this.#record.head].filter((sha): sha is string => !!sha)),
+		];
 		const { stdout } = await run(
 			"git",
 			[
@@ -247,9 +265,7 @@ export class Workspace {
 				this.dir,
 				"commit-tree",
 				snapshot.tree,
-				"-p",
-				local,
-				...(local === this.#record.base ? [] : ["-p", this.#record.base]),
+				...parents.flatMap((sha) => ["-p", sha]),
 				"-m",
 				"Preserved unpublished kix workspace",
 			],
@@ -268,20 +284,22 @@ export class Workspace {
 	 */
 	async #merged(): Promise<string | null> {
 		const base = this.#record.base;
-		const listed = await run(
-			"git",
-			["-C", this.dir, "rev-list", "--merges", "--parents", "-n", "1", `${base}..HEAD`],
-			{
-				encoding: "utf8",
-			},
-		);
-		const merged = listed.stdout.trim().split(" ")[2];
-		if (!merged) return null;
-		const held = await run("git", ["-C", this.dir, "merge-base", "--is-ancestor", merged, base]).then(
-			() => true,
-			() => false,
-		);
-		return held ? null : merged;
+		const checkpoint = this.#record.reapply
+			? (await run("git", ["-C", this.dir, "rev-parse", this.#record.reapply])).stdout.trim()
+			: null;
+		const listed = await run("git", ["-C", this.dir, "rev-list", "--merges", "--parents", `${base}..HEAD`]);
+		for (const line of listed.stdout.trim().split("\n")) {
+			const [commit, , merged] = line.split(" ");
+			// The preservation commit joins local and published ancestry, but is
+			// not an agent request to merge another branch into the publication.
+			if (commit === checkpoint || !merged) continue;
+			const held = await run("git", ["-C", this.dir, "merge-base", "--is-ancestor", merged, base]).then(
+				() => true,
+				() => false,
+			);
+			if (!held) return merged;
+		}
+		return null;
 	}
 
 	/** Record that the branch now holds `snapshot` at `head`, so the next snapshot is relative to it. */

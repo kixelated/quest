@@ -418,6 +418,51 @@ describe("workspace", () => {
 			expect(snapshot.changes.map((change) => change.path)).toEqual(["old.txt", "untracked.txt"]);
 		});
 
+	for (const integrated of [false, true])
+		posix(`continues after publication without replaying published files (integrated=${integrated})`, async () => {
+			const { dir, commit } = upstream();
+			const root = tempDir();
+			const original = await Workspace.prepare(root, job(commit, { workflow: "merge", head: commit }), dir);
+			writeFileSync(join(original.dir, "old.txt"), "published version\n");
+			const snapshot = await original.snapshot();
+			writeFileSync(join(dir, "old.txt"), "published version\n");
+			git(dir, "commit", "-qam", "published checkpoint");
+			const published = git(dir, "rev-parse", "HEAD");
+			await original.published(published, snapshot);
+			writeFileSync(join(dir, "old.txt"), "external version\n");
+			git(dir, "commit", "-qam", "external change after publication");
+			const head = git(dir, "rev-parse", "HEAD");
+			if (integrated) {
+				// An agent can already have integrated the head before publication detects it.
+				git(original.dir, "fetch", "-q", "origin", head);
+				git(original.dir, "reset", "--hard", "-q", head);
+			}
+			writeFileSync(join(original.dir, "untracked.txt"), "unpublished source\n");
+			const current = await Workspace.prepare(
+				root,
+				job(head, {
+					workflow: "merge",
+					head,
+					attempt: 2,
+					questions: [
+						{
+							id: "q",
+							kind: "publication",
+							attempt: 1,
+							approvedAt: 1,
+							prompt: { continuation: { head, from: published, revision: commit } },
+							answer: { continue: head },
+						},
+					],
+				}),
+				dir,
+			);
+			expect(current.continued).toBe(true);
+			expect(await current.conflicts()).toEqual([]);
+			expect(readFileSync(join(current.dir, "old.txt"), "utf8")).toBe("external version\n");
+			expect((await current.snapshot()).changes.map((change) => change.path)).toEqual(["untracked.txt"]);
+		});
+
 	posix("leaves initialized submodule commits intact when a stale checkout needs replacement", async () => {
 		const module = upstream().dir;
 		const { dir } = upstream();
