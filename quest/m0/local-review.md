@@ -89,4 +89,5 @@ Decided 2026-10-28 (user, /quest-plan):
 
 - [Turn off Codex cloud reviews](/quest/m0/codex-cloud-off.md) - once no open PR relies on it
 - [Land only reviewed heads](/quest/m0/kix/land-review.md) - kix's merge gate reads the same record
+- [Keep a review across an identical diff](/quest/m0/helpers/review-rules.md) - an exemption that also covers the `## Review` record
 - [Donate independent agent reviews](/quest/m1/automation/review.md) - the hosted counterpart for kix jobs

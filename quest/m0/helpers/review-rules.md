@@ -1,29 +1,23 @@
-# [S] Settle the review rules that stalled merges
+# [XS] Keep a review across an identical diff
 
 ## Goal
 
-Merge agents stop asking about reviews in three recurring cases.
-
-- **Identical diff.** A head whose diff against the new base equals the
-  reviewed diff keeps that review, even after a hand-resolved merge.
-- **Declined finding.** Codex's posted review with no new findings counts
-  when the only finding it still lists is one a maintainer decision declined.
-- **Stalled review.** A review that hasn't finished after one bounded wait
-  goes to the maintainer instead of being re-requested.
+Merge agents stop waiting for a new review when a head's diff against the new
+base equals the reviewed diff. That head keeps the review, even after a
+hand-resolved merge.
 
 ## Plan
 
 Decided 2026-10-28 (user, /quest-plan of the follow-ups from a 25-PR /quest-complete run).
 
-- **Identical diff** goes in the guide's Reviews section, beside the existing
+- The rule goes in the guide's Reviews section, beside the existing
   exemptions (a conflict-free base merge, an unchanged reviewer patch). #233's
   hand-resolved merge left its diff byte-identical to the reviewed head, yet it
   still waited 45 minutes for a review. Name a check agents can run, such as
   comparing `git diff <base>...<head>` before and after the merge.
-- **Declined finding** goes in `CONTRIBUTING.md`'s review policy. Codex never
-  posts a 👍 while a declined advisory stays listed, even after its thread is
-  resolved. So #246 could never get a qualifying review after a hand-resolved
-  merge.
-- **Stalled review**: the guide already says to ask the user when a wait times
-  out. `CONTRIBUTING.md` adds that a Codex run stuck at "running" counts as
-  timed out. Agents still never request reviews; only the maintainer may.
+- It applies to whichever review the policy counts, including the
+  `## Review` record from [local review](/quest/m0/local-review.md).
+
+Decided 2026-10-28 (user, /quest-merge of #267): the declined-finding and
+stalled-review rules for Codex cloud were dropped, since local review replaces
+Codex as the required reviewer and never waits for online reviewers.
