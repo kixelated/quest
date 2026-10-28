@@ -312,8 +312,7 @@ function resolve(
 		const data = pull.data as Pull;
 		if (workflow === "merge" && data.isDraft)
 			throw new JobError("Mark the draft ready for review before merging it");
-		// Until the sandbox classifies commit authors, every PR head is untrusted
-		// and routes only to Linux runners that build its devShell in a VM.
+		// jobSource verifies every commit's provenance before creating this job.
 		return {
 			workflow,
 			target: `pulls/${pull.number}`,

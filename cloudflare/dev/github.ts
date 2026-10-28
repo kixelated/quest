@@ -51,7 +51,13 @@ export type Pull = Issue & {
 	/** A fork's head branch accepts pushes from the upstream's maintainers. */
 	maintainerCanModify?: boolean;
 };
-export type Commit = { parents: string[]; tree: string; message: string };
+export type Commit = {
+	parents: string[];
+	tree: string;
+	message: string;
+	/** GitHub's authenticated signature result, independent of author identity. */
+	signature?: { isValid: boolean; signer: { databaseId: number; login: string } | null } | null;
+};
 /** A tree written through the API: its base tree and the entries changed on it. */
 export type Tree = { base: string; entries: unknown[] };
 export type Repo = {
@@ -319,6 +325,39 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>, 
 			}),
 		);
 		return { data: { repository: objects } };
+	}
+	if (query.includes("signature {")) {
+		const pull = repo.pulls.find((p) => p.number === variables.number);
+		if (!pull) return { data: { repository: { pullRequest: null } } };
+		const base = repo.branches.main ?? commitOf(repo);
+		const ancestors = (tip: string, seen = new Set<string>()): Set<string> => {
+			if (seen.has(tip)) return seen;
+			seen.add(tip);
+			for (const parent of repo.commits[tip]?.parents ?? []) ancestors(parent, seen);
+			return seen;
+		};
+		const inherited = ancestors(base);
+		const commits = [...ancestors(headOf(repo, pull))].filter((oid) => !inherited.has(oid));
+		const start = variables.after ? Number(variables.after) : 0;
+		const end = Math.min(start + 100, commits.length);
+		return {
+			data: {
+				repository: {
+					pullRequest: {
+						state: pull.closed ? "CLOSED" : "OPEN",
+						headRefOid: headOf(repo, pull),
+						baseRefOid: base,
+						commits: {
+							totalCount: commits.length,
+							nodes: commits
+								.slice(start, end)
+								.map((oid) => ({ commit: { oid, signature: repo.commits[oid]?.signature ?? null } })),
+							pageInfo: { hasNextPage: end < commits.length, endCursor: String(end) },
+						},
+					},
+				},
+			},
+		};
 	}
 	if (query.includes("timelineItems(")) {
 		const pull = repo.pulls.find((p) => p.number === variables.number);

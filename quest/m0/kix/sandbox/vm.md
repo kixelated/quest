@@ -15,6 +15,6 @@ sandbox with no network.
   arbitrary builders, and never publish them to the
   [shared cache](/quest/m1/automation/cache.md).
 - The runner refuses untrusted jobs until this ships;
-  [trusted PR heads](/quest/m0/kix/sandbox/trust.md) route them here.
+  the trusted-head classifier routes untrusted heads here.
 - Test a PR whose flake or shellHook tries to run on the host, and one whose
   build tries to reach the network.

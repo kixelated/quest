@@ -716,7 +716,7 @@ export class GitHubService {
 	 * open at the observed head, and whether its revision has a flake for the
 	 * runner's devShell.
 	 */
-	jobSource<T extends { target: string; revision: string }>(
+	jobSource<T extends { target: string; revision: string; trusted: boolean }>(
 		repo: GitHubRepository,
 		userId: string,
 		resolve: (state: ProjectState) => T,
@@ -743,6 +743,7 @@ export class GitHubService {
 				if (live.state !== "open" || (kind === "pulls" && live.head?.sha !== job.revision))
 					throw new GitHubError("This changed on GitHub since it was read; refresh and review it again");
 			}
+			if (kind === "pulls") job.trusted = await this.#pullTrust(token, repo, Number(target), job.revision);
 			let flake = true;
 			try {
 				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
@@ -752,6 +753,92 @@ export class GitHubService {
 			}
 			return { job, enabled: enrolled === "enabled", flake };
 		});
+	}
+
+	/** Recheck a queued PR head against current signatures and repository roles. */
+	jobTrust(repo: GitHubRepository, target: string, revision: string) {
+		return this.#withRepository(repo, { contents: "read", pull_requests: "read" }, async (token, current) => {
+			this.#public(current);
+			return this.#pullTrust(token, repo, pullNumber(target), revision);
+		});
+	}
+
+	async #pullTrust(token: string, repo: GitHubRepository, pull: number, revision: string) {
+		type Signer = { databaseId: number; login: string };
+		type Commit = { oid: string; signature: { isValid: boolean; signer: Signer | null } | null };
+		type Page = {
+			state: string;
+			headRefOid: string;
+			baseRefOid: string;
+			commits: {
+				totalCount: number;
+				nodes: { commit: Commit }[];
+				pageInfo: { hasNextPage: boolean; endCursor: string | null };
+			};
+		};
+		const query = `query($owner:String!,$name:String!,$number:Int!,$after:String) {
+ repository(owner:$owner,name:$name) { pullRequest(number:$number) {
+ state headRefOid baseRefOid commits(first:100,after:$after) {
+ totalCount nodes { commit { oid signature { isValid signer { databaseId login } } } }
+ pageInfo { hasNextPage endCursor }
+ } } } }`;
+		let after: string | null = null;
+		let base: string | undefined;
+		let count: number | undefined;
+		const cursors = new Set<string>();
+		const commits = new Set<string>();
+		const maintainers = new Map<number, boolean>();
+		do {
+			const response: { data?: { repository?: { pullRequest: Page | null } }; errors?: unknown[] } =
+				await this.#api(token, "/graphql", "POST", {
+					query,
+					variables: { owner: repo.owner, name: repo.name, number: pull, after },
+				});
+			if (response.errors?.length) throw new GitHubError("Could not verify pull request commits");
+			const page: Page | null | undefined = response.data?.repository?.pullRequest;
+			if (!page || page.state !== "OPEN" || page.headRefOid !== sha(revision)) return false;
+			base ??= page.baseRefOid;
+			count ??= page.commits.totalCount;
+			if (base !== page.baseRefOid || count !== page.commits.totalCount) return false;
+			const published = new Set(
+				(
+					await this.#env.DB.prepare(
+						"SELECT sha FROM job_commits WHERE repository=? AND sha IN (SELECT value FROM json_each(?))",
+					)
+						.bind(repo.id, JSON.stringify(page.commits.nodes.map(({ commit }) => sha(commit.oid))))
+						.all<{ sha: string }>()
+				).results.map(({ sha }) => sha),
+			);
+			for (const { commit } of page.commits.nodes) {
+				if (commits.has(commit.oid)) throw new GitHubError("Repeated pull request commit");
+				commits.add(sha(commit.oid));
+				// Only confirmed publications recorded by kix count, never agent claims or author email.
+				if (published.has(commit.oid)) continue;
+				const signer = commit.signature?.isValid && commit.signature.signer;
+				if (!signer || !positiveId(signer.databaseId) || !name(signer.login)) return false;
+				if (!maintainers.has(signer.databaseId)) {
+					const permission = await this.#api<{ user: { id: number }; permission: string; role_name: string }>(
+						token,
+						`${repositoryPath(repo)}/collaborators/${signer.login}/permission`,
+					).catch((error: unknown) => {
+						if (error instanceof GitHubError && error.status === 404) return null;
+						throw error;
+					});
+					maintainers.set(
+						signer.databaseId,
+						!!permission &&
+							permission.user.id === signer.databaseId &&
+							(permission.permission === "admin" || permission.role_name === "maintain"),
+					);
+				}
+				if (!maintainers.get(signer.databaseId)) return false;
+			}
+			if (!page.commits.pageInfo.hasNextPage) break;
+			after = page.commits.pageInfo.endCursor;
+			if (!after || cursors.has(after)) throw new GitHubError("Missing or repeated pull request commit cursor");
+			cursors.add(after);
+		} while (true);
+		return commits.size > 0 && commits.size === count && commits.has(revision);
 	}
 
 	previewProject(repo: GitHubRepository, userId: string) {

@@ -90,7 +90,9 @@ target; a retry keeps both. A completed job's result may list suggested
 idea and takes the follow-ups and summary as context from the job's own
 result, never from the request, and offers them once. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
-observations read it. `iterate` and `merge` jobs are untrusted and route
+observations read it. `iterate` and `merge` jobs verify every PR commit: only a verified signature
+from a current maintainer, or a confirmed publication recorded by kix, is
+trusted. The check runs at creation and again at assignment. Other heads route
 only to Linux runners that declare VM builds. A `merge` job runs the merge
 skill's loop on an open, non-draft pull request and lands it; it holds the PR
 with the `quest:merge` label that local `quest merge` sessions share

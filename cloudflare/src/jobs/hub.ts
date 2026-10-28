@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { GitHubService } from "../github/service";
 import * as push from "../push/notify";
 import * as landing from "./landing";
 import * as output from "./output";
@@ -121,7 +122,25 @@ export class RunnerHub extends DurableObject<Env> {
 			const reported = (ws.deserializeAttachment() as Attachment).slots;
 			if (reported !== null) slots.set(runner, reported);
 		}
-		const { assign, cancel, ended, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
+		const github = new GitHubService(this.env);
+		const { assign, cancel, ended, wake } = await store.dispatch(
+			this.env.DB,
+			owner,
+			slots,
+			Date.now(),
+			async (job) => {
+				const repo = await this.env.DB.prepare("SELECT id,owner,name FROM github_projects WHERE id=?")
+					.bind(job.repository)
+					.first<{ id: number; owner: string; name: string }>();
+				if (!repo) return false;
+				try {
+					return await github.jobTrust(repo, job.target, job.head ?? job.revision);
+				} catch {
+					// No current proof means no trusted execution, including during a GitHub outage.
+					return false;
+				}
+			},
+		);
 		for (const { runner, job } of assign) {
 			const message = { type: "assign", job, instructions: instructions(job.workflow) };
 			connections.get(runner)?.send(JSON.stringify(message));

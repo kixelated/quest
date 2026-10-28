@@ -70,6 +70,7 @@ export async function maintainerOf() {
 	const github = {
 		flake: true,
 		pullFlake: true,
+		signature: null as { isValid: boolean; signer: { databaseId: number; login: string } | null } | null,
 		role: "maintain" as string | null,
 		issue: "open",
 		pull: "open",
@@ -116,6 +117,23 @@ export async function maintainerOf() {
 				app_id: 123,
 				suspended_at: null,
 				permissions: { metadata: "read", contents: "write", issues: "write", pull_requests: "write" },
+			});
+		if (path === "/graphql" && String(init?.body).includes("signature {"))
+			return Response.json({
+				data: {
+					repository: {
+						pullRequest: {
+							state: github.pull.toUpperCase(),
+							headRefOid: github.head,
+							baseRefOid: commit,
+							commits: {
+								totalCount: 1,
+								nodes: [{ commit: { oid: github.head, signature: github.signature } }],
+								pageInfo: { hasNextPage: false, endCursor: null },
+							},
+						},
+					},
+				},
 			});
 		if (path === "/graphql" && String(init?.body).includes("timelineItems")) {
 			return Response.json({

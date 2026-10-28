@@ -310,7 +310,15 @@ export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner
  * claim commits. Until acknowledged, an assignment holds one of the runner's
  * reported free slots, which it could not count yet.
  */
-export async function dispatch(db: D1Database, owner: string, slots: Map<string, number>, now: number) {
+export async function dispatch(
+	db: D1Database,
+	owner: string,
+	slots: Map<string, number>,
+	now: number,
+	verify: (
+		job: Pick<Job, "repository" | "target" | "revision" | "head" | "trusted">,
+	) => Promise<boolean> = async () => false,
+) {
 	const connected = JSON.stringify([...slots.keys()]);
 	const [, , cancelled, , candidates, offers, cancels, pending] = await db.batch([
 		db
@@ -364,9 +372,19 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		if (free.has(runner)) free.set(runner, free.get(runner)! - n);
 	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
 	const accounts = offers!.results as Row[];
+	const verified = new Set<string>();
+	const revoked: (Attempt & { runner: string })[] = [];
 	// Every queued job is considered, so unroutable older ones cannot starve newer ones.
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
+		if (onPull(job.workflow)) {
+			job.trusted = (await verify(job)) ? 1 : 0;
+			verified.add(job.id);
+			await db
+				.prepare("UPDATE jobs SET trusted=? WHERE id=? AND state='queued' AND attempt=? AND head IS ?")
+				.bind(job.trusted, job.id, job.attempt, job.head)
+				.run();
+		}
 		const chosen = route(
 			job,
 			accounts.map((o) => ({ ...o, free: (free.get(o.runner) ?? 0) > 0, limited: !!o.limited })),
@@ -376,9 +394,19 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 			db
 				.prepare(
 					`UPDATE jobs SET state='running',attempt=attempt+1,runner=?,account=?,session=CASE WHEN runner=? AND account=? THEN session END,lease=NULL,delivered=0,updatedAt=?
- WHERE id=? AND attempt=? AND cancel=0 AND state='queued' AND EXISTS(SELECT 1 FROM github_projects WHERE id=jobs.repository AND state='enabled')`,
+ WHERE id=? AND attempt=? AND head IS ? AND trusted=? AND cancel=0 AND state='queued' AND EXISTS(SELECT 1 FROM github_projects WHERE id=jobs.repository AND state='enabled')`,
 				)
-				.bind(chosen.runner, chosen.account, chosen.runner, chosen.account, now, job.id, job.attempt),
+				.bind(
+					chosen.runner,
+					chosen.account,
+					chosen.runner,
+					chosen.account,
+					now,
+					job.id,
+					job.attempt,
+					job.head,
+					job.trusted,
+				),
 			// changes() is the update above, so only the pass that moved the job records it.
 			db
 				.prepare(
@@ -400,7 +428,25 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 	const assign: { runner: string; job: Claimed }[] = [];
 	for (const { id, runner, ...project } of undelivered.results) {
 		const job = await readJob(db, id);
-		if (job) assign.push({ runner, job: { ...job, ...project } });
+		if (!job || job.state !== "running" || job.cancel) continue;
+		if (onPull(job.workflow) && !verified.has(job.id)) {
+			const trusted = (await verify(job)) ? 1 : 0;
+			const machine = accounts.find((offer) => offer.runner === runner);
+			const eligible = trusted || (machine?.platform === "linux" && machine.vm);
+			const update = await db
+				.prepare(
+					"UPDATE jobs SET trusted=?,state=? WHERE id=? AND attempt=? AND head IS ? AND cancel=0 AND state='running' AND delivered=0",
+				)
+				.bind(trusted, eligible ? "running" : "queued", job.id, job.attempt, job.head)
+				.run();
+			if (update.meta.changes !== 1) continue;
+			if (!eligible) {
+				revoked.push({ runner, job: job.id, attempt: job.attempt });
+				continue;
+			}
+			job.trusted = trusted;
+		}
+		assign.push({ runner, job: { ...job, ...project } });
 	}
 	const wake = await db
 		.prepare("SELECT MIN(lease) AS at FROM jobs WHERE actor=? AND state='running' AND lease IS NOT NULL")
@@ -408,9 +454,9 @@ export async function dispatch(db: D1Database, owner: string, slots: Map<string,
 		.first<{ at: number | null }>();
 	return {
 		assign,
-		cancel: cancels!.results as (Attempt & { runner: string })[],
+		cancel: [...(cancels!.results as (Attempt & { runner: string })[]), ...revoked],
 		ended: ended(cancelled!),
-		wake: wake?.at ?? null,
+		wake: revoked.length ? now : (wake?.at ?? null),
 	};
 }
 
@@ -578,12 +624,18 @@ export async function publishing(db: D1Database, runner: Runner, job: string, at
 
 /** Record a pending commit that the branch shows landed after all. */
 export async function adopt(db: D1Database, job: string, head: string | null, pending: string, now: number) {
-	await db
-		.prepare(
-			"UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND head IS ? AND pending=?",
-		)
-		.bind(now, job, head, pending)
-		.run();
+	await db.batch([
+		db
+			.prepare(
+				"INSERT OR IGNORE INTO job_commits(repository,sha,job) SELECT repository,pending,id FROM jobs WHERE id=? AND head IS ? AND pending=?",
+			)
+			.bind(job, head, pending),
+		db
+			.prepare(
+				"UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND head IS ? AND pending=?",
+			)
+			.bind(now, job, head, pending),
+	]);
 }
 
 /**
@@ -612,14 +664,24 @@ export async function claim(
 
 /** Record whether the reserved branch update landed. The branch's head follows it either way. */
 export async function settle(db: D1Database, job: string, commit: string, landed: boolean, now: number) {
-	await db
-		.prepare(
-			landed
-				? "UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?"
-				: "UPDATE jobs SET pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?",
-		)
-		.bind(now, job, commit)
-		.run();
+	await db.batch([
+		...(landed
+			? [
+					db
+						.prepare(
+							"INSERT OR IGNORE INTO job_commits(repository,sha,job) SELECT repository,pending,id FROM jobs WHERE id=? AND pending=?",
+						)
+						.bind(job, commit),
+				]
+			: []),
+		db
+			.prepare(
+				landed
+					? "UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?"
+					: "UPDATE jobs SET pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?",
+			)
+			.bind(now, job, commit),
+	]);
 }
 
 /**
