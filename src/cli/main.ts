@@ -839,8 +839,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"`/code-review high <base>...HEAD`), then resumes that session for one turn that applies the base's " +
 				"REVIEW.md, if any, and reports the findings in one JSON schema. Later rounds on the branch resume the " +
 				"same session with the new head and --responses, the author's fixes and refutations of the last " +
-				"round's findings, required while that round reported any. --new starts a new session. The session is " +
-				"kept per branch in the clone's common Git directory, so any worktree of the clone resumes it.\n\n" +
+				"round's findings, required while that round reported any. A resumed session keeps the instructions it " +
+				"started with, so when the applicable AGENTS.md or CLAUDE.md files change, the round starts a new " +
+				"session that still weighs --responses. --new starts a new session. The session is kept per branch in the clone's common Git directory, so any worktree of the clone resumes it.\n\n" +
 				"The reviewer is read-only: Codex in its read-only sandbox without execpolicy rules, Claude Code with " +
 				"no settings files, only read tools, and the Bash commands it judges read-only. It follows the base's AGENTS.md and CLAUDE.md, from the root and " +
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +

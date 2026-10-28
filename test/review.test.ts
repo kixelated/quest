@@ -324,26 +324,44 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain("round 1\n");
 });
 
-fakes("a later round restates instructions the base changed and revokes rules it removed", async () => {
+fakes("a later round revokes REVIEW.md rules the base removed", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ findings: [] }));
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	const base = moveBase(s.repo, (dir) => git(dir, "rm", "-q", "REVIEW.md"));
 
-	// The base moves: new rules for src/, and no REVIEW.md.
-	const base = join(s.repo, "..", "base");
-	git(s.repo, "worktree", "add", "-q", base, "origin/main");
-	write(base, "src/AGENTS.md", "BASE-SRC new rule\n");
-	git(base, "rm", "-q", "REVIEW.md");
-	git(base, "commit", "-qam", "move the base");
-	git(base, "push", "-q", "origin", "HEAD:main");
-
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	expect((await quest("--root", s.repo, "review")).stdout).toContain(`round 2\nbase ${base}`);
 	const prompt = s.calls().at(-1)!.stdin;
-	expect(prompt).toContain("differ from those you were given");
-	expect(prompt).toContain("BASE-SRC new rule");
 	expect(prompt).toContain("no longer has a REVIEW.md");
 	expect(prompt).not.toContain("BASE-REVIEW rule");
 });
+
+fakes("a change to the applicable instructions starts a new session that weighs the responses", async () => {
+	const s = setup();
+	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	moveBase(s.repo, (dir) => write(dir, "src/AGENTS.md", "BASE-SRC new rule\n"));
+
+	const responses = join(s.repo, ".tmp", "responses.md");
+	write(s.repo, ".tmp/responses.md", "Refuted: see src/lib.ts:1.\n");
+	const round = await quest("--root", s.repo, "review", "--responses", responses);
+	expect(round.code).toBe(0);
+	expect(round.stdout).toContain("round 1\n");
+	const [review, followUp] = s.calls().slice(-2);
+	expect(review.argv[1]).toBe("review");
+	expect(review.argv.find((arg) => arg.startsWith("developer_instructions="))).toContain("BASE-SRC new rule");
+	expect(followUp.stdin).toContain("Refuted: see src/lib.ts:1.");
+});
+
+/** Push a commit that `change` makes to origin's main, returning its SHA. */
+function moveBase(repo: string, change: (dir: string) => void): string {
+	const base = join(repo, "..", "base");
+	git(repo, "worktree", "add", "-q", base, "origin/main");
+	change(base);
+	git(base, "add", "-A");
+	git(base, "commit", "-qm", "move the base");
+	git(base, "push", "-q", "origin", "HEAD:main");
+	return git(base, "rev-parse", "HEAD");
+}
 
 fakes("a reply that does not match the schema fails rather than reads as clean", async () => {
 	const s = setup();

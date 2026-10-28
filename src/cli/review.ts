@@ -129,9 +129,9 @@ interface State {
 	model: string | null;
 	rounds: { head: string; findings: number }[];
 	/**
-	 * Digests of the instruction files and REVIEW.md the session was last given.
-	 * A resumed session keeps its first system or developer instructions, so a
-	 * later round restates what changed in its prompt.
+	 * Digests of the instruction files the session started with, and the
+	 * REVIEW.md it was last given. A resumed session keeps its first system or
+	 * developer instructions, so a change to the files starts a new session.
 	 */
 	given: { instructions: string; rules: string | null };
 }
@@ -522,11 +522,26 @@ function rulesParts(rules: Rules | null, first: boolean): string[] {
 	];
 }
 
-/** The first round's follow-up: apply the base's REVIEW.md, if any, and report in the schema. */
-export function firstPrompt(head: string, rules: Rules | null): string {
+/** The author's responses to an earlier round, and how a refutation stands. */
+function responseParts(responses: string | undefined): string[] {
+	if (responses === undefined) return [];
+	return [
+		`The author responded to the findings of an earlier review:\n\n<responses>\n${responses}\n</responses>`,
+		"Verify each response. A fix holds only if the head fixes the problem. A refutation holds only when it " +
+			"cites evidence you can check and cannot rebut: a `path:line`, a command's output, or a recorded maintainer " +
+			"decision. An uncited refutation is a claim to verify; keep its finding unless you verify the claim yourself.",
+	];
+}
+
+/**
+ * A session's follow-up turn: apply the base's REVIEW.md, if any, weigh any
+ * responses to an earlier session's findings, and report in the schema.
+ */
+export function firstPrompt(head: string, rules: Rules | null, responses?: string): string {
 	return [
 		`Report your review as JSON matching the response schema: every finding that holds at the head ${head}.`,
 		...rulesParts(rules, true),
+		...responseParts(responses),
 		REPORT,
 	].join("\n\n");
 }
@@ -537,8 +552,6 @@ export interface LaterRound {
 	previous: string;
 	head: string;
 	responses?: string;
-	/** The instructions prompt, when the applicable instruction files changed since the session was last given them. */
-	instructions?: string;
 	rules: Rules | null;
 	/** The session was given REVIEW.md rules the base no longer has. */
 	rulesRemoved: boolean;
@@ -551,23 +564,10 @@ export function laterPrompt(round: LaterRound): string {
 		`The branch is now at ${head}; your last review covered ${round.previous}. ` +
 			`Review the change ${round.base}...HEAD again.`,
 	];
-	if (round.instructions !== undefined) {
-		parts.push(
-			`The agent instructions that apply to this change differ from those you were given; these replace them:\n\n${round.instructions}`,
-		);
-	}
 	if (round.rulesRemoved && round.rules === null) {
 		parts.push("The base no longer has a REVIEW.md, so the review rules you were given no longer apply.");
 	}
-	parts.push(...rulesParts(round.rules, false));
-	if (responses !== undefined) {
-		parts.push(
-			`The author responded to your last findings:\n\n<responses>\n${responses}\n</responses>`,
-			"Verify each response. A fix holds only if the new head fixes the problem. A refutation holds only when it " +
-				"cites evidence you can check and cannot rebut: a `path:line`, a command's output, or a recorded maintainer " +
-				"decision. An uncited refutation is a claim to verify; keep its finding unless you verify the claim yourself.",
-		);
-	}
+	parts.push(...rulesParts(round.rules, false), ...responseParts(responses));
 	parts.push(
 		`Report as JSON matching the response schema every finding that holds at ${head}, including any the new changes introduce.`,
 		REPORT,
@@ -703,23 +703,25 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	let session: string;
 	let model = state?.model ?? null;
 	let reply: Reply;
-	if (state === undefined || previous === undefined) {
+	// A resumed session would keep instructions the base or the change has since replaced.
+	const resume = previous !== undefined && state?.given.instructions === given.instructions;
+	if (!resume) {
 		const first = await turn(reviewer, reviewer.review(context, randomUUID()), root, env);
 		if (first.session === undefined) throw new Error(`${harness} did not report its session`);
 		session = first.session;
 		model = first.model ?? model;
 		if (reported(first.usage)) usage.push({ turn: "review", ...first.usage });
-		reply = await turn(reviewer, reviewer.resume(context, session, firstPrompt(head, rules)), root, env);
+		const prompt = firstPrompt(head, rules, options.responses);
+		reply = await turn(reviewer, reviewer.resume(context, session, prompt), root, env);
 	} else {
-		session = state.session;
+		session = state!.session;
 		const prompt = laterPrompt({
 			base: baseRef,
-			previous: previous.head,
+			previous: previous!.head,
 			head,
 			responses: options.responses,
-			instructions: state.given.instructions === given.instructions ? undefined : context.instructions,
 			rules,
-			rulesRemoved: state.given.rules !== null,
+			rulesRemoved: state!.given.rules !== null,
 		});
 		reply = await turn(reviewer, reviewer.resume(context, session, prompt), root, env);
 	}
@@ -728,7 +730,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	if (model === null && harness === "codex") model = codexModel(deps.codexHome, session, [started, deps.now()]);
 	const found = findings(reply);
 
-	const rounds = [...(state?.rounds ?? []), { head, findings: found.length }];
+	const rounds = [...(resume ? state!.rounds : []), { head, findings: found.length }];
 	save(statePath, { branch, reviewer: harness, session, model, rounds, given } satisfies State);
 	return {
 		reviewer: harness,

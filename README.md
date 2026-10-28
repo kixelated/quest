@@ -723,7 +723,9 @@ one turn that applies the base's `REVIEW.md`, if any, and reports the findings
 in one JSON schema. Later rounds resume the same session with the new head and
 `--responses`, the author's free-text fixes and refutations, which a round that
 reported findings requires. A refutation stands only when it cites evidence the
-reviewer can check. Resuming keeps the reviewer's prompt cache; Claude Code is
+reviewer can check. A resumed session keeps the instructions it started with,
+so a round whose applicable `AGENTS.md` or `CLAUDE.md` files changed starts a
+new session instead, which still weighs the responses. Resuming keeps the reviewer's prompt cache; Claude Code is
 asked for its 1-hour cache. The session is kept per branch in the clone's
 common Git directory, so any worktree of the clone resumes it; `--new` starts
 over.
