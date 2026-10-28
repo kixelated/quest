@@ -166,7 +166,7 @@ Fix each finding or refute it, then review the new head with your responses, unt
 A refutation stands only when it cites evidence the reviewer cannot rebut: a `path:line`, a command's output, or a recorded maintainer decision.
 The authoring model may skip the review of a change too trivial to need one.
 
-The PR body's `## Review` section records the latest round: the reviewer harness and model, the reviewed head SHA, and each finding's disposition (fixed, or refuted with the reason), or the skip and its reason.
+The PR body's `## Review` section records the latest round: the reviewer harness, model, and effort, the reviewed head SHA, and each finding's disposition (fixed, or refuted with the reason), or the skip and its reason.
 Rewrite it after each round.
 A review counts for the head whose SHA it names.
 

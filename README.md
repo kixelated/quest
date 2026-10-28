@@ -708,13 +708,17 @@ command waits as long as the host stays busy.
 branch before it is pushed for review: Codex when run from Claude Code, and
 Claude Code when run from Codex. `--harness` names the reviewer instead; an
 unknown harness, or a missing or logged-out CLI, is an error rather than a
-same-model review. The reviewer uses its CLI's own login, config, model, and
-effort, with `--model` and `--effort` passed through.
+same-model review. The reviewer uses its CLI's own login and config, with a
+pinned model and effort: a default tier for routine work and, with `--strong`, a
+stronger one for a high-stakes change such as security, a wire format or public
+API, or a risk of data loss. `quest review --help` lists them; `--model` and
+`--effort` override either.
 
 ```sh
 quest review                                  # round 1 against origin's default branch
 quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
 quest review --base origin/release --new      # a new session against another base
+quest review --strong                         # the stronger model, for a high-stakes change
 ```
 
 The first round runs the reviewer's own review, `codex exec review --base` or
@@ -725,23 +729,23 @@ in one JSON schema. Later rounds resume the same session with the new head and
 reported findings requires. A refutation stands only when it cites evidence the
 reviewer can check. A resumed session keeps the instructions it started with,
 so a round whose applicable `AGENTS.md` or `CLAUDE.md` files changed starts a
-new session instead, which still weighs the responses. Resuming keeps the reviewer's prompt cache; Claude Code is
-asked for its 1-hour cache. The session is kept per branch in the clone's
+new session instead, which still weighs the responses. Resuming keeps the
+reviewer's prompt cache; Claude Code is asked for its 1-hour cache, and Codex
+keeps its default. The session is kept per branch in the clone's
 common Git directory, so any worktree of the clone resumes it; `--new` starts
 over.
 
 The reviewer is read-only: Codex in its `read-only` sandbox, ignoring
 execpolicy rules, and Claude Code with only read tools and the Bash commands it
 judges read-only, in `dontAsk` mode. Claude Code loads no settings files, so no
-allow rule, even the user's own, widens that; pass `--model` and `--effort` to
-override its defaults. The base is fetched first, since the sandbox has no
-network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
+allow rule, even the user's own, widens that. The base is fetched first, since
+the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,
 given every round, and chooses the review's stance, such as adversarial.
 
-It prints the reviewer and model, session, round, base, head, a `usage` line
-per turn (input tokens, the part read from the prompt cache, and output), the
+It prints the reviewer, model, and effort, session, round, base, head, a
+`usage` line per turn (input tokens, the part read from the prompt cache, and output), the
 finding count, then each finding as severity, `path:line`, and title over its
 indented body. `--json` prints the same as one object. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout or CLI that

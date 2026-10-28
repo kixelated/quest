@@ -55,7 +55,6 @@ if (argv.includes("--session-id")) {
 `,
 	codex: `
 const fs = require("node:fs");
-const path = require("node:path");
 const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|FAKE_HOST)/.test(k)));
@@ -68,12 +67,6 @@ if (argv[1] === "review") {
 	event({ type: "thread.started", thread_id: "thread-1" });
 	message("Found an off-by-one.");
 	event({ type: "turn.completed", usage: zero });
-	const now = new Date();
-	const day = [String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")];
-	const dir = path.join(process.env.CODEX_HOME, "sessions", ...day);
-	fs.mkdirSync(dir, { recursive: true });
-	fs.writeFileSync(path.join(dir, "rollout-2026-01-01T00-00-00-thread-1.jsonl"),
-		JSON.stringify({ type: "session_meta", payload: {} }) + "\\n" + JSON.stringify({ type: "turn_context", payload: { model: "gpt-fake" } }) + "\\n");
 } else {
 	event({ type: "thread.started", thread_id: argv[argv.length - 2] });
 	message("Checking the findings.");
@@ -134,7 +127,6 @@ function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECODE"): Se
 	const log = join(dir, "calls.log");
 	vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
 	vi.stubEnv("FAKE_LOG", log);
-	vi.stubEnv("CODEX_HOME", join(dir, "codex"));
 	vi.stubEnv("CLAUDECODE", undefined);
 	vi.stubEnv("CODEX_THREAD_ID", undefined);
 	if (host === "CLAUDECODE") vi.stubEnv("CLAUDECODE", "1");
@@ -220,7 +212,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	const base = git(s.repo, "rev-parse", "origin/main");
 	expect(result.stdout).toBe(
 		[
-			"reviewer codex gpt-fake",
+			"reviewer codex gpt-6.1-sol medium",
 			"session thread-1",
 			"round 1",
 			`base ${base} origin/main`,
@@ -242,6 +234,8 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 		expect(call.argv).toContain('sandbox_mode="read-only"');
 		expect(call.argv).toContain("project_doc_max_bytes=0");
 		expect(call.argv).toContain("--ignore-rules");
+		expect(call.argv[call.argv.indexOf("-m") + 1]).toBe("gpt-6.1-sol");
+		expect(call.argv).toContain('model_reasoning_effort="medium"');
 		expect(call.argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");
 		// The session's own variables never reach the reviewer.
 		expect(call.env.CLAUDECODE).toBeUndefined();
@@ -264,6 +258,7 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	const round = JSON.parse(result.stdout);
 	expect(round.reviewer).toBe("claude");
 	expect(round.model).toBe("opus");
+	expect(round.effort).toBe("high");
 	expect(round.usage).toEqual([
 		{ turn: "review", input: 101, cached: 0, output: 51 },
 		{ turn: "findings", input: 100, cached: 80, output: 7 },
@@ -288,6 +283,21 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 		expect(call.env.CODEX_THREAD_ID).toBeUndefined();
 		expect(call.env.CLAUDE_CODE_PROMPT_CACHE_TTL).toBe("1h");
 	}
+});
+
+fakes("--strong picks each reviewer's stronger model, which --model cannot also name", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ findings: [] }));
+	expect((await quest("--root", s.repo, "review", "--strong")).stdout).toContain(
+		"reviewer codex gpt-6-astra medium\n",
+	);
+	const claude = await quest("--root", s.repo, "review", "--harness", "claude", "--strong", "--new");
+	expect(claude.stdout).toContain("reviewer claude claude-fable-5-1 medium\n");
+	expect(s.calls().at(-1)!.argv).toContain("claude-fable-5-1");
+
+	const both = await quest("--root", s.repo, "review", "--strong", "--model", "opus");
+	expect(both.code).toBe(2);
+	expect(both.stderr).toContain("cannot be used with");
 });
 
 fakes("a later round resumes the session with the new head and the author's responses", async () => {

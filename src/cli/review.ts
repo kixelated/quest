@@ -7,8 +7,7 @@
 // prompt cache, and a finding the author refuted with evidence does not recur.
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import { type HarnessName, LINE_LIMIT, boundedLines, strippedEnvironment } from "./agent";
@@ -19,6 +18,22 @@ import { save } from "./worktree";
 export class ReviewInputError extends Error {}
 
 export const SEVERITIES = ["high", "medium", "low"] as const;
+
+/**
+ * Each reviewer's model and effort: `default` for routine work, and `strong`
+ * for a high-stakes change such as security, a wire format or public API, or a
+ * risk of data loss. `--model` and `--effort` override either.
+ */
+export const MODELS = {
+	claude: {
+		default: { model: "claude-opus-5-5", effort: "medium" },
+		strong: { model: "claude-fable-5-1", effort: "medium" },
+	},
+	codex: {
+		default: { model: "gpt-6.1-sol", effort: "medium" },
+		strong: { model: "gpt-6-astra", effort: "medium" },
+	},
+} as const satisfies Record<HarnessName, Record<"default" | "strong", { model: string; effort: string }>>;
 
 export interface Finding {
 	/** Repository-relative path. */
@@ -42,8 +57,8 @@ export interface Usage {
 /** One finished round, as `quest review` prints it. */
 export interface Round {
 	reviewer: HarnessName;
-	/** The model that reviewed, when the CLI reports it. */
-	model: string | null;
+	model: string;
+	effort: string;
 	session: string;
 	/** 1 for the session's first round. */
 	round: number;
@@ -100,6 +115,8 @@ export interface ReviewOptions {
 	base?: string;
 	/** The reviewer; defaults to the harness this command is not running under. */
 	harness?: HarnessName;
+	/** Review with the reviewer's `strong` tier in `MODELS`. */
+	strong?: boolean;
 	model?: string;
 	effort?: string;
 	/** The author's fixes and refutations of the last round's findings. */
@@ -110,23 +127,15 @@ export interface ReviewOptions {
 
 export interface ReviewDependencies {
 	env: NodeJS.ProcessEnv;
-	/** Codex's state, where its rollouts name the model; normally `$CODEX_HOME` or `~/.codex`. */
-	codexHome: string;
-	now(): Date;
 }
 
-export const processDependencies = (): ReviewDependencies => ({
-	env: process.env,
-	codexHome: process.env.CODEX_HOME ?? join(homedir(), ".codex"),
-	now: () => new Date(),
-});
+export const processDependencies = (): ReviewDependencies => ({ env: process.env });
 
 /** A branch's review session, kept in the clone's common Git directory so every worktree resumes it. */
 interface State {
 	branch: string;
 	reviewer: HarnessName;
 	session: string;
-	model: string | null;
 	rounds: { head: string; findings: number }[];
 	/**
 	 * Digests of the instruction files the session started with, and the
@@ -141,8 +150,8 @@ interface Context {
 	base: string;
 	/** The base's agent instructions, given in place of the checkout's. */
 	instructions: string;
-	model?: string;
-	effort?: string;
+	model: string;
+	effort: string;
 	/** Where `--output-schema` reads the schema from. */
 	schemaFile: string;
 }
@@ -155,7 +164,6 @@ interface Turn {
 
 interface Reply {
 	session?: string;
-	model?: string;
 	/** The reply's text: the review, or the schema's JSON. */
 	text?: string;
 	/** The parsed reply, when the CLI enforced the schema itself. */
@@ -223,10 +231,6 @@ const claude: Reviewer = {
 			},
 			reply() {
 				if (result === undefined) return { error: "claude printed no result" };
-				const models = Object.entries(record(result.modelUsage) ?? {}).map(([name, value]) => ({
-					name,
-					usage: record(value) ?? {},
-				}));
 				const usage = record(result.usage) ?? {};
 				let input = count(usage.input_tokens) + count(usage.cache_read_input_tokens);
 				input += count(usage.cache_creation_input_tokens);
@@ -235,18 +239,16 @@ const claude: Reviewer = {
 				// A built-in command's turn, such as /code-review, reports zero usage;
 				// the session's per-model totals are that turn's, since it is the first.
 				if (input === 0 && output === 0) {
-					for (const { usage: model } of models) {
+					for (const value of Object.values(record(result.modelUsage) ?? {})) {
+						const model = record(value) ?? {};
 						cached += count(model.cacheReadInputTokens);
 						input += count(model.inputTokens) + count(model.cacheReadInputTokens);
 						input += count(model.cacheCreationInputTokens);
 						output += count(model.outputTokens);
 					}
 				}
-				// Side calls, such as a smaller model's, write less than the reviewing model.
-				const model = models.sort((a, b) => count(b.usage.outputTokens) - count(a.usage.outputTokens))[0]?.name;
 				return {
 					session: text(result.session_id),
-					model,
 					text: text(result.result),
 					structured: result.structured_output,
 					usage: { input, cached, output },
@@ -272,8 +274,10 @@ function claudeFlags(context: Context): string[] {
 		"Read,Grep,Glob,Bash,Agent",
 		"--append-system-prompt",
 		context.instructions,
-		...(context.model === undefined ? [] : ["--model", context.model]),
-		...(context.effort === undefined ? [] : ["--effort", context.effort]),
+		"--model",
+		context.model,
+		"--effort",
+		context.effort,
 	];
 }
 
@@ -350,8 +354,10 @@ function codexFlags(context: Context): string[] {
 		"project_doc_max_bytes=0",
 		"-c",
 		`developer_instructions=${JSON.stringify(context.instructions)}`,
-		...(context.model === undefined ? [] : ["-m", context.model]),
-		...(context.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(context.effort)}`]),
+		"-m",
+		context.model,
+		"-c",
+		`model_reasoning_effort=${JSON.stringify(context.effort)}`,
 	];
 }
 
@@ -603,36 +609,6 @@ function load(path: string): State | undefined {
 	}
 }
 
-/**
- * The model a Codex thread ran, from its rollout, which `codex exec --json`
- * does not report otherwise. Rollouts sit under the local date each thread
- * started, so only the dates the review spans are searched.
- */
-export function codexModel(home: string, thread: string, dates: Date[]): string | null {
-	for (const date of dates) {
-		const day = [
-			String(date.getFullYear()),
-			String(date.getMonth() + 1).padStart(2, "0"),
-			String(date.getDate()).padStart(2, "0"),
-		];
-		const dir = join(home, "sessions", ...day);
-		let names: string[];
-		try {
-			names = readdirSync(dir);
-		} catch {
-			continue;
-		}
-		const name = names.find((n) => n.startsWith("rollout-") && n.endsWith(`-${thread}.jsonl`));
-		if (name === undefined) continue;
-		for (const line of readFileSync(join(dir, name), "utf8").split("\n")) {
-			const event = json(line);
-			const model = text(record(event?.payload)?.model);
-			if (event?.type === "turn_context" && model !== undefined) return model;
-		}
-	}
-	return null;
-}
-
 /** Review the checkout's committed branch: one round, resuming the branch's session unless `fresh`. */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Round> {
 	// Native Windows searches the checkout before PATH, so a checkout could supply its own reviewer CLI.
@@ -687,21 +663,20 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const schemaFile = join(dir, "schema.json");
 	save(schemaFile, SCHEMA);
 	const files = baseInstructions(root, baseSha, changed);
+	const tier = MODELS[harness][options.strong ? "strong" : "default"];
 	const context: Context = {
 		base: baseRef,
 		instructions: instructionsPrompt(baseSha, files),
-		model: options.model,
-		effort: options.effort,
+		model: options.model ?? tier.model,
+		effort: options.effort ?? tier.effort,
 		schemaFile,
 	};
 
 	const rules = exists(root, baseSha, "REVIEW.md") ? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") } : null;
 	// Digests of content only, so a base that moved without changing them restates nothing.
 	const given = { instructions: digest(JSON.stringify(files)), rules: rules && digest(rules.text) };
-	const started = deps.now();
 	const usage: Usage[] = [];
 	let session: string;
-	let model = state?.model ?? null;
 	let reply: Reply;
 	// A resumed session would keep instructions the base or the change has since replaced.
 	const resume = previous !== undefined && state?.given.instructions === given.instructions;
@@ -709,7 +684,6 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		const first = await turn(reviewer, reviewer.review(context, randomUUID()), root, env);
 		if (first.session === undefined) throw new Error(`${harness} did not report its session`);
 		session = first.session;
-		model = first.model ?? model;
 		if (reported(first.usage)) usage.push({ turn: "review", ...first.usage });
 		const prompt = firstPrompt(head, rules, options.responses);
 		reply = await turn(reviewer, reviewer.resume(context, session, prompt), root, env);
@@ -726,15 +700,14 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		reply = await turn(reviewer, reviewer.resume(context, session, prompt), root, env);
 	}
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
-	model = options.model ?? reply.model ?? model;
-	if (model === null && harness === "codex") model = codexModel(deps.codexHome, session, [started, deps.now()]);
 	const found = findings(reply);
 
 	const rounds = [...(resume ? state!.rounds : []), { head, findings: found.length }];
-	save(statePath, { branch, reviewer: harness, session, model, rounds, given } satisfies State);
+	save(statePath, { branch, reviewer: harness, session, rounds, given } satisfies State);
 	return {
 		reviewer: harness,
-		model,
+		model: context.model,
+		effort: context.effort,
 		session,
 		round: rounds.length,
 		base: { ref: baseRef, sha: baseSha },
@@ -747,7 +720,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 /** The plain report: one record per line, then each finding with its body indented. */
 export function roundLines(round: Round): string[] {
 	const lines = [
-		`reviewer ${round.reviewer} ${round.model ?? "-"}`,
+		`reviewer ${round.reviewer} ${round.model} ${round.effort}`,
 		`session ${round.session}`,
 		`round ${round.round}`,
 		`base ${round.base.sha} ${round.base.ref}`,
