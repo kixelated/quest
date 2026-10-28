@@ -10,6 +10,7 @@ import {
 	parse,
 	ready,
 } from "quest/core";
+import { cleanAutoMergeRefusal, immediateMerge } from "../../../src/github/merge";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 import {
@@ -1569,33 +1570,56 @@ export class GitHubService {
 				// Landing is a contribution like opening a pull request, so a paused project lands nothing.
 				if ((await this.#state(repo, installation)) !== "enabled")
 					throw new GitHubError("Contributions are paused");
+				const check = (holds: Holds) => {
+					if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
+					if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
+						throw new PublicationBlocked(
+							"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
+						);
+					if (holds.head !== sha(input.head))
+						throw new PublicationBlocked("The pull request's head moved outside this job.");
+				};
 				const holds = await this.#holds(token, repo, pull);
-				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
-				if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
-					throw new PublicationBlocked(
-						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
-					);
-				if (holds.head !== sha(input.head))
-					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				check(holds);
 				const gated = await this.#gated(token, repo, holds.base);
-				const mutation =
-					!gated && !holds.queue && IMMEDIATE.includes(holds.mergeState)
+				let mutation: "mergePullRequest" | "enablePullRequestAutoMerge" =
+					!gated && immediateMerge(holds.mergeState, holds.queue)
 						? "mergePullRequest"
 						: "enablePullRequestAutoMerge";
-				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
-					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
-					variables: {
-						id: holds.id,
-						sha: input.head,
-						method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
-						body: gated ? `${LAND_PIN}: ${input.head}` : null,
-					},
-				});
-				if (result.errors?.length) {
-					const reason = result.errors[0]?.message;
-					throw new PublicationBlocked(
-						`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
-					);
+				const submit = async () => {
+					const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
+						query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
+						variables: {
+							id: holds.id,
+							sha: input.head,
+							method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
+							body: gated ? `${LAND_PIN}: ${input.head}` : null,
+						},
+					});
+					if (result.errors?.length) {
+						const reason = result.errors[0]?.message;
+						throw new PublicationBlocked(
+							`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
+						);
+					}
+				};
+				try {
+					await submit();
+				} catch (error) {
+					if (
+						mutation !== "enablePullRequestAutoMerge" ||
+						gated ||
+						holds.queue ||
+						!cleanAutoMergeRefusal(error instanceof Error ? error.message : null)
+					)
+						throw error;
+					// The refusal can race GitHub computing UNKNOWN. Reread once, keeping the original head pinned.
+					const fresh = await this.#holds(token, repo, pull);
+					check(fresh);
+					if (!immediateMerge(fresh.mergeState, fresh.queue) || (await this.#gated(token, repo, fresh.base)))
+						throw error;
+					mutation = "mergePullRequest";
+					await submit();
 				}
 				await this.#invalidate(repo);
 				return { merged: mutation === "mergePullRequest" };
@@ -1614,8 +1638,6 @@ function mergeMethod(current: Repository): MergeMethod {
 	throw new GitHubError("The repository allows no merge method");
 }
 
-/** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
-const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 /** The check a base gated by `quest land` requires, and the commit body trailer that queues a head for it; see `quest land --help`. */
 const LAND_CHECK = "quest land";
 const LAND_PIN = "Quest-Land-Head";
