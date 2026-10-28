@@ -40,6 +40,8 @@ class FakePull {
 	readonly writes: string[] = [];
 	/** Runs before each label is added, as when another session adds one at the same moment. */
 	beforeAdd?: () => void;
+	beforeAutoMerge?: () => string | undefined;
+	reads = 0;
 	private clock = Date.parse("2026-10-21T12:00:00Z");
 
 	/** Add a label as GitHub does: re-adding one already on the PR records no event. */
@@ -120,11 +122,14 @@ class FakePull {
 			if (name === "markPullRequestReadyForReview") this.draft = false;
 			if (name === "mergePullRequest") this.state = "MERGED";
 			if (name === "enablePullRequestAutoMerge") {
+				const reason = this.beforeAutoMerge?.();
+				if (reason) return { errors: [{ message: reason }] };
 				this.autoMerge = { enabledAt: "2026-10-21T12:00:00Z" };
 				this.event("AutoMergeEnabledEvent");
 			}
 			return { data: { [name]: { clientMutationId: null } } };
 		}
+		this.reads++;
 		return {
 			data: {
 				repository: {
@@ -134,6 +139,7 @@ class FakePull {
 						state: this.state,
 						isDraft: this.draft,
 						body: this.body,
+						updatedAt: new Date(this.clock).toISOString(),
 						baseRefName: "main",
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,
@@ -324,6 +330,72 @@ describe("merge --land", () => {
 		expect(warnings).toEqual([`${URL_} lands through quest land, which squashes`]);
 		expect(pull.comparisons).toEqual([]);
 	});
+
+	test.each(["CLEAN", "HAS_HOOKS", "UNSTABLE"])(
+		"rereads an UNKNOWN state once after a clean refusal, then merges %s at the same head",
+		async (state) => {
+			const pull = new FakePull();
+			pull.mergeState = "UNKNOWN";
+			pull.beforeAutoMerge = () => {
+				pull.mergeState = state;
+				return "Pull request is in clean status";
+			};
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			const before = pull.reads;
+			await land(PR, token, HEAD, "squash", pull.deps());
+			expect(pull.writes.slice(-2)).toEqual([
+				`enablePullRequestAutoMerge ${HEAD} SQUASH`,
+				`mergePullRequest ${HEAD} SQUASH`,
+			]);
+			expect(pull.reads - before).toBe(2); // The usual hold read, then one reread after refusal.
+			expect(pull.state).toBe("MERGED");
+		},
+	);
+
+	test("keeps UNKNOWN on auto-merge when GitHub accepts it", async () => {
+		const pull = new FakePull();
+		pull.mergeState = "UNKNOWN";
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		const before = pull.reads;
+		await land(PR, token, HEAD, "merge", pull.deps());
+		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+		expect(pull.reads - before).toBe(1);
+		expect(pull.state).toBe("OPEN");
+	});
+
+	test.each(["Pull request is in clean status", "Auto merge is not allowed for this repository"])(
+		"preserves a refused UNKNOWN auto-merge: %s",
+		async (reason) => {
+			const pull = new FakePull();
+			pull.mergeState = "UNKNOWN";
+			pull.beforeAutoMerge = () => reason;
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			const before = pull.reads;
+			await expect(land(PR, token, HEAD, "merge", pull.deps())).rejects.toThrow(reason);
+			expect(pull.reads - before).toBe(reason.includes("clean status") ? 2 : 1);
+			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+		},
+	);
+
+	test.each(["head", "hold", "gate", "queue"])(
+		"does not merge after the clean refusal changes its %s",
+		async (change) => {
+			const pull = new FakePull();
+			pull.mergeState = "UNKNOWN";
+			pull.beforeAutoMerge = () => {
+				pull.mergeState = "CLEAN";
+				if (change === "head") pull.head = "b".repeat(40);
+				if (change === "hold") pull.labels = [];
+				if (change === "gate") pull.required = ["quest land"];
+				if (change === "queue") pull.queue = true;
+				return "Pull request is in clean status";
+			};
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			await expect(land(PR, token, HEAD, "merge", pull.deps())).rejects.toThrow();
+			expect(pull.state).toBe("OPEN");
+			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+		},
+	);
 
 	test("refuses a head that moved", async () => {
 		const pull = new FakePull();

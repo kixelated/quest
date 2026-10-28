@@ -6,7 +6,7 @@ Before starting, run `quest guide`, `quest skill ready`, `quest skill merge`, an
 
 The goal is to evaluate the open PRs in the repository, drafts included, and decide which ones to merge.
 For a draft, summarize the open decisions its body lists.
-Skip each PR another session holds: one with a `quest:*` label, or a draft without a `## Decisions needed` section.
+Read each PR with `quest status` and skip one another session holds, using its `hold` and `starter-hold` records instead of a separate label read. A `hold` names the label, acquisition token/time, event URL, and age. A `starter-hold` identifies a draft without a `## Decisions needed` section and reports when it was last active; that is not an acquisition time.
 List those with how long ago each was last active, and offer to take over only one that looks stale.
 The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent, following the guide's Reviews section for the shared design checkpoint across review rounds.
@@ -20,7 +20,7 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 
 Include a brief summary of each PR.
 Act on a PR only after the user picks its action in this session, including PRs found on a later refresh.
-A blanket answer, such as "accept all" or "use your recommendations", never picks `/quest-merge`; ask again for each PR it would merge.
+A blanket answer, such as "accept all" or "use your recommendations", picks your recommendation for every PR in scope, `/quest-merge` included, except a PR whose recommendation settles a decision you have not yet shown; ask about those.
 A skip or hold stands until the user lifts it: do not ask about that PR again on a refresh, and state the hold in every sub-agent brief for it.
 GitHub auto-merge is that pick: enabling it takes write access, and GitHub disables it when anyone without write access pushes.
 Do not ask about a PR with auto-merge enabled; leave it to land, and dispatch `/quest-merge` only when a conflict, failing check, or review finding stalls it.

@@ -36,7 +36,7 @@ import { type Hold, type State, finish, land, release, take } from "./hold";
 import { LAND_CHECK, checkQueue, parsePlan, parseResult, pushQueue, resolveQueue } from "./land";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
-import { resolveFile } from "./resolve";
+import { type ResolveOptions, resolveFile } from "./resolve";
 import { heal, init, uninstall } from "./setup";
 import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { GUIDE, SKILLS, skill } from "./skills";
@@ -734,6 +734,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Run one headless agent turn per call in the foreground, billed to one of the keys in QUEST_API_KEYS, " +
 				"so a spawn launches every agent with one legible command.\n\n" +
+				"Codex requires a registered Quest checkout and Linux worktree supervision; these are checked before resolving keys. " +
+				"It uses the quest worktree run lifecycle: restore before each turn and release declared scratch after exit. Claude runs directly in the given checkout.\n\n" +
 				"QUEST_API_KEYS lists keys separated by whitespace; --key names one by its 1-based position. An " +
 				"entry may be a 1Password op:// reference: the first launch resolves every reference in one " +
 				"`op inject` and keeps the keys in a user-only store under $XDG_RUNTIME_DIR (or the temporary " +
@@ -952,8 +954,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("<ours>", "Our version, overwritten with the result (git's %A)")
 		.argument("<base>", "The common ancestor (git's %O)")
 		.argument("<theirs>", "Their version (git's %B)")
-		.action((ours: string, base: string, theirs: string) => {
-			if (resolveFile(ours, base, theirs) > 0) code = 1;
+		.option("--marker-size <size>", "Conflict marker length (git's %L; default: 7)", positiveInteger("marker-size"))
+		.option("--ours-label <label>", "Our conflict label (git's %X; default: ours)")
+		.option("--base-label <label>", "Ancestor conflict label (git's %S; default: base)")
+		.option("--theirs-label <label>", "Their conflict label (git's %Y; default: theirs)")
+		.action((ours: string, base: string, theirs: string, options: ResolveOptions) => {
+			if (resolveFile(ours, base, theirs, options) > 0) code = 1;
 		});
 
 	program

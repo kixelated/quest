@@ -31,7 +31,13 @@ function pull(
 		data: {
 			repository: {
 				pullRequest: {
+					id: "PR_1",
 					url: URL_,
+					body: "Summary.",
+					updatedAt: "2026-10-07T12:00:00Z",
+					baseRefName: "main",
+					isMergeQueueEnabled: false,
+					labels: { nodes: [] },
 					state: "OPEN",
 					isDraft: false,
 					headRefOid: head,
@@ -99,22 +105,59 @@ function thread(id: string, isResolved: boolean, line: number | null = 3, author
 	};
 }
 
-function setup(bodies: unknown[]) {
+function setup(
+	bodies: unknown[],
+	options: {
+		now?: number;
+		holdFields?: Node;
+		eventPages?: { rows: Node[]; next?: string }[];
+	} = {},
+) {
 	const queries: Record<string, unknown>[] = [];
+	const holdQueries: Record<string, unknown>[] = [];
+	const eventRequests: string[] = [];
+	let last: ReturnType<typeof pull> | undefined;
+	const eventPages = [...(options.eventPages ?? [])];
 	const deps: GitHubDependencies = {
 		token: "test-token",
-		now: () => 0,
+		now: () => options.now ?? 0,
 		sleep: async () => {},
 		warn: () => {},
 		fetch: async (url, init) => {
-			expect(new URL(String(url)).pathname).toBe("/graphql");
-			queries.push(JSON.parse(String(init?.body)).variables);
+			const path = new URL(String(url));
+			if (path.pathname !== "/graphql") {
+				expect(path.pathname).toBe("/repos/example/project/issues/1/events");
+				eventRequests.push(String(url));
+				const page = eventPages.shift();
+				if (!page) throw new Error("unexpected event request");
+				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
+			}
+			const request = JSON.parse(String(init?.body));
+			if (request.query.includes("query HoldOwnership(")) {
+				holdQueries.push(request.variables);
+				if (!last) throw new Error("ownership read before PR state");
+				const row = last.data.repository.pullRequest;
+				const events = (row.timelineItems as { nodes: Node[] }).nodes.filter((event) =>
+					["LabeledEvent", "AutoMergeEnabledEvent", "AddedToMergeQueueEvent"].includes(
+						String(event.__typename),
+					),
+				);
+				return Response.json({
+					data: {
+						repository: {
+							pullRequest: { ...row, timelineItems: { nodes: events }, ...options.holdFields },
+						},
+					},
+				});
+			}
+			queries.push(request.variables);
 			const body = bodies.shift();
 			if (body === undefined) throw new Error("unexpected request");
-			return new Response(JSON.stringify(body));
+			last = body as ReturnType<typeof pull>;
+			return Response.json(body);
 		},
 	};
-	return { deps, queries };
+	return { deps, queries, holdQueries, eventRequests };
 }
 
 test("reports checks by requiredness, each reviewer's latest review against the head, and open threads", async () => {
@@ -150,6 +193,7 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 	]);
 	const status = await pullRequestStatus(pr, fixture.deps);
 	expect(fixture.queries).toHaveLength(1);
+	expect(fixture.holdQueries).toHaveLength(1);
 	expect(fixture.queries[0]).toMatchObject({ number: 1, moreChecks: true, moreReviews: true, moreThreads: true });
 	expect(statusLines(status)).toEqual([
 		`url ${URL_}`,
@@ -176,6 +220,7 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 		`reacted:thumbs_up codex[bot] 2026-10-07T12:04:00Z ${URL_}#pullrequestreview-3`,
 		`thread T2 current reviewer ${URL_}#discussion_rT2 src/a.ts:3`,
 		`thread T3 outdated author ${URL_}#discussion_rT3 src/a.ts:2`,
+		"hold -",
 	]);
 });
 
@@ -354,4 +399,87 @@ test("review rounds count distinct submitted commits since the latest design mar
 		moreChecks: false,
 		moreThreads: false,
 	});
+});
+
+const holdEvent = (id: string, label: string, at = "2026-10-07T11:00:00Z") => ({
+	__typename: "LabeledEvent",
+	id,
+	createdAt: at,
+	label: { name: label },
+});
+
+test("reports the latest acquisition, age, and verified paged event URL for each hold label", async () => {
+	const label = "quest:iterate";
+	const body = pull({
+		checks: null,
+		reviews: page([]),
+		threads: page([]),
+		labels: { nodes: [{ name: "bug" }, { name: label }] },
+	});
+	const eventUrl = "https://api.github.com/repos/example/project/issues/events/23";
+	const next = "https://api.github.com/repos/example/project/issues/1/events?per_page=100&page=2";
+	const fixture = setup([body], {
+		now: Date.parse("2026-10-07T12:00:00Z"),
+		holdFields: { timelineItems: { nodes: [holdEvent("old", label), holdEvent("new", label)] } },
+		eventPages: [
+			{ rows: [{ node_id: "old", event: "labeled", label: { name: label }, url: "old-url" }], next },
+			{ rows: [{ node_id: "new", event: "labeled", label: { name: label }, url: eventUrl }] },
+		],
+	});
+	const status = await pullRequestStatus(pr, fixture.deps);
+	expect(status.holds).toEqual([
+		{ label, token: "new", takenAt: "2026-10-07T11:00:00.000Z", age: "1 hour ago", eventUrl },
+	]);
+	expect(statusLines(status)).toContain(`hold ${label} new 2026-10-07T11:00:00.000Z ${eventUrl} 1 hour ago`);
+	expect(fixture.eventRequests).toHaveLength(2);
+	expect(status.starterHold).toBeNull();
+});
+
+test("retains a hold fact when its acquisition is outside the available timeline", async () => {
+	const fixture = setup([
+		pull({ checks: null, reviews: page([]), threads: page([]), labels: { nodes: [{ name: "quest:ready" }] } }),
+	]);
+	const status = await pullRequestStatus(pr, fixture.deps);
+	expect(status.holds).toEqual([{ label: "quest:ready", token: null, takenAt: null, age: null, eventUrl: null }]);
+	expect(statusLines(status)).toContain("hold quest:ready - - - unknown age");
+	expect(fixture.eventRequests).toEqual([]);
+});
+
+test("never attaches a URL from a different label or event to a hold token", async () => {
+	const body = pull({
+		checks: null,
+		reviews: page([]),
+		threads: page([]),
+		labels: { nodes: [{ name: "quest:merge" }] },
+	});
+	const fixture = setup([body], {
+		holdFields: { timelineItems: { nodes: [holdEvent("token", "quest:merge")] } },
+		eventPages: [{ rows: [{ node_id: "token", event: "labeled", label: { name: "bug" }, url: "wrong" }] }],
+	});
+	expect((await pullRequestStatus(pr, fixture.deps)).holds[0].eventUrl).toBeNull();
+});
+
+test("reports draft starter ownership as last activity, and does not invent its acquisition time", async () => {
+	const draft = pull({
+		checks: null,
+		reviews: page([]),
+		threads: page([]),
+		isDraft: true,
+		updatedAt: "2026-10-07T11:00:00Z",
+	});
+	const status = await pullRequestStatus(pr, setup([draft], { now: Date.parse("2026-10-07T12:00:00Z") }).deps);
+	expect(status.starterHold).toEqual({ lastActive: "2026-10-07T11:00:00Z", age: "1 hour ago", url: URL_ });
+	expect(statusLines(status)).toContain(`starter-hold 2026-10-07T11:00:00Z ${URL_} last active 1 hour ago`);
+	for (const change of [{ body: "## Decisions needed\n\nChoose one." }, { state: "CLOSED" }, { state: "MERGED" }]) {
+		const copy = structuredClone(draft);
+		Object.assign(copy.data.repository.pullRequest, change);
+		expect((await pullRequestStatus(pr, setup([copy]).deps)).starterHold).toBeNull();
+	}
+});
+
+test("refuses a head moved between the paged state and ownership read", async () => {
+	const fixture = setup([pull({ checks: null, reviews: page([]), threads: page([]) })], {
+		holdFields: { headRefOid: B },
+	});
+	await expect(pullRequestStatus(pr, fixture.deps)).rejects.toThrow("head changed while reading its holds");
 });
