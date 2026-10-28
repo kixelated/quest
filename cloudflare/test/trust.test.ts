@@ -228,6 +228,47 @@ describe("authenticated PR provenance", () => {
 		expect(await store.readJob(db, id)).toMatchObject({ trusted: 0, state: "queued" });
 	});
 
+	it("rechecks a head a lost publication settles between the claim and the assignment", async () => {
+		const id = await queued();
+		const first = await runner("first", "darwin");
+		await dispatch([first]);
+		await store.report(
+			db,
+			first,
+			[{ id: "account", provider: "anthropic", kind: "subscription", label: "First", limited: false }],
+			[{ job: id, attempt: 1 }],
+			1,
+		);
+		const published = "d".repeat(40);
+		repo.commits[published] = { ...commit([head]), signature: { isValid: true, signer: null } };
+		await store.claim(db, first, id, 1, head, published, 2);
+		await store.dispatch(db, "owner", new Map(), 3, verify(testEnv));
+		// The lost push lands and settles only after the next pass claims the signed head.
+		const racing = new Proxy(db, {
+			get(target, key) {
+				if (key !== "prepare") return Reflect.get(target, key).bind(target);
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (!sql.startsWith("SELECT j.id,j.runner")) return statement;
+					return {
+						bind: (...values: unknown[]) => ({
+							all: async () => {
+								repo.branches.fix = published;
+								await store.settle(db, id, published, true, 5);
+								return statement.bind(...values).all();
+							},
+						}),
+					};
+				};
+			},
+		});
+		const mac = await runner("mac", "darwin");
+		const pass = await store.dispatch(racing, "owner", new Map([[mac.id, 1]]), store.GRACE + 4, verify(testEnv));
+		expect(pass.assign).toEqual([]);
+		expect(pass.cancel).toEqual([{ runner: mac.id, job: id, attempt: 2 }]);
+		expect(await store.readJob(db, id)).toMatchObject({ head: published, trusted: 0, state: "queued" });
+	});
+
 	it("leaves a head kix published to VM-only, even after a lost response", async () => {
 		const id = await queued();
 		const first = await runner("first", "darwin");

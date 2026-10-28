@@ -373,14 +373,15 @@ export async function dispatch(
 		if (free.has(runner)) free.set(runner, free.get(runner)! - n);
 	type Row = Omit<Offer, "free" | "limited"> & { limited: number };
 	const accounts = offers!.results as Row[];
-	const verified = new Set<string>();
+	// The attempt and head each claim verified. A publication can still move the
+	// head after the claim, so the read below checks any other head again.
+	const verified = new Map<string, { attempt: number; head: string | null }>();
 	const revoked: (Attempt & { runner: string })[] = [];
 	// Every queued job is considered, so unroutable older ones cannot starve newer ones.
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
 		if (onPull(job.workflow)) {
 			job.trusted = (await verify(job)) ? 1 : 0;
-			verified.add(job.id);
 			await db
 				.prepare("UPDATE jobs SET trusted=? WHERE id=? AND state='queued' AND attempt=? AND head IS ?")
 				.bind(job.trusted, job.id, job.attempt, job.head)
@@ -417,6 +418,7 @@ export async function dispatch(
 		]);
 		// The job or its project changed underneath this pass; the next one sees it.
 		if (update!.meta.changes !== 1) continue;
+		if (onPull(job.workflow)) verified.set(job.id, { attempt: job.attempt + 1, head: job.head });
 		free.set(chosen.runner, free.get(chosen.runner)! - 1);
 	}
 	const undelivered = await db
@@ -430,7 +432,8 @@ export async function dispatch(
 	for (const { id, runner, ...project } of undelivered.results) {
 		const job = await readJob(db, id);
 		if (!job || job.state !== "running" || job.cancel) continue;
-		if (onPull(job.workflow) && !verified.has(job.id)) {
+		const checked = verified.get(job.id);
+		if (onPull(job.workflow) && (checked?.attempt !== job.attempt || checked.head !== job.head)) {
 			const trusted = (await verify(job)) ? 1 : 0;
 			const machine = accounts.find((offer) => offer.runner === runner);
 			const eligible = trusted || (machine?.platform === "linux" && machine.vm);
