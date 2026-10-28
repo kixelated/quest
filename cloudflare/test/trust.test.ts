@@ -103,6 +103,24 @@ describe("authenticated PR provenance", () => {
 		expect(await trusted()).toBe(false);
 	});
 
+	it("does not let a retargeted PR hide an unsigned ancestor under its signed head", async () => {
+		const hidden = "d".repeat(40);
+		repo.commits[hidden] = { ...commit(), signature: null };
+		repo.branches.feature = hidden;
+		repo.pulls[0]!.base = "feature";
+		repo.commits[head]!.parents = [hidden];
+		expect(await trusted()).toBe(false);
+		// A non-default PR base itself does not make an authenticated ancestry untrusted.
+		repo.commits[hidden]!.signature = signature();
+		expect(await trusted()).toBe(true);
+	});
+
+	it("trusts revisions already inherited by the repository default branch", async () => {
+		repo.branches.main = head;
+		repo.commits[head]!.signature = null;
+		expect(await trusted()).toBe(true);
+	});
+
 	it("refuses unsigned commits and a contributor forging a maintainer's author email", async () => {
 		// The PR author is a maintainer; only the signature signer proves who committed.
 		repo.commits[head]!.signature = null;
@@ -145,6 +163,39 @@ describe("authenticated PR provenance", () => {
 		expect(await trusted(parent)).toBe(false);
 	});
 
+	it.each(["default tip", "default name", "pull head", "comparison head", "comparison base", "commit count"])(
+		"fails closed when %s changes during comparison paging",
+		async (change) => {
+			let parent = base;
+			for (let i = 1; i <= 102; i++) {
+				const oid = i.toString(16).padStart(40, "0");
+				repo.commits[oid] = commit([parent]);
+				parent = oid;
+			}
+			repo.branches.fix = parent;
+			let pages = 0;
+			vi.mocked(globalThis.fetch).mockImplementation(
+				intercept(
+					github,
+					(url) => url.pathname === "/graphql" && ++pages === 2,
+					async (next) => {
+						const response = (await (await next()).json()) as any;
+						const repository = response.data.repository;
+						const branch = repository.defaultBranchRef;
+						if (change === "default tip") branch.target.oid = head;
+						if (change === "default name") branch.name = "release";
+						if (change === "pull head") repository.pullRequest.headRefOid = head;
+						if (change === "comparison head") branch.compare.headTarget.oid = head;
+						if (change === "comparison base") branch.compare.baseTarget.oid = head;
+						if (change === "commit count") branch.compare.commits.totalCount++;
+						return Response.json(response);
+					},
+				),
+			);
+			expect(await trusted(parent)).toBe(false);
+		},
+	);
+
 	it("fails closed when GitHub cannot finish paging", async () => {
 		vi.mocked(globalThis.fetch).mockImplementation(
 			intercept(
@@ -152,7 +203,10 @@ describe("authenticated PR provenance", () => {
 				(url) => url.pathname === "/graphql",
 				async (next) => {
 					const response = (await (await next()).json()) as any;
-					response.data.repository.pullRequest.commits.pageInfo = { hasNextPage: true, endCursor: null };
+					response.data.repository.defaultBranchRef.compare.commits.pageInfo = {
+						hasNextPage: true,
+						endCursor: null,
+					};
 					return Response.json(response);
 				},
 			),

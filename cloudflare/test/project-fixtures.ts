@@ -122,19 +122,24 @@ export async function maintainerOf() {
 			return Response.json({
 				data: {
 					repository: {
-						pullRequest: {
-							state: github.pull.toUpperCase(),
-							headRefOid: github.head,
-							baseRefOid: commit,
-							commits: {
-								totalCount: 1,
-								nodes: [{ commit: { oid: github.head, signature: github.signature } }],
-								pageInfo: { hasNextPage: false, endCursor: null },
+						pullRequest: { state: github.pull.toUpperCase(), headRefOid: github.head },
+						defaultBranchRef: {
+							name: "trunk",
+							target: { oid: commit },
+							compare: {
+								baseTarget: { oid: commit },
+								headTarget: { oid: github.head },
+								commits: {
+									totalCount: 1,
+									nodes: [{ oid: github.head, signature: github.signature }],
+									pageInfo: { hasNextPage: false, endCursor: null },
+								},
 							},
 						},
 					},
 				},
 			});
+
 		if (path === "/graphql" && String(init?.body).includes("timelineItems")) {
 			return Response.json({
 				data: {

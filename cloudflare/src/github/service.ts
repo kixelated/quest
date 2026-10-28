@@ -766,50 +766,76 @@ export class GitHubService {
 	async #pullTrust(token: string, repo: GitHubRepository, pull: number, revision: string) {
 		type Signer = { databaseId: number; login: string };
 		type Commit = { oid: string; signature: { isValid: boolean; signer: Signer | null } | null };
-		type Page = {
-			state: string;
-			headRefOid: string;
-			baseRefOid: string;
+		type Comparison = {
+			baseTarget: { oid: string };
+			headTarget: { oid: string };
 			commits: {
 				totalCount: number;
-				nodes: { commit: Commit }[];
+				nodes: Commit[];
 				pageInfo: { hasNextPage: boolean; endCursor: string | null };
 			};
 		};
-		const query = `query($owner:String!,$name:String!,$number:Int!,$after:String) {
- repository(owner:$owner,name:$name) { pullRequest(number:$number) {
- state headRefOid baseRefOid commits(first:100,after:$after) {
- totalCount nodes { commit { oid signature { isValid signer { databaseId login } } } }
+		type Page = {
+			pullRequest: { state: string; headRefOid: string } | null;
+			defaultBranchRef: { name: string; target: { oid: string } | null; compare: Comparison | null } | null;
+		};
+		// A PR's base is contributor-controlled. Compare the exact head against the
+		// repository's trusted default branch so retargeting cannot hide ancestors.
+		const query = `query($owner:String!,$name:String!,$number:Int!,$revision:String!,$after:String) {
+ repository(owner:$owner,name:$name) {
+ pullRequest(number:$number) { state headRefOid }
+ defaultBranchRef { name target { oid } compare(headRef:$revision) {
+ baseTarget { oid } headTarget { oid }
+ commits(first:100,after:$after) {
+ totalCount nodes { oid signature { isValid signer { databaseId login } } }
  pageInfo { hasNextPage endCursor }
- } } } }`;
+ } } } } }`;
 		let after: string | null = null;
 		let base: string | undefined;
+		let branch: string | undefined;
 		let count: number | undefined;
 		const cursors = new Set<string>();
 		const commits = new Set<string>();
 		const maintainers = new Map<number, boolean>();
 		do {
-			const response: { data?: { repository?: { pullRequest: Page | null } }; errors?: unknown[] } =
-				await this.#api(token, "/graphql", "POST", {
+			const response: { data?: { repository?: Page }; errors?: unknown[] } = await this.#api(
+				token,
+				"/graphql",
+				"POST",
+				{
 					query,
-					variables: { owner: repo.owner, name: repo.name, number: pull, after },
-				});
+					variables: { owner: repo.owner, name: repo.name, number: pull, revision: sha(revision), after },
+				},
+			);
 			if (response.errors?.length) throw new GitHubError("Could not verify pull request commits");
-			const page: Page | null | undefined = response.data?.repository?.pullRequest;
-			if (!page || page.state !== "OPEN" || page.headRefOid !== sha(revision)) return false;
-			base ??= page.baseRefOid;
-			count ??= page.commits.totalCount;
-			if (base !== page.baseRefOid || count !== page.commits.totalCount) return false;
+			const repository: Page | undefined = response.data?.repository;
+			const live = repository?.pullRequest;
+			const anchor = repository?.defaultBranchRef;
+			const comparison = anchor?.compare;
+			if (!live || live.state !== "OPEN" || live.headRefOid !== revision || !anchor?.target || !comparison)
+				return false;
+			base ??= sha(anchor.target.oid);
+			branch ??= anchor.name;
+			const page = comparison.commits;
+			count ??= page.totalCount;
+			if (
+				base !== anchor.target.oid ||
+				branch !== anchor.name ||
+				count !== page.totalCount ||
+				comparison.baseTarget.oid !== base ||
+				comparison.headTarget.oid !== revision
+			)
+				return false;
 			const published = new Set(
 				(
 					await this.#env.DB.prepare(
 						"SELECT sha FROM job_commits WHERE repository=? AND sha IN (SELECT value FROM json_each(?))",
 					)
-						.bind(repo.id, JSON.stringify(page.commits.nodes.map(({ commit }) => sha(commit.oid))))
+						.bind(repo.id, JSON.stringify(page.nodes.map((commit) => sha(commit.oid))))
 						.all<{ sha: string }>()
 				).results.map(({ sha }) => sha),
 			);
-			for (const { commit } of page.commits.nodes) {
+			for (const commit of page.nodes) {
 				if (commits.has(commit.oid)) throw new GitHubError("Repeated pull request commit");
 				commits.add(sha(commit.oid));
 				// Only confirmed publications recorded by kix count, never agent claims or author email.
@@ -833,12 +859,12 @@ export class GitHubService {
 				}
 				if (!maintainers.get(signer.databaseId)) return false;
 			}
-			if (!page.commits.pageInfo.hasNextPage) break;
-			after = page.commits.pageInfo.endCursor;
+			if (!page.pageInfo.hasNextPage) break;
+			after = page.pageInfo.endCursor;
 			if (!after || cursors.has(after)) throw new GitHubError("Missing or repeated pull request commit cursor");
 			cursors.add(after);
 		} while (true);
-		return commits.size > 0 && commits.size === count && commits.has(revision);
+		return commits.size === count && (count === 0 || commits.has(revision));
 	}
 
 	previewProject(repo: GitHubRepository, userId: string) {
