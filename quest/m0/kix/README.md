@@ -72,6 +72,11 @@ operator-paid-hosting decisions:
 - **A real GitHub App bot.** The service publishes as its App identity and
   keeps GitHub credentials off runners. It pushes job branches to the
   enrolled repository itself, with no service forks (decided 2026-10-27, user).
+- **Read-only CI, signed trust** (decided 2026-10-28, user, trust audit).
+  Enrolled repositories keep pull-request CI read-only instead of kix
+  shielding CI behind forks or per-push gates. Host trust comes from
+  maintainer signatures or an explicit approval of the exact head, never from
+  kix having published a commit. Landing needs a review of the exact head.
 - **Ready means eligible.** After a maintainer opts in, ready quests on the
   default branch may be implemented. Draft plans are not eligible. Project
   pause stops new work. An explicit spawn decision can prioritize ready work
@@ -121,10 +126,12 @@ fixes what it finds:
 ## Required
 
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
+- [Read-only CI](/quest/m0/kix/ci-read-only.md) - enrolled repositories keep pull-request CI read-only, checked at enrollment, with every trust boundary written down
 - [Operator setup](/quest/m0/kix/operator-setup.md) - pilot installations and a verified test PR on kixelated/quest and moq-dev/moq
 - [App sign-in](/quest/m0/kix/app-sign-in.md) - one GitHub screen signs in and installs the App, with no separate OAuth app
 - [Pick repositories](/quest/m0/kix/pick-repos.md) - after installing, the maintainer enables repositories from a list
 - [Setup PR](/quest/m0/kix/setup-pr.md) - enrolling a repository without Quest makes the App open its `quest init` pull request
 - [Job sandbox](/quest/m0/kix/sandbox/README.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
+- [Land review](/quest/m0/kix/land-review.md) - kix lands only heads with a review that counts on that exact head
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

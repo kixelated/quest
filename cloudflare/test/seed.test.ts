@@ -165,8 +165,8 @@ it("ignores a quest branch left at the head of its merged pull request", async (
 		await request("/projects/github/example/rocket/board", { headers: { Cookie: cookie } })
 	).text();
 	const row = (title: string) => board.match(new RegExp(`${title}[^<]*</a>[\\s\\S]*?</li>`))?.[0] ?? "";
-	expect(row("Add passkey sign-in")).toContain("Available");
-	expect(row("Keep working offline")).toContain("Claimed");
+	expect(row("Add passkey sign-in")).toContain("Account limited");
+	expect(row("Keep working offline")).toContain("Queued");
 	expect(row("Export a project as a ZIP archive")).toContain("Claimed");
 	// The inbox agrees: it offers the landed quest, and not the one new work claims.
 	const inbox = await (await request("/inbox", { headers: { Cookie: cookie } })).text();

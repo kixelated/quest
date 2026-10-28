@@ -595,6 +595,18 @@ async function jobs(db: D1Database, user: string, repo: Repo) {
 						at,
 						now,
 					),
+				...(job.state === "completed"
+					? [
+							db
+								.prepare("INSERT INTO job_events(job,attempt,kind,body,at) VALUES(?,?,'result',?,?)")
+								.bind(
+									job.id,
+									attempt,
+									JSON.stringify({ outcome: "completed", summary: job.summary ?? "" }),
+									at,
+								),
+						]
+					: []),
 				...(job.question
 					? [
 							db
