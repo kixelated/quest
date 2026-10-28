@@ -753,6 +753,18 @@ with a private `HOME`.
 On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
 pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
 AppArmor allows them only for programs with a profile granting `userns`.
+Merge jobs retain existing PR submodule pointers when merging the base. Their
+`wait` tool wakes on GitHub webhook hints or reconnects and rereads the PR;
+a hint never approves work. If someone moves the head, the maintainer can
+continue from that exact head through the existing approval flow. The same
+runner checkpoints and merges its unpublished source locally; conflicts pause
+for a decision. Stale local changes are preserved in the runner's bare clone
+under `refs/kix/checkpoints/<job>/`, and are not reapplied after another runner
+publishes. Existing failover still restarts from the latest published branch
+checkpoint. Initialized submodules leave their checkout intact until their
+local commits and changes can be preserved explicitly; this path never deletes
+them to force continuation.
+
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
