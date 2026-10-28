@@ -115,6 +115,7 @@ export class Attempt {
 	#paused = false;
 	/** The attempt reported how it ended, so statuses stop listing it. */
 	#reported = false;
+	#agentExited = false;
 
 	constructor(ctx: Context, job: Job, instructions: string | null) {
 		this.ctx = ctx;
@@ -261,6 +262,8 @@ export class Attempt {
 				if (this.#ended()) this.#agent.stop();
 				exit = await this.#agent.done;
 			} finally {
+				this.#agentExited = true;
+				this.wake();
 				await tools.close();
 				await output.close();
 				if (sandbox) closeSandbox(sandbox);
@@ -328,6 +331,7 @@ export class Attempt {
 			this.ctx.log(`${job.id}: kix refused the ${outcome} result: ${error.message}`);
 		}
 		this.#reported = true;
+		this.wake();
 		// A limited job waits on an account choice, which may resume it here.
 		if (outcome !== "limited") await this.#workspace?.remove();
 	}
@@ -410,7 +414,7 @@ export class Attempt {
 	}
 
 	#closed(): string | null {
-		if (this.#stopped || this.#abandoned) return STOPPED;
+		if (this.#stopped || this.#abandoned || this.#agentExited || this.#reported) return STOPPED;
 		if (this.#paused) return PAUSED;
 		if (this.#cancelled) return "The maintainer stopped this job. End your turn now.";
 		return null;

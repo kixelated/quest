@@ -274,9 +274,9 @@ function PublicationForm(props: { item: Item }) {
 				<>
 					<input type="hidden" name="head" value={continuation} />
 					<p>
-						Continue from <code>{continuation}</code>. On the same runner, unpublished work is preserved
-						and merged with this head; conflicts need another decision. A replacement runner starts
-						from the latest published checkpoint.
+						Continue from <code>{continuation}</code>. On the same runner, unpublished work is preserved and
+						merged with this head; conflicts need another decision. A replacement runner starts from the
+						latest published checkpoint.
 					</p>
 					<button class="button quiet" name="continue" value="1" formnovalidate>
 						Continue from this head

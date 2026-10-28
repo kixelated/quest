@@ -103,20 +103,21 @@ export class Workspace {
 			if (record && record.head === job.head && existsSync(join(dir, ".git")))
 				return new Workspace(git, dir, file, record);
 			const previous = record && existsSync(join(dir, ".git")) ? new Workspace(git, dir, file, record) : null;
+			const source = previous ? await previous.snapshot(true) : null;
 			if (previous) {
-				const links = (await run("git", ["-C", dir, "ls-files", "--stage", "-z"])).stdout.split("\0");
-				if (
-					links.some(
-						(entry) =>
-							entry.startsWith("160000 ") &&
-							existsSync(join(dir, entry.slice(entry.indexOf("\t") + 1), ".git")),
-					)
-				)
+				const entries = (await run("git", ["-C", dir, "ls-files", "--stage", "-z"])).stdout.split("\0");
+				const links = [
+					...entries
+						.filter((entry) => entry.startsWith("160000 "))
+						.map((entry) => entry.slice(entry.indexOf("\t") + 1)),
+					...(source?.submodules ?? []).map((entry) => entry.path),
+				];
+				if (links.some((path) => existsSync(join(dir, path, ".git"))))
 					throw new Error(
-						"The paused checkout has initialized submodules; preserve their local commits and changes before replacing it. Its checkout was left intact.",
+						"The paused checkout has initialized submodules or embedded repositories; preserve their local commits and changes before replacing it. Its checkout was left intact.",
 					);
 			}
-			const saved = previous ? await previous.#checkpoint(job.id) : null;
+			const saved = previous ? await previous.#checkpoint(job.id, source!) : null;
 			const continuing =
 				job.workflow === "merge" &&
 				job.head !== null &&
@@ -236,8 +237,7 @@ export class Workspace {
 	}
 
 	/** Preserve tracked/untracked source in a local Git ref before replacing any stale checkout. */
-	async #checkpoint(job: string): Promise<{ ref: string; sha: string } | null> {
-		const snapshot = await this.snapshot(true);
+	async #checkpoint(job: string, snapshot: Snapshot): Promise<{ ref: string; sha: string } | null> {
 		if (!snapshot.changes.length && !snapshot.merge && !snapshot.submodules.length) return null;
 		const local = (await run("git", ["-C", this.dir, "rev-parse", "HEAD"])).stdout.trim();
 		const { stdout } = await run(

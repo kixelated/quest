@@ -442,6 +442,27 @@ describe("workspace", () => {
 		expect(readFileSync(join(child, "old.txt"), "utf8")).toBe("unpublished module commit\n");
 	});
 
+	posix("leaves an untracked embedded repository intact instead of deleting its commits", async () => {
+		const { dir, commit } = upstream();
+		const root = tempDir();
+		const original = await Workspace.prepare(root, job(commit, { head: commit }), dir);
+		const embedded = join(original.dir, "embedded");
+		mkdirSync(embedded);
+		git(embedded, "init", "-q");
+		writeFileSync(join(embedded, "source"), "local repository\n");
+		git(embedded, "add", ".");
+		git(embedded, "commit", "-qm", "local commit");
+		const local = git(embedded, "rev-parse", "HEAD");
+		writeFileSync(join(dir, "new.txt"), "published\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-qm", "new head");
+		const head = git(dir, "rev-parse", "HEAD");
+		await expect(Workspace.prepare(root, job(commit, { head, attempt: 2 }), dir)).rejects.toThrow(
+			"embedded repositories",
+		);
+		expect(git(embedded, "rev-parse", "HEAD")).toBe(local);
+	});
+
 	posix("preserves stale local work without reapplying it after another runner published", async () => {
 		const { dir, commit } = upstream();
 		const root = tempDir();
@@ -1063,6 +1084,11 @@ async function rpc(method, params) {
 		if (step.write) fs.writeFileSync(step.write, step.content);
 		if (step.remove) fs.rmSync(step.remove);
 		if (step.emit) out(step.emit);
+		if (step.backgroundWait) {
+			void rpc("tools/call", { name: "wait", arguments: {minutes:55} }).catch(() => {});
+			await rpc("tools/call", { name: "context", arguments: {} });
+			log({ backgroundWaitPid: process.pid });
+		}
 		if (step.tool) log({ tool: step.tool, reply: await rpc("tools/call", { name: step.tool, arguments: step.args }) });
 		if (step.wait) {
 			process.on("SIGTERM", () => { log({ terminated: true }); process.exit(143); });
@@ -1292,6 +1318,28 @@ async function idle(runner: Runner) {
 }
 
 describe("quest runner", () => {
+	posix("an agent crash cancels its pending webhook wait before the attempt ends", async () => {
+		const timers = vi.spyOn(globalThis, "setTimeout");
+		const cleared = vi.spyOn(globalThis, "clearTimeout");
+		const r = rig();
+		try {
+			r.steps({ start: [{ backgroundWait: true }, { wait: true }] });
+			r.assign(job(r.upstream.commit, { workflow: "merge", target: "pulls/2", head: r.upstream.commit }));
+			await vi.waitFor(() => expect(r.calls().some((call) => call.backgroundWaitPid)).toBe(true));
+			const index = timers.mock.calls.findIndex(([, ms]) => typeof ms === "number" && ms > 60_000);
+			expect(index).toBeGreaterThanOrEqual(0);
+			const handle = timers.mock.results[index]!.value;
+			process.kill(r.calls().find((call) => call.backgroundWaitPid)!.backgroundWaitPid, "SIGKILL");
+			await r.result();
+			await idle(r.runner);
+			expect(cleared).toHaveBeenCalledWith(handle);
+		} finally {
+			await r.runner.shutdown();
+			timers.mockRestore();
+			cleared.mockRestore();
+		}
+	});
+
 	posix("runs a job in its devShell and delivers its pull request", async () => {
 		const r = rig();
 		r.steps({
