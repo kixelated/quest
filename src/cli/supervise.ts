@@ -1,7 +1,7 @@
 // Process ownership for supervised checkout commands. Each run gets its own systemd user scope,
 // named once and never reused, so its cgroup holds every descendant that does not ask another
 // service manager to start it. Other hosts fail explicitly rather than guess from process groups.
-import { execFileSync, spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { closeSync, existsSync, constants as fs, openSync, readFileSync, watch, writeSync } from "node:fs";
 import { constants, hostname } from "node:os";
 import { join } from "node:path";
@@ -46,6 +46,12 @@ export function alive(owner: Owner): boolean {
 	}
 }
 
+/** Optional pipes for a caller that consumes its command's protocol instead of inheriting streams. */
+export interface RunIO {
+	env?: NodeJS.ProcessEnv;
+	spawned(child: ChildProcessWithoutNullStreams): void;
+}
+
 export interface Scopes {
 	/** Throws on a platform this backend cannot own processes on. */
 	check(): void;
@@ -58,7 +64,7 @@ export interface Scopes {
 	 * Resolves with the command's exit status only once the scope is empty. Rejects with `Retained`
 	 * when that cannot be confirmed, and otherwise only when the command never started.
 	 */
-	run(unit: string, cwd: string, command: string[]): Promise<number>;
+	run(unit: string, cwd: string, command: string[], io?: RunIO): Promise<number>;
 }
 
 /** The command may have started and its scope may still hold processes, so its run stays recorded. */
@@ -160,6 +166,20 @@ function scopeGroup(unit: string): string | undefined {
 export const systemdScopes: Scopes = {
 	check() {
 		if (process.platform !== "linux" || !killable()) throw new Error(UNSUPPORTED);
+		try {
+			const version = execFileSync("systemd-run", ["--version"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			const manager = execFileSync("systemctl", ["--user", "show", "--property=Version", "--value"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			if (!(Number(/^systemd (\d+)/.exec(version)?.[1]) >= 254) || !(Number.parseInt(manager, 10) >= 254))
+				throw new Error(UNSUPPORTED);
+		} catch {
+			throw new Error(UNSUPPORTED);
+		}
 	},
 
 	live(unit) {
@@ -174,7 +194,7 @@ export const systemdScopes: Scopes = {
 		await vacated(group);
 	},
 
-	run(unit, cwd, command) {
+	run(unit, cwd, command, io) {
 		return new Promise((resolve, reject) => {
 			const child = spawn(
 				"systemd-run",
@@ -192,8 +212,13 @@ export const systemdScopes: Scopes = {
 					"quest-worktree",
 					...command,
 				],
-				{ cwd, stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"] },
+				{
+					cwd,
+					env: io?.env,
+					stdio: [io ? "pipe" : "inherit", io ? "pipe" : "inherit", io ? "pipe" : "inherit", "pipe", "pipe"],
+				},
 			);
+			io?.spawned(child as ChildProcessWithoutNullStreams);
 			const report = child.stdio[3] as Readable;
 			const admission = (child.stdio as unknown as (Writable | null)[])[4]!;
 			let group: string | undefined;
