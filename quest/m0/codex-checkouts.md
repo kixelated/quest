@@ -16,6 +16,9 @@ since it does not depend on the Claude hooks; the decision is recorded there.
   recoverable archive and a 15-worktree retention, so `quest agent` runs the
   harness inside `quest worktree run`, which releases on exit and restores on
   resume. Codex app threads stay on Codex's native archive.
+- Decided 2026-10-27 (user): Codex requires a registered Quest-owned Linux
+  checkout. Reject unmanaged paths and unsupported hosts before resolving
+  credentials or launching Codex; preserve Claude launch behavior.
 - Exercise a finished agent, a suspended decision, a crash, and a resumed
   session, and confirm each checkout is released or restored.
 
