@@ -14,7 +14,7 @@ import { OutputUploader } from "./output";
 import { resumePrompt, startPrompt, systemPrompt } from "./prompt";
 import { type Job, type Message, type Outcome, clip } from "./protocol";
 import { type Sandbox, closeSandbox, openSandbox } from "./sandbox";
-import { fingerprint, WAIT_LIMIT, waitForChange } from "./wait";
+import { Changes, fingerprint, WAIT_LIMIT, waitForChange } from "./wait";
 import { Workspace } from "./workspace";
 
 /** What an attempt needs from its runner. */
@@ -100,6 +100,12 @@ export class Attempt {
 	#delivered: Delivery | undefined;
 	/** The fingerprint of the pull request as the agent last read it, which `wait` waits to change. */
 	#seen: string | null = null;
+	#changes = new Changes();
+
+	/** A webhook or reconnect is a hint to reread authoritative context, never approval to act. */
+	wake(): void {
+		this.#changes.wake();
+	}
 	#cancelled = false;
 	/** The hub no longer counts this attempt as this runner's. */
 	#stopped = false;
@@ -109,6 +115,7 @@ export class Attempt {
 	#paused = false;
 	/** The attempt reported how it ended, so statuses stop listing it. */
 	#reported = false;
+	#agentExited = false;
 
 	constructor(ctx: Context, job: Job, instructions: string | null) {
 		this.ctx = ctx;
@@ -145,6 +152,7 @@ export class Attempt {
 	}
 
 	#halt(): void {
+		this.wake();
 		this.#preparing.abort();
 		this.#agent?.stop();
 	}
@@ -180,6 +188,40 @@ export class Attempt {
 			// Before any checkout: an account added while the runner runs may lack its CLI or sandbox.
 			const adapter = ctx.adapter(account);
 			this.#workspace = await Workspace.prepare(ctx.root, job, ctx.remote(job));
+			if (this.#workspace.preserved)
+				ctx.log(
+					`${job.id}: preserved local work at ${this.#workspace.preserved}${this.#workspace.continued ? "; reapplying to the selected head" : "; stale work was not reapplied to another published checkpoint"}`,
+				);
+			const conflicts = this.#workspace.continued ? await this.#workspace.conflicts() : [];
+			if (conflicts.length) {
+				await this.#send({
+					type: "question",
+					job: job.id,
+					attempt: job.attempt,
+					session: this.#session,
+					summary: "Preserved work conflicts with the selected head",
+					prompt: {
+						kind: "decision",
+						questions: [
+							{
+								header: "Head conflicts",
+								question: `The preserved workspace conflicts with ${job.head} in ${conflicts.length} paths. Resume the agent to inspect the conflicts and resolve and commit the merge?`,
+								options: [
+									{
+										label: "Resolve conflicts",
+										description:
+											"Keep both versions preserved and resume this checkout to resolve them.",
+										recommended: true,
+									},
+								],
+							},
+						],
+					},
+				});
+				this.#paused = true;
+				this.wake();
+				return;
+			}
 			if (this.#ended()) return await this.#conclude(null, account);
 			const devShell = await ctx
 				.devShell(job, this.#workspace.repository, this.#preparing.signal)
@@ -220,6 +262,8 @@ export class Attempt {
 				if (this.#ended()) this.#agent.stop();
 				exit = await this.#agent.done;
 			} finally {
+				this.#agentExited = true;
+				this.wake();
 				await tools.close();
 				await output.close();
 				if (sandbox) closeSandbox(sandbox);
@@ -287,6 +331,7 @@ export class Attempt {
 			this.ctx.log(`${job.id}: kix refused the ${outcome} result: ${error.message}`);
 		}
 		this.#reported = true;
+		this.wake();
 		// A limited job waits on an account choice, which may resume it here.
 		if (outcome !== "limited") await this.#workspace?.remove();
 	}
@@ -303,8 +348,7 @@ export class Attempt {
 		const next = this.#publishing.then(async () => {
 			const workspace = this.#workspace!;
 			let snapshot = await workspace.snapshot();
-			if (snapshot.skipped.length)
-				this.ctx.log(`${this.job.id}: cannot publish submodules: ${snapshot.skipped.join(", ")}`);
+
 			const idle = () => !snapshot.changes.length && !snapshot.merge && !pull && !land;
 			if (idle()) return { head: workspace.head };
 			const send = () =>
@@ -316,8 +360,8 @@ export class Attempt {
 					...((snapshot.changes.length || snapshot.merge) && { message }),
 					changes: snapshot.changes,
 					...(snapshot.merge && { merge: snapshot.merge }),
-					// A merge would revert the submodules it cannot send, so kix refuses it on a decision.
-					...(snapshot.merge && snapshot.skipped.length && { submodules: snapshot.skipped }),
+					// kix verifies these pointers against the existing head before carrying them into the merge tree.
+					...(snapshot.merge && snapshot.submodules.length && { submodules: snapshot.submodules }),
 					...(pull && { pull }),
 					...(land && { land }),
 				});
@@ -332,6 +376,7 @@ export class Attempt {
 			}
 			if (status === 202) {
 				this.#paused = true;
+				this.wake();
 				if (body.cancel) this.#cancelled = true;
 				return null;
 			}
@@ -369,7 +414,7 @@ export class Attempt {
 	}
 
 	#closed(): string | null {
-		if (this.#stopped || this.#abandoned) return STOPPED;
+		if (this.#stopped || this.#abandoned || this.#agentExited || this.#reported) return STOPPED;
 		if (this.#paused) return PAUSED;
 		if (this.#cancelled) return "The maintainer stopped this job. End your turn now.";
 		return null;
@@ -423,6 +468,7 @@ export class Attempt {
 									typeof args.minutes === "number" && args.minutes > 0 ? args.minutes : 30;
 								const waited = await waitForChange(() => this.ctx.context(job.id, job.attempt), {
 									since: this.#seen,
+									changes: this.#changes,
 									until: Date.now() + Math.min(minutes * 60_000, WAIT_LIMIT),
 									stopped: () => this.#closed(),
 								});
@@ -530,6 +576,7 @@ export class Attempt {
 						throw error;
 					}
 					this.#paused = true;
+					this.wake();
 					if (reply.cancel) this.#agent?.stop();
 					return "kix sent your questions to the maintainer and paused this job. End your turn now without further work; this session resumes with their answers.";
 				},

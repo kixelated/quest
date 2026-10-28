@@ -147,9 +147,13 @@ included. A branch whose tip is the head of a merged PR holds nothing, since
 its work landed; a closed, unmerged PR's branch still holds its quest. It
 lists each one it skips on stderr with its PR and how long ago that PR was
 last active, so you can decide whether a stale claim should be taken over.
-In a fork's clone, the upstream is the fork's parent, and the fork's own
-branches and PRs count too; a remote that fetches from upstream and pushes to
-a fork works the same way. `--remote` picks a remote other than `origin`.
+On GitHub, the upstream is found by walking up the remote's fork chain while
+each parent's default branch has `quest/README.md`. In a contributor's fork,
+the upstream is the project it forked, and the fork's own branches and PRs
+count too; a remote that fetches from upstream and pushes to a fork works the
+same way. A fork whose parent keeps no quests is its own upstream. A failed
+lookup, such as an expired token or a network error, fails the command rather
+than picking a different upstream. `--remote` picks a remote other than `origin`.
 Off GitHub, only branches are checked.
 Neither form inspects kix.quest runner locks or outside conditions.
 
@@ -166,7 +170,9 @@ It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`), then opens a draft PR
 from it right away and prints the PR's URL. It switches your checkout to the
 claim on a new local branch, or fast-forwards that branch if it is already
-checked out. A fork pushes to itself and opens the PR on its parent. It reads
+checked out. A fork pushes to itself and opens the PR on its upstream, found
+as for `unblocked --unclaimed`, so a fork with its own quests claims on
+itself. It reads
 readiness from the upstream default branch it builds on, not your checkout. It
 fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
@@ -247,7 +253,7 @@ result and exit 1 if it fails, for example when a quest moved out of its epic.
 An epic is its directory or README; removing one that holds other quests needs
 `-r`. The root and milestones are never moved or removed. `mv` refuses a
 destination that exists, and refuses to move a quest while it has a claim
-branch or open PR on `origin`, or on the repository a GitHub fork came from,
+branch or open PR on `origin`, or on the upstream that holds its claims,
 since the branch would no longer name it.
 Neither command touches branches or PRs.
 
@@ -267,6 +273,17 @@ command registers the driver in a fresh clone or worktree whose
 `.gitattributes` names it. Without `quest` on the merge's PATH, the driver
 falls back to `git merge-file`, and GitHub's merges ignore drivers, so a PR
 shows as conflicting until a local merge from its base is pushed.
+
+The registered driver passes Git's conflict marker length and revision labels
+to `quest resolve`, including the ancestor label for `diff3` conflicts. A direct
+invocation defaults to seven-character markers and `ours`/`base`/`theirs`;
+`--marker-size`, `--ours-label`, `--base-label`, and `--theirs-label` override
+them. Labels must fit on one line. The fallback carries the same Git metadata
+when `quest` is missing or too old to accept those options.
+
+Existing configured drivers are preserved. For a checkout still using the old
+quest-generated command, clear its local `merge.quest.driver` entry and run any
+quest command to register the current one.
 
 ## Wait for pull request activity
 
@@ -372,6 +389,7 @@ checks success passed=14 failing=0 pending=0
 review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
 review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
 thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+hold quest:merge LE_example 2026-10-16T17:57:16.000Z https://api.github.com/repos/kixelated/quest/issues/events/123456 1 hour ago
 ```
 
 Each line starts with its record type; any free text, a check name or a path,
@@ -389,6 +407,8 @@ comes last, and a missing value prints as `-`:
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+| `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
+| `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 `resolveReviewThread` take. Neutral and skipped checks pass. A required check
@@ -396,7 +416,7 @@ is one branch protection or a ruleset requires for this PR. `--json` prints the
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
-`threads`. Long lists are paged; reactions are the newest 100 per PR or review,
+`threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
@@ -431,8 +451,12 @@ It enables auto-merge bound to that SHA, which enters GitHub's merge queue
 when the base has one, or merges at once when nothing is left to wait for. It
 makes a merge commit; `--squash` or `--rebase` picks another method, and a
 merge queue applies its own. On a base that requires the `quest land` check, it
-queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead. `quest:merge` stays on while the PR is queued or
-auto-merging; once the PR leaves the queue unmerged, the next command removes
+queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead.
+On an ungated base, it compares the live base against that head and refuses a
+head that is behind or diverged: merge the base, rerun the repository's checks,
+and land the new head. This is a preflight check; GitHub can still move the base
+between that comparison and its head-pinned merge mutation. `quest:merge` stays
+on while the PR is queued or auto-merging; once the PR leaves the queue unmerged, the next command removes
 it. The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.
@@ -450,8 +474,9 @@ and each landed PR shows as merged.
 A gated base requires the `quest land` status check, which nothing reports on
 a PR head, so GitHub's auto-merge only waits and its merge button cannot land
 around the gate. Only the gate's push credential bypasses that rule; pin the
-check's source to an app that never reports it, so no one can satisfy it with
-a status. There,
+check's source to an app installed on the repository that never reports it, so
+no one can satisfy it with a status. GitHub rejects an uninstalled app as a
+required check's source. There,
 `quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
 auto-merge whose commit body pins the head it approved
 (`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
@@ -501,11 +526,12 @@ the gate upholds them itself. It requires each PR's review decision to allow
 it, each of the base's other required checks to pass on its head, counting
 every check and only those from the app a rule names, and, when the base
 requires conversation resolution, each of its review threads to be resolved.
-Its push satisfies `creation`, `update`, `deletion`, `non_fast_forward`, and
+Its push satisfies `creation`, `deletion`, `non_fast_forward`, and
 `required_linear_history`, and `copilot_code_review` blocks nothing. `resolve`
 fails, before anything lands, on any other rule type and on `pull_request`
 settings the review decision does not cover: last-push approval, merge methods
-without squash, and required reviewers.
+without squash, and required reviewers. It refuses `update`: that rule
+restricts who can move the base, while the gate can land a PR any writer queues.
 
 On a base with classic protection, `resolve` reads its settings, which needs
 administration read (a GitHub App's "Administration: read", or a token with
@@ -589,12 +615,10 @@ jobs:
           if [ -s "$RUNNER_TEMP/landing" ]; then gh workflow run land.yml --ref "$GITHUB_REF_NAME"; fi
 ```
 
-The land job's token pushes the base and PR branches; give it the bypass,
-such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
-from an environment only the base branch can use. Where the ruleset
-refuses GitHub Actions as a bypass actor, as an organization's can, use an App
-installed on the repository. Ejecting a PR disables its auto-merge, which needs
-`contents: write` on the token in `GH_TOKEN` even when another credential
+The land job's token pushes the base and PR branches. Grant the ruleset's bypass
+to a GitHub App installed on the repository, and mint its token from an
+environment only the base branch can use. Ejecting a PR disables its auto-merge,
+which needs `contents: write` on the token in `GH_TOKEN` even when another credential
 pushes. The check job holds only a read token, so it can run on a self-hosted
 runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,
 the land job needs a token with admin rights, and the resolve job one with
@@ -662,6 +686,17 @@ quest agent resume --harness claude --key 2 --model claude-opus-5-5 --effort hig
 quest agent stop .worktrees/foo
 quest agent stop --all
 ```
+
+Codex starts and resumes only in a checkout registered by `quest worktree create`,
+on Linux with the `quest worktree run` supervisor available.
+Ownership and host support are checked before keys are resolved. Each turn uses
+the same lifecycle as `quest worktree run`: restore the reservation before the
+turn, then release it and prune declared scratch after the agent and its
+remaining descendants exit. Source changes and the session remain available
+for resume, including after a decision pause or failed turn. Reinstall or rebuild
+pruned dependencies when the next turn needs them. Claude continues to run
+directly in the supplied checkout. Codex desktop threads use the desktop app's
+native archival instead.
 
 Options go before the worktree, and the prompt or message follows it, so text
 starting with `-` is never read as an option. `--key` names a key by its
@@ -732,6 +767,18 @@ with a private `HOME`.
 On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
 pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
 AppArmor allows them only for programs with a profile granting `userns`.
+Merge jobs retain existing PR submodule pointers when merging the base. Their
+`wait` tool wakes on GitHub webhook hints or reconnects and rereads the PR;
+a hint never approves work. If someone moves the head, the maintainer can
+continue from that exact head through the existing approval flow. The same
+runner checkpoints and merges its unpublished source locally; conflicts pause
+for a decision. Stale local changes are preserved in the runner's bare clone
+under `refs/kix/checkpoints/<job>/`, and are not reapplied after another runner
+publishes. Existing failover still restarts from the latest published branch
+checkpoint. Initialized submodules leave their checkout intact until their
+local commits and changes can be preserved explicitly; this path never deletes
+them to force continuation.
+
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
@@ -820,7 +867,7 @@ quest worktree remove example
 modified or untracked files and any commit, at `HEAD` or under the checkout's
 own refs such as `refs/bisect/`, that no branch or remote-tracking ref
 reaches. A squash-merged change leaves its commits unreached, so they count as
-preserved only when origin's GitHub repository (a fork's parent) has a merged
+preserved only when the GitHub upstream that holds origin's claims has a merged
 PR whose head is exactly that commit; other commits need no forge or token.
 It then prunes the scratch and refuses ignored files that remain, leaving the
 checkout released, before `git worktree remove` deletes it. A checkout already
