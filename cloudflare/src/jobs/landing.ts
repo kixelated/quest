@@ -24,7 +24,7 @@ export async function release(env: Env, repository: number, target: string) {
 			if (await github.releasePullRequest({ ...project, id: repository }, pullOf(target), hold))
 				await store.released(env.DB, id, hold);
 		} catch (error) {
-			// The next event on the pull request tries again.
+			// The next pull request event or scheduled sweep tries again.
 			console.error({
 				event: "merge_hold_release_failed",
 				name: error instanceof Error ? error.name : "unknown",
@@ -41,4 +41,15 @@ export async function ended(env: Env, job: string) {
 		.bind(job)
 		.first<{ repository: number; target: string }>();
 	if (row) await release(env, row.repository, row.target);
+}
+
+/** A regular backstop for lifecycle callbacks or GitHub reads that failed. */
+export const SWEEP_CRON = "*/5 * * * *";
+
+/** Retry every ended job's hold; release() rechecks the job and the exact live hold before removing it. */
+export async function sweep(env: Env) {
+	const { results } = await env.DB.prepare(
+		"SELECT DISTINCT repository,target FROM jobs WHERE workflow='merge' AND hold IS NOT NULL AND state NOT IN ('queued','running','waiting') ORDER BY repository,target",
+	).all<{ repository: number; target: string }>();
+	for (const { repository, target } of results) await release(env, repository, target);
 }

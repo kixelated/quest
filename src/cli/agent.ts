@@ -6,7 +6,7 @@
 // variables, and reads the agent's session, reply, and cost. Its own arguments
 // name the harness, worktree, key, model, effort, and permission mode, so a
 // permission classifier reading the call sees the whole launch.
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	chmodSync,
@@ -25,7 +25,8 @@ import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { save } from "./worktree";
+import { systemdScopes } from "./supervise";
+import { Worktrees, save } from "./worktree";
 
 export const HARNESSES = ["claude", "codex"] as const;
 export type HarnessName = (typeof HARNESSES)[number];
@@ -559,6 +560,17 @@ export async function runAgent(
 	} catch {
 		throw new AgentInputError(`${launch.worktree} is not a directory`);
 	}
+	// Validate ownership and supervision before any secret-manager or key-store access.
+	const checkouts = launch.harness === "codex" ? new Worktrees() : undefined;
+	let checkout: string | undefined;
+	if (checkouts) {
+		systemdScopes.check();
+		checkout = checkouts.registered(worktree)?.id;
+		if (checkout === undefined)
+			throw new AgentInputError(
+				`Codex requires a registered Quest checkout; create it with \`quest worktree create\`: ${worktree}`,
+			);
+	}
 	const dir = spawnDirectory(deps.base, worktree);
 	const keys = await spawnKeys(dir, deps.env, deps.resolve);
 	const key = keys[launch.key - 1];
@@ -607,56 +619,62 @@ export async function runAgent(
 	const handlers = signals.map((name) => [name, () => forward(name)] as const);
 	for (const [name, handler] of handlers) process.on(name, handler);
 	try {
+		let supervised: Promise<{ code: number; failure?: string }> | undefined;
 		const { code, stdout, stderr } = await new Promise<{ code: number; stdout: string; stderr: string }>(
 			(resolve, reject) => {
-				const agent = spawn(argv[0], argv.slice(1), {
-					cwd: worktree,
-					env: agentEnvironment(deps.env, harness.keyVariable, key),
-					stdio: ["pipe", "pipe", "pipe"],
-				});
-				child = agent;
-				state.child = agent.pid;
-				update();
-				announce(known);
-				// The kept tails are redacted before they are cut, so a cut never splits a key.
-				let out = "";
-				let err = "";
-				const lines = boundedLines(LINE_LIMIT, (line) => announce(reader.line(line)));
-				const forwarded = redactedLines(redact, Math.max(...keys.map((k) => k.length)) - 1, deps.stderr);
-				agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-					out = tail(redact(out + chunk));
-					lines.data(chunk);
-				});
-				agent.stdout.once("end", () => {
-					dropped = lines.end();
-				});
-				agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-					err = tail(redact(err + chunk));
-					forwarded.data(chunk);
-				});
-				agent.stderr.once("end", () => forwarded.end());
-				agent.stdin.on("error", () => {}); // An agent that exits early closes its stdin.
-				agent.stdin.end(prompt);
-				agent.once("error", (error: NodeJS.ErrnoException) =>
-					reject(error.code === "ENOENT" ? new Error(`${argv[0]} is not installed`) : error),
-				);
-				agent.once("close", (status, signal) =>
-					resolve({
-						code: status ?? (signal ? 128 + constants.signals[signal] : 1),
-						stdout: out,
-						stderr: err,
-					}),
-				);
+				const connect = (agent: ChildProcessWithoutNullStreams) => {
+					child = agent;
+					state.child = agent.pid;
+					update();
+					announce(known);
+					// The kept tails are redacted before they are cut, so a cut never splits a key.
+					let out = "";
+					let err = "";
+					const lines = boundedLines(LINE_LIMIT, (line) => announce(reader.line(line)));
+					const forwarded = redactedLines(redact, Math.max(...keys.map((k) => k.length)) - 1, deps.stderr);
+					agent.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+						out = tail(redact(out + chunk));
+						lines.data(chunk);
+					});
+					agent.stdout.once("end", () => {
+						dropped = lines.end();
+					});
+					agent.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+						err = tail(redact(err + chunk));
+						forwarded.data(chunk);
+					});
+					agent.stderr.once("end", () => forwarded.end());
+					agent.stdin.on("error", () => {}); // An agent that exits early closes its stdin.
+					agent.stdin.end(prompt);
+					agent.once("error", (error: NodeJS.ErrnoException) =>
+						reject(error.code === "ENOENT" ? new Error(`${argv[0]} is not installed`) : error),
+					);
+					agent.once("close", (status, signal) =>
+						resolve({
+							code: status ?? (signal ? 128 + constants.signals[signal] : 1),
+							stdout: out,
+							stderr: err,
+						}),
+					);
+				};
+				const env = agentEnvironment(deps.env, harness.keyVariable, key);
+				if (checkouts) {
+					supervised = checkouts.run(checkout!, argv, { env, spawned: connect });
+					supervised.catch(reject);
+				} else connect(spawn(argv[0], argv.slice(1), { cwd: worktree, env, stdio: ["pipe", "pipe", "pipe"] }));
 			},
 		);
+		const released = await supervised;
+		if (released?.failure) throw new Error(released.failure);
 		if (lost !== undefined) throw lost;
+		const exitCode = released?.code ?? code;
 		const result = reader.result(stderr);
 		announce(result.session);
 		// A finished turn is never exhausted, even if its reply mentions credit.
 		const outcome: Outcome =
 			interrupted || existsSync(stopPath(record))
 				? "stopped"
-				: code === 0 && !result.failed
+				: exitCode === 0 && !result.failed
 					? "finished"
 					: result.exhausted
 						? "exhausted"

@@ -147,9 +147,13 @@ included. A branch whose tip is the head of a merged PR holds nothing, since
 its work landed; a closed, unmerged PR's branch still holds its quest. It
 lists each one it skips on stderr with its PR and how long ago that PR was
 last active, so you can decide whether a stale claim should be taken over.
-In a fork's clone, the upstream is the fork's parent, and the fork's own
-branches and PRs count too; a remote that fetches from upstream and pushes to
-a fork works the same way. `--remote` picks a remote other than `origin`.
+On GitHub, the upstream is found by walking up the remote's fork chain while
+each parent's default branch has `quest/README.md`. In a contributor's fork,
+the upstream is the project it forked, and the fork's own branches and PRs
+count too; a remote that fetches from upstream and pushes to a fork works the
+same way. A fork whose parent keeps no quests is its own upstream. A failed
+lookup, such as an expired token or a network error, fails the command rather
+than picking a different upstream. `--remote` picks a remote other than `origin`.
 Off GitHub, only branches are checked.
 Neither form inspects kix.quest runner locks or outside conditions.
 
@@ -166,7 +170,9 @@ It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`), then opens a draft PR
 from it right away and prints the PR's URL. It switches your checkout to the
 claim on a new local branch, or fast-forwards that branch if it is already
-checked out. A fork pushes to itself and opens the PR on its parent. It reads
+checked out. A fork pushes to itself and opens the PR on its upstream, found
+as for `unblocked --unclaimed`, so a fork with its own quests claims on
+itself. It reads
 readiness from the upstream default branch it builds on, not your checkout. It
 fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
@@ -247,7 +253,7 @@ result and exit 1 if it fails, for example when a quest moved out of its epic.
 An epic is its directory or README; removing one that holds other quests needs
 `-r`. The root and milestones are never moved or removed. `mv` refuses a
 destination that exists, and refuses to move a quest while it has a claim
-branch or open PR on `origin`, or on the repository a GitHub fork came from,
+branch or open PR on `origin`, or on the upstream that holds its claims,
 since the branch would no longer name it.
 Neither command touches branches or PRs.
 
@@ -431,8 +437,12 @@ It enables auto-merge bound to that SHA, which enters GitHub's merge queue
 when the base has one, or merges at once when nothing is left to wait for. It
 makes a merge commit; `--squash` or `--rebase` picks another method, and a
 merge queue applies its own. On a base that requires the `quest land` check, it
-queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead. `quest:merge` stays on while the PR is queued or
-auto-merging; once the PR leaves the queue unmerged, the next command removes
+queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead.
+On an ungated base, it compares the live base against that head and refuses a
+head that is behind or diverged: merge the base, rerun the repository's checks,
+and land the new head. This is a preflight check; GitHub can still move the base
+between that comparison and its head-pinned merge mutation. `quest:merge` stays
+on while the PR is queued or auto-merging; once the PR leaves the queue unmerged, the next command removes
 it. The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.
@@ -663,6 +673,17 @@ quest agent stop .worktrees/foo
 quest agent stop --all
 ```
 
+Codex starts and resumes only in a checkout registered by `quest worktree create`,
+on Linux with the `quest worktree run` supervisor available.
+Ownership and host support are checked before keys are resolved. Each turn uses
+the same lifecycle as `quest worktree run`: restore the reservation before the
+turn, then release it and prune declared scratch after the agent and its
+remaining descendants exit. Source changes and the session remain available
+for resume, including after a decision pause or failed turn. Reinstall or rebuild
+pruned dependencies when the next turn needs them. Claude continues to run
+directly in the supplied checkout. Codex desktop threads use the desktop app's
+native archival instead.
+
 Options go before the worktree, and the prompt or message follows it, so text
 starting with `-` is never read as an option. `--key` names a key by its
 1-based position. The first launch resolves every 1Password `op://` entry in
@@ -732,6 +753,18 @@ with a private `HOME`.
 On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
 pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
 AppArmor allows them only for programs with a profile granting `userns`.
+Merge jobs retain existing PR submodule pointers when merging the base. Their
+`wait` tool wakes on GitHub webhook hints or reconnects and rereads the PR;
+a hint never approves work. If someone moves the head, the maintainer can
+continue from that exact head through the existing approval flow. The same
+runner checkpoints and merges its unpublished source locally; conflicts pause
+for a decision. Stale local changes are preserved in the runner's bare clone
+under `refs/kix/checkpoints/<job>/`, and are not reapplied after another runner
+publishes. Existing failover still restarts from the latest published branch
+checkpoint. Initialized submodules leave their checkout intact until their
+local commits and changes can be preserved explicitly; this path never deletes
+them to force continuation.
+
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
@@ -820,7 +853,7 @@ quest worktree remove example
 modified or untracked files and any commit, at `HEAD` or under the checkout's
 own refs such as `refs/bisect/`, that no branch or remote-tracking ref
 reaches. A squash-merged change leaves its commits unreached, so they count as
-preserved only when origin's GitHub repository (a fork's parent) has a merged
+preserved only when the GitHub upstream that holds origin's claims has a merged
 PR whose head is exactly that commit; other commits need no forge or token.
 It then prunes the scratch and refuses ignored files that remain, leaving the
 checkout released, before `git worktree remove` deletes it. A checkout already

@@ -24,7 +24,7 @@ import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/ru
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
 import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
-import { fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
+import { Changes, fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -362,8 +362,201 @@ describe("workspace", () => {
 		git(workspace.dir, "merge", "-q", "--no-edit", "FETCH_HEAD");
 		const snapshot = await workspace.snapshot();
 		expect(snapshot.merge).not.toBeNull();
-		// Relative to the merged commit, the pull request's own submodule bump is a change kix cannot send.
-		expect(snapshot.skipped).toEqual(["sub"]);
+		// Relative to the merged commit, retain the pull request's existing pointer without uploading submodule contents.
+		expect(snapshot.submodules).toEqual([{ path: "sub", sha: git(join(dir, "sub"), "rev-parse", "HEAD") }]);
+	});
+
+	for (const conflict of [false, true])
+		posix(`continues a selected moved head while preserving unpublished work (conflict=${conflict})`, async () => {
+			const { dir, commit } = upstream();
+			const root = tempDir();
+			const original = await Workspace.prepare(
+				root,
+				job(commit, { workflow: "merge", target: "pulls/2", head: commit }),
+				dir,
+			);
+			writeFileSync(join(original.dir, "old.txt"), "local work\n");
+			writeFileSync(join(original.dir, "untracked.txt"), "new source\n");
+			writeFileSync(join(dir, conflict ? "old.txt" : "remote.txt"), "someone else's work\n");
+			git(dir, "add", ".");
+			git(dir, "commit", "-qm", "external head");
+			const head = git(dir, "rev-parse", "HEAD");
+			const current = await Workspace.prepare(
+				root,
+				job(head, {
+					workflow: "merge",
+					target: "pulls/2",
+					head,
+					attempt: 2,
+					session: "s",
+					questions: [
+						{
+							id: "q",
+							kind: "publication",
+							attempt: 1,
+							approvedAt: 1,
+							prompt: { continuation: { head, from: commit, revision: commit } },
+							answer: { continue: head },
+						},
+					],
+				}),
+				dir,
+			);
+			expect(current.continued).toBe(true);
+			expect(current.preserved).toMatch(/^refs\/kix\/checkpoints\/job1\//);
+			expect(git(current.repository, "show", `${current.preserved}:old.txt`)).toBe("local work");
+			expect(readFileSync(join(current.dir, "untracked.txt"), "utf8")).toBe("new source\n");
+			if (conflict) {
+				expect(await current.conflicts()).toEqual(["old.txt"]);
+				await expect(current.snapshot()).rejects.toThrow("Resolve and stage");
+				writeFileSync(join(current.dir, "old.txt"), "resolved both versions\n");
+				git(current.dir, "add", "old.txt");
+				git(current.dir, "commit", "-qm", "resolve preserved merge");
+			} else expect(readFileSync(join(current.dir, "remote.txt"), "utf8")).toBe("someone else's work\n");
+			const snapshot = await current.snapshot();
+			expect(snapshot.merge).toBeNull();
+			expect(snapshot.changes.map((change) => change.path)).toEqual(["old.txt", "untracked.txt"]);
+		});
+
+	for (const integrated of [false, true])
+		posix(`continues after publication without replaying published files (integrated=${integrated})`, async () => {
+			const { dir, commit } = upstream();
+			const root = tempDir();
+			const original = await Workspace.prepare(root, job(commit, { workflow: "merge", head: commit }), dir);
+			writeFileSync(join(original.dir, "old.txt"), "published version\n");
+			const snapshot = await original.snapshot();
+			writeFileSync(join(dir, "old.txt"), "published version\n");
+			git(dir, "commit", "-qam", "published checkpoint");
+			const published = git(dir, "rev-parse", "HEAD");
+			await original.published(published, snapshot);
+			writeFileSync(join(dir, "old.txt"), "external version\n");
+			git(dir, "commit", "-qam", "external change after publication");
+			const head = git(dir, "rev-parse", "HEAD");
+			if (integrated) {
+				// An agent can already have integrated the head before publication detects it.
+				git(original.dir, "fetch", "-q", "origin", head);
+				git(original.dir, "reset", "--hard", "-q", head);
+			}
+			writeFileSync(join(original.dir, "untracked.txt"), "unpublished source\n");
+			const current = await Workspace.prepare(
+				root,
+				job(head, {
+					workflow: "merge",
+					head,
+					attempt: 2,
+					questions: [
+						{
+							id: "q",
+							kind: "publication",
+							attempt: 1,
+							approvedAt: 1,
+							prompt: { continuation: { head, from: published, revision: commit } },
+							answer: { continue: head },
+						},
+					],
+				}),
+				dir,
+			);
+			expect(current.continued).toBe(true);
+			expect(await current.conflicts()).toEqual([]);
+			expect(readFileSync(join(current.dir, "old.txt"), "utf8")).toBe("external version\n");
+			expect((await current.snapshot()).changes.map((change) => change.path)).toEqual(["untracked.txt"]);
+			let workspace = current;
+			for (const round of [1, 2, 3]) {
+				const snapshot = await workspace.snapshot();
+				writeFileSync(join(dir, "untracked.txt"), readFileSync(join(workspace.dir, "untracked.txt")));
+				git(dir, "add", ".");
+				git(dir, "commit", "-qm", `published continuation ${round}`);
+				const published = git(dir, "rev-parse", "HEAD");
+				if (round === 2) await workspace.adopt(published);
+				else await workspace.published(published, snapshot);
+				expect(await workspace.snapshot()).toMatchObject({ merge: null, changes: [] });
+				if (round === 3) break;
+				writeFileSync(join(workspace.dir, "untracked.txt"), `next unpublished edit ${round}\n`);
+				writeFileSync(join(dir, "remote.txt"), `another external edit ${round}\n`);
+				git(dir, "add", ".");
+				git(dir, "commit", "-qm", "another moved head");
+				const next = git(dir, "rev-parse", "HEAD");
+				workspace = await Workspace.prepare(
+					root,
+					job(next, {
+						workflow: "merge",
+						head: next,
+						attempt: 3,
+						questions: [
+							{
+								id: "q2",
+								kind: "publication",
+								attempt: 2,
+								approvedAt: 2,
+								prompt: { continuation: { head: next, from: published, revision: head } },
+								answer: { continue: next },
+							},
+						],
+					}),
+					dir,
+				);
+			}
+		});
+
+	posix("leaves initialized submodule commits intact when a stale checkout needs replacement", async () => {
+		const module = upstream().dir;
+		const { dir } = upstream();
+		git(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", module, "module");
+		git(dir, "commit", "-qam", "add module");
+		const commit = git(dir, "rev-parse", "HEAD");
+		const root = tempDir();
+		const original = await Workspace.prepare(root, job(commit, { head: commit }), dir);
+		git(original.dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q");
+		const child = join(original.dir, "module");
+		writeFileSync(join(child, "old.txt"), "unpublished module commit\n");
+		git(child, "commit", "-qam", "module local");
+		const local = git(child, "rev-parse", "HEAD");
+		writeFileSync(join(dir, "new.txt"), "remote\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-qm", "new head");
+		const head = git(dir, "rev-parse", "HEAD");
+		await expect(Workspace.prepare(root, job(commit, { head, attempt: 2 }), dir)).rejects.toThrow(
+			"initialized submodules",
+		);
+		expect(git(child, "rev-parse", "HEAD")).toBe(local);
+		expect(readFileSync(join(child, "old.txt"), "utf8")).toBe("unpublished module commit\n");
+	});
+
+	posix("leaves an untracked embedded repository intact instead of deleting its commits", async () => {
+		const { dir, commit } = upstream();
+		const root = tempDir();
+		const original = await Workspace.prepare(root, job(commit, { head: commit }), dir);
+		const embedded = join(original.dir, "embedded");
+		mkdirSync(embedded);
+		git(embedded, "init", "-q");
+		writeFileSync(join(embedded, "source"), "local repository\n");
+		git(embedded, "add", ".");
+		git(embedded, "commit", "-qm", "local commit");
+		const local = git(embedded, "rev-parse", "HEAD");
+		writeFileSync(join(dir, "new.txt"), "published\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-qm", "new head");
+		const head = git(dir, "rev-parse", "HEAD");
+		await expect(Workspace.prepare(root, job(commit, { head, attempt: 2 }), dir)).rejects.toThrow(
+			"embedded repositories",
+		);
+		expect(git(embedded, "rev-parse", "HEAD")).toBe(local);
+	});
+
+	posix("preserves stale local work without reapplying it after another runner published", async () => {
+		const { dir, commit } = upstream();
+		const root = tempDir();
+		const original = await Workspace.prepare(root, job(commit, { head: commit }), dir);
+		writeFileSync(join(original.dir, "old.txt"), "stale unpublished work\n");
+		writeFileSync(join(dir, "old.txt"), "new published work\n");
+		git(dir, "commit", "-qam", "another runner published");
+		const head = git(dir, "rev-parse", "HEAD");
+		const current = await Workspace.prepare(root, job(commit, { head, attempt: 2 }), dir);
+		expect(current.continued).toBe(false);
+		expect(readFileSync(join(current.dir, "old.txt"), "utf8")).toBe("new published work\n");
+		expect(git(current.repository, "show", `${current.preserved}:old.txt`)).toBe("stale unpublished work");
+		expect((await current.snapshot()).changes).toEqual([]);
 	});
 
 	posix("prepares jobs on one repository at once without racing on its clone", async () => {
@@ -498,12 +691,11 @@ describe("waiting on a pull request", () => {
 			since: fingerprint(pull("PENDING")),
 			until: 1_000_000,
 			stopped: () => null,
-			interval: 10,
 			now: () => 0,
 			pause: async (ms) => slept.push(ms),
 		});
 		expect(waited).toEqual({ changed: true, context: pull("SUCCESS") });
-		expect(slept).toEqual([10, 10]);
+		expect(slept).toEqual([1_000_000, 1_000_000]);
 		expect(fingerprint(pull("SUCCESS", 1))).not.toBe(fingerprint(pull("SUCCESS")));
 		// A new review still counts once kix's window of the latest reviews is full.
 		const full = (newest: string) => ({
@@ -518,7 +710,6 @@ describe("waiting on a pull request", () => {
 		const options = {
 			since: null,
 			until: 25,
-			interval: 10,
 			now: () => clock,
 			pause: async (ms: number) => (clock += ms),
 		};
@@ -530,6 +721,48 @@ describe("waiting on a pull request", () => {
 			stopped: "Stopped.",
 		});
 	});
+});
+
+test("a webhook arriving during the context read is not lost before subscribing", async () => {
+	const changes = new Changes();
+	let reads = 0;
+	const result = await waitForChange(
+		async () => {
+			if (reads++ === 0) {
+				changes.wake();
+				return { state: "OPEN" };
+			}
+			return { state: "CLOSED" };
+		},
+		{ since: fingerprint({ state: "OPEN" }), until: Date.now() + 60_000, stopped: () => null, changes },
+	);
+	expect(result).toEqual({ changed: true, context: { state: "CLOSED" } });
+	expect(reads).toBe(2);
+});
+
+test("a webhook wait reads only on a wake and wakes immediately when its job stops", async () => {
+	const changes = new Changes();
+	let stopped: string | null = null;
+	let reads = 0;
+	const result = waitForChange(
+		async () => {
+			reads++;
+			return { state: "OPEN" };
+		},
+		{
+			since: null,
+			until: Date.now() + 60_000,
+			stopped: () => stopped,
+			changes,
+		},
+	);
+	await vi.waitFor(() => expect(reads).toBe(1));
+	changes.wake();
+	await vi.waitFor(() => expect(reads).toBe(2));
+	stopped = "Stopped.";
+	changes.wake();
+	expect(await result).toEqual({ stopped: "Stopped." });
+	expect(reads).toBe(2);
 });
 
 describe("opencode", () => {
@@ -931,7 +1164,13 @@ async function rpc(method, params) {
 	for (const step of steps) {
 		if (step.write) fs.writeFileSync(step.write, step.content);
 		if (step.remove) fs.rmSync(step.remove);
+		if (step.git) require("node:child_process").execFileSync("git", ["-c", "user.name=Fake Agent", "-c", "user.email=fake@example.test", ...step.git], { stdio: "ignore" });
 		if (step.emit) out(step.emit);
+		if (step.backgroundWait) {
+			void rpc("tools/call", { name: "wait", arguments: {minutes:55} }).catch(() => {});
+			await rpc("tools/call", { name: "context", arguments: {} });
+			log({ backgroundWaitPid: process.pid });
+		}
 		if (step.tool) log({ tool: step.tool, reply: await rpc("tools/call", { name: step.tool, arguments: step.args }) });
 		if (step.wait) {
 			process.on("SIGTERM", () => { log({ terminated: true }); process.exit(143); });
@@ -1161,6 +1400,117 @@ async function idle(runner: Runner) {
 }
 
 describe("quest runner", () => {
+	posix("pauses a large conflicted continuation with a bounded question and intact checkout", async () => {
+		const r = rig();
+		try {
+			const paths = Array.from({ length: 60 }, (_, i) => `component-${i}-${"long-path".repeat(6)}.txt`);
+			for (const path of paths) writeFileSync(join(r.upstream.dir, path), "initial\n");
+			git(r.upstream.dir, "add", ".");
+			git(r.upstream.dir, "commit", "-qm", "initial component files");
+			const from = git(r.upstream.dir, "rev-parse", "HEAD");
+			const original = await Workspace.prepare(
+				r.home.dir,
+				job(from, { workflow: "merge", head: from }),
+				r.upstream.dir,
+			);
+			for (const path of paths) {
+				writeFileSync(join(original.dir, path), "local unpublished work\n");
+				writeFileSync(join(r.upstream.dir, path), "external change\n");
+			}
+			git(r.upstream.dir, "commit", "-qam", "moved head");
+			const head = git(r.upstream.dir, "rev-parse", "HEAD");
+			const continued = job(head, {
+				workflow: "merge",
+				head,
+				attempt: 2,
+				questions: [
+					{
+						id: "q",
+						kind: "publication",
+						attempt: 1,
+						approvedAt: 1,
+						prompt: { continuation: { head, from, revision: from } },
+						answer: { continue: head },
+					},
+				],
+			});
+			r.assign(continued);
+			const question = await r.hub.next((message) => message.type === "question");
+			await idle(r.runner);
+			expect(question.prompt.questions[0].question.length).toBeLessThanOrEqual(2000);
+			expect(question.prompt.questions[0].question).toContain("60 paths");
+			expect(r.hub.of("result")).toEqual([]);
+			expect((await original.conflicts()).length).toBe(60);
+			expect(r.calls()).toEqual([]);
+			r.steps({
+				start: [
+					...paths.map((path) => ({ write: path, content: "resolved both versions\n" })),
+					{ git: ["add", "."] },
+					{ git: ["commit", "-qm", "resolve preserved conflicts"] },
+					{
+						tool: "deliver",
+						args: {
+							summary: "Resolved preserved conflicts",
+							title: "Merge",
+							body: "Resolved",
+							draft: false,
+						},
+					},
+				],
+			});
+			r.assign({
+				...continued,
+				attempt: 3,
+				questions: [
+					...continued.questions,
+					{
+						id: "conflicts",
+						kind: "agent",
+						attempt: 2,
+						approvedAt: 2,
+						prompt: question.prompt,
+						answer: { answers: [{ choices: ["Resolve conflicts"] }] },
+					},
+				],
+			});
+			expect(await r.result()).toMatchObject({ outcome: "completed", summary: "Resolved preserved conflicts" });
+			await idle(r.runner);
+			expect(r.hub.of("question")).toHaveLength(1);
+			expect(r.calls().find((call) => call.stdin)!.stdin).toContain("Resolve conflicts");
+			expect(r.publishes).toHaveLength(1);
+			expect(r.publishes[0]).toMatchObject({
+				head,
+				changes: expect.arrayContaining([
+					{ path: paths[0], content: Buffer.from("resolved both versions\n").toString("base64") },
+				]),
+			});
+		} finally {
+			await r.runner.shutdown();
+		}
+	});
+
+	posix("an agent crash cancels its pending webhook wait before the attempt ends", async () => {
+		const timers = vi.spyOn(globalThis, "setTimeout");
+		const cleared = vi.spyOn(globalThis, "clearTimeout");
+		const r = rig();
+		try {
+			r.steps({ start: [{ backgroundWait: true }, { wait: true }] });
+			r.assign(job(r.upstream.commit, { workflow: "merge", target: "pulls/2", head: r.upstream.commit }));
+			await vi.waitFor(() => expect(r.calls().some((call) => call.backgroundWaitPid)).toBe(true));
+			const index = timers.mock.calls.findIndex(([, ms]) => typeof ms === "number" && ms > 60_000);
+			expect(index).toBeGreaterThanOrEqual(0);
+			const handle = timers.mock.results[index]!.value;
+			process.kill(r.calls().find((call) => call.backgroundWaitPid)!.backgroundWaitPid, "SIGKILL");
+			await r.result();
+			await idle(r.runner);
+			expect(cleared).toHaveBeenCalledWith(handle);
+		} finally {
+			await r.runner.shutdown();
+			timers.mockRestore();
+			cleared.mockRestore();
+		}
+	});
+
 	posix("runs a job in its devShell and delivers its pull request", async () => {
 		const r = rig();
 		r.steps({
