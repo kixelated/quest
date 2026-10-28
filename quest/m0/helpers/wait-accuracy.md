@@ -32,4 +32,3 @@ Decided 2026-10-24 (user) from the merge wave that landed
 ## Related
 
 - [Landing rules](/quest/m0/helpers/landing.md) - the checkpoint that reads the round count
-- [Status holds](/quest/m0/helpers/status-holds.md) - also extends `quest status`

@@ -126,6 +126,7 @@ class FakePull {
 						state: this.state,
 						isDraft: this.draft,
 						body: this.body,
+						updatedAt: new Date(this.clock).toISOString(),
 						baseRefName: "main",
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,

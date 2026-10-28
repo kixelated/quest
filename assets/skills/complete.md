@@ -6,7 +6,7 @@ Before starting, run `quest guide`, `quest skill ready`, `quest skill merge`, an
 
 The goal is to evaluate the open PRs in the repository, drafts included, and decide which ones to merge.
 For a draft, summarize the open decisions its body lists.
-Skip each PR another session holds: one with a `quest:*` label, or a draft without a `## Decisions needed` section.
+Read each PR with `quest status` and skip one another session holds, using its `hold` and `starter-hold` records instead of a separate label read. A `hold` names the label, acquisition token/time, event URL, and age. A `starter-hold` identifies a draft without a `## Decisions needed` section and reports when it was last active; that is not an acquisition time.
 List those with how long ago each was last active, and offer to take over only one that looks stale.
 The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent.

@@ -372,6 +372,7 @@ checks success passed=14 failing=0 pending=0
 review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
 review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
 thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+hold quest:merge LE_example 2026-10-16T17:57:16.000Z https://api.github.com/repos/kixelated/quest/issues/events/123456 1 hour ago
 ```
 
 Each line starts with its record type; any free text, a check name or a path,
@@ -389,6 +390,8 @@ comes last, and a missing value prints as `-`:
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+| `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
+| `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 `resolveReviewThread` take. Neutral and skipped checks pass. A required check
@@ -396,7 +399,7 @@ is one branch protection or a ruleset requires for this PR. `--json` prints the
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `reactions`, and
-`threads`. Long lists are paged; reactions are the newest 100 per PR or review,
+`threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
