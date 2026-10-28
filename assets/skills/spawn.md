@@ -41,7 +41,7 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Once a PR merges, offer `/quest-plan` for the suggested follow-ups its `/quest-merge` sub-agent reported.
+Once every sub-agent has finished, run `/quest-plan` without asking first on the suggested follow-ups that merged PRs' `/quest-merge` sub-agents reported.
 Include quest context, as many quests are concurrently in flight.
 
 Run each selected `/quest-ready`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
