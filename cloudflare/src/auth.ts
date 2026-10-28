@@ -68,7 +68,9 @@ export function createAuth(env: Env) {
 			}),
 		],
 		socialProviders: {
+			// GitHub App permissions are registered in its manifest, not OAuth scopes.
 			github: {
+				disableDefaultScope: true,
 				clientId: env.GITHUB_CLIENT_ID,
 				clientSecret: env.GITHUB_CLIENT_SECRET,
 			},
