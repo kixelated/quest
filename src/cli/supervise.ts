@@ -58,13 +58,7 @@ export interface Scopes {
 	 * Resolves with the command's exit status only once the scope is empty. Rejects with `Retained`
 	 * when that cannot be confirmed, and otherwise only when the command never started.
 	 */
-	run(unit: string, cwd: string, command: string[], options?: RunOptions): Promise<number>;
-}
-
-/** A caller may supply its environment and cancel the owned scope without global signal handlers. */
-export interface RunOptions {
-	env?: NodeJS.ProcessEnv;
-	signal?: AbortSignal;
+	run(unit: string, cwd: string, command: string[]): Promise<number>;
 }
 
 /** The command may have started and its scope may still hold processes, so its run stays recorded. */
@@ -180,14 +174,7 @@ export const systemdScopes: Scopes = {
 		await vacated(group);
 	},
 
-	run(unit, cwd, command, options) {
-		const signal = options?.signal;
-		const cancelled = () => {
-			const name = signal?.reason;
-			const number = typeof name === "string" ? constants.signals[name as NodeJS.Signals] : undefined;
-			return 128 + (number ?? constants.signals.SIGTERM);
-		};
-		if (signal?.aborted) return Promise.resolve(cancelled());
+	run(unit, cwd, command) {
 		return new Promise((resolve, reject) => {
 			const child = spawn(
 				"systemd-run",
@@ -205,7 +192,7 @@ export const systemdScopes: Scopes = {
 					"quest-worktree",
 					...command,
 				],
-				{ cwd, env: options?.env, stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"] },
+				{ cwd, stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"] },
 			);
 			const report = child.stdio[3] as Readable;
 			const admission = (child.stdio as unknown as (Writable | null)[])[4]!;
@@ -229,24 +216,8 @@ export const systemdScopes: Scopes = {
 				SIGTERM: () => interrupt("SIGTERM"),
 				SIGHUP: () => interrupt("SIGHUP"),
 			};
-			const abort = () => {
-				interrupted = cancelled();
-				if (group) {
-					try {
-						kill(group);
-					} catch (error) {
-						failure = error as Error;
-						admission.destroy();
-						child.kill("SIGTERM");
-					}
-				} else admission.destroy();
-			};
-			if (signal) {
-				signal.addEventListener("abort", abort, { once: true });
-				if (signal.aborted) abort();
-			} else for (const [name, handler] of Object.entries(handlers)) process.on(name, handler);
+			for (const [name, handler] of Object.entries(handlers)) process.on(name, handler);
 			const cleanup = () => {
-				signal?.removeEventListener("abort", abort);
 				for (const [name, handler] of Object.entries(handlers)) process.off(name, handler);
 			};
 
