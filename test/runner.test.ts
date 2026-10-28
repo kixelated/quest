@@ -462,17 +462,18 @@ describe("workspace", () => {
 			expect(readFileSync(join(current.dir, "old.txt"), "utf8")).toBe("external version\n");
 			expect((await current.snapshot()).changes.map((change) => change.path)).toEqual(["untracked.txt"]);
 			let workspace = current;
-			for (const round of [1, 2]) {
+			for (const round of [1, 2, 3]) {
 				const snapshot = await workspace.snapshot();
 				writeFileSync(join(dir, "untracked.txt"), readFileSync(join(workspace.dir, "untracked.txt")));
 				git(dir, "add", ".");
 				git(dir, "commit", "-qm", `published continuation ${round}`);
 				const published = git(dir, "rev-parse", "HEAD");
-				await workspace.published(published, snapshot);
+				if (round === 2) await workspace.adopt(published);
+				else await workspace.published(published, snapshot);
 				expect(await workspace.snapshot()).toMatchObject({ merge: null, changes: [] });
-				if (round === 2) break;
-				writeFileSync(join(workspace.dir, "untracked.txt"), "next unpublished edit\n");
-				writeFileSync(join(dir, "remote.txt"), "another external edit\n");
+				if (round === 3) break;
+				writeFileSync(join(workspace.dir, "untracked.txt"), `next unpublished edit ${round}\n`);
+				writeFileSync(join(dir, "remote.txt"), `another external edit ${round}\n`);
 				git(dir, "add", ".");
 				git(dir, "commit", "-qm", "another moved head");
 				const next = git(dir, "rev-parse", "HEAD");
@@ -1163,6 +1164,7 @@ async function rpc(method, params) {
 	for (const step of steps) {
 		if (step.write) fs.writeFileSync(step.write, step.content);
 		if (step.remove) fs.rmSync(step.remove);
+		if (step.git) require("node:child_process").execFileSync("git", ["-c", "user.name=Fake Agent", "-c", "user.email=fake@example.test", ...step.git], { stdio: "ignore" });
 		if (step.emit) out(step.emit);
 		if (step.backgroundWait) {
 			void rpc("tools/call", { name: "wait", arguments: {minutes:55} }).catch(() => {});
@@ -1417,23 +1419,22 @@ describe("quest runner", () => {
 			}
 			git(r.upstream.dir, "commit", "-qam", "moved head");
 			const head = git(r.upstream.dir, "rev-parse", "HEAD");
-			r.assign(
-				job(head, {
-					workflow: "merge",
-					head,
-					attempt: 2,
-					questions: [
-						{
-							id: "q",
-							kind: "publication",
-							attempt: 1,
-							approvedAt: 1,
-							prompt: { continuation: { head, from, revision: from } },
-							answer: { continue: head },
-						},
-					],
-				}),
-			);
+			const continued = job(head, {
+				workflow: "merge",
+				head,
+				attempt: 2,
+				questions: [
+					{
+						id: "q",
+						kind: "publication",
+						attempt: 1,
+						approvedAt: 1,
+						prompt: { continuation: { head, from, revision: from } },
+						answer: { continue: head },
+					},
+				],
+			});
+			r.assign(continued);
 			const question = await r.hub.next((message) => message.type === "question");
 			await idle(r.runner);
 			expect(question.prompt.questions[0].question.length).toBeLessThanOrEqual(2000);
@@ -1441,6 +1442,48 @@ describe("quest runner", () => {
 			expect(r.hub.of("result")).toEqual([]);
 			expect((await original.conflicts()).length).toBe(60);
 			expect(r.calls()).toEqual([]);
+			r.steps({
+				start: [
+					...paths.map((path) => ({ write: path, content: "resolved both versions\n" })),
+					{ git: ["add", "."] },
+					{ git: ["commit", "-qm", "resolve preserved conflicts"] },
+					{
+						tool: "deliver",
+						args: {
+							summary: "Resolved preserved conflicts",
+							title: "Merge",
+							body: "Resolved",
+							draft: false,
+						},
+					},
+				],
+			});
+			r.assign({
+				...continued,
+				attempt: 3,
+				questions: [
+					...continued.questions,
+					{
+						id: "conflicts",
+						kind: "agent",
+						attempt: 2,
+						approvedAt: 2,
+						prompt: question.prompt,
+						answer: { answers: [{ choices: ["Resolve conflicts"] }] },
+					},
+				],
+			});
+			expect(await r.result()).toMatchObject({ outcome: "completed", summary: "Resolved preserved conflicts" });
+			await idle(r.runner);
+			expect(r.hub.of("question")).toHaveLength(1);
+			expect(r.calls().find((call) => call.stdin)!.stdin).toContain("Resolve conflicts");
+			expect(r.publishes).toHaveLength(1);
+			expect(r.publishes[0]).toMatchObject({
+				head,
+				changes: expect.arrayContaining([
+					{ path: paths[0], content: Buffer.from("resolved both versions\n").toString("base64") },
+				]),
+			});
 		} finally {
 			await r.runner.shutdown();
 		}
