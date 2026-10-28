@@ -170,6 +170,13 @@ Any other change, including a base merge with a hand-resolved conflict, waits fo
 The repository's review policy decides whose review counts.
 Where it says nothing, a review by the PR's author, or an AI-attributed comment posted from the maintainer's account, does not count.
 
+Checkpoint the design across review rounds.
+A review round is one pushed head that drew reviews, counted from the PR's full history since its last comment that starts with `Design change:`.
+Read the full history with `gh pr view <pr> --json reviews,comments`.
+Every fourth round, stop before fixing more findings and reconsider the approach.
+Report that judgment and what remains, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
+Record each design change, including a rethink the user picks, in a PR comment that starts with `Design change:`; the next agent counts rounds from it.
+
 Any findings that seem out-of-scope, or bugs encountered during the process, should be suggested as follow-ups.
 
 ## Deletion

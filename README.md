@@ -431,8 +431,12 @@ It enables auto-merge bound to that SHA, which enters GitHub's merge queue
 when the base has one, or merges at once when nothing is left to wait for. It
 makes a merge commit; `--squash` or `--rebase` picks another method, and a
 merge queue applies its own. On a base that requires the `quest land` check, it
-queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead. `quest:merge` stays on while the PR is queued or
-auto-merging; once the PR leaves the queue unmerged, the next command removes
+queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead.
+On an ungated base, it compares the live base against that head and refuses a
+head that is behind or diverged: merge the base, rerun the repository's checks,
+and land the new head. This is a preflight check; GitHub can still move the base
+between that comparison and its head-pinned merge mutation. `quest:merge` stays
+on while the PR is queued or auto-merging; once the PR leaves the queue unmerged, the next command removes
 it. The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.

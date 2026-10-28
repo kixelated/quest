@@ -1,41 +1,34 @@
-# [S] Land only heads tested against the current base
+# [S] Settle ungated landing freshness
 
 ## Goal
 
-A PR lands only on a head that contains the base branch as it is at landing
-time, and the merge skill stops for the user, rather than waiting again, when
-a required review of a changed head does not arrive. The merge skill, iterate,
-and complete share one definition of the design checkpoint.
+Decide whether an immediate comparison against the live base is sufficient for
+ungated landings, or whether landing must atomically require the current base
+through server-side protection or a queue.
 
 ## Plan
 
-Decided 2026-10-24 (user) from the merge wave that landed
-[kixelated/quest#205](https://github.com/kixelated/quest/pull/205) through
-[#219](https://github.com/kixelated/quest/pull/219). The user asked for these
-skill and guide edits through this plan.
+Narrowed 2026-10-27 (user): apply the freshness refusal only to ungated bases.
+A base gated by `quest land` uses its existing current-base merge/test chain;
+queuing a PR must not add a per-PR base merge and check cycle.
 
-- **Refuse a stale head (user).** GitHub reported
-  [kixelated/quest#213](https://github.com/kixelated/quest/pull/213) clean,
-  but landing it would have broken a test #205 had just added. `quest merge
-  --land <sha>` refuses when the head does not contain the base branch's
-  current tip, naming both. The merge skill then merges the base (never
-  rebasing), reruns the repository's checks, and lands the new head; a
-  conflict-free base merge still needs no new review. Rejected: skill prose
-  alone, and GitHub's "require branches to be up to date" protection.
-  GitHub merge queues need an organization-owned repository, which
-  kixelated/quest is not.
-- **Ask on a missing review.** `assets/skills/merge.md` says to rerun
-  `quest wait` with `--since` after a timeout. When the wait is for a
-  required review of a changed head, ask the user instead, as the guide's
-  Reviews section already says
-  ([kixelated/quest#206](https://github.com/kixelated/quest/pull/206)).
-- **One checkpoint.** Move the every-fourth-round design checkpoint that
-  [kixelated/quest#207](https://github.com/kixelated/quest/pull/207) wrote
-  into both `merge` and `iterate` into the guide's Reviews section, and point
-  `merge`, `iterate`, and `complete` at it.
-- Test a stale head refused, the same head landing after a base merge, and a
-  head the base already contains.
+Implemented in [kixelated/quest#253](https://github.com/kixelated/quest/pull/253):
+the ungated command compares the live base ref against the pinned head and
+refuses a behind or diverged head, naming both commits. The shared design
+checkpoint and the required-review timeout instruction are implemented too.
+
+Remaining decision: GitHub's merge API pins `expectedHeadOid` but has no expected
+base OID. The base can move between the comparison and the mutation, so this
+preflight cannot promise atomic freshness at landing time.
+
+- Recommended: accept the immediate live-base preflight for ungated bases,
+  documenting that race; `quest land` remains the stronger current-base gate.
+- Or require server-side protection or a queue for an atomic guarantee. Choose
+  that requirement and its scope before implementing another landing mechanism.
+
+The original 2026-10-24 plan rejected requiring GitHub's up-to-date protection;
+this API limit needs a new explicit decision rather than silently adding it.
 
 ## Related
 
-- [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - the review-round count the checkpoint reads
+- [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - reports the review-round count the shared checkpoint reads
