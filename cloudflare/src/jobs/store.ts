@@ -1048,13 +1048,17 @@ export async function hold(db: D1Database, job: string, input: { summary: string
 }
 
 /**
- * Record the `quest:merge` label a merge job holds its pull request with,
- * while the job is still queued. Returns false once it was stopped meanwhile,
- * so the caller gives the label back.
+ * Record the acquired `quest:merge` label even if the job was stopped meanwhile,
+ * so the sweep can recover a failed immediate release. Returns whether the job
+ * is still queued and may start.
  */
 export async function held(db: D1Database, job: string, token: string) {
-	const { meta } = await db.prepare("UPDATE jobs SET hold=? WHERE id=? AND state='queued'").bind(token, job).run();
-	return meta.changes === 1;
+	const row = await db
+		.prepare("UPDATE jobs SET hold=? WHERE id=? AND workflow='merge' AND (hold IS NULL OR hold=?) RETURNING state")
+		.bind(token, job, token)
+		.first<{ state: JobState }>();
+	// Retain a stopped job's token too, so a failed immediate release remains recoverable.
+	return row?.state === "queued";
 }
 
 /** A merge job's hold on its pull request is over. */
