@@ -148,6 +148,7 @@ function setup(
 	baseline = [A],
 	side: {
 		comments?: Response[];
+		edits?: Response[];
 		graphql?: Response[];
 		checks?: Response[];
 		protected?: string[];
@@ -161,6 +162,7 @@ function setup(
 	const calls: { path: string; headers: Headers }[] = [];
 	const sideCalls: { path: string; headers: Headers; body?: unknown }[] = [];
 	const checkCalls: { path: string; headers: Headers; body?: unknown }[] = [];
+	const editCalls: { path: string; headers: Headers }[] = [];
 	const ruleCalls: { path: string; headers: Headers }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
@@ -175,6 +177,10 @@ function setup(
 		fetch: async (url, init) => {
 			const parsed = new URL(String(url));
 			const call = { path: parsed.pathname + parsed.search, headers: new Headers(init?.headers) };
+			if (parsed.pathname.endsWith("/issues/1/comments")) {
+				editCalls.push(call);
+				return side.edits?.shift() ?? response([]);
+			}
 			if (parsed.pathname.endsWith("/pulls/1/comments")) {
 				sideCalls.push(call);
 				return side.comments?.shift() ?? response([]);
@@ -224,7 +230,7 @@ function setup(
 			return next;
 		},
 	};
-	return { deps, calls, sideCalls, checkCalls, ruleCalls, sleeps, warnings, responses };
+	return { deps, calls, sideCalls, checkCalls, editCalls, ruleCalls, sleeps, warnings, responses };
 }
 
 function graphql(fixture: ReturnType<typeof setup>) {
@@ -864,48 +870,51 @@ test("a required failure wakes the wait, naming the check and linking its detail
 		protected: ["build and test", "check"],
 	});
 	const lines = await waitForActivity(pr, {}, fixture.deps);
-	expect(lines).toHaveLength(1);
-	expect(lines[0]).toMatch(
+	expect(lines).toHaveLength(2);
+	expect(lines[0]).toContain("check:failed lint");
+	expect(lines[1]).toMatch(
 		/^2026-10-07T12:08:00Z checks:failed build_and_test https:\/\/github.com\/example\/project\/actions\/runs\/1\/job\/14 q1\./,
 	);
 	expect(fixture.checkCalls[0].body).toMatchObject({ variables: { owner: "example", repo: "project", number: 1 } });
 });
 
-test("an optional failure never wakes the wait, and checks:passed waits for every check to finish", async () => {
-	const fixture = setup(
-		[pull(), response([pushed()]), response([committed(A)]), response([committed(A)]), response([committed(A)])],
-		[A],
-		{
-			checks: [
-				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "check", required: true, result: "SUCCESS", time: LATER },
-					{ name: "test", required: true },
-				]),
-				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "check", required: true, result: "SUCCESS", time: LATER },
-					{ name: "test", required: true, result: "SKIPPED", time: LATEST },
-					{ name: "slow" },
-				]),
-				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
-					{ name: "check", required: true, result: "SUCCESS", time: LATER },
-					{ name: "test", required: true, result: "SKIPPED", time: LATEST },
-					{ name: "slow", result: "SUCCESS", time: LATER },
-				]),
-			],
-			ruled: ["check", "test"],
-		},
-	);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
-	expect(fixture.sleeps).toEqual([300_000, 300_000]);
+test("an optional failure wakes separately, and resuming still waits for all checks before reporting a required pass", async () => {
+	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		checks: [
+			checks([
+				{ name: "lint", result: "FAILURE", time: LATER },
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "test", required: true },
+			]),
+		],
+		ruled: ["check", "test"],
+	});
+	const failed = await waitForActivity(pr, {}, first.deps);
+	expect(failed).toHaveLength(1);
+	expect(failed[0]).toMatch(/^2026-10-07T12:05:00Z check:failed lint /);
+	const next = setup([response([committed(A)]), response([committed(A)])], [A], {
+		checks: [
+			checks([
+				{ name: "lint", result: "FAILURE", time: LATER },
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "test", required: true, result: "SKIPPED", time: LATEST },
+				{ name: "slow" },
+			]),
+			checks([
+				{ name: "lint", result: "FAILURE", time: LATER },
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "test", required: true, result: "SKIPPED", time: LATEST },
+				{ name: "slow", result: "SUCCESS", time: LATER },
+			]),
+		],
+		ruled: ["check", "test"],
+	});
+	const lines = await waitForActivity(pr, { since: cursor(failed) }, next.deps);
+	expect(next.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
-	expect(lines[0]).toMatch(
-		/^2026-10-07T12:08:00Z checks:passed test https:\/\/github.com\/example\/project\/actions\/runs\/1\/job\/4 q1\./,
-	);
-	// The base branch's requirements are read once per wait.
-	expect(fixture.ruleCalls.map((call) => call.path)).toEqual([
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed test /);
+	// Every wait reads the base's requirements just once.
+	expect(next.ruleCalls.map((call) => call.path)).toEqual([
 		`${base}/branches/main`,
 		`${base}/rules/branches/main?per_page=100`,
 	]);
@@ -945,13 +954,13 @@ test("optional checks never stand in for required checks that have not started",
 		[A],
 		{
 			checks: [
-				checks([{ name: "lint", result: "FAILURE", time: LATER }]),
+				checks([{ name: "lint", result: "FAILURE", time: "2026-10-07T11:59:00Z" }]),
 				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "lint", result: "FAILURE", time: "2026-10-07T11:59:00Z" },
 					{ name: "check", required: true, result: "SUCCESS", time: LATER },
 				]),
 				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "lint", result: "FAILURE", time: "2026-10-07T11:59:00Z" },
 					{ name: "check", required: true, result: "SUCCESS", time: LATER },
 					{ name: "gate", required: true, result: "SUCCESS", time: LATEST },
 				]),
@@ -1003,14 +1012,14 @@ test("a required workflow requires its jobs, keeps optional checks optional, and
 		[A],
 		{
 			checks: [
-				checks([{ name: "lint", result: "FAILURE", time: LATER }]),
+				checks([{ name: "lint", result: "FAILURE", time: "2026-10-07T11:59:00Z" }]),
 				// The run's next job has not been created yet.
 				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "lint", result: "FAILURE", time: "2026-10-07T11:59:00Z" },
 					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI, running: true },
 				]),
 				checks([
-					{ name: "lint", result: "FAILURE", time: LATER },
+					{ name: "lint", result: "FAILURE", time: "2026-10-07T11:59:00Z" },
 					{ name: "build", result: "SUCCESS", time: LATER, workflow: CI },
 					{ name: "gate", result: "SUCCESS", time: LATEST, workflow: CI },
 				]),
@@ -1053,7 +1062,7 @@ test("checks:passed is dated when the head goes idle, after required checks fini
 	const lines = await waitForActivity(pr, { since: LATER }, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
-	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed slow /);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed check /);
 });
 
 test("with no required checks, an unfinished workflow run holds back checks:passed", async () => {
@@ -1177,4 +1186,82 @@ test("checks are read from every page, and a head racing the read waits for the 
 		null,
 		"next",
 	]);
+});
+
+function edited(id: number, updated = LATER, body = "Review completed", login = "codex[bot]") {
+	return {
+		id,
+		body,
+		created_at: "2026-10-06T12:00:00Z",
+		updated_at: updated,
+		user: { login },
+		html_url: `https://github.com/example/project/pull/1#issuecomment-${id}`,
+	};
+}
+
+test("edited bot comments wake once, including different edits in the same second", async () => {
+	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		edits: [response([edited(1)])],
+	});
+	const lines = await waitForActivity(pr, {}, first.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z edited codex\[bot\] /);
+	expect(Buffer.from(cursor(lines).slice(3), "base64url").toString()).not.toContain("Review completed");
+	const resumed = setup([response([committed(A)]), response([committed(A)])], [A], {
+		edits: [response([edited(1)]), response([edited(1, LATER, "Security review completed")])],
+	});
+	const changed = await waitForActivity(pr, { since: cursor(lines) }, resumed.deps);
+	expect(resumed.sleeps).toEqual([300_000]);
+	expect(changed[0]).toContain(" edited codex[bot] ");
+});
+
+test("edits reread every creation-ordered page, so an old first-page comment can change", async () => {
+	const page2 = `${base}/issues/1/comments?per_page=100&page=2`;
+	const untouched = { ...edited(1, POINT), created_at: POINT };
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
+		edits: [
+			response([untouched], { link: `<https://api.github.com${page2}>; rel="next"` }),
+			response([]),
+			response([edited(1)]),
+		],
+	});
+	expect((await waitForActivity(pr, {}, fixture.deps))[0]).toContain(" edited codex[bot] ");
+	expect(fixture.editCalls.map((call) => call.path)).toEqual([
+		`${base}/issues/1/comments?per_page=100&since=2026-10-07T11:59:59.000Z`,
+		page2,
+		`${base}/issues/1/comments?per_page=100&since=2026-10-07T11:59:59.000Z`,
+	]);
+});
+
+test("a later reaction does not hide an older edit, and old cursors learn the edit source", async () => {
+	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		graphql: [reactions([reacted("r1", LATEST)])],
+	});
+	const previous = JSON.parse(
+		Buffer.from(cursor(await waitForActivity(pr, {}, first.deps)).slice(3), "base64url").toString(),
+	);
+	delete previous.marks.edits;
+	const old = `q1.${Buffer.from(JSON.stringify(previous)).toString("base64url")}`;
+	const next = setup([response([committed(A)])], [A], {
+		edits: [response([edited(1), edited(2, LATEST, "My reply", "waiter")])],
+	});
+	const lines = await waitForActivity(pr, { since: old }, next.deps);
+	expect(lines).toHaveLength(1);
+	expect(lines[0]).toContain(" edited codex[bot] ");
+});
+
+test("a later failing optional check cannot name the aggregate required pass", async () => {
+	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
+		protected: ["check"],
+		checks: [
+			checks([
+				{ name: "check", required: true, result: "SUCCESS", time: LATER },
+				{ name: "optional", result: "FAILURE", time: LATEST },
+			]),
+		],
+	});
+	const lines = await waitForActivity(pr, {}, fixture.deps);
+	expect(lines).toHaveLength(2);
+	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z check:failed optional /);
+	expect(lines[1]).toMatch(/^2026-10-07T12:08:00Z checks:passed check /);
 });
