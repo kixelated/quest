@@ -98,6 +98,8 @@ interface Pull {
 class FakeGitHub {
 	readonly repos = new Map<string, ObjectValue>();
 	readonly pulls: Pull[] = [];
+	/** The status of each `owner/repo/path` contents lookup on a default branch; any other path is a 404. */
+	readonly files = new Map<string, number>([["example/project/quest/README.md", 200]]);
 	/** Runs after each PR is created, as when another claimer opens one at the same moment. */
 	onCreate?: () => void;
 	private clock = Date.now();
@@ -108,21 +110,23 @@ class FakeGitHub {
 
 	repo(name: string, extra: ObjectValue): void {
 		const [owner, repo] = name.split("/");
-		this.repos.set(name, { owner: { login: owner }, name: repo, full_name: name, ...extra });
+		this.repos.set(name, {
+			owner: { login: owner },
+			name: repo,
+			full_name: name,
+			clone_url: `https://github.com/${name}.git`,
+			ssh_url: `git@github.com:${name}.git`,
+			...extra,
+		});
 	}
 
-	/** A fork of example/project. */
-	fork(name: string): void {
+	/** A fork of `parent`. */
+	fork(name: string, parent = "example/project"): void {
+		const [owner, repo] = parent.split("/");
 		this.repo(name, {
 			fork: true,
 			default_branch: "main",
-			parent: {
-				owner: { login: "example" },
-				name: "project",
-				clone_url: UPSTREAM,
-				ssh_url: "git@github.com:example/project.git",
-				default_branch: "main",
-			},
+			parent: { owner: { login: owner }, name: repo, default_branch: "main" },
 		});
 	}
 
@@ -188,6 +192,11 @@ class FakeGitHub {
 		if (match && method === "GET") {
 			const repo = this.repos.get(match[1]);
 			return repo ? json(200, repo) : json(404, { message: "Not Found" });
+		}
+		match = /^\/repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(url.pathname);
+		if (match && method === "GET") {
+			const status = this.files.get(`${match[1]}/${decodeURIComponent(match[2])}`) ?? 404;
+			return json(status, status === 200 ? { type: "file", path: match[2] } : { message: "Not Found" });
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/pulls$/.exec(url.pathname);
 		if (match && method === "GET") return json(200, this.list(match[1], url.searchParams));
@@ -473,6 +482,90 @@ describe("start on GitHub", () => {
 		const released = await releaseQuest(work, ONE, "origin", deps(github));
 		expect(released).toEqual({ branch: BRANCH, closed: [started.url] });
 		expect(tip(forkBare)).toBe("");
+	});
+
+	test("a fork whose parent keeps no quests claims on itself", async () => {
+		const parentBare = tempDir();
+		git(parentBare, "init", "-q", "--bare", "-b", "main");
+		const forkBare = upstream();
+		const github = new FakeGitHub();
+		github.files.delete("example/project/quest/README.md");
+		github.fork("me/project");
+		const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: parentBare });
+
+		const started = await start(work, github);
+		expect(started.url).toBe("https://github.com/me/project/pull/1");
+		expect(tip(forkBare)).toBe(started.sha);
+		expect(tip(parentBare)).toBe("");
+		expect(github.pulls).toMatchObject([
+			{ base: "me/project", head: { ref: BRANCH, repo: { full_name: "me/project" } } },
+		]);
+	});
+
+	test.each([
+		["keeps no quests", "me/project", false],
+		["keeps quests too", "example/project", true],
+	])("a fork of a fork with quests whose parent %s claims on %s", async (_, expected, rooted) => {
+		const bares: Record<string, string> = { "example/project": upstream(), "me/project": upstream() };
+		const ownBare = tempDir();
+		git(ownBare, "init", "-q", "--bare", "-b", "main");
+		const github = new FakeGitHub();
+		if (!rooted) github.files.delete("example/project/quest/README.md");
+		github.files.set("me/project/quest/README.md", 200);
+		github.fork("me/project");
+		github.fork("them/project", "me/project");
+		const own = "https://github.com/them/project.git";
+		const work = clone(own, { [own]: ownBare, [FORK]: bares["me/project"], [UPSTREAM]: bares["example/project"] });
+
+		const started = await start(work, github);
+		expect(tip(ownBare)).toBe(started.sha);
+		for (const bare of Object.values(bares)) expect(tip(bare)).toBe("");
+		expect(github.pulls).toMatchObject([
+			{ base: expected, head: { ref: BRANCH, repo: { full_name: "them/project" } } },
+		]);
+	});
+
+	test("looks up a parent's README below a directory whose name a URL would cut short", async () => {
+		const parentBare = tempDir();
+		git(parentBare, "init", "-q", "--bare", "-b", "main");
+		const forkBare = tempDir();
+		git(forkBare, "init", "-q", "--bare", "-b", "main");
+		const dir = "sub#1";
+		const work = tempDir();
+		setup(work);
+		mkdirSync(join(work, dir));
+		cpSync(join(Tree.baseline().path, "quest"), join(work, dir, "quest"), { recursive: true });
+		git(work, "add", ".");
+		git(work, "commit", "-q", "-m", "seed");
+		git(work, "remote", "add", "origin", FORK);
+		git(work, "config", `url.${forkBare}.insteadOf`, FORK);
+		git(work, "config", `url.${parentBare}.insteadOf`, UPSTREAM);
+		git(work, "push", "-q", "origin", "HEAD:refs/heads/main");
+		git(work, "push", "-q", UPSTREAM, "HEAD:refs/heads/main");
+		const github = new FakeGitHub();
+		github.files.delete("example/project/quest/README.md");
+		github.files.set(`example/project/${dir}/quest/README.md`, 200);
+		github.fork("me/project");
+
+		await start(join(work, dir), github);
+		expect(github.pulls).toMatchObject([
+			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "me/project" } } },
+		]);
+	});
+
+	test("a failed lookup of a parent's README fails rather than picking an upstream", async () => {
+		const bare = upstream();
+		const forkBare = upstream();
+		const github = new FakeGitHub();
+		github.files.set("example/project/quest/README.md", 401);
+		github.fork("me/project");
+		const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: bare });
+
+		await expect(start(work, github)).rejects.toThrow(
+			"GitHub HTTP 401 for /repos/example/project/contents/quest/README.md",
+		);
+		expect(tip(forkBare)).toBe("");
+		expect(github.pulls).toEqual([]);
 	});
 
 	test("refuses a quest missing from the upstream default branch", async () => {

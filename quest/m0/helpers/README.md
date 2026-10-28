@@ -66,7 +66,6 @@ commands from Sep-Oct. Session counts in each child come from that window.
 
 ## Required
 
-- [Landing rules](/quest/m0/helpers/landing.md) - land only heads that contain the current base, ask on a missing review, one design checkpoint
 - [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - wake on edited bot comments, honest `checks:passed`, review rounds in `quest status`
 - [Status holds](/quest/m0/helpers/status-holds.md) - `quest status` shows a PR's `quest:*` hold
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows

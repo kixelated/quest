@@ -145,6 +145,20 @@ export async function land(
 			);
 			return;
 		}
+		// The batch gate tests its own current-base chain. Ungated landings need that base in the PR head.
+		const comparison = object(
+			await (
+				await labels.github.request(
+					`${repositoryPath(pr)}/compare/${encodeURIComponent(snapshot.base)}...${snapshot.head}?per_page=1`,
+				)
+			).json(),
+		);
+		if (comparison.status !== "ahead" && comparison.status !== "identical") {
+			const base = string(object(comparison.base_commit).sha);
+			throw new Refusal(
+				`${snapshot.url} head ${snapshot.head} does not contain ${snapshot.base} at ${base}; merge the base and rerun the repository's checks before landing`,
+			);
+		}
 		if (snapshot.queue && method !== "merge") {
 			deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
 		}
