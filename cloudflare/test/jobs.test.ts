@@ -56,7 +56,7 @@ async function state(id: string) {
 }
 /** One dispatch pass over connected runners and their free slots, whose runners acknowledge what they receive. */
 async function run(slots: Record<string, number>, now: number, owner = "owner", deliver = true) {
-	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now);
+	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now, async (job) => !!job.trusted);
 	if (deliver)
 		for (const { job } of pass.assign)
 			await db.prepare("UPDATE jobs SET delivered=1 WHERE id=?").bind(job.id).run();
@@ -991,6 +991,27 @@ describe("job routes", () => {
 		);
 	});
 
+	it("classifies a verified maintainer PR at creation and rechecks before hub assignment", async () => {
+		const identity = await db
+			.prepare("SELECT accountId FROM account WHERE userId=? AND providerId='github'")
+			.bind(maintainer)
+			.first<{ accountId: string }>();
+		const databaseId = Number(identity!.accountId);
+		github.signature = { isValid: true, signer: { databaseId, login: `person${databaseId}` } };
+		const response = await post("", { workflow: "iterate", target: "pulls/2" });
+		expect(response.status).toBe(201);
+		const { id } = (await response.json()) as { id: string };
+		expect(await state(id)).toMatchObject({ trusted: 1, state: "queued" });
+		// A role revoked after creation must not execute on an ordinary runner.
+		github.role = "read";
+		const machine = await runner(maintainer, "machine");
+		const live = await connect(machine.token);
+		live.send(status(1, "main"));
+		expect(await live.next()).toMatchObject({ type: "reply", id: 1 });
+		await env.RUNNERS.get(env.RUNNERS.idFromName(maintainer)).dispatch(maintainer);
+		expect(await state(id)).toMatchObject({ trusted: 0, state: "queued" });
+	});
+
 	it("starts a new plan from the maintainer's idea and keeps it across a retry", async () => {
 		const refuse = async (body: Record<string, unknown>, error: string) => {
 			const response = await post("", body);
@@ -1524,7 +1545,14 @@ describe("job routes", () => {
 
 describe("merge wait webhook wakeups", () => {
 	it("wakes only the current merge attempt for the enrolled repository and matching head or PR", async () => {
-		const machine = await runner("owner", "webhooks");
+		// GitHub cannot verify the head here, so the merge job routes as untrusted to a VM runner.
+		const real = globalThis.fetch;
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>
+			new URL(input instanceof Request ? input.url : input).hostname === "api.github.com"
+				? new Response(null, { status: 503 })
+				: real(input, init),
+		);
+		const machine = await runner("owner", "webhooks", "linux", true);
 		await connected(machine, [account("main")]);
 		const id = await job(10, "owner", { workflow: "merge", target: "pulls/2", branch: "feature", revision: head });
 		await store.held(db, id, "merge-token");

@@ -18,6 +18,8 @@ export type Issue = {
 };
 export type Thread = { path: string; line: number | null; resolved?: boolean; outdated?: boolean; comments: Comment[] };
 export type Pull = Issue & {
+	/** The PR base; retargeting changes its commit list, never the trusted default branch. */
+	base?: string;
 	/** Head branch; `quest/<path>` associates the pull request with that quest. */
 	branch: string;
 	checks: "SUCCESS" | "FAILURE" | "PENDING" | null;
@@ -51,7 +53,13 @@ export type Pull = Issue & {
 	/** A fork's head branch accepts pushes from the upstream's maintainers. */
 	maintainerCanModify?: boolean;
 };
-export type Commit = { parents: string[]; tree: string; message: string };
+export type Commit = {
+	parents: string[];
+	tree: string;
+	message: string;
+	/** GitHub's authenticated signature result, independent of author identity. */
+	signature?: { isValid: boolean; signer: { databaseId: number; login: string } | null } | null;
+};
 /** A tree written through the API: its base tree and the entries changed on it. */
 export type Tree = { base: string; entries: unknown[] };
 export type Repo = {
@@ -60,6 +68,8 @@ export type Repo = {
 	name: string;
 	/** Logins with the maintain role; everyone else can only read. */
 	maintainers: string[];
+	/** Defaults to main. */
+	defaultBranch?: string;
 	/** The default branch's files. */
 	files: { path: string; content: string }[];
 	issues: Issue[];
@@ -327,6 +337,61 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>, 
 		);
 		return { data: { repository: objects } };
 	}
+	if (query.includes("signature {")) {
+		const pull = repo.pulls.find((p) => p.number === variables.number);
+		if (!pull) return { data: { repository: { pullRequest: null } } };
+		const branch = repo.defaultBranch ?? "main";
+		const anchor = repo.branches[branch] ?? commitOf(repo);
+		const comparison = query.includes("compare(headRef:");
+		const base = comparison ? anchor : (repo.branches[pull.base ?? branch] ?? anchor);
+		const head = comparison ? String(variables.revision) : headOf(repo, pull);
+		const ancestors = (tip: string, seen = new Set<string>()): Set<string> => {
+			if (seen.has(tip)) return seen;
+			seen.add(tip);
+			for (const parent of repo.commits[tip]?.parents ?? []) ancestors(parent, seen);
+			return seen;
+		};
+		const inherited = ancestors(base);
+		const commits = [...ancestors(head)].filter((oid) => !inherited.has(oid));
+		const start = variables.after ? Number(variables.after) : 0;
+		const end = Math.min(start + 100, commits.length);
+		const nodes = commits
+			.slice(start, end)
+			.map((oid) => ({ oid, signature: repo.commits[oid]?.signature ?? null }));
+		const connection = {
+			totalCount: commits.length,
+			nodes,
+			pageInfo: { hasNextPage: end < commits.length, endCursor: String(end) },
+		};
+		const live = { state: pull.closed ? "CLOSED" : "OPEN", headRefOid: headOf(repo, pull) };
+		return {
+			data: {
+				repository: comparison
+					? {
+							pullRequest: live,
+							defaultBranchRef: {
+								name: branch,
+								target: { oid: anchor },
+								compare: repo.commits[head]
+									? {
+											baseTarget: { oid: base },
+											headTarget: { oid: head },
+											commits: connection,
+										}
+									: null,
+							},
+						}
+					: {
+							pullRequest: {
+								...live,
+								baseRefOid: base,
+								commits: { ...connection, nodes: nodes.map((commit) => ({ commit })) },
+							},
+						},
+			},
+		};
+	}
+
 	if (query.includes("timelineItems(")) {
 		const pull = repo.pulls.find((p) => p.number === variables.number);
 		return { data: { repository: { pullRequest: pull ? holdsTarget(repo, pull) : null } } };
@@ -692,7 +757,7 @@ export function fakeGitHub(world: World) {
 				owner: { login: repo.owner },
 				private: false,
 				visibility: "public",
-				default_branch: "main",
+				default_branch: repo.defaultBranch ?? "main",
 				archived: false,
 				disabled: false,
 				license: { spdx_id: "MIT" },
