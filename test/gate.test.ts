@@ -530,6 +530,29 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 });
 
 describe.skipIf(process.platform === "win32")("a process group", () => {
+	test("delivers SIGINT once to a command under a nested gate", { timeout: 30_000 }, async () => {
+		const dir = tempDir();
+		const ready = join(dir, "ready");
+		const count = join(dir, "count");
+		const child = join(dir, "child.js");
+		writeFileSync(
+			child,
+			`const { writeFileSync } = require("node:fs");
+			let interrupts = 0;
+			process.on("SIGINT", () => interrupts++);
+			writeFileSync(${JSON.stringify(ready)}, "");
+			setTimeout(() => writeFileSync(${JSON.stringify(count)}, String(interrupts)), 1000);`,
+		);
+		const bin = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
+		const { stop, cancel } = cancellation();
+		const env = { ...process.env, QUEST_GATE_ADMITTED: "1" };
+		const result = group([process.execPath, bin, "gate", process.execPath, child], env, cancel);
+		await until(() => existsSync(ready), "the command to start");
+		stop.abort("SIGINT");
+		expect(await result).toBe(128 + constants.signals.SIGINT);
+		expect(readFileSync(count, "utf8")).toBe("1");
+	});
+
 	test("leaves a descendant that started its own session", { timeout: 30_000 }, async () => {
 		const { command, pid } = descendant(tempDir(), "exit 3", { leave: true });
 		expect(await group(command, process.env, cancellation().cancel)).toBe(3);

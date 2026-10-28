@@ -400,8 +400,9 @@ export const scope: Owner = (command, env, cancel) =>
  * Run the command as the leader of a new session, whose process group holds every descendant that
  * does not move to another group or session. Once the command exits, the rest of its group is
  * killed. The session has no controlling terminal: the command keeps its inherited streams, but a
- * terminal's signals reach it only through Quest, so a terminal's Ctrl-C goes to the whole group,
- * as the terminal would have sent it, and Quest inside the group leaves it there (see `GROUP`).
+ * terminal's signals reach it only through Quest, which stands in for the terminal: every SIGINT
+ * Quest receives goes to the whole group, as a terminal's Ctrl-C would, and Quest inside the group
+ * leaves it there (see `GROUP`).
  */
 export const group: Owner = (command, env, cancel) =>
 	new Promise((resolve, reject) => {
@@ -419,8 +420,8 @@ export const group: Owner = (command, env, cancel) =>
 		};
 		const stop = () => {
 			const name = requested(cancel.signal);
-			if (forwards(cancel.signal)) child.kill(name);
-			else signal(name);
+			if (name === "SIGINT") signal(name);
+			else child.kill(name);
 		};
 		const terminate = () => signal("SIGKILL");
 		child.once("error", reject);

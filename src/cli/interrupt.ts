@@ -82,7 +82,7 @@ function foreground(): boolean {
 
 /**
  * Set for a command whose session Quest's group owner leads. The owner stands in for the session's
- * terminal and delivers a terminal's Ctrl-C to the whole group, so it already reaches the child.
+ * terminal and delivers every SIGINT to the whole group, so it already reaches the child.
  */
 export const GROUP = "QUEST_GATE_GROUP";
 
