@@ -147,9 +147,13 @@ included. A branch whose tip is the head of a merged PR holds nothing, since
 its work landed; a closed, unmerged PR's branch still holds its quest. It
 lists each one it skips on stderr with its PR and how long ago that PR was
 last active, so you can decide whether a stale claim should be taken over.
-In a fork's clone, the upstream is the fork's parent, and the fork's own
-branches and PRs count too; a remote that fetches from upstream and pushes to
-a fork works the same way. `--remote` picks a remote other than `origin`.
+On GitHub, the upstream is found by walking up the remote's fork chain while
+each parent's default branch has `quest/README.md`. In a contributor's fork,
+the upstream is the project it forked, and the fork's own branches and PRs
+count too; a remote that fetches from upstream and pushes to a fork works the
+same way. A fork whose parent keeps no quests is its own upstream. A failed
+lookup, such as an expired token or a network error, fails the command rather
+than picking a different upstream. `--remote` picks a remote other than `origin`.
 Off GitHub, only branches are checked.
 Neither form inspects kix.quest runner locks or outside conditions.
 
@@ -166,7 +170,9 @@ It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`), then opens a draft PR
 from it right away and prints the PR's URL. It switches your checkout to the
 claim on a new local branch, or fast-forwards that branch if it is already
-checked out. A fork pushes to itself and opens the PR on its parent. It reads
+checked out. A fork pushes to itself and opens the PR on its upstream, found
+as for `unblocked --unclaimed`, so a fork with its own quests claims on
+itself. It reads
 readiness from the upstream default branch it builds on, not your checkout. It
 fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
@@ -247,7 +253,7 @@ result and exit 1 if it fails, for example when a quest moved out of its epic.
 An epic is its directory or README; removing one that holds other quests needs
 `-r`. The root and milestones are never moved or removed. `mv` refuses a
 destination that exists, and refuses to move a quest while it has a claim
-branch or open PR on `origin`, or on the repository a GitHub fork came from,
+branch or open PR on `origin`, or on the upstream that holds its claims,
 since the branch would no longer name it.
 Neither command touches branches or PRs.
 
@@ -267,6 +273,17 @@ command registers the driver in a fresh clone or worktree whose
 `.gitattributes` names it. Without `quest` on the merge's PATH, the driver
 falls back to `git merge-file`, and GitHub's merges ignore drivers, so a PR
 shows as conflicting until a local merge from its base is pushed.
+
+The registered driver passes Git's conflict marker length and revision labels
+to `quest resolve`, including the ancestor label for `diff3` conflicts. A direct
+invocation defaults to seven-character markers and `ours`/`base`/`theirs`;
+`--marker-size`, `--ours-label`, `--base-label`, and `--theirs-label` override
+them. Labels must fit on one line. The fallback carries the same Git metadata
+when `quest` is missing or too old to accept those options.
+
+Existing configured drivers are preserved. For a checkout still using the old
+quest-generated command, clear its local `merge.quest.driver` entry and run any
+quest command to register the current one.
 
 ## Wait for pull request activity
 
@@ -312,7 +329,8 @@ CI results are read for the current head. The first required check to fail
 prints `checks:failed` right away. `checks:passed` prints once nothing on the
 head is still going (no pending check and no unfinished GitHub Actions run, which
 may still create jobs), every check and workflow the base branch names is
-present, and every required check passed; it names the last check to finish,
+present (except `quest land`'s, which no head carries), and every required
+check passed; it names the last check to finish,
 when the head went idle. Each prints once per head, with the check's name
 (spaces as `_`) in the actor field and its details URL. Results count as
 `quest status` counts them, so neutral and skipped results pass. Each job of a
@@ -382,7 +400,7 @@ comes last, and a missing value prints as `-`:
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `auto-merge` | Method, who enabled it, and when. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
-| `landing-stopped` | GitHub's reason the latest merge-queue entry or auto-merge ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when. |
+| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#land-a-batch-with-quest-land) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when. |
 | `checks` | The head's rollup state and `passed=`, `failing=`, `pending=` counts. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
@@ -429,11 +447,184 @@ after a swap, the error names the new token.
 It enables auto-merge bound to that SHA, which enters GitHub's merge queue
 when the base has one, or merges at once when nothing is left to wait for. It
 makes a merge commit; `--squash` or `--rebase` picks another method, and a
-merge queue applies its own. `quest:merge` stays on while the PR is queued or
-auto-merging; once the PR leaves the queue unmerged, the next command removes
+merge queue applies its own. On a base that requires the `quest land` check, it
+queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead.
+On an ungated base, it compares the live base against that head and refuses a
+head that is behind or diverged: merge the base, rerun the repository's checks,
+and land the new head. This is a preflight check; GitHub can still move the base
+between that comparison and its head-pinned merge mutation. `quest:merge` stays
+on while the PR is queued or auto-merging; once the PR leaves the queue unmerged, the next command removes
 it. The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.
+
+## Land a batch with quest land
+
+`quest land` is a batched merge gate that a GitHub repository runs from its own
+CI, including a user-owned one that cannot use GitHub's merge queue. It lands
+every queued PR as one tested batch: it builds them, in order, into a chain of
+squash commits on the base, resolving quest files with `quest resolve`, runs
+the repository's check once on the chain's tip, and fast-forwards the base to
+the longest passing prefix. The base only ever holds a tree the gate tested,
+and each landed PR shows as merged.
+
+A gated base requires the `quest land` status check, which nothing reports on
+a PR head, so GitHub's auto-merge only waits and its merge button cannot land
+around the gate. Only the gate's push credential bypasses that rule; pin the
+check's source to an app that never reports it, so no one can satisfy it with
+a status. There,
+`quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
+auto-merge whose commit body pins the head it approved
+(`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
+the pin is its current head, so a push by anyone but the gate dequeues it.
+The queue is in the order auto-merge was enabled.
+
+Each run of the gate has three phases, so PR code never sees a push credential:
+
+```sh
+quest land resolve > plan.json              # read the queue, with a read-only token
+quest land check plan.json -- just check > result.json  # build and test, with no push credential
+quest land push plan.json result.json       # land what passed, eject what cannot land
+```
+
+`check` runs the command on the chain's tip. When it fails, it runs it on the
+first half, and so on, until a prefix passes or one PR fails alone, with no
+retries and no batch-size limit. `push` rebuilds the chain itself and refuses a
+result that did not test exactly its prefixes. It reads the queue again and
+lands only PRs still queued as they were when checked, and prints a PR that
+left the queue as `withdrawn` so the workflow runs again for the rest. It moves each PR's branch, with
+a lease on the head that was tested, to that PR's squash commit: a fork's
+branch first, then every other branch in one atomic push. Once GitHub shows
+every PR at its new head, it fast-forwards the base to the tip. GitHub marks a
+PR merged only when the base reaches a head it has already seen, so moving
+both in one push would close the PRs unmerged. A moved head stops the landing,
+and the prefix before it lands only if a check passed on exactly that prefix,
+since a later PR can mask an earlier one's failure. A failed landing moves the
+branches back, so they stay queued. The rest of the queue waits for the next run.
+
+An ejected PR loses its auto-merge and `quest:merge` label and gets a comment
+with the reason, which `quest status` prints under `landing-stopped`:
+
+| Reason | Why |
+| --- | --- |
+| `merge_conflict` | It conflicts with the base or the PRs before it, beyond what `quest resolve` settles. |
+| `failed_checks` | The check failed with it alone on the base, or a required check failed on its head. |
+| `checks_pending` | A required check had not passed on its head. |
+| `review_required`, `changes_requested` | Its review decision blocks it. |
+| `unresolved_conversations` | The base requires conversation resolution, and it has unresolved review threads. |
+| `no_maintainer_edits` | It comes from a fork the gate cannot push to. |
+| `head_moved` | Its head moved after it was queued or while it was checked. |
+| `not_pinned` | Auto-merge was enabled without `quest merge --land`. |
+| `push_failed` | The gate could not move its fork's branch. |
+
+The gate's push bypasses the base's rulesets and classic branch protection, so
+the gate upholds them itself. It requires each PR's review decision to allow
+it, each of the base's other required checks to pass on its head, counting
+every check and only those from the app a rule names, and, when the base
+requires conversation resolution, each of its review threads to be resolved.
+Its push satisfies `creation`, `update`, `deletion`, `non_fast_forward`, and
+`required_linear_history`, and `copilot_code_review` blocks nothing. `resolve`
+fails, before anything lands, on any other rule type and on `pull_request`
+settings the review decision does not cover: last-push approval, merge methods
+without squash, and required reviewers.
+
+On a base with classic protection, `resolve` reads its settings, which needs
+administration read (a GitHub App's "Administration: read", or a token with
+admin rights), and fails if it cannot. It upholds required status checks (strict
+included), required reviews (approving count, code owners, and dismissing stale
+reviews), conversation resolution, linear history, and blocked creations, and
+allows force pushes, deletions, and fork syncing. It fails on any other setting
+that is on, such as signed commits, push restrictions, a locked branch,
+last-push approval, or `enforce_admins`: only an admin's push bypasses classic
+protection, and only while it does not apply to admins.
+
+A workflow runs the phases in three jobs, with `quest` on PATH in each,
+installed from a source the PR cannot modify:
+
+```yaml
+name: Land
+on:
+  pull_request_target:
+    types: [auto_merge_enabled]
+  workflow_dispatch:
+# One run at a time; waiting triggers collapse into one run that reads the whole queue.
+concurrency:
+  group: land
+permissions: {}
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, pull-requests: read, checks: read, statuses: read }
+    outputs:
+      plan: ${{ steps.resolve.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Install quest here.
+      - id: resolve
+        env:
+          # Under classic protection, a token with administration read instead.
+          GH_TOKEN: ${{ github.token }}
+        run: echo "plan=$(quest land resolve)" >> "$GITHUB_OUTPUT"
+  check:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    outputs:
+      result: ${{ steps.check.outputs.result }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Install quest here, outside the checkout.
+      - id: check
+        env:
+          PLAN: ${{ needs.resolve.outputs.plan }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
+          echo "result=$(quest land check "$RUNNER_TEMP/plan.json" -- just check)" >> "$GITHUB_OUTPUT"
+  land:
+    needs: [resolve, check]
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write, issues: write, actions: write, checks: read, statuses: read }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Install quest here.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ needs.resolve.outputs.plan }}
+          RESULT: ${{ needs.check.outputs.result }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
+          printf '%s' "$RESULT" > "$RUNNER_TEMP/result.json"
+          quest land push "$RUNNER_TEMP/plan.json" "$RUNNER_TEMP/result.json" > "$RUNNER_TEMP/landing"
+          cat "$RUNNER_TEMP/landing"
+          # The queue changed, so run again for the rest.
+          if [ -s "$RUNNER_TEMP/landing" ]; then gh workflow run land.yml --ref "$GITHUB_REF_NAME"; fi
+```
+
+The land job's token pushes the base and PR branches; give it the bypass,
+such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
+from an environment only the base branch can use. Where the ruleset
+refuses GitHub Actions as a bypass actor, as an organization's can, use an App
+installed on the repository. Ejecting a PR disables its auto-merge, which needs
+`contents: write` on the token in `GH_TOKEN` even when another credential
+pushes. The check job holds only a read token, so it can run on a self-hosted
+runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,
+the land job needs a token with admin rights, and the resolve job one with
+administration read, which `github.token` cannot have. Pushing to a fork's
+branch needs a credential the fork accepts maintainer edits from. `resolve` reads
+the repository from `origin` and fails unless its base requires the
+`quest land` check. Ejection comments link the run. `push` merges PR files
+with its credential in reach, so it runs `quest resolve` from the clone's git
+directory, where a queued PR's `bunfig.toml` or `.env` cannot configure it.
 
 ## Gate expensive commands
 
@@ -492,6 +683,17 @@ quest agent resume --harness claude --key 2 --model claude-opus-5-5 --effort hig
 quest agent stop .worktrees/foo
 quest agent stop --all
 ```
+
+Codex starts and resumes only in a checkout registered by `quest worktree create`,
+on Linux with the `quest worktree run` supervisor available.
+Ownership and host support are checked before keys are resolved. Each turn uses
+the same lifecycle as `quest worktree run`: restore the reservation before the
+turn, then release it and prune declared scratch after the agent and its
+remaining descendants exit. Source changes and the session remain available
+for resume, including after a decision pause or failed turn. Reinstall or rebuild
+pruned dependencies when the next turn needs them. Claude continues to run
+directly in the supplied checkout. Codex desktop threads use the desktop app's
+native archival instead.
 
 Options go before the worktree, and the prompt or message follows it, so text
 starting with `-` is never read as an option. `--key` names a key by its
@@ -562,6 +764,18 @@ with a private `HOME`.
 On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
 pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
 AppArmor allows them only for programs with a profile granting `userns`.
+Merge jobs retain existing PR submodule pointers when merging the base. Their
+`wait` tool wakes on GitHub webhook hints or reconnects and rereads the PR;
+a hint never approves work. If someone moves the head, the maintainer can
+continue from that exact head through the existing approval flow. The same
+runner checkpoints and merges its unpublished source locally; conflicts pause
+for a decision. Stale local changes are preserved in the runner's bare clone
+under `refs/kix/checkpoints/<job>/`, and are not reapplied after another runner
+publishes. Existing failover still restarts from the latest published branch
+checkpoint. Initialized submodules leave their checkout intact until their
+local commits and changes can be preserved explicitly; this path never deletes
+them to force continuation.
+
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
@@ -650,7 +864,7 @@ quest worktree remove example
 modified or untracked files and any commit, at `HEAD` or under the checkout's
 own refs such as `refs/bisect/`, that no branch or remote-tracking ref
 reaches. A squash-merged change leaves its commits unreached, so they count as
-preserved only when origin's GitHub repository (a fork's parent) has a merged
+preserved only when the GitHub upstream that holds origin's claims has a merged
 PR whose head is exactly that commit; other commits need no forge or token.
 It then prunes the scratch and refuses ignored files that remain, leaving the
 checkout released, before `git worktree remove` deletes it. A checkout already

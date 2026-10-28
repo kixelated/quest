@@ -26,7 +26,7 @@ and a tolerant check must tell a finished quest from a mistyped link.
 The fix belongs in quest, not in each repository's process. Rejected:
 landing one sibling at a time, which serializes batches.
 
-Narrowed 2026-10-26 (user): [`quest land`](/quest/m0/helpers/land.md) runs
+Narrowed 2026-10-26 (user): `quest land` runs
 the merge driver while it builds its chain, so a repository on that gate no
 longer hits the link-list conflict. This quest keeps the dead-link
 `quest check` failure on every gate, which caused 6 of moq's queue failures
@@ -47,8 +47,3 @@ Open (this quest decides, with a recommendation to the user):
 Whatever it picks must keep `quest check`'s rule that a finished quest leaves
 no dangling reference once all siblings land. Test it with two sibling PRs
 landing through a merge that does not run the driver.
-
-## Related
-
-- [Batched merge gate: quest land](/quest/m0/helpers/land.md) - resolves the link-list conflict for gated repositories
-- [Land only heads tested against the current base](/quest/m0/helpers/landing.md) - the same landing path

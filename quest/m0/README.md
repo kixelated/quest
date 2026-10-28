@@ -21,9 +21,13 @@ product without changing the core's independence.
 Decided while planning m0 (2026-09-26), replacing the earlier copied-files and
 ownership-manifest design:
 
-- Nothing is vendored. The binary carries the skills and the quest contract;
-  a repository gets static one-line skill stubs and one reference line in its
-  root instructions. Upgrading never rewrites repository files.
+- The binary carries the skills, the quest contract, and all hook logic.
+  `quest init` installs only static stubs into a repository: one-line skill
+  stubs, one reference line in its root instructions, one `.gitattributes`
+  line, and Claude hook entries in `.claude/settings.json` that only call a
+  `quest` subcommand. Upgrading never rewrites repository files. (Amended
+  2026-10-26 (user), replacing "Nothing is vendored", so `quest init` can
+  install the agent lifecycle hooks.)
 - The repository's own tool manager pins the version: mise (release binaries)
   or a nix flake input (any rev, built from source). Quest ships no launcher
   and no pin file; an install outside either is simply unpinned.
@@ -35,11 +39,10 @@ ownership-manifest design:
 
 ## Required
 
+- [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [Review policy](/quest/m0/review-policy.md) - CONTRIBUTING.md says whose review counts
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
-- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended checkouts through their harness
+- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended Claude checkouts through its hooks
 - [Agent workflow helpers](/quest/m0/helpers/README.md) - CLI commands for CI waits, PR status, claims, quest moves, and serialized merges
-
-- [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [Quest log theme](/quest/m0/theme/README.md) - an MMO-style identity, copy, board, landing page, and CLI output for the demo and launch
 - [Launch material](/quest/m0/launch.md) - README, quickstart, demo, comparison, and launch-post drafts

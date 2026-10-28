@@ -2,24 +2,24 @@
 
 ## Goal
 
-The operator supplies a service-controlled fork namespace and installs the
-registered GitHub App on it and on the pilot repositories. A real issue event
-and a bounded test PR verify the integration before contributors are invited.
+The operator installs the registered GitHub App on the pilot repositories,
+kixelated/quest and moq-dev/moq, and enrolls them. A real issue event and a
+bounded test PR verify the integration before contributors are invited.
 
 ## Plan
 
 - This is an operator/setup outcome. App registration and its secrets belong
   to [Deploy kix.quest](/quest/m0/kix/deploy.md), because every deploy needs them.
-- The operator chooses the fork namespace during setup. The bot identity is
-  distinct from that namespace; do not assume an App can own a fork by itself.
-  Set it as `GITHUB_FORK_OWNER` (steps 3 and 5 of `cloudflare/GITHUB.md`).
-- Validate real installation-token behavior across upstream and
-  service-owned forks, which publication's tests only mock (Publication in
-  `cloudflare/GITHUB.md`): an upstream token opening a pull request whose head
-  is on the fork's separate installation, a fork commit whose parent is an
-  upstream commit pushed after the fork was made, GitHub's signature on the
-  App's API commits, and an iteration pushing an upstream pull request head
-  under branch rules. Disable Actions on the service forks.
+- Pilot repositories decided 2026-10-27 (user): kixelated/quest and
+  moq-dev/moq, ranked first so kix.quest is usable on moq-dev/moq soonest.
+  Service forks were dropped the same day for
+  [upstream branches](/quest/m0/kix/upstream-branches.md), so there is no
+  fork namespace to set up.
+- Validate real installation-token behavior, which publication's tests only
+  mock (Publication in `cloudflare/GITHUB.md`): a job branch pushed to the
+  upstream under its branch rules, GitHub's signature on the App's API
+  commits, a same-repository pull request opened by the App, and an
+  iteration pushing an upstream pull request head under branch rules.
 - Install the PWA and receive a push notification on real Android, iOS, and
   desktop devices (from
   [kixelated/quest#165](https://github.com/kixelated/quest/pull/165), whose
@@ -29,7 +29,7 @@ and a bounded test PR verify the integration before contributors are invited.
   [kixelated/quest#170](https://github.com/kixelated/quest/pull/170) only
   tests against the fake.
 - Check what GitHub does to an open pull request when "Start over" resets
-  its service-fork head branch to the base, which
+  its head branch to the base, which
   [kixelated/quest#190](https://github.com/kixelated/quest/pull/190) handles
   either way (adopt it if open, open a new one if closed) but tests only
   against the fake. Added 2026-10-22 (user).
@@ -41,3 +41,4 @@ and a bounded test PR verify the integration before contributors are invited.
 ## Required
 
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the live origin and registered App
+- [Upstream branches](/quest/m0/kix/upstream-branches.md) - jobs publish on the pilot repositories themselves

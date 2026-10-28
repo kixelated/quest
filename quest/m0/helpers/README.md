@@ -59,18 +59,21 @@ commands from Sep-Oct. Session counts in each child come from that window.
   merge gate, `quest land`, joins this epic. It ranks after the existing
   children, and kixelated/quest adopts it first. moq-dev/moq, moq-dev/moq.pro,
   and kixelated/rust2 plan their own adoption.
+- Decided 2026-10-27 (user), from the follow-ups of
+  [kixelated/quest#229](https://github.com/kixelated/quest/pull/229): the
+  gate's rule and setup fixes rank after its adoption, which verifies forks
+  live.
 
 ## Required
 
 - [Merge state race](/quest/m0/helpers/merge-state-race.md) - `--land` and merge jobs land a PR whose merge state GitHub is still computing, on the first try
-- [Landing rules](/quest/m0/helpers/landing.md) - land only heads that contain the current base, ask on a missing review, one design checkpoint
 - [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - wake on edited bot comments, honest `checks:passed`, review rounds in `quest status`
 - [Status holds](/quest/m0/helpers/status-holds.md) - `quest status` shows a PR's `quest:*` hold
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 - [Sibling PRs through a server-side merge](/quest/m0/helpers/queue-siblings.md) - children of one epic land back to back through a merge queue without conflicting on its link list
-- [Batched merge gate: quest land](/quest/m0/helpers/land.md) - a repository's CI lands every queued PR as one tested squash chain, fast-forwarding the base to the longest passing prefix
 - [kixelated/quest lands through quest land](/quest/m0/helpers/land-adopt.md) - this repository's `main` changes only through its own gate
+- [quest land upholds only the rules GitHub lets it](/quest/m0/helpers/land-rules.md) - `resolve` refuses `update` rules, and the README names only credentials and check sources GitHub accepts
 
 ## Related
 
-- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - removes the agent-level load-average rules
+- [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaims finished and suspended agent checkouts through their harness

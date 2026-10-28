@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitHubService } from "../src/github/service";
 import { app } from "../src/index";
 import * as landing from "../src/jobs/landing";
-import { refusal, restart, validPath } from "../src/jobs/publish";
+import { refusal, restart, validPath, validateContinuation } from "../src/jobs/publish";
 import * as store from "../src/jobs/store";
 import { type Repo, type World, blob, commitOf, fakeGitHub, intercept as around } from "../dev/github";
 import { privateKey } from "./github-key";
@@ -1131,7 +1131,10 @@ describe("merge jobs", () => {
 		expect(project.branches["contributor/fix"]).toBe(head);
 		expect(landed).toEqual({ merged: false });
 		expect(lands()).toEqual([
-			{ mutation: "enablePullRequestAutoMerge", variables: { id: "PR_10002", sha: head, method: "MERGE" } },
+			{
+				mutation: "enablePullRequestAutoMerge",
+				variables: { id: "PR_10002", sha: head, method: "MERGE", body: null },
+			},
 		]);
 
 		// Its landing is queued when the job ends, so it keeps holding the pull request.
@@ -1143,6 +1146,21 @@ describe("merge jobs", () => {
 		await landing.release(testEnv, 10, "pulls/2");
 		expect(pull().labels).toEqual([]);
 		expect(await job(id)).toMatchObject({ hold: null });
+	});
+
+	it("queues for quest land on a base that requires its check, even when nothing else is left to wait for", async () => {
+		const id = await merging();
+		pull().merge = "CLEAN";
+		project.required = ["quest land"];
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "merge" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: false } });
+		expect(lands()).toEqual([
+			{
+				mutation: "enablePullRequestAutoMerge",
+				variables: { id: "PR_10002", sha: prHead, method: "SQUASH", body: `Quest-Land-Head: ${prHead}` },
+			},
+		]);
+		expect(pull().autoMerge?.commitBody).toBe(`Quest-Land-Head: ${prHead}`);
 	});
 
 	it("merges at once when nothing is left to wait for, unless the project is paused", async () => {
@@ -1202,28 +1220,115 @@ describe("merge jobs", () => {
 		expect(project.branches["contributor/fix"]).toBe(head);
 	});
 
-	it("refuses a merge that would revert submodules it cannot publish", async () => {
+	it("carries the head's existing submodule pointer into a merge tree", async () => {
 		const id = await merging();
 		const main = "f".repeat(40);
+		const pointer = { path: "vendor/lib", sha: "7".repeat(40) };
+		const tree = "8".repeat(40);
+		project.trees[tree] = { base: "e".repeat(40), entries: [{ ...pointer, mode: "160000", type: "commit" }] };
+		project.commits[prHead]!.tree = tree;
 		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
 		project.branches.main = main;
-		const merge = { job: id, attempt: 1, head: prHead, message: "Merge main", changes: [], merge: main };
-		const refused = await publish({ ...merge, session: "s", submodules: ["vendor/lib"], land: {} });
-		expect(refused.status).toBe(202);
-		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
-			type: "publication",
-			refused: [
-				{
-					path: "vendor/lib",
-					reason: "kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version",
-				},
-			],
+		const merged = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			message: "Merge main",
+			changes: [],
+			merge: main,
+			submodules: [pointer],
 		});
-		expect(project.branches["contributor/fix"]).toBe(prHead);
-		expect(lands()).toEqual([]);
-		// Only a merge lists them.
-		const plain = await publish({ job: id, attempt: 1, head: prHead, submodules: ["vendor/lib"], land: {} });
-		expect(await plain.json()).toEqual({ error: "Only a merge lists the submodules it cannot publish" });
+		expect(merged.status).toBe(200);
+		const { head } = (await merged.json()) as { head: string };
+		expect(project.commits[head]!.parents).toEqual([prHead, main]);
+		expect(project.trees[project.commits[head]!.tree]!.entries).toEqual([
+			{ ...pointer, mode: "160000", type: "commit" },
+		]);
+		const plain = await publish({ job: id, attempt: 1, head, submodules: [pointer], land: {} });
+		expect(await plain.json()).toEqual({ error: "Only a merge carries existing submodule pointers" });
+	});
+
+	it.each([false, true])(
+		"rejects a runner submodule pointer not already on the head (existing=%s)",
+		async (existing) => {
+			const id = await merging();
+			const main = "f".repeat(40);
+			project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+			project.branches.main = main;
+			if (existing) {
+				const tree = "8".repeat(40);
+				project.trees[tree] = {
+					base: "e".repeat(40),
+					entries: [{ path: "vendor/lib", sha: "6".repeat(40), mode: "160000", type: "commit" }],
+				};
+				project.commits[prHead]!.tree = tree;
+			}
+			const refused = await publish({
+				job: id,
+				attempt: 1,
+				head: prHead,
+				message: "Merge main",
+				changes: [],
+				merge: main,
+				submodules: [{ path: "vendor/lib", sha: "7".repeat(40) }],
+				session: "s",
+			});
+			expect(refused.status).toBe(202);
+			expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+				type: "publication",
+				blocked: "A merge can only retain the head's existing submodule pointer: vendor/lib",
+			});
+			expect(project.branches["contributor/fix"]).toBe(prHead);
+			expect(lands()).toEqual([]);
+		},
+	);
+
+	it("continues only the offered live head after owner approval, without granting trust", async () => {
+		const id = await merging();
+		const head = "9".repeat(40);
+		project.commits[head] = { parents: [prHead], tree: "e".repeat(40), message: "external" };
+		project.branches["contributor/fix"] = head;
+		await db.prepare("UPDATE jobs SET trusted=1 WHERE id=?").bind(id).run();
+		expect((await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} })).status).toBe(202);
+		const waiting = await job(id);
+		const question = waiting.questions.at(-1)!;
+		const continuation = store.continuationOf(question.prompt, { continue: head })!;
+		project.branches["contributor/fix"] = revision;
+		await expect(validateContinuation(testEnv, user, upstream, waiting, question, continuation)).rejects.toThrow(
+			"changed again",
+		);
+		project.branches["contributor/fix"] = head;
+		await db
+			.prepare(
+				"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('other-publisher','Other','other-publisher@example.test',1,0,0)",
+			)
+			.run();
+		await store.answer(db, id, question.id, "other-publisher", { continue: head }, 1);
+		expect(await job(id)).toMatchObject({ state: "waiting", head: prHead, trusted: 1 });
+		await validateContinuation(testEnv, user, upstream, await job(id), question, continuation);
+		await store.approve(db, id, question.id, user, 2);
+		expect(await job(id)).toMatchObject({
+			state: "queued",
+			head,
+			revision: head,
+			trusted: 0,
+			pending: null,
+			session: "s",
+			runner: machine.id,
+		});
+		expect(project.branches["contributor/fix"]).toBe(head);
+	});
+
+	it("fences a continuation when the stored branch version changes before the answer", async () => {
+		const id = await merging();
+		project.branches["contributor/fix"] = revision;
+		await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} });
+		const question = (await job(id)).questions.at(-1)!;
+		await db.prepare("UPDATE jobs SET head=? WHERE id=?").bind("9".repeat(40), id).run();
+		await expect(store.answer(db, id, question.id, user, { continue: revision }, 1)).rejects.toThrow(
+			"no longer open",
+		);
+		expect((await job(id)).questions.at(-1)!.answer).toBeNull();
 	});
 
 	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {
@@ -1247,7 +1352,7 @@ describe("merge jobs", () => {
 			expect(response.status).toBe(202);
 			const waiting = await job(id);
 			expect(waiting.state).toBe("waiting");
-			expect(waiting.questions.at(-1)!.prompt).toEqual({ type: "publication", blocked });
+			expect(waiting.questions.at(-1)!.prompt).toMatchObject({ type: "publication", blocked });
 			await store.cancel(db, id, user, 0);
 		}
 		// The landing GitHub refused used the first merge method the repository allows.

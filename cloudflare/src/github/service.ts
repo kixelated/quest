@@ -1,5 +1,15 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
-import { check, isQuest, parse, ready } from "quest/core";
+import {
+	MERGE_LABEL,
+	isHoldLabel,
+	latestHold,
+	heldToken,
+	spentMergeHold,
+	check,
+	isQuest,
+	parse,
+	ready,
+} from "quest/core";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 import {
@@ -110,7 +120,13 @@ export interface Branch {
 	 * `merge`, it is a merge commit of `parent` and `merge`, and `changes` are
 	 * relative to `merge`'s files.
 	 */
-	commit(parent: string, changes: Change[], message: string, merge?: string): Promise<string>;
+	commit(
+		parent: string,
+		changes: Change[],
+		message: string,
+		merge?: string,
+		submodules?: { path: string; sha: string }[],
+	): Promise<string>;
 	/** Whether the branch this one merges into, upstream, already holds `commit`. */
 	based(commit: string): Promise<boolean>;
 	/** The tree ID of `commit`'s `.github/workflows`, or null when it has none. */
@@ -1146,12 +1162,32 @@ export class GitHubService {
 					throw error;
 				}
 			},
-			commit: async (parent, changes, message, merge) => {
+			commit: async (parent, changes, message, merge, submodules = []) => {
 				const base = await this.#api<{ tree: { sha: string } }>(
 					token,
 					`${path}/git/commits/${sha(merge ?? parent)}`,
 				);
 				const tree = [];
+				if (submodules.length) {
+					const source = await this.#api<{ tree: { sha: string } }>(
+						token,
+						`${path}/git/commits/${sha(parent)}`,
+					);
+					const existing = await this.#api<Tree>(
+						token,
+						`${path}/git/trees/${sha(source.tree.sha)}?recursive=1`,
+					);
+					if (existing.truncated)
+						throw new PublicationBlocked("The head's submodule tree is incomplete; no merge was published");
+					for (const pointer of submodules) {
+						const entry = existing.tree.find((entry) => entry.path === pointer.path);
+						if (entry?.mode !== "160000" || entry.type !== "commit" || entry.sha !== pointer.sha)
+							throw new PublicationBlocked(
+								`A merge can only retain the head's existing submodule pointer: ${pointer.path}`,
+							);
+						tree.push({ path: pointer.path, mode: "160000", type: "commit", sha: sha(entry.sha) });
+					}
+				}
 				for (const change of changes) {
 					const mode = change.mode;
 					if (change.content === null) {
@@ -1348,11 +1384,12 @@ export class GitHubService {
 		return {
 			id: row.id,
 			state: row.state,
+			base: row.baseRefName,
 			head: row.headRefOid,
 			mergeState: row.mergeStateStatus,
 			queue: row.isMergeQueueEnabled === true,
 			landing: row.autoMergeRequest !== null || row.mergeQueueEntry !== null,
-			labels: row.labels.nodes.map((label) => label.name).filter((name) => name.startsWith(HOLD_PREFIX)),
+			labels: row.labels.nodes.map((label) => label.name).filter(isHoldLabel),
 			events: row.timelineItems.nodes.map((event) => ({
 				id: event.id,
 				label: event.__typename === "LabeledEvent" ? (event.label?.name ?? "") : null,
@@ -1385,7 +1422,7 @@ export class GitHubService {
 		return this.#authorized(repo, userId, { issues: "write", pull_requests: "read" }, async (token) => {
 			let holds = await this.#holds(token, repo, pull);
 			if (holds.state !== "OPEN") throw new GitHubError("The pull request is no longer open");
-			if (spent(holds)) {
+			if (spentMergeHold(holds)) {
 				await this.#unhold(token, repo, pull);
 				holds = { ...holds, labels: holds.labels.filter((name) => name !== MERGE_LABEL) };
 			}
@@ -1395,11 +1432,11 @@ export class GitHubService {
 				labels: [MERGE_LABEL],
 			});
 			holds = await this.#holds(token, repo, pull);
-			const ours = added(holds, MERGE_LABEL);
+			const ours = latestHold(holds.events, MERGE_LABEL);
 			if (!ours) throw new GitHubError("GitHub does not show the quest:merge label kix added");
 			const rival = holds.labels.find((name) => {
 				if (name === MERGE_LABEL) return false;
-				const event = added(holds, name);
+				const event = latestHold(holds.events, name);
 				return !event || holds.events.indexOf(event) < holds.events.indexOf(ours);
 			});
 			if (rival) {
@@ -1419,12 +1456,36 @@ export class GitHubService {
 	releasePullRequest(repo: GitHubRepository, pull: number, hold: string) {
 		return this.#withRepository(repo, { issues: "write", pull_requests: "read" }, async (token) => {
 			const holds = await this.#holds(token, repo, pull);
-			if (holds.state !== "OPEN" || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== hold)
-				return true;
+			if (holds.state !== "OPEN" || heldToken(holds, MERGE_LABEL) !== hold) return true;
 			if (holds.landing) return false;
 			await this.#unhold(token, repo, pull);
 			return true;
 		});
+	}
+
+	/** Whether `branch` requires the `quest land` check, read from branch protection and rulesets. */
+	async #gated(token: string, repo: GitHubRepository, branch: string): Promise<boolean> {
+		const path = repositoryPath(repo);
+		const ref = encodeURIComponent(branch);
+		type Contexts = { context: string }[];
+		const { protection } = await this.#api<{
+			protection?: {
+				required_status_checks?: { enforcement_level?: string; contexts?: string[]; checks?: Contexts };
+			};
+		}>(token, `${path}/branches/${ref}`);
+		const legacy = protection?.required_status_checks;
+		const contexts =
+			legacy && legacy.enforcement_level !== "off"
+				? (legacy.checks?.map((check) => check.context) ?? legacy.contexts ?? [])
+				: [];
+		const rules = await this.#api<{ type: string; parameters?: { required_status_checks?: Contexts } }[]>(
+			token,
+			`${path}/rules/branches/${ref}?per_page=100`,
+		);
+		const ruled = rules.flatMap((rule) =>
+			rule.type === "required_status_checks" ? (rule.parameters?.required_status_checks ?? []) : [],
+		);
+		return [...contexts, ...ruled.map((check) => check.context)].includes(LAND_CHECK);
 	}
 
 	/**
@@ -1433,6 +1494,9 @@ export class GitHubService {
 	 * queue when the base has one, or merge at once when GitHub would refuse
 	 * auto-merge because nothing is left to wait for. `method` is the one the
 	 * repository's instructions name, or else the first the repository allows.
+	 * A base that requires the `quest land` check queues it for that gate
+	 * instead, as `quest merge --land` does: squash auto-merge whose commit body
+	 * pins the head.
 	 */
 	landPullRequest(
 		repo: GitHubRepository,
@@ -1450,22 +1514,24 @@ export class GitHubService {
 					throw new GitHubError("Contributions are paused");
 				const holds = await this.#holds(token, repo, pull);
 				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
-				if (!input.hold || !holds.labels.includes(MERGE_LABEL) || added(holds, MERGE_LABEL)?.id !== input.hold)
+				if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
 					throw new PublicationBlocked(
 						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
 					);
 				if (holds.head !== sha(input.head))
 					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				const gated = await this.#gated(token, repo, holds.base);
 				const mutation =
-					!holds.queue && IMMEDIATE.includes(holds.mergeState)
+					!gated && !holds.queue && IMMEDIATE.includes(holds.mergeState)
 						? "mergePullRequest"
 						: "enablePullRequestAutoMerge";
 				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
-					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method }) { clientMutationId } }`,
+					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
 					variables: {
 						id: holds.id,
 						sha: input.head,
-						method: (input.method ?? mergeMethod(current)).toUpperCase(),
+						method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
+						body: gated ? `${LAND_PIN}: ${input.head}` : null,
 					},
 				});
 				if (result.errors?.length) {
@@ -1491,19 +1557,20 @@ function mergeMethod(current: Repository): MergeMethod {
 	throw new GitHubError("The repository allows no merge method");
 }
 
-/** The label prefix and merge label `quest iterate`, `ready`, and `merge` hold pull requests with. */
-const HOLD_PREFIX = "quest:";
-export const MERGE_LABEL = "quest:merge";
 /** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
 const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
+/** The check a base gated by `quest land` requires, and the commit body trailer that queues a head for it; see `quest land --help`. */
+const LAND_CHECK = "quest land";
+const LAND_PIN = "Quest-Land-Head";
 const HOLDS = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) {
- id state headRefOid mergeStateStatus isMergeQueueEnabled autoMergeRequest { enabledAt } mergeQueueEntry { state }
+ id state baseRefName headRefOid mergeStateStatus isMergeQueueEnabled autoMergeRequest { enabledAt } mergeQueueEntry { state }
  labels(first: 100) { nodes { name } }
  timelineItems(last: 100, itemTypes: [LABELED_EVENT, AUTO_MERGE_ENABLED_EVENT, ADDED_TO_MERGE_QUEUE_EVENT]) { nodes { __typename
   ... on LabeledEvent { id label { name } } ... on AutoMergeEnabledEvent { id } ... on AddedToMergeQueueEvent { id } } } } } }`;
 type HoldRow = {
 	id: string;
 	state: string;
+	baseRefName: string;
 	headRefOid: string;
 	mergeStateStatus: string;
 	isMergeQueueEnabled: boolean | null;
@@ -1515,6 +1582,7 @@ type HoldRow = {
 type Holds = {
 	id: string;
 	state: string;
+	base: string;
 	head: string;
 	mergeState: string;
 	queue: boolean;
@@ -1525,18 +1593,6 @@ type Holds = {
 	/** Oldest first; `label` is null for a landing that started. */
 	events: { id: string; label: string | null }[];
 };
-
-/** The latest event that added `label`. */
-function added(holds: Holds, label: string) {
-	return [...holds.events].reverse().find((event) => event.label === label);
-}
-
-/** A `quest:merge` label is spent once a landing started after it was added and ended unmerged. */
-function spent(holds: Holds) {
-	const event = added(holds, MERGE_LABEL);
-	if (!event || holds.landing || !holds.labels.includes(MERGE_LABEL)) return false;
-	return holds.events.slice(holds.events.indexOf(event) + 1).some((later) => later.label === null);
-}
 
 function heldBy(label: string) {
 	return `Another session holds this pull request with ${label}; pick it again once it is released`;

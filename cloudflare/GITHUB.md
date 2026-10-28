@@ -18,7 +18,9 @@ and installation tokens stay inside the Worker; agents receive neither.
 | Commit statuses: read | Observe legacy CI status contexts                                           | Check reads only                                               |
 
 The manifest subscribes to push, issues, issue comments, pull requests, reviews,
-checks and statuses. GitHub also sends installation lifecycle and repository
+review threads, inline review comments, checks and statuses. Existing App registrations
+must enable `pull_request_review_thread` and `pull_request_review_comment` in their
+webhook subscriptions so resolving discussions and replying inline wake merge jobs. GitHub also sends installation lifecycle and repository
 selection events automatically. No organization, administration, workflow,
 checks-write, or user permissions are requested. These installation grants
 are necessarily broader than individual operations: minted tokens always name
@@ -189,8 +191,10 @@ on a decision.
   the job's hold, then enables auto-merge bound to that head, entering the
   merge queue when the base has one, or merges it at once when GitHub would
   refuse auto-merge because nothing is left to wait for. It uses the method the
-  job names, else the first the repository allows. A refusal pauses the job on
-  a decision, in GitHub's words.
+  job names, else the first the repository allows. A base that requires the
+  `quest land` check queues the PR for that gate instead, as `quest merge
+--land` does: squash auto-merge whose commit body pins the head. A refusal
+  pauses the job on a decision, in GitHub's words.
 - The label stays while the job runs or waits, and while the PR is queued or
   auto-merging. When the job ends without a landing in progress, or a
   `pull_request` webhook arrives and GitHub shows the landing ended unmerged,

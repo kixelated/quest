@@ -9,7 +9,7 @@ For a draft, summarize the open decisions its body lists.
 Skip each PR another session holds: one with a `quest:*` label, or a draft without a `## Decisions needed` section.
 List those with how long ago each was last active, and offer to take over only one that looks stale.
 The skill argument can be used to filter the PRs in scope.
-Each merge is performed in parallel by a sub-agent.
+Each merge is performed in parallel by a sub-agent, following the guide's Reviews section for the shared design checkpoint across review rounds.
 
 Ask synchronously with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), following the guide's Questions section and including your recommendation:
 - `/quest-ready`: Are drafts ready for review.
@@ -32,7 +32,6 @@ Run each `/quest-ready`, `/quest-merge`, or `/quest-iterate` in its own sub-agen
 Each sub-agent blocks on its own waits and reports back only when done or blocked.
 For GitHub CI, review, or merge activity, it uses one `quest wait` and resumes with the
 returned cursor as described by `quest skill merge`, rather than polling GitHub.
-Limit the number of active agents to the CPU core count.
 
 Merge sub-agents report once their PR is landing; do not watch the queue or wait for merges.
 An open PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.

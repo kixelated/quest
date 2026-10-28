@@ -9,6 +9,7 @@ import {
 	type PullRequest,
 	string,
 } from "./github";
+import { EJECTED } from "./land";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -22,9 +23,11 @@ const STATUS = `query($owner: String!, $repo: String!, $number: Int!,
 			url state isDraft headRefOid mergeable mergeStateStatus reviewDecision
 			autoMergeRequest { enabledAt mergeMethod enabledBy { login } }
 			mergeQueueEntry { state position enqueuedAt }
-			timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT, AUTO_MERGE_DISABLED_EVENT]) { nodes {
+			timelineItems(last: 100, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT, AUTO_MERGE_DISABLED_EVENT, ISSUE_COMMENT]) { nodes {
+				__typename
 				... on RemovedFromMergeQueueEvent { createdAt reason actor { login } }
 				... on AutoMergeDisabledEvent { createdAt reasonCode actor { login } }
+				... on IssueComment { createdAt body authorAssociation author { __typename login } }
 			} }
 			reactions(last: 100) { nodes { ...reaction } }
 			commits(last: 1) { nodes { commit { oid statusCheckRollup { state
@@ -104,7 +107,7 @@ export interface Status {
 	reviewDecision: string | null;
 	autoMerge: { method: string; enabledBy: string; enabledAt: string } | null;
 	mergeQueue: { state: string; position: number; enqueuedAt: string } | null;
-	/** The latest exit from the merge queue or auto-merge, and GitHub's reason for it. */
+	/** The latest exit from the merge queue, auto-merge, or `quest land`'s queue, and the reason for it. */
 	landingStopped: { reason: string; actor: string; at: string } | null;
 	checks: { state: string | null; passed: number; failing: Check[]; pending: Check[] };
 	/** Each reviewer's latest submitted review, oldest first. */
@@ -235,7 +238,9 @@ function summarize(
 
 	const autoMerge = pull.autoMergeRequest === null ? null : object(pull.autoMergeRequest);
 	const queue = pull.mergeQueueEntry === null ? null : object(pull.mergeQueueEntry);
-	const stopped = array(object(pull.timelineItems).nodes).at(-1);
+	const stopped = array(object(pull.timelineItems).nodes)
+		.filter((node) => node.__typename !== "IssueComment" || ejection(node) !== null)
+		.at(-1);
 	return {
 		url,
 		state: lower(pull.state) as Status["state"],
@@ -260,8 +265,8 @@ function summarize(
 			stopped === undefined
 				? null
 				: {
-						reason: lower(stopped.reason ?? stopped.reasonCode),
-						actor: actor(stopped.actor),
+						reason: ejection(stopped) ?? lower(stopped.reason ?? stopped.reasonCode),
+						actor: actor(stopped.actor ?? stopped.author),
 						at: string(stopped.createdAt),
 					},
 		checks,
@@ -269,6 +274,18 @@ function summarize(
 		reactions,
 		threads,
 	};
+}
+
+/**
+ * The reason in a `quest land` ejection comment, or null for any other comment. Only an app or a
+ * person with write access speaks for the gate.
+ */
+function ejection(node: ObjectValue): string | null {
+	if (node.__typename !== "IssueComment") return null;
+	const author = node.author === null ? null : object(node.author);
+	const trusted =
+		author?.__typename === "Bot" || ["OWNER", "MEMBER", "COLLABORATOR"].includes(String(node.authorAssociation));
+	return trusted && typeof node.body === "string" ? (EJECTED.exec(node.body)?.[1] ?? null) : null;
 }
 
 /**
