@@ -195,7 +195,7 @@ class FakeGitHub {
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(url.pathname);
 		if (match && method === "GET") {
-			const status = this.files.get(`${match[1]}/${decodeURI(match[2])}`) ?? 404;
+			const status = this.files.get(`${match[1]}/${decodeURIComponent(match[2])}`) ?? 404;
 			return json(status, status === 200 ? { type: "file", path: match[2] } : { message: "Not Found" });
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/pulls$/.exec(url.pathname);
@@ -522,6 +522,34 @@ describe("start on GitHub", () => {
 		for (const bare of Object.values(bares)) expect(tip(bare)).toBe("");
 		expect(github.pulls).toMatchObject([
 			{ base: expected, head: { ref: BRANCH, repo: { full_name: "them/project" } } },
+		]);
+	});
+
+	test("looks up a parent's README below a directory whose name a URL would cut short", async () => {
+		const parentBare = tempDir();
+		git(parentBare, "init", "-q", "--bare", "-b", "main");
+		const forkBare = tempDir();
+		git(forkBare, "init", "-q", "--bare", "-b", "main");
+		const dir = "sub#1";
+		const work = tempDir();
+		setup(work);
+		mkdirSync(join(work, dir));
+		cpSync(join(Tree.baseline().path, "quest"), join(work, dir, "quest"), { recursive: true });
+		git(work, "add", ".");
+		git(work, "commit", "-q", "-m", "seed");
+		git(work, "remote", "add", "origin", FORK);
+		git(work, "config", `url.${forkBare}.insteadOf`, FORK);
+		git(work, "config", `url.${parentBare}.insteadOf`, UPSTREAM);
+		git(work, "push", "-q", "origin", "HEAD:refs/heads/main");
+		git(work, "push", "-q", UPSTREAM, "HEAD:refs/heads/main");
+		const github = new FakeGitHub();
+		github.files.delete("example/project/quest/README.md");
+		github.files.set(`example/project/${dir}/quest/README.md`, 200);
+		github.fork("me/project");
+
+		await start(join(work, dir), github);
+		expect(github.pulls).toMatchObject([
+			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "me/project" } } },
 		]);
 	});
 

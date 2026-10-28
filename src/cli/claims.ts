@@ -118,9 +118,8 @@ async function repositoryInfo(
 
 /** Whether `repository`'s default branch has `path`. Only a 404 says no; any other failure throws. */
 async function has(client: GitHub, repository: Repository, path: string): Promise<boolean> {
-	const response = await client.request(`${repositoryPath(repository)}/contents/${encodeURI(path)}`, {
-		allow: [404],
-	});
+	const encoded = path.split("/").map(encodeURIComponent).join("/");
+	const response = await client.request(`${repositoryPath(repository)}/contents/${encoded}`, { allow: [404] });
 	return response.status !== 404;
 }
 
