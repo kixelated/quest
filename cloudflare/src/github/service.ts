@@ -843,20 +843,11 @@ export class GitHubService {
 				comparison.headTarget.oid !== revision
 			)
 				return false;
-			const published = new Set(
-				(
-					await this.#env.DB.prepare(
-						"SELECT sha FROM job_commits WHERE repository=? AND sha IN (SELECT value FROM json_each(?))",
-					)
-						.bind(repo.id, JSON.stringify(page.nodes.map((commit) => sha(commit.oid))))
-						.all<{ sha: string }>()
-				).results.map(({ sha }) => sha),
-			);
 			for (const commit of page.nodes) {
 				if (commits.has(commit.oid)) throw new GitHubError("Repeated pull request commit");
 				commits.add(sha(commit.oid));
-				// Only confirmed publications recorded by kix count, never agent claims or author email.
-				if (published.has(commit.oid)) continue;
+				// Only a valid signature counts, never author email. kix's own commits
+				// are signed as the App, which is no maintainer, so they stay untrusted.
 				const signer = commit.signature?.isValid && commit.signature.signer;
 				if (!signer || !positiveId(signer.databaseId) || !name(signer.login)) return false;
 				if (!maintainers.has(signer.databaseId)) {

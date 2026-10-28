@@ -298,22 +298,8 @@ export function route(job: Job, offers: Offer[]): Offer | null {
 	return eligible.find((offer) => offer.free && !offer.limited) ?? null;
 }
 
-export type AssignmentSource = Pick<
-	Job,
-	| "id"
-	| "repository"
-	| "workflow"
-	| "target"
-	| "revision"
-	| "branch"
-	| "actor"
-	| "trusted"
-	| "head"
-	| "pending"
-	| "pull"
-	| "createdAt"
->;
-export type VerifiedSource = { head: string | null; trusted: boolean };
+/** Whether a queued PR job's current head is still trusted. */
+export type Verify = (job: Pick<Job, "repository" | "target" | "revision" | "head" | "trusted">) => Promise<boolean>;
 
 export type Claimed = NonNullable<Awaited<ReturnType<typeof readJob>>> & { owner: string; name: string };
 
@@ -332,7 +318,7 @@ export async function dispatch(
 	owner: string,
 	slots: Map<string, number>,
 	now: number,
-	verify: (job: AssignmentSource) => Promise<VerifiedSource> = async (job) => ({ head: job.head, trusted: false }),
+	verify: Verify = async () => false,
 ) {
 	const connected = JSON.stringify([...slots.keys()]);
 	const [, , cancelled, , candidates, offers, cancels, pending] = await db.batch([
@@ -393,9 +379,7 @@ export async function dispatch(
 	for (const job of candidates!.results as Job[]) {
 		if (![...free.values()].some((n) => n > 0)) break;
 		if (onPull(job.workflow)) {
-			const source = await verify(job);
-			job.head = source.head;
-			job.trusted = source.trusted ? 1 : 0;
+			job.trusted = (await verify(job)) ? 1 : 0;
 			verified.add(job.id);
 			await db
 				.prepare("UPDATE jobs SET trusted=? WHERE id=? AND state='queued' AND attempt=? AND head IS ?")
@@ -447,13 +431,7 @@ export async function dispatch(
 		const job = await readJob(db, id);
 		if (!job || job.state !== "running" || job.cancel) continue;
 		if (onPull(job.workflow) && !verified.has(job.id)) {
-			const source = await verify(job);
-			job.head = source.head;
-			if (job.pending === source.head) {
-				job.pending = null;
-				job.pendingAt = null;
-			}
-			const trusted = source.trusted ? 1 : 0;
+			const trusted = (await verify(job)) ? 1 : 0;
 			const machine = accounts.find((offer) => offer.runner === runner);
 			const eligible = trusted || (machine?.platform === "linux" && machine.vm);
 			const update = await db
@@ -647,18 +625,12 @@ export async function publishing(db: D1Database, runner: Runner, job: string, at
 
 /** Record a pending commit that the branch shows landed after all. */
 export async function adopt(db: D1Database, job: string, head: string | null, pending: string, now: number) {
-	await db.batch([
-		db
-			.prepare(
-				"INSERT OR IGNORE INTO job_commits(repository,sha,job) SELECT repository,pending,id FROM jobs WHERE id=? AND head IS ? AND pending=?",
-			)
-			.bind(job, head, pending),
-		db
-			.prepare(
-				"UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND head IS ? AND pending=?",
-			)
-			.bind(now, job, head, pending),
-	]);
+	await db
+		.prepare(
+			"UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND head IS ? AND pending=?",
+		)
+		.bind(now, job, head, pending)
+		.run();
 }
 
 /**
@@ -687,24 +659,14 @@ export async function claim(
 
 /** Record whether the reserved branch update landed. The branch's head follows it either way. */
 export async function settle(db: D1Database, job: string, commit: string, landed: boolean, now: number) {
-	await db.batch([
-		...(landed
-			? [
-					db
-						.prepare(
-							"INSERT OR IGNORE INTO job_commits(repository,sha,job) SELECT repository,pending,id FROM jobs WHERE id=? AND pending=?",
-						)
-						.bind(job, commit),
-				]
-			: []),
-		db
-			.prepare(
-				landed
-					? "UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?"
-					: "UPDATE jobs SET pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?",
-			)
-			.bind(now, job, commit),
-	]);
+	await db
+		.prepare(
+			landed
+				? "UPDATE jobs SET head=pending,pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?"
+				: "UPDATE jobs SET pending=NULL,pendingAt=NULL,updatedAt=? WHERE id=? AND pending=?",
+		)
+		.bind(now, job, commit)
+		.run();
 }
 
 /**

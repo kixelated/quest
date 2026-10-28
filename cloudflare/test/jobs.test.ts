@@ -56,10 +56,7 @@ async function state(id: string) {
 }
 /** One dispatch pass over connected runners and their free slots, whose runners acknowledge what they receive. */
 async function run(slots: Record<string, number>, now: number, owner = "owner", deliver = true) {
-	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now, async (job) => ({
-		head: job.head,
-		trusted: !!job.trusted,
-	}));
+	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now, async (job) => !!job.trusted);
 	if (deliver)
 		for (const { job } of pass.assign)
 			await db.prepare("UPDATE jobs SET delivered=1 WHERE id=?").bind(job.id).run();
@@ -1521,7 +1518,14 @@ describe("job routes", () => {
 
 describe("merge wait webhook wakeups", () => {
 	it("wakes only the current merge attempt for the enrolled repository and matching head or PR", async () => {
-		const machine = await runner("owner", "webhooks");
+		// GitHub cannot verify the head here, so the merge job routes as untrusted to a VM runner.
+		const real = globalThis.fetch;
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>
+			new URL(input instanceof Request ? input.url : input).hostname === "api.github.com"
+				? new Response(null, { status: 503 })
+				: real(input, init),
+		);
+		const machine = await runner("owner", "webhooks", "linux", true);
 		await connected(machine, [account("main")]);
 		const id = await job(10, "owner", { workflow: "merge", target: "pulls/2", branch: "feature", revision: head });
 		await store.held(db, id, "merge-token");

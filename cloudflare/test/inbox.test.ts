@@ -97,10 +97,7 @@ async function running(workflow: store.Workflow = "start", target = "quest/first
 		{ repository: 10, actor: user, workflow, target, revision: commit, branch, trusted: true },
 		1,
 	);
-	await store.dispatch(db, user, new Map([[runner.id, 1]]), 2, async (job) => ({
-		head: job.head,
-		trusted: !!job.trusted,
-	}));
+	await store.dispatch(db, user, new Map([[runner.id, 1]]), 2, async (job) => !!job.trusted);
 	return { id, runner };
 }
 

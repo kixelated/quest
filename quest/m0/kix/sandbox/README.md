@@ -6,7 +6,7 @@ Jobs on PR heads containing non-maintainer commits route to Linux runners,
 which build the PR's devShell in a per-job VM before its commands run in the
 OS sandbox every Claude Code job already uses. opencode jobs' commands run in
 that sandbox too. kix classifies PR heads whose commits all
-come from maintainers or kix jobs as trusted, so those run on any runner. The
+carry a current maintainer's valid signature as trusted, so those run on any runner. The
 sandbox is verified on macOS, and the owner's approval of another
 maintainer's answer is lifted once it is.
 

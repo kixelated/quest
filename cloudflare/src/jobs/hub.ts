@@ -129,8 +129,12 @@ export class RunnerHub extends DurableObject<Env> {
 			const reported = (ws.deserializeAttachment() as Attachment).slots;
 			if (reported !== null) slots.set(runner, reported);
 		}
-		const { assign, cancel, ended, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now(), (job) =>
-			trust.verify(this.env, job),
+		const { assign, cancel, ended, wake } = await store.dispatch(
+			this.env.DB,
+			owner,
+			slots,
+			Date.now(),
+			trust.verify(this.env),
 		);
 		for (const { runner, job } of assign) {
 			const message = { type: "assign", job, instructions: instructions(job.workflow) };
