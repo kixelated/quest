@@ -4,7 +4,7 @@
 
 Before pushing for review, the authoring session commits, passes local checks,
 then has the other vendor's model (Claude Code reviews Codex's work, Codex
-reviews Claude Code's) adversarially review the committed branch on this
+reviews Claude Code's) review the committed branch read-only on this
 machine. It fixes or refutes the findings, and only then pushes and marks the
 PR ready. GitHub's role shrinks to triggering the free online reviewers and
 acting as the final merge gate. Their already-posted findings are addressed

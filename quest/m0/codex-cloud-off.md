@@ -11,4 +11,3 @@ having merged main since. To check, list each repository's open PRs and
 compare them with the adoption merge. To advance it, update the stragglers to
 main. Then the maintainer turns off automatic reviews in Codex's settings, and
 this quest is deleted.
-
