@@ -28,6 +28,11 @@ its file tools follow permission rules. Checked against the pinned opencode
   the wrapper, and replacing the bash tool, which would reimplement its
   timeout, truncation, and process-tree kill. Each command pays srt's startup
   (about 0.5 to 1 s measured); srt runs outermost, so no nesting is needed.
+- The server's environment is not the commands': commands inherit it, so
+  the wrapper strips `OPENCODE_SERVER_PASSWORD`, `OPENCODE_CONFIG_CONTENT`,
+  and the other `OPENCODE_*` variables before starting srt. The sandbox's
+  filesystem and network policy does not substitute for this (from Codex's
+  review of [kixelated/quest#248](https://github.com/kixelated/quest/pull/248)).
 - File tools: today `permission: { "*": "allow" }` overrides opencode's
   `external_directory` check, so the read tool can read the account's
   `auth.json`. Add `external_directory: "deny"` and `webfetch: "deny"` after
@@ -45,7 +50,8 @@ its file tools follow permission rules. Checked against the pinned opencode
 - Rerun the hostile-repository boundary test from
   [kixelated/quest#212](https://github.com/kixelated/quest/pull/212) against
   an opencode account on Linux, including a symlink to `auth.json`, a
-  project plugin, and a `.opencode` MCP server. Then remove the "opencode
+  project plugin, a `.opencode` MCP server, and a bash tool and a `!` command
+  that print the server password and the tools' token. Then remove the "opencode
   runs unconfined" notes from the README, `src/runner/opencode.ts`, and
   `src/runner/cli.ts`, and the epic's 2026-10-24 decision.
 - [macOS sandbox](/quest/m0/kix/sandbox/macos.md) reruns the test for
