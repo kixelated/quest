@@ -88,6 +88,13 @@ export class RunnerHub extends DurableObject<Env> {
 			connections.get(runner)?.send(JSON.stringify({ type: "cancel", job, attempt }));
 	}
 
+	/** Webhooks wake only the attempts named by their current durable records. */
+	wake(attempts: (store.Attempt & { runner: string })[]) {
+		const connections = this.#connections();
+		for (const { runner, job, attempt } of attempts)
+			connections.get(runner)?.send(JSON.stringify({ type: "wake", job, attempt }));
+	}
+
 	/** Reconcile and assign the owner's jobs. The Worker calls this after changing them. */
 	async dispatch(owner: string) {
 		await this.#queue(owner);
