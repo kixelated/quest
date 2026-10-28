@@ -38,6 +38,8 @@ interface Record {
 	base: string;
 	/** Local-only recovery point while unpublished work is merged onto a selected head. */
 	reapply?: string;
+	/** Recovery commits in this checkout's ancestry are not agent merge requests. */
+	checkpoints?: string[];
 }
 
 /** A pending publication: the changes, and the tree they would make the branch hold. */
@@ -146,7 +148,12 @@ export class Workspace {
 				dir,
 				continuing && saved ? saved.sha : start,
 			]);
-			const fresh: Record = { head: job.head, base: start, ...(continuing && saved && { reapply: saved.ref }) };
+			const fresh: Record = {
+				head: job.head,
+				base: start,
+				...(continuing &&
+					saved && { reapply: saved.ref, checkpoints: [...(record.checkpoints ?? []), saved.sha] }),
+			};
 			save(file, fresh);
 			const workspace = new Workspace(git, dir, file, fresh);
 			workspace.preserved = saved?.ref ?? null;
@@ -284,15 +291,13 @@ export class Workspace {
 	 */
 	async #merged(): Promise<string | null> {
 		const base = this.#record.base;
-		const checkpoint = this.#record.reapply
-			? (await run("git", ["-C", this.dir, "rev-parse", this.#record.reapply])).stdout.trim()
-			: null;
+		const checkpoints = new Set(this.#record.checkpoints);
 		const listed = await run("git", ["-C", this.dir, "rev-list", "--merges", "--parents", `${base}..HEAD`]);
 		for (const line of listed.stdout.trim().split("\n")) {
 			const [commit, , merged] = line.split(" ");
 			// The preservation commit joins local and published ancestry, but is
 			// not an agent request to merge another branch into the publication.
-			if (commit === checkpoint || !merged) continue;
+			if (checkpoints.has(commit!) || !merged) continue;
 			const held = await run("git", ["-C", this.dir, "merge-base", "--is-ancestor", merged, base]).then(
 				() => true,
 				() => false,
@@ -323,7 +328,7 @@ export class Workspace {
 			);
 			base = commit.stdout.trim();
 		}
-		this.#record = { head, base };
+		this.#record = { head, base, ...(this.#record.checkpoints && { checkpoints: this.#record.checkpoints }) };
 		save(this.#file, this.#record);
 	}
 
@@ -341,7 +346,7 @@ export class Workspace {
 		} catch {
 			throw new Error(`kix reports the branch at ${head}, which does not continue from ${known}`);
 		}
-		this.#record = { head, base: head };
+		this.#record = { head, base: head, ...(this.#record.checkpoints && { checkpoints: this.#record.checkpoints }) };
 		save(this.#file, this.#record);
 	}
 

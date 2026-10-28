@@ -461,6 +461,41 @@ describe("workspace", () => {
 			expect(await current.conflicts()).toEqual([]);
 			expect(readFileSync(join(current.dir, "old.txt"), "utf8")).toBe("external version\n");
 			expect((await current.snapshot()).changes.map((change) => change.path)).toEqual(["untracked.txt"]);
+			let workspace = current;
+			for (const round of [1, 2]) {
+				const snapshot = await workspace.snapshot();
+				writeFileSync(join(dir, "untracked.txt"), readFileSync(join(workspace.dir, "untracked.txt")));
+				git(dir, "add", ".");
+				git(dir, "commit", "-qm", `published continuation ${round}`);
+				const published = git(dir, "rev-parse", "HEAD");
+				await workspace.published(published, snapshot);
+				expect(await workspace.snapshot()).toMatchObject({ merge: null, changes: [] });
+				if (round === 2) break;
+				writeFileSync(join(workspace.dir, "untracked.txt"), "next unpublished edit\n");
+				writeFileSync(join(dir, "remote.txt"), "another external edit\n");
+				git(dir, "add", ".");
+				git(dir, "commit", "-qm", "another moved head");
+				const next = git(dir, "rev-parse", "HEAD");
+				workspace = await Workspace.prepare(
+					root,
+					job(next, {
+						workflow: "merge",
+						head: next,
+						attempt: 3,
+						questions: [
+							{
+								id: "q2",
+								kind: "publication",
+								attempt: 2,
+								approvedAt: 2,
+								prompt: { continuation: { head: next, from: published, revision: head } },
+								answer: { continue: next },
+							},
+						],
+					}),
+					dir,
+				);
+			}
 		});
 
 	posix("leaves initialized submodule commits intact when a stale checkout needs replacement", async () => {
@@ -1363,6 +1398,54 @@ async function idle(runner: Runner) {
 }
 
 describe("quest runner", () => {
+	posix("pauses a large conflicted continuation with a bounded question and intact checkout", async () => {
+		const r = rig();
+		try {
+			const paths = Array.from({ length: 60 }, (_, i) => `component-${i}-${"long-path".repeat(6)}.txt`);
+			for (const path of paths) writeFileSync(join(r.upstream.dir, path), "initial\n");
+			git(r.upstream.dir, "add", ".");
+			git(r.upstream.dir, "commit", "-qm", "initial component files");
+			const from = git(r.upstream.dir, "rev-parse", "HEAD");
+			const original = await Workspace.prepare(
+				r.home.dir,
+				job(from, { workflow: "merge", head: from }),
+				r.upstream.dir,
+			);
+			for (const path of paths) {
+				writeFileSync(join(original.dir, path), "local unpublished work\n");
+				writeFileSync(join(r.upstream.dir, path), "external change\n");
+			}
+			git(r.upstream.dir, "commit", "-qam", "moved head");
+			const head = git(r.upstream.dir, "rev-parse", "HEAD");
+			r.assign(
+				job(head, {
+					workflow: "merge",
+					head,
+					attempt: 2,
+					questions: [
+						{
+							id: "q",
+							kind: "publication",
+							attempt: 1,
+							approvedAt: 1,
+							prompt: { continuation: { head, from, revision: from } },
+							answer: { continue: head },
+						},
+					],
+				}),
+			);
+			const question = await r.hub.next((message) => message.type === "question");
+			await idle(r.runner);
+			expect(question.prompt.questions[0].question.length).toBeLessThanOrEqual(2000);
+			expect(question.prompt.questions[0].question).toContain("60 paths");
+			expect(r.hub.of("result")).toEqual([]);
+			expect((await original.conflicts()).length).toBe(60);
+			expect(r.calls()).toEqual([]);
+		} finally {
+			await r.runner.shutdown();
+		}
+	});
+
 	posix("an agent crash cancels its pending webhook wait before the attempt ends", async () => {
 		const timers = vi.spyOn(globalThis, "setTimeout");
 		const cleared = vi.spyOn(globalThis, "clearTimeout");

@@ -205,7 +205,7 @@ export class Attempt {
 						questions: [
 							{
 								header: "Head conflicts",
-								question: `The preserved workspace conflicts with ${job.head}: ${conflicts.join(", ")}. Resume the agent to resolve and commit the merge?`,
+								question: `The preserved workspace conflicts with ${job.head} in ${conflicts.length} paths. Resume the agent to inspect the conflicts and resolve and commit the merge?`,
 								options: [
 									{
 										label: "Resolve conflicts",
