@@ -20,10 +20,14 @@ Remaining work:
   heads never enter the trusted publication ledger.
 - Preserve and safely reapply unpublished workspace changes before adopting
   the new head; conflicts become a maintainer decision. A paused job can move
-  between runners, so the transfer mechanism is awaiting the user's choice:
-  a fenced snapshot in existing R2, or a continuation pinned to its original
-  runner with an explicit availability limitation. No pin or artifact protocol
-  is authorized by silence.
+  between runners, so its transfer mechanism remains a product choice.
+  Existing publication checks the live head before creating a commit; an early
+  foreign move leaves no pending commit to restore. Checkpoint events hold
+  summaries, not workspace files, and dangling Git objects are not a durable
+  transfer guarantee. Alternatives include a fenced snapshot in existing R2,
+  an explicit checkpoint Git ref with ownership and cleanup rules, or pinning
+  continuation to its original runner with an availability limitation. No new
+  ref, pin, or artifact protocol is authorized by silence.
 
 This PR implements the independent submodule-pointer and webhook-wakeup portions:
 merge publication retains only pointers verified against the PR's existing head;
