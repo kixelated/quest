@@ -727,12 +727,16 @@ export async function readJob(db: D1Database, id: string) {
 	]);
 	const row = job!.results[0] as Job | undefined;
 	if (!row) return null;
+	return jobView(row, events!.results as Event[], questions!.results as Question[]);
+}
+
+function jobView(row: Job, events: Event[], questions: Question[]) {
 	const json = (value: string | null): unknown => (value === null ? null : JSON.parse(value));
 	return {
 		...row,
 		result: json(row.result),
-		events: (events!.results as Event[]).map((e) => ({ ...e, body: json(e.body as string) })),
-		questions: (questions!.results as Question[]).map((q) => ({
+		events: events.map((e) => ({ ...e, body: json(e.body as string) })),
+		questions: questions.map((q) => ({
 			...q,
 			prompt: json(q.prompt as string),
 			answer: json(q.answer as string | null),
@@ -740,12 +744,40 @@ export async function readJob(db: D1Database, id: string) {
 	};
 }
 
+/** Hydrate a selection in three snapshot queries, without multiplying events by questions. */
+async function readJobs(db: D1Database, select: string, ...parameters: (string | number)[]) {
+	const [jobs, events, questions] = await db.batch([
+		db.prepare(select).bind(...parameters),
+		db
+			.prepare(
+				`WITH selected AS (${select}) SELECT e.job,e.attempt,e.kind,e.body,e.at
+				FROM job_events e JOIN selected j ON j.id=e.job ORDER BY e.rowid`,
+			)
+			.bind(...parameters),
+		db
+			.prepare(
+				`WITH selected AS (${select}) SELECT q.job,q.id,q.attempt,q.kind,q.prompt,q.answer,q.answeredBy,q.askedAt,q.answeredAt,q.approvedAt
+				FROM job_questions q JOIN selected j ON j.id=q.job ORDER BY q.askedAt,q.rowid`,
+			)
+			.bind(...parameters),
+	]);
+	const byJob = <T extends { job: string }>(rows: T[]) => {
+		const grouped = new Map<string, Omit<T, "job">[]>();
+		for (const { job, ...row } of rows) {
+			if (!grouped.has(job)) grouped.set(job, []);
+			grouped.get(job)!.push(row);
+		}
+		return grouped;
+	};
+	const eventRows = byJob(events!.results as (Event & { job: string })[]);
+	const questionRows = byJob(questions!.results as (Question & { job: string })[]);
+	return (jobs!.results as Job[]).map((row) =>
+		jobView(row, eventRows.get(row.id) ?? [], questionRows.get(row.id) ?? []),
+	);
+}
+
 export async function listJobs(db: D1Database, repository: number) {
-	const rows = await db
-		.prepare("SELECT id FROM jobs WHERE repository=? ORDER BY createdAt DESC,id LIMIT 50")
-		.bind(repository)
-		.all<{ id: string }>();
-	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+	return readJobs(db, "SELECT * FROM jobs WHERE repository=? ORDER BY createdAt DESC,id LIMIT 50", repository);
 }
 
 export type Published = Pick<Job, "branch" | "head" | "pending" | "pull">;
@@ -777,16 +809,15 @@ export async function active(db: D1Database, repository: number, target: string)
  * one of the `observed` issues, pull requests, or ready quests.
  */
 export async function listInboxJobs(db: D1Database, repository: number, observed: string[]) {
-	const rows = await db
-		.prepare(
-			`SELECT id FROM jobs j WHERE repository=?1
+	return readJobs(
+		db,
+		`SELECT * FROM jobs j WHERE repository=?1
 				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
 				AND (state IN ('queued','running','waiting','failed') OR target IN (SELECT value FROM json_each(?2)))
 			ORDER BY createdAt DESC,id`,
-		)
-		.bind(repository, JSON.stringify(observed))
-		.all<{ id: string }>();
-	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+		repository,
+		JSON.stringify(observed),
+	);
 }
 
 /** The most follow-ups a delivery suggests, and the longest one, in characters. */
@@ -848,17 +879,16 @@ export async function followupRequest(db: D1Database, repository: number, job: s
  * delivered is one of the `open` ones and no later job works on that pull request.
  */
 export async function listActivityJobs(db: D1Database, repository: number, open: number[]) {
-	const rows = await db
-		.prepare(
-			`SELECT id FROM jobs j WHERE repository=?1
+	return readJobs(
+		db,
+		`SELECT * FROM jobs j WHERE repository=?1
 				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
 				AND (state IN ('queued','running','waiting') OR (pull IN (SELECT value FROM json_each(?2))
 					AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target='pulls/'||j.pull AND n.id<>j.id AND n.createdAt>=j.createdAt)))
 			ORDER BY createdAt DESC,id`,
-		)
-		.bind(repository, JSON.stringify(open))
-		.all<{ id: string }>();
-	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+		repository,
+		JSON.stringify(open),
+	);
 }
 
 type Pin = { runner: string; account: string };
