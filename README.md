@@ -147,9 +147,13 @@ included. A branch whose tip is the head of a merged PR holds nothing, since
 its work landed; a closed, unmerged PR's branch still holds its quest. It
 lists each one it skips on stderr with its PR and how long ago that PR was
 last active, so you can decide whether a stale claim should be taken over.
-In a fork's clone, the upstream is the fork's parent, and the fork's own
-branches and PRs count too; a remote that fetches from upstream and pushes to
-a fork works the same way. `--remote` picks a remote other than `origin`.
+On GitHub, the upstream is found by walking up the remote's fork chain while
+each parent's default branch has `quest/README.md`. In a contributor's fork,
+the upstream is the project it forked, and the fork's own branches and PRs
+count too; a remote that fetches from upstream and pushes to a fork works the
+same way. A fork whose parent keeps no quests is its own upstream. A failed
+lookup, such as an expired token or a network error, fails the command rather
+than picking a different upstream. `--remote` picks a remote other than `origin`.
 Off GitHub, only branches are checked.
 Neither form inspects kix.quest runner locks or outside conditions.
 
@@ -166,7 +170,9 @@ It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`), then opens a draft PR
 from it right away and prints the PR's URL. It switches your checkout to the
 claim on a new local branch, or fast-forwards that branch if it is already
-checked out. A fork pushes to itself and opens the PR on its parent. It reads
+checked out. A fork pushes to itself and opens the PR on its upstream, found
+as for `unblocked --unclaimed`, so a fork with its own quests claims on
+itself. It reads
 readiness from the upstream default branch it builds on, not your checkout. It
 fails on a tree `quest check` rejects, which can hide a blocker, and refuses a
 blocked quest and one someone else holds; a rejected push means
@@ -247,7 +253,7 @@ result and exit 1 if it fails, for example when a quest moved out of its epic.
 An epic is its directory or README; removing one that holds other quests needs
 `-r`. The root and milestones are never moved or removed. `mv` refuses a
 destination that exists, and refuses to move a quest while it has a claim
-branch or open PR on `origin`, or on the repository a GitHub fork came from,
+branch or open PR on `origin`, or on the upstream that holds its claims,
 since the branch would no longer name it.
 Neither command touches branches or PRs.
 
@@ -820,7 +826,7 @@ quest worktree remove example
 modified or untracked files and any commit, at `HEAD` or under the checkout's
 own refs such as `refs/bisect/`, that no branch or remote-tracking ref
 reaches. A squash-merged change leaves its commits unreached, so they count as
-preserved only when origin's GitHub repository (a fork's parent) has a merged
+preserved only when the GitHub upstream that holds origin's claims has a merged
 PR whose head is exactly that commit; other commits need no forge or token.
 It then prunes the scratch and refuses ignored files that remain, leaving the
 checkout released, before `git worktree remove` deletes it. A checkout already
