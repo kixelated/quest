@@ -797,7 +797,12 @@ token; a new plan reads your idea and pasted context there. kix publishes as its
 pauses for you to pick another account; the runner never switches on its own.
 On SIGINT or SIGTERM, running work is published and its jobs move to another
 runner. Runners take only trusted revisions until they can build untrusted
-heads' devShells in a VM, and a job resumes with another maintainer's answer
+heads' devShells in a VM. A pull request's head is trusted only when every
+commit beyond the default branch has a valid signature from a current
+maintainer, so sign your commits (for example with
+[SSH signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification#ssh-commit-signature-verification))
+for its iterate and merge jobs to run; a head kix has pushed to stays
+untrusted. A job resumes with another maintainer's answer
 only once you approve it in the inbox. opencode runs as `opencode serve` on
 localhost behind a password made for each turn.
 
