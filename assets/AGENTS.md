@@ -161,7 +161,8 @@ Fix any merge conflicts.
 ## Reviews
 
 Before a PR is marked ready for review, and before each push to one that is, the other vendor's model reviews the committed branch locally against the PR's base branch with `quest review --base <remote>/<base>`: Claude Code reviews Codex's work, and Codex reviews Claude Code's.
-Commit and pass the repository's checks first, except on the head of a PR whose author lacks write access to the repository: its checks would run untrusted code with your credentials, so leave them to CI.
+Commit and pass the repository's checks first.
+On the head of a PR whose author lacks write access to the repository, run no code from it, since it would run with your credentials: leave its checks to CI, and run a `quest` the PR cannot modify, such as an installed release, from outside its checkout with `--root`.
 Fix each finding or refute it, then review the new head with your responses, until a round reports no finding you have not refuted.
 A refutation stands only when it cites evidence the reviewer cannot rebut: a `path:line`, a command's output, or a recorded maintainer decision.
 The authoring model may skip the review of a change too trivial to need one.
