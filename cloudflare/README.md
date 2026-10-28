@@ -90,8 +90,12 @@ target; a retry keeps both. A completed job's result may list suggested
 idea and takes the follow-ups and summary as context from the job's own
 result, never from the request, and offers them once. A job on an issue or pull request
 rereads it from GitHub, refusing one that closed or whose head moved since
-observations read it. `iterate` and `merge` jobs are untrusted and route
-only to Linux runners that declare VM builds. A `merge` job runs the merge
+observations read it. `iterate` and `merge` jobs trust a head only when
+every commit beyond the repository's default branch, independently of the
+PR's chosen base, has a valid signature from a current maintain or admin
+collaborator. The check runs at creation and again at assignment. Other
+heads, including unsigned ones and those kix pushed to, route only to Linux
+runners that declare VM builds. A `merge` job runs the merge
 skill's loop on an open, non-draft pull request and lands it; it holds the PR
 with the `quest:merge` label that local `quest merge` sessions share
 (`src/jobs/landing.ts`), as described in [GITHUB.md](GITHUB.md#merge-jobs). A five-minute scheduled sweep retries ended jobs’ hold releases even when a lifecycle callback or GitHub read was missed; a live job, a replacement hold, or an active landing keeps its label. Without a `flake.nix`, the route
@@ -319,7 +323,7 @@ cp cloudflare/.dev.vars.example cloudflare/.dev.vars
 ```
 
 Fill in the local file with a random `AUTH_SECRET` (at least 32 characters) and
-GitHub OAuth app credentials. Google sign-in is optional and off by default:
+the development GitHub App's client ID and client secret. Google sign-in is optional and off by default:
 to try it, register a Google OAuth web client with redirect URI
 `http://localhost:8787/api/auth/callback/google`, set both Google values in
 the local file, and temporarily list `GOOGLE_CLIENT_SECRET` under
@@ -328,7 +332,8 @@ secrets. Configure the GitHub app's homepage as
 `http://localhost:8787` and callback as
 `http://localhost:8787/api/auth/callback/github`. The file is ignored by Git.
 Its `AUTH_URL` overrides the production origin in `wrangler.jsonc`. Use a
-separate OAuth app for production.
+separate GitHub App for production. The App needs the manifest's Email addresses
+read permission for accounts with private email addresses; see [GITHUB.md](GITHUB.md).
 
 ```sh
 just worker-dev
@@ -344,7 +349,7 @@ development and tests need no Cloudflare login. Wrangler reruns the build when
 
 ### Seeded local server
 
-Check UI changes in a browser with representative data, and no OAuth app or
+Check UI changes in a browser with representative data, and no GitHub App or
 Cloudflare login:
 
 ```sh
@@ -451,8 +456,11 @@ for a fresh deployment only. For another environment, change `routes`,
 `AUTH_URL`, Worker name, account, database, bucket, and OAuth credentials
 together.
 
-Register the production GitHub OAuth app with callback
-`https://kix.quest/api/auth/callback/github`. For Google sign-in, also register
+Register the production GitHub App from [the manifest](github-app-manifest.json),
+which includes callback `https://kix.quest/api/auth/callback/github` and requests
+user authorization during installation. Use that App's client ID and client
+secret as `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`; no separate GitHub OAuth
+app is needed. For Google sign-in, also register
 a production Google OAuth web client with redirect URI
 `https://kix.quest/api/auth/callback/google`, set its public client ID as
 `GOOGLE_CLIENT_ID` in `wrangler.jsonc`, and set the secret with

@@ -10,12 +10,14 @@ import {
 	parse,
 	ready,
 } from "quest/core";
+import { cleanAutoMergeRefusal, immediateMerge } from "../../../src/github/merge";
 import { osiApproved } from "../licenses";
 import { positiveId } from "./webhook";
 import {
 	activityQuery,
 	type ActivityPage,
 	type ProjectState,
+	type Pull,
 	type Scan,
 	reconcile,
 	readState,
@@ -586,7 +588,7 @@ export class GitHubService {
 				throw new GitHubError("Project is not enrolled for this installation");
 			// A lost maintainer role during the read must not publish fresh observations.
 			if (refresh)
-				await this.#read(token, repo, current, installation, () => this.#maintainer(token, repo, userId));
+				await this.#read(token, repo, current, installation, () => this.#maintainer(token, repo, userId), true);
 			return this.#observations(repo, installation);
 		});
 	}
@@ -602,6 +604,7 @@ export class GitHubService {
 		current: Repository,
 		installation: number,
 		recheck: () => Promise<void>,
+		full = false,
 	) {
 		await this.#env.DB.prepare("INSERT OR IGNORE INTO github_project_state(repository,epoch) VALUES(?,?)")
 			.bind(repo.id, crypto.randomUUID())
@@ -616,9 +619,21 @@ export class GitHubService {
 		// small, restarts to observe a possibly opened, closed, or claimed quest.
 		const scan: Scan = {
 			history:
-				previous && !previous.history.complete
+				previous?.history.since && !previous.history.complete && (!full || previous.history.full)
 					? previous.history
-					: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
+					: {
+							id: crypto.randomUUID(),
+							issues: null,
+							pulls: null,
+							complete: false,
+							since: full
+								? { issues: null, pulls: null }
+								: (previous?.history.watermark ?? { issues: null, pulls: null }),
+							watermark: full
+								? { issues: null, pulls: null }
+								: (previous?.history.watermark ?? { issues: null, pulls: null }),
+							full,
+						},
 			occupancy:
 				previous && !previous.occupancy.complete && row!.invalidated !== 1
 					? previous.occupancy
@@ -651,6 +666,7 @@ export class GitHubService {
 				error.path?.length !== 2 || error.path[0] !== "repository" || !/^s\d+$/.test(String(error.path[1])),
 		);
 		if (partial || !response.data?.repository) throw new GitHubError("Project activity unavailable");
+		await this.#draftBodies(token, repo, scan, response.data.repository, stale);
 		// A rename, transfer, visibility change, or revocation during the read
 		// must not publish fresh observations.
 		const latest = await this.#api<Repository>(token, repositoryPath(repo));
@@ -662,6 +678,70 @@ export class GitHubService {
 		await this.#gate(installation);
 		if ((await this.#state(repo, installation)) === null) throw new GitHubError("Project enrollment changed");
 		await reconcile(this.#env.DB, repo, snapshot, scan, response.data.repository, stale, row!.revision, row!.epoch);
+	}
+
+	async #draftBodies(
+		token: string,
+		repo: GitHubRepository,
+		scan: Scan,
+		page: ActivityPage,
+		stale: Awaited<ReturnType<typeof staleEntities>>,
+	) {
+		// Bodies are needed only to classify open drafts. Metadata pages never request them.
+		// Read those drafts in one batch, then require the same identity/version before publishing.
+		const drafts = new Map<number, (Pull & { body?: string })[]>();
+		const rows = [
+			...(scan.history.pulls !== false
+				? (page.pullRequests?.nodes ?? []).filter(
+						(item) =>
+							!scan.history.since?.pulls ||
+							Date.parse(item.updatedAt) >= Date.parse(scan.history.since.pulls),
+					)
+				: []),
+			...(scan.occupancy.open !== false ? (page.open?.nodes ?? []) : []),
+			...stale.map((_, i) => page[`s${i}`]),
+		];
+		for (const item of rows) {
+			if (!item || !("isDraft" in item) || !item.isDraft || item.state !== "OPEN") continue;
+			const draft = item as Pull & { body?: string };
+			if (!positiveId(draft.number)) throw new GitHubError("Invalid draft observation");
+			drafts.set(draft.number, [...(drafts.get(draft.number) ?? []), draft]);
+		}
+		if (drafts.size) {
+			const numbers = [...drafts.keys()];
+			const result = await this.#api<{
+				data?: {
+					repository?: Record<
+						string,
+						| (Pick<Pull, "databaseId" | "updatedAt" | "headRefOid" | "state" | "isDraft"> & {
+								body: string;
+						  })
+						| null
+					>;
+				};
+				errors?: unknown[];
+			}>(token, "/graphql", "POST", {
+				query: `query($owner: String!, $name: String!) { repository(owner:$owner,name:$name) { ${numbers.map((number, i) => `b${i}:pullRequest(number:${number}) { databaseId:fullDatabaseId updatedAt headRefOid state isDraft body }`).join("\n")} } }`,
+				variables: { owner: repo.owner, name: repo.name },
+			});
+			if (result.errors?.length || !result.data?.repository) throw new GitHubError("Draft bodies unavailable");
+			for (const [i, number] of numbers.entries()) {
+				const body = result.data.repository[`b${i}`];
+				for (const item of drafts.get(number)!) {
+					if (
+						!body ||
+						typeof body.body !== "string" ||
+						body.databaseId !== item.databaseId ||
+						body.updatedAt !== item.updatedAt ||
+						body.headRefOid !== item.headRefOid ||
+						body.state !== "OPEN" ||
+						!body.isDraft
+					)
+						throw new ProjectChanged();
+					item.body = body.body;
+				}
+			}
+		}
 	}
 
 	/**
@@ -732,7 +812,7 @@ export class GitHubService {
 	 * open at the observed head, and whether its revision has a flake for the
 	 * runner's devShell.
 	 */
-	jobSource<T extends { target: string; revision: string }>(
+	jobSource<T extends { target: string; revision: string; trusted: boolean }>(
 		repo: GitHubRepository,
 		userId: string,
 		resolve: (state: ProjectState) => T,
@@ -759,6 +839,7 @@ export class GitHubService {
 				if (live.state !== "open" || (kind === "pulls" && live.head?.sha !== job.revision))
 					throw new GitHubError("This changed on GitHub since it was read; refresh and review it again");
 			}
+			if (kind === "pulls") job.trusted = await this.#pullTrust(token, repo, Number(target), job.revision);
 			let flake = true;
 			try {
 				await this.#api(token, `${repositoryPath(repo)}/contents/flake.nix?ref=${sha(job.revision)}`);
@@ -768,6 +849,109 @@ export class GitHubService {
 			}
 			return { job, enabled: enrolled === "enabled", flake };
 		});
+	}
+
+	/** Recheck a queued PR head against current signatures and repository roles. */
+	jobTrust(repo: GitHubRepository, target: string, revision: string) {
+		return this.#withRepository(repo, { contents: "read", pull_requests: "read" }, async (token, current) => {
+			this.#public(current);
+			return this.#pullTrust(token, repo, pullNumber(target), revision);
+		});
+	}
+
+	async #pullTrust(token: string, repo: GitHubRepository, pull: number, revision: string) {
+		type Signer = { databaseId: number; login: string };
+		type Commit = { oid: string; signature: { isValid: boolean; signer: Signer | null } | null };
+		type Comparison = {
+			baseTarget: { oid: string };
+			headTarget: { oid: string };
+			commits: {
+				totalCount: number;
+				nodes: Commit[];
+				pageInfo: { hasNextPage: boolean; endCursor: string | null };
+			};
+		};
+		type Page = {
+			pullRequest: { state: string; headRefOid: string } | null;
+			defaultBranchRef: { name: string; target: { oid: string } | null; compare: Comparison | null } | null;
+		};
+		// A PR's base is contributor-controlled. Compare the exact head against the
+		// repository's trusted default branch so retargeting cannot hide ancestors.
+		const query = `query($owner:String!,$name:String!,$number:Int!,$revision:String!,$after:String) {
+ repository(owner:$owner,name:$name) {
+ pullRequest(number:$number) { state headRefOid }
+ defaultBranchRef { name target { oid } compare(headRef:$revision) {
+ baseTarget { oid } headTarget { oid }
+ commits(first:100,after:$after) {
+ totalCount nodes { oid signature { isValid signer { databaseId login } } }
+ pageInfo { hasNextPage endCursor }
+ } } } } }`;
+		let after: string | null = null;
+		let base: string | undefined;
+		let branch: string | undefined;
+		let count: number | undefined;
+		const cursors = new Set<string>();
+		const commits = new Set<string>();
+		const maintainers = new Map<number, boolean>();
+		do {
+			const response: { data?: { repository?: Page }; errors?: unknown[] } = await this.#api(
+				token,
+				"/graphql",
+				"POST",
+				{
+					query,
+					variables: { owner: repo.owner, name: repo.name, number: pull, revision: sha(revision), after },
+				},
+			);
+			if (response.errors?.length) throw new GitHubError("Could not verify pull request commits");
+			const repository: Page | undefined = response.data?.repository;
+			const live = repository?.pullRequest;
+			const anchor = repository?.defaultBranchRef;
+			const comparison = anchor?.compare;
+			if (!live || live.state !== "OPEN" || live.headRefOid !== revision || !anchor?.target || !comparison)
+				return false;
+			base ??= sha(anchor.target.oid);
+			branch ??= anchor.name;
+			const page = comparison.commits;
+			count ??= page.totalCount;
+			if (
+				base !== anchor.target.oid ||
+				branch !== anchor.name ||
+				count !== page.totalCount ||
+				comparison.baseTarget.oid !== base ||
+				comparison.headTarget.oid !== revision
+			)
+				return false;
+			for (const commit of page.nodes) {
+				if (commits.has(commit.oid)) throw new GitHubError("Repeated pull request commit");
+				commits.add(sha(commit.oid));
+				// Only a valid signature counts, never author email. kix's own commits
+				// are signed as the App, which is no maintainer, so they stay untrusted.
+				const signer = commit.signature?.isValid && commit.signature.signer;
+				if (!signer || !positiveId(signer.databaseId) || !name(signer.login)) return false;
+				if (!maintainers.has(signer.databaseId)) {
+					const permission = await this.#api<{ user: { id: number }; permission: string; role_name: string }>(
+						token,
+						`${repositoryPath(repo)}/collaborators/${signer.login}/permission`,
+					).catch((error: unknown) => {
+						if (error instanceof GitHubError && error.status === 404) return null;
+						throw error;
+					});
+					maintainers.set(
+						signer.databaseId,
+						!!permission &&
+							permission.user.id === signer.databaseId &&
+							(permission.permission === "admin" || permission.role_name === "maintain"),
+					);
+				}
+				if (!maintainers.get(signer.databaseId)) return false;
+			}
+			if (!page.pageInfo.hasNextPage) break;
+			after = page.pageInfo.endCursor;
+			if (!after || cursors.has(after)) throw new GitHubError("Missing or repeated pull request commit cursor");
+			cursors.add(after);
+		} while (true);
+		return commits.size === count && (count === 0 || commits.has(revision));
 	}
 
 	previewProject(repo: GitHubRepository, userId: string) {
@@ -890,24 +1074,28 @@ export class GitHubService {
 		if (!kind) throw new GitHubError("Only issue and pull request jobs have a target to read");
 		const permissions: Permissions =
 			kind === "issues" ? { issues: "read" } : { pull_requests: "read", checks: "read", statuses: "read" };
-		const comments = "comments(last: 100) { nodes { author { login } body createdAt } }";
-		// One page of review threads; a pull request's later pages are read `after` the one before.
-		const threads =
-			"reviewThreads(first: 100, after: $threads) { nodes { isResolved isOutdated path line comments(first: 50) { nodes { author { login } body createdAt } } } pageInfo { hasNextPage endCursor } }";
+		const pageInfo = "pageInfo { hasNextPage endCursor }";
+		const commentFields = "nodes { author { login } body createdAt }";
+		const comments = `comments(first: 100, after: $after) { ${commentFields} ${pageInfo} }`;
+		const reviews = `reviews(first: 50, after: $after) { nodes { author { login } state body submittedAt } ${pageInfo} }`;
+		const threads = `reviewThreads(first: 100, after: $after) { nodes { id isResolved isOutdated path line comments(first: 50) { ${commentFields} ${pageInfo} } } ${pageInfo} }`;
+		const contexts = (after: boolean) =>
+			`contexts(first: 100${after ? ", after: $after" : ""}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } ${pageInfo} }`;
 		const query =
 			kind === "issues"
 				? `issue(number: $number) { number title state body author { login } ${comments} }`
-				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments}
- reviews(last: 50) { nodes { author { login } state body submittedAt } }
- ${threads}
- commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state description targetUrl } } } } } } } }`;
+				: `pullRequest(number: $number) { number title state body isDraft author { login } baseRefName headRefName headRefOid ${comments} ${reviews} ${threads}
+ commits(last: 1) { nodes { commit { oid statusCheckRollup { state ${contexts(false)} } } } } }`;
+		type Connection<T> = { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 		type Comment = { author: { login: string } | null; body: string; createdAt?: string; submittedAt?: string };
+		type Review = Comment & { state: string };
 		type Thread = {
+			id: string;
 			isResolved: boolean;
 			isOutdated: boolean;
 			path: string;
 			line: number | null;
-			comments: { nodes: Comment[] };
+			comments: Connection<Comment>;
 		};
 		type Check = {
 			__typename: string;
@@ -920,6 +1108,7 @@ export class GitHubService {
 			description?: string | null;
 			targetUrl?: string | null;
 		};
+		type Rollup = { state: string; contexts: Connection<Check> };
 		type Item = {
 			number: number;
 			title: string;
@@ -930,82 +1119,134 @@ export class GitHubService {
 			baseRefName?: string;
 			headRefName?: string;
 			headRefOid?: string;
-			comments: { nodes: Comment[] };
-			reviews?: { nodes: (Comment & { state: string })[] };
-			reviewThreads?: { nodes: Thread[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
-			commits?: {
-				nodes: {
-					commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: Check[] } } | null };
-				}[];
-			};
+			comments: Connection<Comment>;
+			reviews?: Connection<Review>;
+			reviewThreads?: Connection<Thread>;
+			commits?: { nodes: { commit: { oid: string; statusCheckRollup: Rollup | null } }[] };
 		};
 		return this.#authorized(repo, userId, permissions, async (token) => {
-			const read = async (fields: string, after: string | null = null) => {
-				const pull = kind === "pulls";
-				const result = await this.#api<{
-					data?: { repository: { issue?: Item | null; pullRequest?: Item | null } | null };
-					errors?: unknown[];
-				}>(token, "/graphql", "POST", {
-					query: `query($owner: String!, $name: String!, $number: Int!${pull ? ", $threads: String" : ""}) { repository(owner: $owner, name: $name) { ${fields} } }`,
-					variables: {
-						owner: repo.owner,
-						name: repo.name,
-						number: number(Number(value)),
-						...(pull && { threads: after }),
-					},
+			const request = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
+				const result = await this.#api<{ data?: T; errors?: unknown[] }>(token, "/graphql", "POST", {
+					query,
+					variables,
 				});
-				const item = result.data?.repository?.[pull ? "pullRequest" : "issue"];
-				if (result.errors?.length || !item) throw new GitHubError("This issue or pull request is unavailable");
+				if (result.errors?.length || !result.data)
+					throw new GitHubError("This issue or pull request is unavailable");
+				return result.data;
+			};
+			const read = async (fields: string, after: string | null = null) => {
+				const result = await request<{ repository: { issue?: Item | null; pullRequest?: Item | null } | null }>(
+					`query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { ${fields} } }`,
+					{ owner: repo.owner, name: repo.name, number: number(Number(value)), after },
+				);
+				const item = result.repository?.[kind === "pulls" ? "pullRequest" : "issue"];
+				if (!item) throw new GitHubError("This issue or pull request is unavailable");
 				return item;
 			};
+			// Each connection owns its cursor history, including nested comments and fixed-head checks.
+			const collect = async <T>(
+				first: Connection<T> | undefined,
+				next: (after: string) => Promise<Connection<T> | undefined>,
+				name: string,
+			): Promise<T[]> => {
+				const all: T[] = [];
+				const seen = new Set<string>();
+				let page = first;
+				for (;;) {
+					if (!page) throw new GitHubError(`This target's ${name} are unavailable`);
+					all.push(...page.nodes);
+					if (!page.pageInfo.hasNextPage) return all;
+					const cursor = page.pageInfo.endCursor;
+					if (!cursor || seen.has(cursor)) throw new GitHubError(`This target's ${name} are unavailable`);
+					seen.add(cursor);
+					page = await next(cursor);
+				}
+			};
 			const item = await read(query);
-			// Every thread is read before the unresolved ones are kept: a busy pull request has more than a page.
-			const all: Thread[] = [];
-			let after: string | null = null;
-			for (let page = item.reviewThreads; page;) {
-				all.push(...page.nodes);
-				if (!page.pageInfo.hasNextPage) break;
-				if (!page.pageInfo.endCursor || page.pageInfo.endCursor === after)
-					throw new GitHubError("This pull request's review threads are unavailable");
-				after = page.pageInfo.endCursor;
-				page = (await read(`pullRequest(number: $number) { ${threads} }`, after)).reviewThreads;
-				if (!page) throw new GitHubError("This pull request's review threads are unavailable");
-			}
 			const comment = (c: Comment) => ({
 				author: c.author?.login ?? null,
 				body: c.body,
 				at: c.createdAt ?? c.submittedAt ?? null,
 			});
+			const discussion = await collect(
+				item.comments,
+				async (after) =>
+					(
+						await read(
+							`${kind === "pulls" ? "pullRequest" : "issue"}(number: $number) { ${comments} }`,
+							after,
+						)
+					).comments,
+				"comments",
+			);
 			const common = {
 				number: item.number,
 				title: item.title,
 				state: item.state,
 				author: item.author?.login ?? null,
 				body: item.body,
-				comments: item.comments.nodes.map(comment),
+				comments: discussion.map(comment),
 			};
 			if (kind === "issues") return { kind: "issue" as const, ...common };
+			const allReviews = await collect(
+				item.reviews,
+				async (after) => (await read(`pullRequest(number: $number) { ${reviews} }`, after)).reviews,
+				"reviews",
+			);
+			const allThreads = await collect(
+				item.reviewThreads,
+				async (after) => (await read(`pullRequest(number: $number) { ${threads} }`, after)).reviewThreads,
+				"review threads",
+			);
+			const unresolved = [];
+			for (const thread of allThreads.filter((t) => !t.isResolved)) {
+				const replies = await collect(
+					thread.comments,
+					async (after) => {
+						const data = await request<{ node: { comments: Connection<Comment> } | null }>(
+							`query($id: ID!, $after: String) { node(id: $id) { ... on PullRequestReviewThread { comments(first: 50, after: $after) { ${commentFields} ${pageInfo} } } } }`,
+							{ id: thread.id, after },
+						);
+						return data.node?.comments;
+					},
+					"review thread comments",
+				);
+				unresolved.push({
+					path: thread.path,
+					line: thread.line,
+					outdated: thread.isOutdated,
+					comments: replies.map(comment),
+				});
+			}
 			const head = item.commits?.nodes.at(-1)?.commit;
+			const allChecks = head?.statusCheckRollup
+				? await collect(
+						head.statusCheckRollup.contexts,
+						async (after) => {
+							const data = await request<{
+								repository: { object: { statusCheckRollup: Rollup | null } | null } | null;
+							}>(
+								`query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String) { repository(owner: $owner, name: $name) { object(oid: $oid) { ... on Commit { statusCheckRollup { ${contexts(true)} } } } } }`,
+								{ owner: repo.owner, name: repo.name, oid: head.oid, after },
+							);
+							return data.repository?.object?.statusCheckRollup?.contexts;
+						},
+						"check contexts",
+					)
+				: [];
 			return {
 				kind: "pull" as const,
 				...common,
 				draft: item.isDraft ?? false,
 				base: item.baseRefName ?? null,
 				head: { ref: item.headRefName ?? null, oid: item.headRefOid ?? null },
-				reviews: (item.reviews?.nodes ?? []).map((r) => ({ ...comment(r), state: r.state })),
+				reviews: allReviews.map((r) => ({ ...comment(r), state: r.state })),
 				// Resolved threads need nothing more; outdated ones may still need an answer.
-				threads: all
-					.filter((t) => !t.isResolved)
-					.map((t) => ({
-						path: t.path,
-						line: t.line,
-						outdated: t.isOutdated,
-						comments: t.comments.nodes.map(comment),
-					})),
+				threads: unresolved,
 				checks: {
 					commit: head?.oid ?? null,
 					state: head?.statusCheckRollup?.state ?? null,
-					runs: (head?.statusCheckRollup?.contexts.nodes ?? []).map((c) =>
+					runs: allChecks.map((c) =>
 						c.__typename === "CheckRun"
 							? { name: c.name!, state: c.conclusion ?? c.status ?? null, url: c.detailsUrl ?? null }
 							: {
@@ -1512,33 +1753,56 @@ export class GitHubService {
 				// Landing is a contribution like opening a pull request, so a paused project lands nothing.
 				if ((await this.#state(repo, installation)) !== "enabled")
 					throw new GitHubError("Contributions are paused");
+				const check = (holds: Holds) => {
+					if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
+					if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
+						throw new PublicationBlocked(
+							"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
+						);
+					if (holds.head !== sha(input.head))
+						throw new PublicationBlocked("The pull request's head moved outside this job.");
+				};
 				const holds = await this.#holds(token, repo, pull);
-				if (holds.state !== "OPEN") throw new PublicationBlocked("The pull request is no longer open.");
-				if (!input.hold || heldToken(holds, MERGE_LABEL) !== input.hold)
-					throw new PublicationBlocked(
-						"This job's quest:merge label was removed or replaced, so it no longer holds the pull request.",
-					);
-				if (holds.head !== sha(input.head))
-					throw new PublicationBlocked("The pull request's head moved outside this job.");
+				check(holds);
 				const gated = await this.#gated(token, repo, holds.base);
-				const mutation =
-					!gated && !holds.queue && IMMEDIATE.includes(holds.mergeState)
+				let mutation: "mergePullRequest" | "enablePullRequestAutoMerge" =
+					!gated && immediateMerge(holds.mergeState, holds.queue)
 						? "mergePullRequest"
 						: "enablePullRequestAutoMerge";
-				const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
-					query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
-					variables: {
-						id: holds.id,
-						sha: input.head,
-						method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
-						body: gated ? `${LAND_PIN}: ${input.head}` : null,
-					},
-				});
-				if (result.errors?.length) {
-					const reason = result.errors[0]?.message;
-					throw new PublicationBlocked(
-						`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
-					);
+				const submit = async () => {
+					const result = await this.#api<{ errors?: { message?: unknown }[] }>(token, "/graphql", "POST", {
+						query: `mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!, $body: String) { ${mutation}(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: $method, commitBody: $body }) { clientMutationId } }`,
+						variables: {
+							id: holds.id,
+							sha: input.head,
+							method: gated ? "SQUASH" : (input.method ?? mergeMethod(current)).toUpperCase(),
+							body: gated ? `${LAND_PIN}: ${input.head}` : null,
+						},
+					});
+					if (result.errors?.length) {
+						const reason = result.errors[0]?.message;
+						throw new PublicationBlocked(
+							`GitHub refused to land the pull request${typeof reason === "string" && line(reason) ? `: ${line(reason)}` : "."}`,
+						);
+					}
+				};
+				try {
+					await submit();
+				} catch (error) {
+					if (
+						mutation !== "enablePullRequestAutoMerge" ||
+						gated ||
+						holds.queue ||
+						!cleanAutoMergeRefusal(error instanceof Error ? error.message : null)
+					)
+						throw error;
+					// The refusal can race GitHub computing UNKNOWN. Reread once, keeping the original head pinned.
+					const fresh = await this.#holds(token, repo, pull);
+					check(fresh);
+					if (!immediateMerge(fresh.mergeState, fresh.queue) || (await this.#gated(token, repo, fresh.base)))
+						throw error;
+					mutation = "mergePullRequest";
+					await submit();
 				}
 				await this.#invalidate(repo);
 				return { merged: mutation === "mergePullRequest" };
@@ -1557,8 +1821,6 @@ function mergeMethod(current: Repository): MergeMethod {
 	throw new GitHubError("The repository allows no merge method");
 }
 
-/** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
-const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 /** The check a base gated by `quest land` requires, and the commit body trailer that queues a head for it; see `quest land --help`. */
 const LAND_CHECK = "quest land";
 const LAND_PIN = "Quest-Land-Head";

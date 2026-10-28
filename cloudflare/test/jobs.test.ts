@@ -56,7 +56,7 @@ async function state(id: string) {
 }
 /** One dispatch pass over connected runners and their free slots, whose runners acknowledge what they receive. */
 async function run(slots: Record<string, number>, now: number, owner = "owner", deliver = true) {
-	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now);
+	const pass = await store.dispatch(db, owner, new Map(Object.entries(slots)), now, async (job) => !!job.trusted);
 	if (deliver)
 		for (const { job } of pass.assign)
 			await db.prepare("UPDATE jobs SET delivered=1 WHERE id=?").bind(job.id).run();
@@ -991,6 +991,27 @@ describe("job routes", () => {
 		);
 	});
 
+	it("classifies a verified maintainer PR at creation and rechecks before hub assignment", async () => {
+		const identity = await db
+			.prepare("SELECT accountId FROM account WHERE userId=? AND providerId='github'")
+			.bind(maintainer)
+			.first<{ accountId: string }>();
+		const databaseId = Number(identity!.accountId);
+		github.signature = { isValid: true, signer: { databaseId, login: `person${databaseId}` } };
+		const response = await post("", { workflow: "iterate", target: "pulls/2" });
+		expect(response.status).toBe(201);
+		const { id } = (await response.json()) as { id: string };
+		expect(await state(id)).toMatchObject({ trusted: 1, state: "queued" });
+		// A role revoked after creation must not execute on an ordinary runner.
+		github.role = "read";
+		const machine = await runner(maintainer, "machine");
+		const live = await connect(machine.token);
+		live.send(status(1, "main"));
+		expect(await live.next()).toMatchObject({ type: "reply", id: 1 });
+		await env.RUNNERS.get(env.RUNNERS.idFromName(maintainer)).dispatch(maintainer);
+		expect(await state(id)).toMatchObject({ trusted: 0, state: "queued" });
+	});
+
 	it("starts a new plan from the maintainer's idea and keeps it across a retry", async () => {
 		const refuse = async (body: Record<string, unknown>, error: string) => {
 			const response = await post("", body);
@@ -1028,6 +1049,10 @@ describe("job routes", () => {
 			.prepare("UPDATE jobs SET state='completed',summary='Shipped it.',result=? WHERE id=?")
 			.bind(JSON.stringify({ head: null, followups: ["Cache the parser", "Document `--fast`"] }), id)
 			.run();
+		await db
+			.prepare("INSERT INTO job_events(job,attempt,kind,body,at) VALUES(?,0,'result',?,?)")
+			.bind(id, JSON.stringify({ outcome: "completed", summary: "Shipped it." }), Date.now())
+			.run();
 		expect(await store.listFollowups(db, 10)).toMatchObject([
 			{ id, followups: ["Cache the parser", "Document `--fast`"] },
 		]);
@@ -1047,6 +1072,29 @@ describe("job routes", () => {
 		expect(await store.listFollowups(db, 10)).toEqual([]);
 		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(plan.id).run();
 		expect((await post("", { workflow: "plan", target: `plans/${id}` })).status).toBe(409);
+	});
+
+	it("lists all recent follow-up offers instead of the newest 50", async () => {
+		const now = Date.now();
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<60)
+ INSERT INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,state,result,createdAt,updatedAt)
+ SELECT 'recent-'||i,10,'start','quest/extra-'||i||'.md',?,'quest/extra-'||i,?,1,'completed',?,?-i,? FROM n`,
+			)
+			.bind(commit, maintainer, JSON.stringify({ followups: ["Still useful"] }), now, now)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO job_events(job,attempt,kind,body,at) SELECT id,attempt,'result',?,createdAt FROM jobs WHERE id LIKE 'recent-%'",
+			)
+			.bind(JSON.stringify({ outcome: "completed", summary: "Done" }))
+			.run();
+		const offers = await store.listFollowups(db, 10, now);
+		expect(offers).toHaveLength(60);
+		expect(offers[0]).toMatchObject({ id: "recent-1", completedAt: now - 1 });
+		expect(offers.at(-1)).toMatchObject({ id: "recent-60", completedAt: now - 60 });
+		expect(await store.followupRequest(db, 10, "recent-60", now)).not.toBeNull();
 	});
 
 	it("starts an epic on its README branch while a child's branch is claimed", async () => {
@@ -1497,7 +1545,14 @@ describe("job routes", () => {
 
 describe("merge wait webhook wakeups", () => {
 	it("wakes only the current merge attempt for the enrolled repository and matching head or PR", async () => {
-		const machine = await runner("owner", "webhooks");
+		// GitHub cannot verify the head here, so the merge job routes as untrusted to a VM runner.
+		const real = globalThis.fetch;
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>
+			new URL(input instanceof Request ? input.url : input).hostname === "api.github.com"
+				? new Response(null, { status: 503 })
+				: real(input, init),
+		);
+		const machine = await runner("owner", "webhooks", "linux", true);
 		await connected(machine, [account("main")]);
 		const id = await job(10, "owner", { workflow: "merge", target: "pulls/2", branch: "feature", revision: head });
 		await store.held(db, id, "merge-token");

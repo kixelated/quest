@@ -4,7 +4,8 @@ description: Scope and create quests through an interactive interview. Use when 
 
 Before you begin, run `quest guide` and `quest skill grill`, and read their output completely.
 
-Before anything else, search for existing work: the quest tree, git history for deleted quests, and open PRs touching `quest/`.
+Before anything else, search for existing and planned work: the quest tree, git history for deleted quests, open PRs touching `quest/`, and the quest trees of related repositories that plan work here.
+Search by the code and behavior the work touches, not only its keywords: a quest that will change, replace, or delete them may already settle the question or make the request moot.
 Show any overlap in the first round.
 
 Interview the user with the grill skill.
@@ -12,7 +13,7 @@ Every follow-up the user picks goes through this interview, including edits to e
 A background agent that cannot prompt never creates or edits quests itself, so this skill can run in the foreground.
 
 Search other quests and epics to keep the larger plan consistent.
-When the work changes what a user sees (a wire, an API, a flag, a dashboard), ask whether it needs documentation the feature quest cannot carry inline (a new page or guide), and recommend a quest for that; docs a change makes stale stay in that change.
+Docs a change makes stale stay in that change.
 
 Begin the interview by scoping the goal: the observable outcome, why it matters, and its important boundaries and non-goals.
 Restate the goal in one sentence and get it confirmed before moving on to implementation decisions.

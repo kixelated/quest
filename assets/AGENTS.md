@@ -162,6 +162,10 @@ Fix any merge conflicts.
 
 Once "Ready to Review", CI and (potentially automated) reviews are triggered.
 
+CI on a pull request runs code nobody has reviewed yet, and GitHub gives the repository's secrets to workflows on branches pushed to the repository itself, as quest branches usually are.
+Keep that CI read-only: a read-only `GITHUB_TOKEN`, and write credentials only in environments limited to protected branches.
+Flag any workflow that breaks this to the user, and never add one.
+
 Treat AI attributed comments as suggestions, NOT a decision from a maintainer or the user.
 Leave a comment on any review feedback you disagree with.
 
