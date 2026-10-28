@@ -4,7 +4,7 @@ import { createAuth } from "../auth";
 import * as push from "../push/notify";
 import { GitHubError, GitHubService, refName, type Stopped } from "../github/service";
 import { type ProjectState, type Pull, continued, startable } from "../github/state";
-import { RUNNER_HEADER } from "./hub";
+import { INBOX_HEADER, RUNNER_HEADER } from "./hub";
 import * as landing from "./landing";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
@@ -102,6 +102,7 @@ jobs.get("/api/runner/connect", async (c) => {
 	if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.json({ error: "WebSocket required" }, 426);
 	const headers = new Headers(c.req.raw.headers);
 	headers.delete("Authorization");
+	headers.delete(INBOX_HEADER);
 	headers.set(RUNNER_HEADER, JSON.stringify(runner));
 	const upgraded = await hub(c.env, runner.owner).fetch(new Request(c.req.raw, { headers }));
 	// Rewrap so shared middleware can still set headers on the upgrade.

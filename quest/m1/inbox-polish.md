@@ -1,10 +1,10 @@
-# [M] Keep the inbox live and current
+# [S] Expire old follow-up offers
 
 ## Goal
 
-The inbox updates agent cards as summaries arrive, the quest log shows which
-quests have active jobs, every job type offers the runner and account choice,
-and old "plan these?" offers expire.
+Old "plan these?" offers expire by age, so a quiet project does not keep stale
+suggestions indefinitely and a busy project does not hide recent suggestions
+just because it has more than 50.
 
 ## Plan
 
@@ -13,14 +13,14 @@ Decided 2026-10-24 (user) as follow-ups of
 [kixelated/quest#205](https://github.com/kixelated/quest/pull/205), ranked
 after launch:
 
-- **Live cards.** Cards refresh only on page load. Push summaries from the
-  runner hub to open inbox pages, over the existing per-owner connection or
-  Server-Sent Events, keeping summaries escaped and raw output behind its
-  maintainer-only disclosure.
-- **Active quests.** The quest log shows a quest as ready while a job is
-  queued or running on it; show the job's state instead, from the same card
-  data.
-- **Runner choice everywhere.** The folded runner and account control exists
-  only on the new plan box; offer it when starting or iterating work too.
-- **Offer expiry.** "Plan these?" offers are capped at the newest 50 per
-  project; expire them by age instead.
+The live cards, active quest status, and runner choice portions are implemented
+in [kixelated/quest#258](https://github.com/kixelated/quest/pull/258). The remaining
+work is age-based expiry of "plan these?" offers, which are currently capped at
+the newest 50 per project.
+
+The expiry duration remains undecided: the recorded plan and existing offer
+lifecycle do not specify one. Choose it before implementation. A recommendation
+is 30 days from the completed job's offer, with 7 days for a short decision queue
+or 90 days for infrequent project visits as alternatives. Expiry should hide the
+offer and reject its stale planning form without deleting the completed job's
+history. Replace the newest-50 cutoff with the chosen age policy.
