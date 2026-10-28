@@ -435,6 +435,7 @@ describe("decision inbox", () => {
 		const { question } = await store.ask(db, runner, id, 1, { summary: "Asked.", session: "s", prompt }, 3);
 		const co = await other(true);
 		expect((await visit(co.session)).status).toBe(200);
+		const viewer = await socket(await live());
 		const ctx = createExecutionContext();
 		const answered = await app.request(
 			`${origin}${jobs}/${id}/answer`,
@@ -452,6 +453,8 @@ describe("decision inbox", () => {
 		await waitOnExecutionContext(ctx);
 		expect(answered.status).toBe(303);
 		expect(await store.readJob(db, id)).toMatchObject({ state: "waiting" });
+		// The requester's open inbox refreshes to show the answer awaiting approval.
+		expect(await viewer.next()).toBe("changed");
 		// The co-maintainer sees it wait; only the requester is asked to approve.
 		const theirs = thread(await inbox({ project: "10", item: "quest/first.md" }, co.session));
 		expect(theirs).toContain("resumes once its requester approves the answer");

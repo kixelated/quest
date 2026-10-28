@@ -422,9 +422,9 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 				: data(answer, 1024),
 		Date.now(),
 	);
-	// Jobs run on their requester's runners, whoever answers.
-	if (resumed) await hub(c.env, job.actor).dispatch(job.actor);
-	else c.executionCtx.waitUntil(push.job(c.env, job.id, "approval"));
+	// Jobs run on their requester's runners, whoever answers; an answer awaiting approval still refreshes open inboxes.
+	await hub(c.env, job.actor).dispatch(job.actor);
+	if (!resumed) c.executionCtx.waitUntil(push.job(c.env, job.id, "approval"));
 	return reply(c, form, "answer", null);
 });
 
