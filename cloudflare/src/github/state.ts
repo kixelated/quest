@@ -1,4 +1,4 @@
-import { branchQuest, handedBack, landed, parse, ready } from "quest/core";
+import { branchQuest, handedBack, landed, parse, questBranch, ready } from "quest/core";
 import type { Project, Snapshot } from "../board/project";
 import { GitHubError, type GitHubRepository, ProjectChanged } from "./service";
 import { positiveId } from "./webhook";
@@ -25,6 +25,8 @@ type Entity = {
 export type Pull = Entity & {
 	headRefName: string;
 	headRefOid: string;
+	/** Whether its head is on a different repository; absent in older observations. */
+	isCrossRepository?: boolean;
 	isDraft: boolean;
 	/** Its body has a `## Decisions needed` section; the body itself is not kept. Absent in older observations. */
 	handedBack?: boolean;
@@ -89,7 +91,7 @@ export const RETENTION = 30 * 24 * 60 * 60 * 1000;
 
 const entityFields =
 	"databaseId:fullDatabaseId number title state updatedAt closedAt author { login } comments { totalCount }";
-const pullFields = `${entityFields} body headRefName headRefOid isDraft reviewDecision mergeStateStatus labels(first:20) { nodes { name } } reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
+const pullFields = `${entityFields} body headRefName headRefOid isCrossRepository isDraft reviewDecision mergeStateStatus labels(first:20) { nodes { name } } reviews { totalCount } latestReviews(first:20) { nodes { state author {login} commit {oid} } pageInfo {hasNextPage} } commits(last:1) { nodes { commit { oid statusCheckRollup { state } } } }`;
 // Cursor variables are declared only for unfinished connections (GraphQL rejects
 // unused variables). Fixed page sizes bound subrequests, independent of tree size.
 export function activityQuery({ history, occupancy }: Scan, stale: Stale[] = []) {
@@ -341,9 +343,21 @@ export function startable(state: ProjectState, quest: string, retry: number | nu
 	const { available, changes, documents } = state.project;
 	if (!available) return false;
 	if (available.includes(quest)) return true;
+	// An upstream job's own PR also occupies its quest branch. Only that exact
+	// open PR can account for the branch claim; a fork with the same name cannot.
+	const ownsBranch = state.activity.some((item) => {
+		const pull = item.kind === "pull" && item.number === retry ? (item.data as Pull | null) : null;
+		return (
+			!item.missing &&
+			state.open?.includes(item.id) &&
+			pull?.state === "OPEN" &&
+			pull.headRefName === questBranch(quest) &&
+			pull.isCrossRepository === false
+		);
+	});
 	return (
 		retry !== null &&
-		!state.claims.includes(quest) &&
+		(!state.claims.includes(quest) || ownsBranch) &&
 		changes.every((change) => change.quest !== quest || change.number === retry) &&
 		ready(documents.map((d) => parse(d.path, d.content))).includes(quest)
 	);

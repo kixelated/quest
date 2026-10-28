@@ -323,7 +323,7 @@ function resolve(
 		};
 	}
 	if (workflow === "bootstrap")
-		return { workflow, target: "devshell", revision: commit, branch: "quest/devshell", trusted: true };
+		return { workflow, target: "devshell", revision: commit, branch: "kix/devshell", trusted: true };
 	throw new JobError("Unknown workflow");
 }
 

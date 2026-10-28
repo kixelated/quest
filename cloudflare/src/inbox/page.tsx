@@ -267,8 +267,8 @@ function PublicationForm(props: { item: Item }) {
 			{restart && (
 				<>
 					<p class="note-small muted">
-						Or start over: kix resets <code>{item.job!.branch}</code> on its fork to the commit this job
-						started from, discarding the commits on it, and runs the job again with a new agent.
+						Or start over: kix resets <code>{item.job!.branch}</code> on the repository to the commit this
+						job started from, discarding the commits on it, and runs the job again with a new agent.
 					</p>
 					<button class="button quiet" name="restart" value="1" formnovalidate>
 						Start over

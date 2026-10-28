@@ -71,8 +71,7 @@ operator-paid-hosting decisions:
   explicit choice and the repository's checks and protections.
 - **A real GitHub App bot.** The service publishes as its App identity and
   keeps GitHub credentials off runners. It pushes job branches to the
-  enrolled repository itself, with no service forks (decided 2026-10-27,
-  user, in [Upstream branches](/quest/m0/kix/upstream-branches.md)).
+  enrolled repository itself, with no service forks (decided 2026-10-27, user).
 - **Ready means eligible.** After a maintainer opts in, ready quests on the
   default branch may be implemented. Draft plans are not eligible. Project
   pause stops new work. An explicit spawn decision can prioritize ready work
@@ -122,7 +121,6 @@ fixes what it finds:
 ## Required
 
 - [Deploy kix.quest](/quest/m0/kix/deploy.md) - the operator registers the App and deploys the Worker with GitHub sign-in at kix.quest
-- [Upstream branches](/quest/m0/kix/upstream-branches.md) - jobs publish on the enrolled repository itself, with no service forks
 - [Operator setup](/quest/m0/kix/operator-setup.md) - pilot installations and a verified test PR on kixelated/quest and moq-dev/moq
 - [Context pages](/quest/m0/kix/context-pages.md) - a job's `context` read returns every comment, review, and check of a busy PR
 - [Merge holds](/quest/m0/kix/merge-holds.md) - ended merge jobs never leave a `quest:merge` hold, through one shared hold rule
