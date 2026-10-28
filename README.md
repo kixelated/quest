@@ -274,6 +274,17 @@ command registers the driver in a fresh clone or worktree whose
 falls back to `git merge-file`, and GitHub's merges ignore drivers, so a PR
 shows as conflicting until a local merge from its base is pushed.
 
+The registered driver passes Git's conflict marker length and revision labels
+to `quest resolve`, including the ancestor label for `diff3` conflicts. A direct
+invocation defaults to seven-character markers and `ours`/`base`/`theirs`;
+`--marker-size`, `--ours-label`, `--base-label`, and `--theirs-label` override
+them. Labels must fit on one line. The fallback carries the same Git metadata
+when `quest` is missing or too old to accept those options.
+
+Existing configured drivers are preserved. For a checkout still using the old
+quest-generated command, clear its local `merge.quest.driver` entry and run any
+quest command to register the current one.
+
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
