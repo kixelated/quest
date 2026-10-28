@@ -4,6 +4,7 @@ import * as landing from "./landing";
 import * as output from "./output";
 import { MessageError, type RunnerMessage, parse } from "./protocol";
 import * as store from "./store";
+import * as trust from "./trust";
 import { JobError } from "./store";
 import { instructions } from "./trail";
 
@@ -183,7 +184,13 @@ export class RunnerHub extends DurableObject<Env> {
 			const reported = (ws.deserializeAttachment() as RunnerAttachment).slots;
 			if (reported !== null) slots.set(runner, reported);
 		}
-		const { assign, cancel, ended, wake } = await store.dispatch(this.env.DB, owner, slots, Date.now());
+		const { assign, cancel, ended, wake } = await store.dispatch(
+			this.env.DB,
+			owner,
+			slots,
+			Date.now(),
+			trust.verify(this.env),
+		);
 		for (const { runner, job } of assign) {
 			const message = { type: "assign", job, instructions: instructions(job.workflow) };
 			connections.get(runner)?.send(JSON.stringify(message));

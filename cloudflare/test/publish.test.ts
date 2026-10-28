@@ -111,7 +111,7 @@ async function running(extra: Partial<store.NewJob> = {}, now = 0) {
 		},
 		now,
 	);
-	await store.dispatch(db, user, new Map([[machine.id, 1]]), now);
+	await store.dispatch(db, user, new Map([[machine.id, 1]]), now, async (job) => !!job.trusted);
 	return id;
 }
 /** Fail a job's current attempt, as its runner would. */
