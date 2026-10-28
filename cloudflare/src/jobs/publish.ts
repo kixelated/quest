@@ -281,7 +281,18 @@ export async function publish(env: Env, runner: Runner, input: Publication): Pro
 		if (!(error instanceof PublicationBlocked)) throw error;
 		// Only a service fork branch is kix's to reset; a pull request's own head is not.
 		const restart = error instanceof BranchChanged && !onPull(job.workflow);
-		return decide(db, runner, input, { type: "publication", blocked: error.message, ...(restart && { restart }) });
+		const moved =
+			error instanceof BranchChanged && job.workflow === "merge" && job.head !== null && job.pending === null
+				? await github.contribute(upstream, job.actor, job, (branch) => branch.head())
+				: null;
+		const continuation =
+			moved && moved !== job.head ? { head: moved, from: job.head!, revision: job.revision } : null;
+		return decide(db, runner, input, {
+			type: "publication",
+			blocked: error.message,
+			...(restart && { restart }),
+			...(continuation && { continuation }),
+		});
 	}
 	if (input.land) {
 		// The attempt may have ended, or been asked to stop, while the branch was written.
@@ -363,5 +374,32 @@ export async function restart(
 			throw error;
 		}
 		return created;
+	});
+}
+
+/** Revalidate a selected moved head without changing GitHub or granting it trust. */
+export async function validateContinuation(
+	env: Env,
+	user: string,
+	repo: GitHubRepository,
+	job: Omit<store.Job, "result"> & { questions: store.Question[] },
+	question: store.Question,
+	continuation: store.Continuation,
+) {
+	store.continuationOf(question.prompt, { continue: continuation.head });
+	if (
+		job.workflow !== "merge" ||
+		job.state !== "waiting" ||
+		question.kind !== "publication" ||
+		question.attempt !== job.attempt ||
+		question.approvedAt !== null ||
+		job.head !== continuation.from ||
+		job.revision !== continuation.revision ||
+		job.pending !== null
+	)
+		throw new JobError("This continuation is no longer current");
+	await new GitHubService(env).contribute(repo, user, job, async (branch) => {
+		if ((await branch.head()) !== continuation.head)
+			throw new JobError("The pull request head changed again; refresh and review it");
 	});
 }

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitHubService } from "../src/github/service";
 import { app } from "../src/index";
 import * as landing from "../src/jobs/landing";
-import { refusal, restart, validPath } from "../src/jobs/publish";
+import { refusal, restart, validPath, validateContinuation } from "../src/jobs/publish";
 import * as store from "../src/jobs/store";
 import { type Repo, type World, blob, commitOf, fakeGitHub, intercept as around } from "../dev/github";
 import { privateKey } from "./github-key";
@@ -1283,6 +1283,54 @@ describe("merge jobs", () => {
 		},
 	);
 
+	it("continues only the offered live head after owner approval, without granting trust", async () => {
+		const id = await merging();
+		const head = "9".repeat(40);
+		project.commits[head] = { parents: [prHead], tree: "e".repeat(40), message: "external" };
+		project.branches["contributor/fix"] = head;
+		await db.prepare("UPDATE jobs SET trusted=1 WHERE id=?").bind(id).run();
+		expect((await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} })).status).toBe(202);
+		const waiting = await job(id);
+		const question = waiting.questions.at(-1)!;
+		const continuation = store.continuationOf(question.prompt, { continue: head })!;
+		project.branches["contributor/fix"] = revision;
+		await expect(validateContinuation(testEnv, user, upstream, waiting, question, continuation)).rejects.toThrow(
+			"changed again",
+		);
+		project.branches["contributor/fix"] = head;
+		await db
+			.prepare(
+				"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('other-publisher','Other','other-publisher@example.test',1,0,0)",
+			)
+			.run();
+		await store.answer(db, id, question.id, "other-publisher", { continue: head }, 1);
+		expect(await job(id)).toMatchObject({ state: "waiting", head: prHead, trusted: 1 });
+		await validateContinuation(testEnv, user, upstream, await job(id), question, continuation);
+		await store.approve(db, id, question.id, user, 2);
+		expect(await job(id)).toMatchObject({
+			state: "queued",
+			head,
+			revision: head,
+			trusted: 0,
+			pending: null,
+			session: "s",
+			runner: machine.id,
+		});
+		expect(project.branches["contributor/fix"]).toBe(head);
+	});
+
+	it("fences a continuation when the stored branch version changes before the answer", async () => {
+		const id = await merging();
+		project.branches["contributor/fix"] = revision;
+		await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} });
+		const question = (await job(id)).questions.at(-1)!;
+		await db.prepare("UPDATE jobs SET head=? WHERE id=?").bind("9".repeat(40), id).run();
+		await expect(store.answer(db, id, question.id, user, { continue: revision }, 1)).rejects.toThrow(
+			"no longer open",
+		);
+		expect((await job(id)).questions.at(-1)!.answer).toBeNull();
+	});
+
 	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {
 		const reason = "Pull request Auto merge is not allowed for this repository";
 		const cases: [() => void, string][] = [
@@ -1304,7 +1352,7 @@ describe("merge jobs", () => {
 			expect(response.status).toBe(202);
 			const waiting = await job(id);
 			expect(waiting.state).toBe("waiting");
-			expect(waiting.questions.at(-1)!.prompt).toEqual({ type: "publication", blocked });
+			expect(waiting.questions.at(-1)!.prompt).toMatchObject({ type: "publication", blocked });
 			await store.cancel(db, id, user, 0);
 		}
 		// The landing GitHub refused used the first merge method the repository allows.

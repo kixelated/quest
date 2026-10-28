@@ -366,6 +366,97 @@ describe("workspace", () => {
 		expect(snapshot.submodules).toEqual([{ path: "sub", sha: git(join(dir, "sub"), "rev-parse", "HEAD") }]);
 	});
 
+	for (const conflict of [false, true])
+		posix(`continues a selected moved head while preserving unpublished work (conflict=${conflict})`, async () => {
+			const { dir, commit } = upstream();
+			const root = tempDir();
+			const original = await Workspace.prepare(
+				root,
+				job(commit, { workflow: "merge", target: "pulls/2", head: commit }),
+				dir,
+			);
+			writeFileSync(join(original.dir, "old.txt"), "local work\n");
+			writeFileSync(join(original.dir, "untracked.txt"), "new source\n");
+			writeFileSync(join(dir, conflict ? "old.txt" : "remote.txt"), "someone else's work\n");
+			git(dir, "add", ".");
+			git(dir, "commit", "-qm", "external head");
+			const head = git(dir, "rev-parse", "HEAD");
+			const current = await Workspace.prepare(
+				root,
+				job(head, {
+					workflow: "merge",
+					target: "pulls/2",
+					head,
+					attempt: 2,
+					session: "s",
+					questions: [
+						{
+							id: "q",
+							kind: "publication",
+							attempt: 1,
+							approvedAt: 1,
+							prompt: { continuation: { head, from: commit, revision: commit } },
+							answer: { continue: head },
+						},
+					],
+				}),
+				dir,
+			);
+			expect(current.continued).toBe(true);
+			expect(current.preserved).toMatch(/^refs\/kix\/checkpoints\/job1\//);
+			expect(git(current.repository, "show", `${current.preserved}:old.txt`)).toBe("local work");
+			expect(readFileSync(join(current.dir, "untracked.txt"), "utf8")).toBe("new source\n");
+			if (conflict) {
+				expect(await current.conflicts()).toEqual(["old.txt"]);
+				await expect(current.snapshot()).rejects.toThrow("Resolve and stage");
+				writeFileSync(join(current.dir, "old.txt"), "resolved both versions\n");
+				git(current.dir, "add", "old.txt");
+				git(current.dir, "commit", "-qm", "resolve preserved merge");
+			} else expect(readFileSync(join(current.dir, "remote.txt"), "utf8")).toBe("someone else's work\n");
+			const snapshot = await current.snapshot();
+			expect(snapshot.merge).toBeNull();
+			expect(snapshot.changes.map((change) => change.path)).toEqual(["old.txt", "untracked.txt"]);
+		});
+
+	posix("leaves initialized submodule commits intact when a stale checkout needs replacement", async () => {
+		const module = upstream().dir;
+		const { dir } = upstream();
+		git(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", module, "module");
+		git(dir, "commit", "-qam", "add module");
+		const commit = git(dir, "rev-parse", "HEAD");
+		const root = tempDir();
+		const original = await Workspace.prepare(root, job(commit, { head: commit }), dir);
+		git(original.dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q");
+		const child = join(original.dir, "module");
+		writeFileSync(join(child, "old.txt"), "unpublished module commit\n");
+		git(child, "commit", "-qam", "module local");
+		const local = git(child, "rev-parse", "HEAD");
+		writeFileSync(join(dir, "new.txt"), "remote\n");
+		git(dir, "add", ".");
+		git(dir, "commit", "-qm", "new head");
+		const head = git(dir, "rev-parse", "HEAD");
+		await expect(Workspace.prepare(root, job(commit, { head, attempt: 2 }), dir)).rejects.toThrow(
+			"initialized submodules",
+		);
+		expect(git(child, "rev-parse", "HEAD")).toBe(local);
+		expect(readFileSync(join(child, "old.txt"), "utf8")).toBe("unpublished module commit\n");
+	});
+
+	posix("preserves stale local work without reapplying it after another runner published", async () => {
+		const { dir, commit } = upstream();
+		const root = tempDir();
+		const original = await Workspace.prepare(root, job(commit, { head: commit }), dir);
+		writeFileSync(join(original.dir, "old.txt"), "stale unpublished work\n");
+		writeFileSync(join(dir, "old.txt"), "new published work\n");
+		git(dir, "commit", "-qam", "another runner published");
+		const head = git(dir, "rev-parse", "HEAD");
+		const current = await Workspace.prepare(root, job(commit, { head, attempt: 2 }), dir);
+		expect(current.continued).toBe(false);
+		expect(readFileSync(join(current.dir, "old.txt"), "utf8")).toBe("new published work\n");
+		expect(git(current.repository, "show", `${current.preserved}:old.txt`)).toBe("stale unpublished work");
+		expect((await current.snapshot()).changes).toEqual([]);
+	});
+
 	posix("prepares jobs on one repository at once without racing on its clone", async () => {
 		const { dir, commit } = upstream();
 		const root = tempDir();

@@ -9,7 +9,7 @@ import * as landing from "./landing";
 import * as output from "./output";
 import { formAnswer, parseAnswer, parsePrompt } from "./prompt";
 import { data, id, text } from "./protocol";
-import { HeadMoved, LIMITS, parsePublication, publish, pullOf, restart } from "./publish";
+import { HeadMoved, LIMITS, parsePublication, publish, pullOf, restart, validateContinuation } from "./publish";
 import * as store from "./store";
 import { JobError } from "./store";
 
@@ -394,7 +394,16 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 		await hub(c.env, job.actor).dispatch(job.actor);
 		return reply(c, form, "start", { id: created }, 201);
 	}
-	const answer = question && (form ? formReply(question, form) : body.answer);
+	let continuation: store.Continuation | null = null;
+	if (question && body.continue !== undefined) {
+		if (body.continue !== (form ? "1" : true)) throw new JobError("Invalid continuation");
+		continuation = store.continuationOf(question.prompt, { continue: body.head });
+		if (!continuation) throw new JobError("Choose the offered head");
+		await validateContinuation(c.env, user, repo, job, question, continuation);
+	}
+	const answer = continuation
+		? { continue: continuation.head }
+		: question && (form ? formReply(question, form) : body.answer);
 	if (!question || answer === undefined) throw new JobError("Question and answer required");
 	const { resumed } = await store.answer(
 		c.env.DB,
@@ -405,7 +414,9 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 		question.kind === "agent"
 			? parseAnswer(parsePrompt(question.prompt), answer)
 			: question.kind === "publication"
-				? publicationReply(answer)
+				? continuation
+					? answer
+					: publicationReply(answer)
 				: data(answer, 1024),
 		Date.now(),
 	);
@@ -418,10 +429,13 @@ jobs.post(`${base}/:job/answer`, async (c) => {
 // Until the job sandbox ships, another maintainer's answer resumes the job
 // only once its requester, whose runner acts on it, approves it.
 jobs.post(`${base}/:job/approve`, async (c) => {
-	const { user, job } = await owned(c);
+	const { user, repo, job } = await owned(c);
 	const { body, form } = await input(c);
 	const question = id(body.question);
 	if (!question) throw new JobError("Question required");
+	const pending = job.questions.find((item) => item.id === question);
+	const continuation = pending?.kind === "publication" ? store.continuationOf(pending.prompt, pending.answer) : null;
+	if (continuation) await validateContinuation(c.env, user, repo, job, pending!, continuation);
 	await store.approve(c.env.DB, job.id, question, user, Date.now());
 	await hub(c.env, job.actor).dispatch(job.actor);
 	return reply(c, form, "approve", null);

@@ -187,6 +187,40 @@ export class Attempt {
 			// Before any checkout: an account added while the runner runs may lack its CLI or sandbox.
 			const adapter = ctx.adapter(account);
 			this.#workspace = await Workspace.prepare(ctx.root, job, ctx.remote(job));
+			if (this.#workspace.preserved)
+				ctx.log(
+					`${job.id}: preserved local work at ${this.#workspace.preserved}${this.#workspace.continued ? "; reapplying to the selected head" : "; stale work was not reapplied to another published checkpoint"}`,
+				);
+			const conflicts = this.#workspace.continued ? await this.#workspace.conflicts() : [];
+			if (conflicts.length) {
+				await this.#send({
+					type: "question",
+					job: job.id,
+					attempt: job.attempt,
+					session: this.#session,
+					summary: "Preserved work conflicts with the selected head",
+					prompt: {
+						kind: "decision",
+						questions: [
+							{
+								header: "Head conflicts",
+								question: `The preserved workspace conflicts with ${job.head}: ${conflicts.join(", ")}. Resume the agent to resolve and commit the merge?`,
+								options: [
+									{
+										label: "Resolve conflicts",
+										description:
+											"Keep both versions preserved and resume this checkout to resolve them.",
+										recommended: true,
+									},
+								],
+							},
+						],
+					},
+				});
+				this.#paused = true;
+				this.wake();
+				return;
+			}
 			if (this.#ended()) return await this.#conclude(null, account);
 			const devShell = await ctx
 				.devShell(job, this.#workspace.repository, this.#preparing.signal)

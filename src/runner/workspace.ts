@@ -4,6 +4,7 @@
 // it was. kix publishes, so the runner never pushes: it sends the files that
 // differ from what the job's branch holds, as data.
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -12,6 +13,13 @@ import { save } from "../cli/worktree";
 import type { Job } from "./protocol";
 
 const run = promisify(execFile);
+const identity = () => ({
+	...process.env,
+	GIT_AUTHOR_NAME: "kix",
+	GIT_AUTHOR_EMAIL: "kix@localhost",
+	GIT_COMMITTER_NAME: "kix",
+	GIT_COMMITTER_EMAIL: "kix@localhost",
+});
 
 /** One file as `POST /api/runner/publish` takes it. */
 export interface Change {
@@ -28,6 +36,8 @@ interface Record {
 	head: string | null;
 	/** A local commit whose tree is exactly what that head holds. */
 	base: string;
+	/** Local-only recovery point while unpublished work is merged onto a selected head. */
+	reapply?: string;
 }
 
 /** A pending publication: the changes, and the tree they would make the branch hold. */
@@ -49,6 +59,8 @@ export class Workspace {
 	#record: Record;
 	readonly #file: string;
 	readonly #git: string;
+	preserved: string | null = null;
+	continued = false;
 
 	private constructor(git: string, dir: string, file: string, record: Record) {
 		this.#git = git;
@@ -90,18 +102,93 @@ export class Workspace {
 			const record = load(file);
 			if (record && record.head === job.head && existsSync(join(dir, ".git")))
 				return new Workspace(git, dir, file, record);
-			await remove(git, dir);
+			const previous = record && existsSync(join(dir, ".git")) ? new Workspace(git, dir, file, record) : null;
+			if (previous) {
+				const links = (await run("git", ["-C", dir, "ls-files", "--stage", "-z"])).stdout.split("\0");
+				if (
+					links.some(
+						(entry) =>
+							entry.startsWith("160000 ") &&
+							existsSync(join(dir, entry.slice(entry.indexOf("\t") + 1), ".git")),
+					)
+				)
+					throw new Error(
+						"The paused checkout has initialized submodules; preserve their local commits and changes before replacing it. Its checkout was left intact.",
+					);
+			}
+			const saved = previous ? await previous.#checkpoint(job.id) : null;
+			const continuing =
+				job.workflow === "merge" &&
+				job.head !== null &&
+				record &&
+				job.questions.some((question) => {
+					const offer = (question.prompt as { continuation?: { from?: unknown; head?: unknown } } | null)
+						?.continuation;
+					return (
+						question.kind === "publication" &&
+						typeof question.approvedAt === "number" &&
+						offer?.from === record.head &&
+						offer?.head === job.head &&
+						(question.answer as { continue?: unknown } | null)?.continue === job.head
+					);
+				});
 			const start = job.head ?? job.revision;
 			await fetch(git, start);
-			await run("git", ["-C", git, "worktree", "add", "--quiet", "--detach", dir, start]);
-			const fresh: Record = { head: job.head, base: start };
+			await remove(git, dir);
+			await run("git", [
+				"-C",
+				git,
+				"worktree",
+				"add",
+				"--quiet",
+				"--detach",
+				dir,
+				continuing && saved ? saved.sha : start,
+			]);
+			const fresh: Record = { head: job.head, base: start, ...(continuing && saved && { reapply: saved.ref }) };
 			save(file, fresh);
-			return new Workspace(git, dir, file, fresh);
+			const workspace = new Workspace(git, dir, file, fresh);
+			workspace.preserved = saved?.ref ?? null;
+			workspace.continued = !!continuing;
+			if (continuing && saved) {
+				// The WIP checkpoint is the first parent: the selected branch head is
+				// merged into it locally, so normal publication is a delta on that head.
+				try {
+					await run(
+						"git",
+						[
+							"-C",
+							dir,
+							"merge",
+							"--no-commit",
+							"--no-ff",
+							"--allow-unrelated-histories",
+							"--no-overwrite-ignore",
+							start,
+						],
+						{ env: identity() },
+					);
+					await run("git", ["-C", dir, "commit", "--no-edit"], { env: identity() });
+				} catch (error) {
+					if (!(await workspace.conflicts()).length) throw error;
+					// Standard unmerged index entries block publication until the resumed agent resolves them.
+				}
+			}
+			return workspace;
 		});
 	}
 
 	/** The worktree's files that differ from what the branch holds, untracked ones included and ignored ones not. */
-	async snapshot(): Promise<Snapshot> {
+	async snapshot(preserving = false): Promise<Snapshot> {
+		if (!preserving && (await this.conflicts()).length)
+			throw new Error("Resolve and stage the preserved merge conflicts before publishing");
+		if (!preserving && this.#record.reapply) {
+			try {
+				await run("git", ["-C", this.dir, "merge-base", "--is-ancestor", this.#record.base, "HEAD"]);
+			} catch {
+				throw new Error("Merge and commit the selected head with the preserved work before publishing");
+			}
+		}
 		const index = `${this.#file.replace(/\.json$/, "")}.index`;
 		const env = { ...process.env, GIT_INDEX_FILE: index };
 		const git = (args: string[]) =>
@@ -140,6 +227,38 @@ export class Workspace {
 		} finally {
 			rmSync(index, { force: true });
 		}
+	}
+
+	/** Unmerged paths are a decision, not file contents to publish as conflict markers. */
+	async conflicts(): Promise<string[]> {
+		const { stdout } = await run("git", ["-C", this.dir, "diff", "--name-only", "--diff-filter=U", "-z"]);
+		return stdout.split("\0").filter(Boolean);
+	}
+
+	/** Preserve tracked/untracked source in a local Git ref before replacing any stale checkout. */
+	async #checkpoint(job: string): Promise<{ ref: string; sha: string } | null> {
+		const snapshot = await this.snapshot(true);
+		if (!snapshot.changes.length && !snapshot.merge && !snapshot.submodules.length) return null;
+		const local = (await run("git", ["-C", this.dir, "rev-parse", "HEAD"])).stdout.trim();
+		const { stdout } = await run(
+			"git",
+			[
+				"-C",
+				this.dir,
+				"commit-tree",
+				snapshot.tree,
+				"-p",
+				local,
+				...(local === this.#record.base ? [] : ["-p", this.#record.base]),
+				"-m",
+				"Preserved unpublished kix workspace",
+			],
+			{ env: identity() },
+		);
+		const sha = stdout.trim();
+		const ref = `refs/kix/checkpoints/${job}/${randomUUID()}`;
+		await run("git", ["-C", this.#git, "update-ref", ref, sha]);
+		return { ref, sha };
 	}
 
 	/**
