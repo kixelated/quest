@@ -42,7 +42,6 @@ ownership-manifest design:
 - [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [CI flakes](/quest/m0/ci-flakes.md) - native Windows tests and Release's macOS checks fail only on real breakage
 - [Fork upstream](/quest/m0/fork-upstream.md) - a fork with its own quest tree claims on itself, never its parent
-- [Review policy](/quest/m0/review-policy.md) - CONTRIBUTING.md says whose review counts
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended Claude checkouts through its hooks
 - [Codex checkouts](/quest/m0/codex-checkouts.md) - Codex agents started by `quest agent` release their checkouts on exit
