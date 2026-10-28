@@ -38,14 +38,14 @@ export const LABELS: Record<Side, string> = { ours: "ours", base: "base", theirs
 
 /**
  * Split `git merge-file --diff3` output, written with `size`-character
- * markers and `LABELS`, into chunks.
+ * markers and the supplied labels (defaulting to `LABELS`), into chunks.
  */
-export function chunks(text: string, size: number): Chunk[] {
+export function chunks(text: string, size: number, labels = LABELS): Chunk[] {
 	const marker = (char: string, label?: string) => char.repeat(size) + (label === undefined ? "" : ` ${label}`);
-	const start = marker("<", LABELS.ours);
-	const base = marker("|", LABELS.base);
+	const start = marker("<", labels.ours);
+	const base = marker("|", labels.base);
 	const split = marker("=");
-	const end = marker(">", LABELS.theirs);
+	const end = marker(">", labels.theirs);
 
 	const out: Chunk[] = [];
 	let clean: Clean = [];
@@ -81,7 +81,7 @@ export function chunks(text: string, size: number): Chunk[] {
  * Join chunks back into a file. A conflict is written with standard
  * `size`-character markers, with its base section only when `diff3` is set.
  */
-export function render(chunks: Chunk[], size: number, diff3: boolean): string {
+export function render(chunks: Chunk[], size: number, diff3: boolean, labels = LABELS): string {
 	const lines: string[] = [];
 	for (const chunk of chunks) {
 		if (Array.isArray(chunk)) {
@@ -90,9 +90,9 @@ export function render(chunks: Chunk[], size: number, diff3: boolean): string {
 		}
 		// A conflict's lines keep their own `\r`, so its markers take the same ending.
 		const eol = [...chunk.ours, ...chunk.base, ...chunk.theirs].some((line) => line.endsWith("\r")) ? "\r" : "";
-		lines.push(`${"<".repeat(size)} ${LABELS.ours}${eol}`, ...chunk.ours);
-		if (diff3) lines.push(`${"|".repeat(size)} ${LABELS.base}${eol}`, ...chunk.base);
-		lines.push(`${"=".repeat(size)}${eol}`, ...chunk.theirs, `${">".repeat(size)} ${LABELS.theirs}${eol}`);
+		lines.push(`${"<".repeat(size)} ${labels.ours}${eol}`, ...chunk.ours);
+		if (diff3) lines.push(`${"|".repeat(size)} ${labels.base}${eol}`, ...chunk.base);
+		lines.push(`${"=".repeat(size)}${eol}`, ...chunk.theirs, `${">".repeat(size)} ${labels.theirs}${eol}`);
 	}
 	return lines.join("\n");
 }

@@ -10,6 +10,7 @@ import {
 	string,
 } from "./github";
 import { EJECTED } from "./land";
+import { readHoldStatus, type HoldFact, type HoldReport } from "./hold";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -115,9 +116,12 @@ export interface Status {
 	reactions: Reaction[];
 	/** Unresolved review threads, oldest first. */
 	threads: Thread[];
+	/** Ownership facts read by the same client as the state commands. */
+	holds: HoldFact[];
+	starterHold: HoldReport["starter"];
 }
 
-/** Read the PR's state in one query, plus one per extra page of a long list. */
+/** Read the paged PR state, then the state commands’ ownership snapshot. */
 export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencies): Promise<Status> {
 	const github = new GitHub(deps);
 	const cursors: Record<"checks" | "reviews" | "threads", string | null | undefined> = {
@@ -168,7 +172,14 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 		if (cursors.reviews !== undefined) page(current.reviews, "reviews", reviewNodes);
 		if (cursors.threads !== undefined) page(current.reviewThreads, "threads", threadNodes);
 	}
-	return summarize(first!, rollup, contexts, reviewNodes, threadNodes);
+	const ownership = await readHoldStatus(pr, deps);
+	if (ownership.head !== first!.headRefOid)
+		throw new Error("the PR head changed while reading its holds; rerun quest status");
+	return {
+		...summarize(first!, rollup, contexts, reviewNodes, threadNodes),
+		holds: ownership.holds,
+		starterHold: ownership.starter,
+	};
 }
 
 function summarize(
@@ -273,6 +284,8 @@ function summarize(
 		reviews: [...latest.values()],
 		reactions,
 		threads,
+		holds: [],
+		starterHold: null,
 	};
 }
 
@@ -344,6 +357,17 @@ export function statusLines(status: Status): string[] {
 			(t) =>
 				`thread ${t.id} ${t.outdated ? "outdated" : "current"} ${t.lastAuthor} ${t.url} ${t.path}:${dash(t.line)}`,
 		),
+		...(status.holds.length
+			? status.holds.map(
+					(hold) =>
+						`hold ${hold.label} ${dash(hold.token)} ${dash(hold.takenAt)} ${dash(hold.eventUrl)} ${hold.age ?? "unknown age"}`,
+				)
+			: ["hold -"]),
+		...(status.starterHold
+			? [
+					`starter-hold ${status.starterHold.lastActive} ${status.starterHold.url} last active ${status.starterHold.age}`,
+				]
+			: []),
 	];
 }
 

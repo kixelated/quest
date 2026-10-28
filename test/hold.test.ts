@@ -10,6 +10,7 @@ import { Refusal } from "../src/cli/start";
 const PR = { owner: "example", repo: "project", number: 7 };
 const URL_ = "https://github.com/example/project/pull/7";
 const HEAD = "a".repeat(40);
+const BASE = "b".repeat(40);
 
 interface Event {
 	__typename: "LabeledEvent" | "AutoMergeEnabledEvent" | "AddedToMergeQueueEvent";
@@ -26,6 +27,9 @@ class FakePull {
 	head = HEAD;
 	mergeState = "BLOCKED";
 	queue = false;
+	comparison = "ahead";
+	base = BASE;
+	readonly comparisons: string[] = [];
 	/** Check names the base branch's rulesets require. */
 	required: string[] = [];
 	autoMerge: ObjectValue | null = null;
@@ -85,6 +89,10 @@ class FakePull {
 			return json(200, []);
 		}
 		if (url.pathname === "/repos/example/project/branches/main") return json(200, { protection: {} });
+		if (url.pathname === `/repos/example/project/compare/main...${this.head}`) {
+			this.comparisons.push(`${url.pathname}${url.search}`);
+			return json(200, { status: this.comparison, base_commit: { sha: this.base } });
+		}
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
 			const checks = this.required.map((context) => ({ context }));
 			return json(
@@ -126,6 +134,7 @@ class FakePull {
 						state: this.state,
 						isDraft: this.draft,
 						body: this.body,
+						updatedAt: new Date(this.clock).toISOString(),
 						baseRefName: "main",
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,
@@ -251,6 +260,31 @@ describe("ready --done", () => {
 });
 
 describe("merge --land", () => {
+	test.each(["behind", "diverged"])(
+		"refuses a stale ungated head (%s), then accepts it after a base merge",
+		async (status) => {
+			const pull = new FakePull();
+			pull.comparison = status;
+			const { token } = await take(PR, "merge", undefined, pull.deps());
+			const refusal = await refused(land(PR, token, HEAD, "squash", pull.deps()));
+			expect(refusal).toContain(`head ${HEAD} does not contain main at ${BASE}`);
+			expect(pull.writes.at(-1)).toBe("add quest:merge");
+			pull.head = "c".repeat(40);
+			pull.comparison = "ahead";
+			await land(PR, token, pull.head, "squash", pull.deps());
+			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${pull.head} SQUASH`);
+		},
+	);
+
+	test("accepts a head identical to the current base", async () => {
+		const pull = new FakePull();
+		pull.comparison = "identical";
+		pull.base = HEAD;
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "merge", pull.deps());
+		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
+	});
+
 	test("enables auto-merge with a merge commit by default, bound to the head", async () => {
 		const pull = new FakePull();
 		const { token } = await take(PR, "merge", undefined, pull.deps());
@@ -283,11 +317,13 @@ describe("merge --land", () => {
 	test("queues a gated base's PR for quest land: squash auto-merge pinning the head", async () => {
 		const pull = new FakePull();
 		pull.required = ["test", "quest land"];
+		pull.comparison = "diverged";
 		const warnings: string[] = [];
 		const { token } = await take(PR, "merge", undefined, pull.deps());
 		await land(PR, token, HEAD, "merge", pull.deps(warnings));
 		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} SQUASH Quest-Land-Head: ${HEAD}`);
 		expect(warnings).toEqual([`${URL_} lands through quest land, which squashes`]);
+		expect(pull.comparisons).toEqual([]);
 	});
 
 	test("refuses a head that moved", async () => {
