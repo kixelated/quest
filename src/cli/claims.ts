@@ -7,7 +7,6 @@ import { execFileSync } from "node:child_process";
 import { handedBack, landed } from "../core";
 import {
 	type GitHubDependencies,
-	type ObjectValue,
 	type Repository,
 	GitHub,
 	object,
@@ -47,9 +46,13 @@ export interface ClaimDependencies {
 	warn(message: string): void;
 }
 
-/** Where claims live. For a GitHub fork, that is its parent rather than the remote itself. */
+/**
+ * Where claims live: the furthest repository up the remote's fork chain that
+ * keeps quests, so a contributor's fork claims on the project it came from,
+ * while a fork with its own quest tree claims on itself.
+ */
 export interface Upstream {
-	/** The remote's name, or the parent's URL for a fork; git reads upstream branches from it. */
+	/** The remote's name, or the upstream's URL when that is an ancestor; git reads upstream branches from it. */
 	git: string;
 	/** The URL the remote pushes to, where a claim branch is pushed. */
 	push: string;
@@ -57,17 +60,19 @@ export interface Upstream {
 		client: GitHub;
 		/** Where PRs open and claims are checked. */
 		repository: Repository;
-		/** The repository the remote pushes to: `repository` itself, or the fork. */
+		/** The repository the remote pushes to: `repository` itself, or a fork. */
 		head: Repository;
 		defaultBranch: string;
 	} | null;
 }
 
 /**
- * The upstream of `remote`. A GitHub repository that is a fork resolves to its
- * parent, reached with the same URL scheme as the remote; anything else is
- * its own upstream with no GitHub side. The head repository is where the
- * remote pushes, which may be a fork even when it fetches from upstream.
+ * The upstream of `remote`. On GitHub, it walks from the remote's repository
+ * up to each parent whose default branch holds the quest tree's README, and
+ * stops at the first parent without one; a failed lookup fails rather than
+ * stops the walk. An ancestor is reached with the same URL scheme as the
+ * remote. Off GitHub, the remote is its own upstream. The head repository is
+ * where the remote pushes, which may be a fork even when it fetches from upstream.
  */
 export async function upstream(root: string, remote: string, deps: ClaimDependencies): Promise<Upstream> {
 	const source = remoteRepository(root, remote);
@@ -75,44 +80,48 @@ export async function upstream(root: string, remote: string, deps: ClaimDependen
 	if (source.repository === null) return { git: remote, push, github: null };
 
 	const client = new GitHub(deps.github());
-	const info = await repositoryInfo(client, source.repository);
-	const self = info.repository;
+	const self = await repositoryInfo(client, source.repository);
 	// Push somewhere other than the fetched repository, such as a fork, and that is the head; a push
 	// URL off GitHub can open no PR, so it falls back to the fetched repository.
 	const pushed = remoteRepository(root, remote, true).repository;
-	const head = pushed === null || same(pushed, self) ? self : (await repositoryInfo(client, pushed)).repository;
-	if (info.parent !== null) {
-		const parent = info.parent;
-		return {
-			// Reach the parent the way the remote is reached, so the same credentials work.
-			git: string(/^https:/.test(source.url) ? parent.clone_url : parent.ssh_url),
-			push,
-			github: {
-				client,
-				repository: { owner: string(object(parent.owner).login), repo: string(parent.name) },
-				head,
-				defaultBranch: string(parent.default_branch),
-			},
-		};
-	}
+	const head =
+		pushed === null || same(pushed, self.repository)
+			? self.repository
+			: (await repositoryInfo(client, pushed)).repository;
+	// The README where this checkout's tree sits, which may be below the top level.
+	const readme = `${gitOutput(root, ["rev-parse", "--show-prefix"])}quest/README.md`;
+	let up = self;
+	while (up.parent !== null && (await has(client, up.parent, readme))) up = await repositoryInfo(client, up.parent);
 	return {
-		git: remote,
+		// Reach an ancestor the way the remote is reached, so the same credentials work.
+		git: up === self ? remote : /^https:/.test(source.url) ? up.https : up.ssh,
 		push,
-		github: { client, repository: self, head, defaultBranch: info.defaultBranch },
+		github: { client, repository: up.repository, head, defaultBranch: up.defaultBranch },
 	};
 }
 
-/** A repository as GitHub names it, its default branch, and its parent when it is a fork. */
+/** A repository as GitHub names it, its default branch and clone URLs, and its parent when it is a fork. */
 async function repositoryInfo(
 	client: GitHub,
 	named: Repository,
-): Promise<{ repository: Repository; defaultBranch: string; parent: ObjectValue | null }> {
+): Promise<{ repository: Repository; defaultBranch: string; https: string; ssh: string; parent: Repository | null }> {
 	const info = object(await (await client.request(repositoryPath(named))).json());
+	const parent = info.fork === true && info.parent !== undefined && info.parent !== null ? object(info.parent) : null;
 	return {
 		repository: { owner: string(object(info.owner).login), repo: string(info.name) },
 		defaultBranch: string(info.default_branch),
-		parent: info.fork === true && info.parent !== undefined && info.parent !== null ? object(info.parent) : null,
+		https: string(info.clone_url),
+		ssh: string(info.ssh_url),
+		parent: parent === null ? null : { owner: string(object(parent.owner).login), repo: string(parent.name) },
 	};
+}
+
+/** Whether `repository`'s default branch has `path`. Only a 404 says no; any other failure throws. */
+async function has(client: GitHub, repository: Repository, path: string): Promise<boolean> {
+	const response = await client.request(`${repositoryPath(repository)}/contents/${encodeURI(path)}`, {
+		allow: [404],
+	});
+	return response.status !== 404;
 }
 
 /** Whether two names are the same repository; GitHub ignores case. */
@@ -162,8 +171,8 @@ export function pullsFrom(pulls: OpenPull[], branch: string): OpenPull[] {
 
 /**
  * Which of `branches` someone holds: pushed to `remote` or its upstream, or the
- * head of an open PR in either. A GitHub fork's upstream is its parent. Without
- * the remote it warns and checks nothing; off GitHub it checks branches only.
+ * head of an open PR in either. Without the remote it warns and checks nothing;
+ * off GitHub it checks branches only.
  */
 export async function claims(
 	root: string,

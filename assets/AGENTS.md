@@ -123,7 +123,8 @@ The earliest open PR holds the claim.
 Claim a quest with `quest start <quest>`: it checks both, pushes an empty
 claim commit to the quest's branch, and opens a draft PR from it right away.
 That PR becomes the quest's PR.
-In a fork's clone, it pushes to the fork and opens the PR upstream.
+In a fork's clone, it pushes to the fork and opens the PR upstream; a fork
+whose parent keeps no quests is its own upstream.
 It exits 3 when the quest is blocked or someone else holds it; pick other work.
 `quest start --release <quest>` gives back a claim before any work is pushed.
 If a claim looks stale, such as a draft without `## Decisions needed` or a
