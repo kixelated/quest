@@ -4,7 +4,8 @@ description: Scope and create quests through an interactive interview. Use when 
 
 Before you begin, run `quest guide` and `quest skill grill`, and read their output completely.
 
-Before anything else, search for existing work: the quest tree, git history for deleted quests, and open PRs touching `quest/`.
+Before anything else, search for existing and planned work: the quest tree, git history for deleted quests, open PRs touching `quest/`, and the quest trees of related repositories that plan work here.
+Search by the code and behavior the work touches, not only its keywords: a quest that will change, replace, or delete them may already settle the question or make the request moot.
 Show any overlap in the first round.
 
 Interview the user with the grill skill.
