@@ -1,6 +1,6 @@
 // The board's reading of a project: milestones, epics, and quests, each with its
-// status and progress. Readiness comes from the shared core, so the board
-// always agrees with `quest unblocked`.
+// status and progress. Readiness comes from the shared core; coordinator jobs
+// also claim quests before their branches appear in forge observations.
 
 import {
 	type Doc,
@@ -28,7 +28,7 @@ export type Status =
 	| { kind: "available" }
 	| { kind: "pending" }
 	/** Claimed by a quest branch, or by the draft PR its starter still holds. */
-	| { kind: "accepted"; change?: Change }
+	| { kind: "accepted"; change?: Change; job?: string }
 	| { kind: "blocked"; requires: Ref[] };
 
 /** A link to another quest, or a blocker's own words when it names none. */
@@ -123,7 +123,7 @@ export function lead(content: string, section: string): string {
 		.trim();
 }
 
-export function readBoard(project: Project): Board {
+export function readBoard(project: Project, jobs: ReadonlyMap<string, string> = new Map()): Board {
 	const sorted = [...project.documents].sort((a, b) => comparePaths(a.path, b.path));
 	const parsed = sorted.map(({ path, content }) => parse(path, content));
 	const docs = new Map(parsed.map((doc) => [doc.path, doc]));
@@ -140,6 +140,8 @@ export function readBoard(project: Project): Board {
 	};
 
 	const status = (doc: Doc): Status => {
+		const job = jobs.get(doc.path);
+		if (job) return { kind: "accepted", job };
 		const change = changes.get(doc.path);
 		if (change) return change.owned ? { kind: "accepted", change } : { kind: "turn-in", change };
 		if (project.claims?.includes(doc.path)) return { kind: "accepted" };

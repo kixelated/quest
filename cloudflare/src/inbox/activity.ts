@@ -129,3 +129,8 @@ export function ago(now: number, at: number): string {
 export function highlights(list: Card[]) {
 	return new Map(list.flatMap((card) => (card.quest ? [[card.quest, PHASES[card.phase]] as const] : [])));
 }
+
+/** Running, queued, and waiting jobs claim their quests before forge observations catch up. */
+export function activeHighlights(list: Card[]) {
+	return highlights(list.filter((card) => ["queued", "running", "waiting"].includes(card.job.state)));
+}
