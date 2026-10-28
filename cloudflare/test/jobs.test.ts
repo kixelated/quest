@@ -1027,6 +1027,10 @@ describe("job routes", () => {
 			.prepare("UPDATE jobs SET state='completed',summary='Shipped it.',result=? WHERE id=?")
 			.bind(JSON.stringify({ head: null, followups: ["Cache the parser", "Document `--fast`"] }), id)
 			.run();
+		await db
+			.prepare("INSERT INTO job_events(job,attempt,kind,body,at) VALUES(?,0,'result',?,?)")
+			.bind(id, JSON.stringify({ outcome: "completed", summary: "Shipped it." }), Date.now())
+			.run();
 		expect(await store.listFollowups(db, 10)).toMatchObject([
 			{ id, followups: ["Cache the parser", "Document `--fast`"] },
 		]);
@@ -1046,6 +1050,29 @@ describe("job routes", () => {
 		expect(await store.listFollowups(db, 10)).toEqual([]);
 		await db.prepare("UPDATE jobs SET state='completed' WHERE id=?").bind(plan.id).run();
 		expect((await post("", { workflow: "plan", target: `plans/${id}` })).status).toBe(409);
+	});
+
+	it("lists all recent follow-up offers instead of the newest 50", async () => {
+		const now = Date.now();
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<60)
+ INSERT INTO jobs(id,repository,workflow,target,revision,branch,actor,trusted,state,result,createdAt,updatedAt)
+ SELECT 'recent-'||i,10,'start','quest/extra-'||i||'.md',?,'quest/extra-'||i,?,1,'completed',?,?-i,? FROM n`,
+			)
+			.bind(commit, maintainer, JSON.stringify({ followups: ["Still useful"] }), now, now)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO job_events(job,attempt,kind,body,at) SELECT id,attempt,'result',?,createdAt FROM jobs WHERE id LIKE 'recent-%'",
+			)
+			.bind(JSON.stringify({ outcome: "completed", summary: "Done" }))
+			.run();
+		const offers = await store.listFollowups(db, 10, now);
+		expect(offers).toHaveLength(60);
+		expect(offers[0]).toMatchObject({ id: "recent-1", completedAt: now - 1 });
+		expect(offers.at(-1)).toMatchObject({ id: "recent-60", completedAt: now - 60 });
+		expect(await store.followupRequest(db, 10, "recent-60", now)).not.toBeNull();
 	});
 
 	it("starts an epic on its README branch while a child's branch is claimed", async () => {

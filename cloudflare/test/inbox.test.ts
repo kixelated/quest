@@ -676,7 +676,7 @@ describe("decision inbox", () => {
 			id,
 			1,
 			{ outcome: "completed", summary: "Shipped.", result: { head: null, followups: ["Cache <i>it</i>", 7] } },
-			3,
+			Date.now(),
 		);
 		const target = `plans/${id}`;
 		const html = await inbox();
@@ -699,6 +699,56 @@ describe("decision inbox", () => {
 		expect(interview).toContain("Plan the follow-ups that the start job on quest/first.md suggested.");
 		expect(interview).toContain("Queued");
 		expect(interview).not.toContain("Plan these follow-ups");
+	});
+
+	it("expires offers and stale forms exactly 30 days after completion, despite later metadata", async () => {
+		const now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+		const completed = now - store.FOLLOWUP_AGE + 1;
+		const { id, runner } = await running();
+		await store.claim(db, runner, id, 1, null, head, completed - 1);
+		await store.finish(
+			db,
+			runner,
+			id,
+			1,
+			{
+				outcome: "completed",
+				summary: "Shipped.",
+				result: { followups: ["A useful follow-up"] },
+			},
+			completed,
+		);
+		// A lost publication response settles later; that metadata must not renew the offer.
+		await store.settle(db, id, head, true, now);
+		await db.prepare("UPDATE jobs SET hold='later-hold' WHERE id=?").bind(id).run();
+		await store.released(db, id, "later-hold");
+		expect(await store.listFollowups(db, 10, now)).toMatchObject([{ id, completedAt: completed }]);
+		expect(await store.followupRequest(db, 10, id, now)).not.toBeNull();
+		const target = `plans/${id}`;
+		expect(thread(await inbox({ project: "10", item: target }))).toContain("Plan these follow-ups");
+		for (const at of [completed + store.FOLLOWUP_AGE, completed + store.FOLLOWUP_AGE + 1]) {
+			expect(await store.listFollowups(db, 10, at)).toEqual([]);
+			expect(await store.followupRequest(db, 10, id, at)).toBeNull();
+		}
+		clock.mockReturnValue(completed + store.FOLLOWUP_AGE);
+		expect(await inbox()).not.toContain("A useful follow-up");
+		const stale = await submit(jobs, [
+			["workflow", "plan"],
+			["target", target],
+			["revision", commit],
+		]);
+		expect(stale.status).toBe(409);
+		expect(await stale.text()).toContain("Nothing is left to plan here");
+		expect(await store.active(db, 10, target)).toBe(false);
+		// Expiry leaves the completed job and its original result event intact.
+		expect(await store.readJob(db, id)).toMatchObject({
+			state: "completed",
+			head,
+			updatedAt: now,
+			result: { followups: ["A useful follow-up"] },
+			events: expect.arrayContaining([expect.objectContaining({ kind: "result", at: completed })]),
+		});
 	});
 
 	it("offers no retry for a failed quest that is no longer ready", async () => {

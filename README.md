@@ -735,7 +735,9 @@ AppArmor allows them only for programs with a profile granting `userns`.
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested
-follow-ups, which the inbox offers you to plan. A job on an issue or
+follow-ups, which the inbox offers you to plan for 30 days after the job
+completes. Expired offers cannot start a plan, and the job's history remains.
+A job on an issue or
 pull request reads it through `context`, since the runner holds no GitHub
 token; a new plan reads your idea and pasted context there. kix publishes as its GitHub App, so the runner never pushes. A job that hits an account's limit
 pauses for you to pick another account; the runner never switches on its own.

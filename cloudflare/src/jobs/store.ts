@@ -791,6 +791,8 @@ export async function listInboxJobs(db: D1Database, repository: number, observed
 
 /** The most follow-ups a delivery suggests, and the longest one, in characters. */
 export const FOLLOWUPS = { count: 20, length: 1000 };
+/** Unplanned follow-up offers last 30 days from the job's completed result. */
+export const FOLLOWUP_AGE = 30 * 24 * 60 * 60_000;
 
 /** The follow-ups a completed job's result suggests: untrusted agent text, so only well-formed ones count. */
 export function followupsOf(result: unknown): string[] {
@@ -803,21 +805,27 @@ export function followupsOf(result: unknown): string[] {
 }
 
 /** A job that delivered suggested follow-ups, which a "plan these?" decision offers until it is planned. */
-export type Followups = Pick<Job, "id" | "workflow" | "target" | "summary" | "pull" | "updatedAt"> & {
+export type Followups = Pick<Job, "id" | "workflow" | "target" | "summary" | "pull"> & {
+	completedAt: number;
 	followups: string[];
 };
 
-/** Completed jobs whose suggested follow-ups were not planned yet, newest first: each one's plan target is `plans/<job>`. */
+// The result event is immutable; publication and hold metadata can change jobs.updatedAt later.
+const completedAt = `(SELECT MIN(e.at) FROM job_events e WHERE e.job=j.id AND e.attempt=j.attempt
+ AND e.kind='result' AND json_extract(e.body,'$.outcome')='completed')`;
+
+/** Recent completed jobs whose follow-ups were not planned: each one's plan target is `plans/<job>`. */
 const unplanned = `state='completed' AND json_array_length(result,'$.followups')>0
+ AND ${completedAt}>?
  AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=j.repository AND n.target='plans/'||j.id)`;
 
 /** The project's "plan these?" decisions, newest first. */
-export async function listFollowups(db: D1Database, repository: number): Promise<Followups[]> {
+export async function listFollowups(db: D1Database, repository: number, now = Date.now()): Promise<Followups[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT id,workflow,target,summary,pull,result,updatedAt FROM jobs j WHERE repository=? AND ${unplanned} ORDER BY updatedAt DESC,id LIMIT 50`,
+			`SELECT id,workflow,target,summary,pull,result,${completedAt} AS completedAt FROM jobs j WHERE repository=? AND ${unplanned} ORDER BY completedAt DESC,id`,
 		)
-		.bind(repository)
+		.bind(repository, now - FOLLOWUP_AGE)
 		.all<Omit<Followups, "followups"> & { result: string }>();
 	return results.flatMap(({ result, ...job }) => {
 		const followups = followupsOf(JSON.parse(result));
@@ -826,10 +834,10 @@ export async function listFollowups(db: D1Database, repository: number): Promise
 }
 
 /** The request a "plan these?" decision starts its interview from, or null once it was planned. */
-export async function followupRequest(db: D1Database, repository: number, job: string) {
+export async function followupRequest(db: D1Database, repository: number, job: string, now = Date.now()) {
 	const row = await db
 		.prepare(`SELECT workflow,target,summary,result FROM jobs j WHERE id=? AND repository=? AND ${unplanned}`)
-		.bind(job, repository)
+		.bind(job, repository, now - FOLLOWUP_AGE)
 		.first<Pick<Job, "workflow" | "target" | "summary"> & { result: string }>();
 	const followups = row ? followupsOf(JSON.parse(row.result)) : [];
 	if (!row || !followups.length) return null;
