@@ -9,7 +9,7 @@ For a draft, summarize the open decisions its body lists.
 Read each PR with `quest status` and skip one another session holds, using its `hold` and `starter-hold` records instead of a separate label read. A `hold` names the label, acquisition token/time, event URL, and age. A `starter-hold` identifies a draft without a `## Decisions needed` section and reports when it was last active; that is not an acquisition time.
 List those with how long ago each was last active, and offer to take over only one that looks stale.
 The skill argument can be used to filter the PRs in scope.
-Each merge is performed in parallel by a sub-agent.
+Each merge is performed in parallel by a sub-agent, following the guide's Reviews section for the shared design checkpoint across review rounds.
 
 Ask synchronously with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), following the guide's Questions section and including your recommendation:
 - `/quest-ready`: Are drafts ready for review.

@@ -202,8 +202,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
 				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
 				"branch whose tip is a merged PR's head holds nothing; a closed, unmerged PR's branch still does. A " +
-				"GitHub fork's upstream is its parent, and the branches and PRs of the fork the remote pushes to " +
-				"count too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last " +
+				"GitHub remote's upstream is its repository, or the furthest parent up its fork chain reached " +
+				"through parents whose default branch has quest/README.md, so a fork with its own quests is its own " +
+				"upstream. The branches and PRs of the fork the remote pushes to count too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last " +
 				"active, so a stale claim can be offered for takeover. Off GitHub, only branches are checked. " +
 				"Outside conditions are never checked.\n\n" +
 				"Given a path, piped output lists its blockers, one per line with nesting indented, with an " +
@@ -289,9 +290,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and whether it is a merged PR's head, and leaves it in place. When two PRs " +
 				"race, as from forks, the earliest open PR keeps the claim; a later one is closed and its branch " +
 				"deleted.\n\n" +
-				"The remote's upstream holds claims: a GitHub fork pushes the branch to itself and opens the PR on its " +
-				"parent, and so does a remote that fetches from upstream but pushes to a fork. Off GitHub, only the " +
-				"branch is pushed, with a warning.\n\n" +
+				"The remote's upstream holds claims: on GitHub, the furthest parent up its fork chain reached through " +
+				"parents whose default branch has quest/README.md, or the remote's repository when its parent has " +
+				"none, so a fork with its own quests claims on itself. A fork of that upstream pushes the branch to " +
+				"itself and opens the PR on the upstream, and so does a remote that fetches from upstream but pushes " +
+				"to a fork. A failed lookup of a parent's README is an error. Off GitHub, only the branch is pushed, " +
+				"with a warning.\n\n" +
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
@@ -704,7 +708,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Delete a finished checkout and drop its record, never forcing. Refuses while supervised runs are live, " +
 				"and refuses modified, untracked, or ignored files beyond the declared scratch, and commits no branch " +
-				"or remote-tracking ref reaches, unless origin's GitHub repository merged a PR whose head is exactly " +
+				"or remote-tracking ref reaches, unless the GitHub upstream that holds origin's claims merged a PR whose head is exactly " +
 				"that commit. Prunes the scratch first, so a refusal over ignored files leaves the checkout released.",
 		)
 		.action((id: string) => settled(state().remove(id, merged)));
@@ -729,6 +733,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Run one headless agent turn per call in the foreground, billed to one of the keys in QUEST_API_KEYS, " +
 				"so a spawn launches every agent with one legible command.\n\n" +
+				"Codex requires a registered Quest checkout and Linux worktree supervision; these are checked before resolving keys. " +
+				"It uses the quest worktree run lifecycle: restore before each turn and release declared scratch after exit. Claude runs directly in the given checkout.\n\n" +
 				"QUEST_API_KEYS lists keys separated by whitespace; --key names one by its 1-based position. An " +
 				"entry may be a 1Password op:// reference: the first launch resolves every reference in one " +
 				"`op inject` and keeps the keys in a user-only store under $XDG_RUNTIME_DIR (or the temporary " +
@@ -891,7 +897,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"root-absolute link to it under quest/. The change is staged.\n\n" +
 				"Refuses the root epic and milestones, which are permanent. Refuses outside a git work tree, when " +
 				"the destination exists, and while a moved quest has a claim branch or open PR on origin, or on " +
-				"the repository a GitHub fork came from, since the old branch would no longer name it. Moving a " +
+				"the upstream that holds origin's claims (see quest start), since the old branch would no longer name it. Moving a " +
 				"quest into or out of an epic changes which epic lists it; the check afterwards reports what to fix.\n\n" +
 				"Prints R for the move and M for each edited document. Mentions of the old path that are not links, " +
 				"or are outside quest/, are reported on stderr and left alone. Runs quest check on the result and " +
