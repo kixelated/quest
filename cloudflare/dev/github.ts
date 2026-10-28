@@ -404,7 +404,7 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>, 
 		}
 	// Entities a webhook named, read by number as GitHub does: an issue number
 	// that is a pull request, or a missing one, is NOT_FOUND at its alias.
-	for (const [, alias, field, number] of query.matchAll(/(s\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
+	for (const [, alias, field, number] of query.matchAll(/([sb]\d+):(issue|pullRequest)\(number:(\d+)\)/g)) {
 		const pull = repo.pulls.find((p) => p.number === Number(number));
 		const issue = repo.issues.find((i) => i.number === Number(number));
 		const found = field === "pullRequest" ? pull && pullNode(repo, pull) : issue && entity(repo, issue);
@@ -529,7 +529,7 @@ export function fakeGitHub(world: World) {
 		const me = world.users[0]!;
 		if (url.origin === "https://spdx.org") return json({ licenseId: "MIT", isOsiApproved: true });
 		if (url.origin === "https://github.com" && path === "/login/oauth/access_token")
-			return json({ access_token: "fake-user-token", token_type: "bearer", scope: "read:user,user:email" });
+			return json({ access_token: "fake-user-token", token_type: "bearer", scope: "" });
 		if (url.origin !== "https://api.github.com") return missing(method, request.url);
 		const text = await request.text();
 		const body = text ? (JSON.parse(text) as Record<string, any>) : {};
