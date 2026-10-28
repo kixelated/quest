@@ -34,3 +34,4 @@ Decided 2026-10-28 (user, /quest-plan trust audit):
 
 - [Web execution](/quest/m0/kix/execution.md) - merge jobs this rule gates
 - [Require read-only pull-request CI](/quest/m0/kix/ci-read-only.md) - the trust model this completes
+- [Review locally with the other vendor's model](/quest/m0/local-review.md) - replaces the Codex policy example with the PR's `## Review` record

@@ -39,6 +39,8 @@ ownership-manifest design:
 
 ## Required
 
+- [Local review](/quest/m0/local-review.md) - the other vendor's model reviews each branch locally before it is pushed for review, so landing never waits on Codex cloud
+- [Codex cloud off](/quest/m0/codex-cloud-off.md) - automatic Codex cloud reviews stop once no open PR relies on them
 - [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [Gate bench](/quest/m0/gate-bench.md) - measure headroom admission on an idle host
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaim completed and suspended Claude checkouts through its hooks
