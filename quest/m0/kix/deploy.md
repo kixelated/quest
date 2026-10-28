@@ -34,7 +34,7 @@ delivery. Follow the Deployment section of `cloudflare/README.md` and steps 1,
 - Add the `kix.quest` zone to the Worker's Cloudflare account. Keep the
   Worker name, D1 database ID, and `AUTH_SECRET`; do not create a new
   production database.
-- Set the production GitHub OAuth app's homepage to `https://kix.quest` and
+- Set the production GitHub App's homepage to `https://kix.quest` and
   its callback to `https://kix.quest/api/auth/callback/github`.
 - The deploy deletes the legacy `RepositoryCoordinator` Durable Object and
   any storage it held, approved 2026-10-14 since nothing is stored. Afterwards

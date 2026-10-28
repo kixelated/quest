@@ -33,6 +33,12 @@ app.route("/", githubWebhooks);
 app.get("/health", (c) => c.json({ status: "ok" }));
 // Short link for the one-line setup paste.
 app.get("/setup", (c) => c.redirect("https://github.com/kixelated/quest/blob/main/SETUP.md"));
+// Installation-initiated authorization has no sign-in state from this site.
+// Discard its code and let the visitor start a state-bound sign-in instead.
+app.get("/api/auth/callback/github", (c, next) => {
+	if (c.req.query("code") && !c.req.query("state")) return c.redirect("/sign-in?next=/projects", 303);
+	return next();
+});
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 app.route("/", push.subscriptions);
 
