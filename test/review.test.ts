@@ -313,6 +313,7 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(resumed.argv.at(-2)).toBe("thread-1");
 	expect(resumed.stdin).toContain("Fixed at src/lib.ts:1.");
 	expect(resumed.stdin).toContain("BASE-REVIEW rule");
+	expect(resumed.stdin).not.toContain("differ from those you were given");
 	expect(resumed.stdin).toContain(git(s.repo, "rev-parse", "HEAD"));
 	expect(calls.filter((c) => c.argv[1] === "review")).toHaveLength(1);
 
@@ -321,6 +322,27 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(fresh.code).toBe(2);
 	expect(fresh.stderr).toContain("has none to resume");
 	expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain("round 1\n");
+});
+
+fakes("a later round restates instructions the base changed and revokes rules it removed", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ findings: [] }));
+	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+
+	// The base moves: new rules for src/, and no REVIEW.md.
+	const base = join(s.repo, "..", "base");
+	git(s.repo, "worktree", "add", "-q", base, "origin/main");
+	write(base, "src/AGENTS.md", "BASE-SRC new rule\n");
+	git(base, "rm", "-q", "REVIEW.md");
+	git(base, "commit", "-qam", "move the base");
+	git(base, "push", "-q", "origin", "HEAD:main");
+
+	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	const prompt = s.calls().at(-1)!.stdin;
+	expect(prompt).toContain("differ from those you were given");
+	expect(prompt).toContain("BASE-SRC new rule");
+	expect(prompt).toContain("no longer has a REVIEW.md");
+	expect(prompt).not.toContain("BASE-REVIEW rule");
 });
 
 fakes("a reply that does not match the schema fails rather than reads as clean", async () => {

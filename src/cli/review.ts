@@ -128,6 +128,12 @@ interface State {
 	session: string;
 	model: string | null;
 	rounds: { head: string; findings: number }[];
+	/**
+	 * Digests of the instruction files and REVIEW.md the session was last given.
+	 * A resumed session keeps its first system or developer instructions, so a
+	 * later round restates what changed in its prompt.
+	 */
+	given: { instructions: string; rules: string | null };
 }
 
 /** What a turn needs to build its command line. */
@@ -525,19 +531,35 @@ export function firstPrompt(head: string, rules: Rules | null): string {
 	].join("\n\n");
 }
 
+/** What a later round tells the resumed session. */
+export interface LaterRound {
+	base: string;
+	previous: string;
+	head: string;
+	responses?: string;
+	/** The instructions prompt, when the applicable instruction files changed since the session was last given them. */
+	instructions?: string;
+	rules: Rules | null;
+	/** The session was given REVIEW.md rules the base no longer has. */
+	rulesRemoved: boolean;
+}
+
 /** A later round's only turn: re-review the new head under the base's current rules, weighing the author's responses. */
-export function laterPrompt(
-	base: string,
-	previous: string,
-	head: string,
-	responses: string | undefined,
-	rules: Rules | null,
-): string {
+export function laterPrompt(round: LaterRound): string {
+	const { head, responses } = round;
 	const parts = [
-		`The branch is now at ${head}; your last review covered ${previous}. ` +
-			`Review the change ${base}...HEAD again under the instructions above.`,
-		...rulesParts(rules, false),
+		`The branch is now at ${head}; your last review covered ${round.previous}. ` +
+			`Review the change ${round.base}...HEAD again.`,
 	];
+	if (round.instructions !== undefined) {
+		parts.push(
+			`The agent instructions that apply to this change differ from those you were given; these replace them:\n\n${round.instructions}`,
+		);
+	}
+	if (round.rulesRemoved && round.rules === null) {
+		parts.push("The base no longer has a REVIEW.md, so the review rules you were given no longer apply.");
+	}
+	parts.push(...rulesParts(round.rules, false));
 	if (responses !== undefined) {
 		parts.push(
 			`The author responded to your last findings:\n\n<responses>\n${responses}\n</responses>`,
@@ -664,15 +686,18 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 
 	const schemaFile = join(dir, "schema.json");
 	save(schemaFile, SCHEMA);
+	const files = baseInstructions(root, baseSha, changed);
 	const context: Context = {
 		base: baseRef,
-		instructions: instructionsPrompt(baseSha, baseInstructions(root, baseSha, changed)),
+		instructions: instructionsPrompt(baseSha, files),
 		model: options.model,
 		effort: options.effort,
 		schemaFile,
 	};
 
 	const rules = exists(root, baseSha, "REVIEW.md") ? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") } : null;
+	// Digests of content only, so a base that moved without changing them restates nothing.
+	const given = { instructions: digest(JSON.stringify(files)), rules: rules && digest(rules.text) };
 	const started = deps.now();
 	const usage: Usage[] = [];
 	let session: string;
@@ -687,7 +712,15 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		reply = await turn(reviewer, reviewer.resume(context, session, firstPrompt(head, rules)), root, env);
 	} else {
 		session = state.session;
-		const prompt = laterPrompt(baseRef, previous.head, head, options.responses, rules);
+		const prompt = laterPrompt({
+			base: baseRef,
+			previous: previous.head,
+			head,
+			responses: options.responses,
+			instructions: state.given.instructions === given.instructions ? undefined : context.instructions,
+			rules,
+			rulesRemoved: state.given.rules !== null,
+		});
 		reply = await turn(reviewer, reviewer.resume(context, session, prompt), root, env);
 	}
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
@@ -696,7 +729,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const found = findings(reply);
 
 	const rounds = [...(state?.rounds ?? []), { head, findings: found.length }];
-	save(statePath, { branch, reviewer: harness, session, model, rounds } satisfies State);
+	save(statePath, { branch, reviewer: harness, session, model, rounds, given } satisfies State);
 	return {
 		reviewer: harness,
 		model,
