@@ -35,7 +35,3 @@ GitHub has not computed yet reads `UNKNOWN` and falls through to
 - `land()` sends a base gated by `quest land` to auto-merge ahead of this
   choice ([kixelated/quest#229](https://github.com/kixelated/quest/pull/229)),
   so it applies only to ungated bases.
-
-## Related
-
-- [Landing rules](/quest/m0/helpers/landing.md) - also changes what `quest merge --land` refuses

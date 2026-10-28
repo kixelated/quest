@@ -123,7 +123,8 @@ The earliest open PR holds the claim.
 Claim a quest with `quest start <quest>`: it checks both, pushes an empty
 claim commit to the quest's branch, and opens a draft PR from it right away.
 That PR becomes the quest's PR.
-In a fork's clone, it pushes to the fork and opens the PR upstream.
+In a fork's clone, it pushes to the fork and opens the PR upstream; a fork
+whose parent keeps no quests is its own upstream.
 It exits 3 when the quest is blocked or someone else holds it; pick other work.
 `quest start --release <quest>` gives back a claim before any work is pushed.
 If a claim looks stale, such as a draft without `## Decisions needed` or a
@@ -169,6 +170,13 @@ Changes since the last review skip a new review only when they are conflict-free
 Any other change, including a base merge with a hand-resolved conflict, waits for a review of the new head; if none arrives before a wait times out, ask the user instead of merging.
 The repository's review policy decides whose review counts.
 Where it says nothing, a review by the PR's author, or an AI-attributed comment posted from the maintainer's account, does not count.
+
+Checkpoint the design across review rounds.
+A review round is one pushed head that drew reviews, counted from the PR's full history since its last comment that starts with `Design change:`.
+`quest status <pr>` reports the round count and latest `Design change:` marker under `review-rounds`.
+Every fourth round, stop before fixing more findings and reconsider the approach.
+Report that judgment and what remains, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
+Record each design change, including a rethink the user picks, in a PR comment that starts with `Design change:`; the next agent counts rounds from it.
 
 Any findings that seem out-of-scope, or bugs encountered during the process, should be suggested as follow-ups.
 

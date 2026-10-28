@@ -13,12 +13,7 @@ Hand it back with `quest release <pr> <token>` whenever you stop before it lands
 Read the PR's head, checks, merge state, reviews by head, and unresolved threads with `quest status <pr>`, including after each `quest wait` wakes, instead of chaining `gh` queries.
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
-Automated reviewers often find something new on every push, so keep fixing their findings without asking, but checkpoint the design.
-A review round is one pushed head that drew reviews; count rounds from the PR, not your session, since its last design change (one that reshapes the approach; fixing a finding is not one).
-`quest status` reports the review-round count and latest `Design change:` marker under `review-rounds`; use those facts for the design checkpoint.
-Every fourth round, stop before the next fix and reconsider the design: is something fundamentally wrong with the approach?
-Report that judgment and what remains unresolved, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
-Record each design change, including a rethink the user picks, in a PR comment that starts with `Design change:`; the next agent counts rounds from it.
+Keep fixing automated review findings, following the guide's Reviews section for the shared design checkpoint across rounds.
 Never request a review, including by toggling a ready PR to draft and back.
 
 Abort the merge if there is a significant decision to be made.
@@ -34,8 +29,9 @@ or `checks:passed`, so no separate check watcher is needed.
 Inspect the events and decide whether they satisfy the wait;
 the command does not decide whose review counts. If activity is irrelevant
 (including bot notices), call it again with `--since` set to the last field of
-its last line. Exit 3 means the deadline passed with no activity; re-run with
-`--since` set to the printed cursor, so nothing during the first wait is missed.
+its last line. Exit 3 means the deadline passed with no activity.
+If waiting for a required review of a changed head, stop and ask the user, as the guide's Reviews section requires; do not start another wait for that review.
+For other waits, re-run with `--since` set to the printed cursor, so nothing during the first wait is missed.
 Other failures must be reported rather than treated as activity.
 Do not wait for optional reviews.
 Run each wait so its exit wakes you, such as a background task that notifies on
@@ -44,7 +40,7 @@ foreground time limit; each wake rereads your whole context. The hour bound
 keeps that reread cached; a wake after the prompt cache expires rewrites it all.
 A headless process ends when its turn ends, killing its background commands:
 run each wait in the foreground instead, bounded by the shell's own time limit,
-and re-run it with `--since` until it returns activity.
+and apply the timeout rule above.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Before landing it, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
@@ -54,7 +50,8 @@ On a finding, fix the branch: delete the finished quest with `quest rm`, or rewr
 Then push, re-check, and continue; ask the user only when what remains is unclear.
 Leave a summary of the changes and decisions made, then land the head you checked with `quest merge <pr> <token> --land <full 40-character head SHA>`.
 It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
-On a base that requires the `quest land` check, it queues the PR for `quest land`, the repository's batched merge gate, which squashes.
+On a base that requires the `quest land` check, it queues the PR for `quest land`, whose chain merges and tests against the current base; do not merge the base or rerun checks per PR just to queue it.
+On an ungated base, the command refuses a head that does not contain the current base. Merge the base locally (never rebase), rerun the repository's checks, push, and land the new head after satisfying the guide's review rule for those changes.
 The `quest:merge` label stays on while the PR is queued or auto-merging.
 Report once it is landing; do not wait for it to merge, since the queue re-checks it without you.
 A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
