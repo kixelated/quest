@@ -40,7 +40,3 @@ verification.
   owns, not an organization.
 - The PR that finishes this quest lands through the gate, verifying the
   same-repository path.
-
-## Related
-
-- [quest land upholds only the rules GitHub lets it](/quest/m0/helpers/land-rules.md) - the README setup guidance this follows

@@ -140,7 +140,6 @@ const MORE_CONTEXTS = `query($owner: String!, $name: String!, $oid: GitObjectID!
  */
 export const UPHELD: Record<string, string> = {
 	creation: "the gate never creates the base",
-	update: "only the gate's push, which the rule must let bypass, updates the base",
 	deletion: "the gate never deletes the base",
 	non_fast_forward: "the gate only fast-forwards the base",
 	required_linear_history: "the gate lands squash commits in a line",

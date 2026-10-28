@@ -450,8 +450,9 @@ and each landed PR shows as merged.
 A gated base requires the `quest land` status check, which nothing reports on
 a PR head, so GitHub's auto-merge only waits and its merge button cannot land
 around the gate. Only the gate's push credential bypasses that rule; pin the
-check's source to an app that never reports it, so no one can satisfy it with
-a status. There,
+check's source to an app installed on the repository that never reports it, so
+no one can satisfy it with a status. GitHub rejects an uninstalled app as a
+required check's source. There,
 `quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
 auto-merge whose commit body pins the head it approved
 (`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
@@ -501,11 +502,12 @@ the gate upholds them itself. It requires each PR's review decision to allow
 it, each of the base's other required checks to pass on its head, counting
 every check and only those from the app a rule names, and, when the base
 requires conversation resolution, each of its review threads to be resolved.
-Its push satisfies `creation`, `update`, `deletion`, `non_fast_forward`, and
+Its push satisfies `creation`, `deletion`, `non_fast_forward`, and
 `required_linear_history`, and `copilot_code_review` blocks nothing. `resolve`
 fails, before anything lands, on any other rule type and on `pull_request`
 settings the review decision does not cover: last-push approval, merge methods
-without squash, and required reviewers.
+without squash, and required reviewers. It refuses `update`: that rule
+restricts who can move the base, while the gate can land a PR any writer queues.
 
 On a base with classic protection, `resolve` reads its settings, which needs
 administration read (a GitHub App's "Administration: read", or a token with
@@ -589,12 +591,10 @@ jobs:
           if [ -s "$RUNNER_TEMP/landing" ]; then gh workflow run land.yml --ref "$GITHUB_REF_NAME"; fi
 ```
 
-The land job's token pushes the base and PR branches; give it the bypass,
-such as GitHub Actions in the ruleset's bypass list or a GitHub App's token
-from an environment only the base branch can use. Where the ruleset
-refuses GitHub Actions as a bypass actor, as an organization's can, use an App
-installed on the repository. Ejecting a PR disables its auto-merge, which needs
-`contents: write` on the token in `GH_TOKEN` even when another credential
+The land job's token pushes the base and PR branches. Grant the ruleset's bypass
+to a GitHub App installed on the repository, and mint its token from an
+environment only the base branch can use. Ejecting a PR disables its auto-merge,
+which needs `contents: write` on the token in `GH_TOKEN` even when another credential
 pushes. The check job holds only a read token, so it can run on a self-hosted
 runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,
 the land job needs a token with admin rights, and the resolve job one with
