@@ -35,7 +35,3 @@ skill and guide edits through this plan.
   `merge`, `iterate`, and `complete` at it.
 - Test a stale head refused, the same head landing after a base merge, and a
   head the base already contains.
-
-## Related
-
-- [Wait and status accuracy](/quest/m0/helpers/wait-accuracy.md) - the review-round count the checkpoint reads

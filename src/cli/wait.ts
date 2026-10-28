@@ -1,4 +1,6 @@
 // GitHub-specific PR activity waiting stays outside the repository-independent core.
+import { createHash } from "node:crypto";
+
 import {
 	actor,
 	array,
@@ -89,8 +91,8 @@ interface Activity {
 }
 
 /** Each source is read separately, so each keeps its own position. */
-type Source = "timeline" | "replies" | "reactions";
-const SOURCES: Source[] = ["timeline", "replies", "reactions"];
+type Source = "timeline" | "replies" | "reactions" | "edits";
+const SOURCES: Source[] = ["timeline", "replies", "reactions", "edits"];
 /** The newest event time read from a source, and the IDs of events at that time. */
 interface Mark {
 	time: number;
@@ -250,6 +252,7 @@ async function watch(
 				timeline: { time: since, ids: [] },
 				replies: { time: since, ids: [] },
 				reactions: { time: since, ids: [] },
+				edits: { time: since, ids: [] },
 			},
 			commits: [],
 			pushes: forced
@@ -380,7 +383,20 @@ async function watch(
 	const comments = pager(
 		`${base}/pulls/${pr.number}/comments?per_page=${PAGE}&since=${new Date(cursor.marks.replies.time - 1000).toISOString()}`,
 	);
-	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [] };
+	// Issue comments are ordered by creation: an old comment can be edited on an
+	// earlier page, so reread this update-filtered list from its first page.
+	const edits = async () => {
+		const rows: ObjectValue[] = [];
+		let path: string | undefined =
+			`${base}/issues/${pr.number}/comments?per_page=${PAGE}&since=${new Date(cursor.marks.edits.time - 1000).toISOString()}`;
+		while (path) {
+			const page = await github.list(path);
+			rows.push(...page.rows);
+			path = link(page.response, "next");
+		}
+		return rows;
+	};
+	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [], edits: [] };
 	for (;;) {
 		github.pollInterval = 0;
 		const labels: Activity[] = [];
@@ -427,6 +443,14 @@ async function watch(
 			if (event.actor !== viewer && fresh("replies", event)) found.replies.push(event);
 		}
 		found.reactions.push(...events.filter((event) => event.actor !== viewer && fresh("reactions", event)));
+		for (const row of await edits()) {
+			if (timestamp(string(row.updated_at)) <= timestamp(string(row.created_at))) continue;
+			const event = timedActivity(row, "edited", "updated_at", prUrl);
+			// GitHub timestamps have second precision: two different edits in that
+			// second remain distinct, without storing the comment text in a cursor.
+			event.id += `:${createHash("sha256").update(string(row.body)).digest("hex")}`;
+			if (event.actor !== viewer && fresh("edits", event)) found.edits.push(event);
+		}
 		// Check results are state rather than a log, so each poll reads them afresh.
 		const head = await checks();
 		const reached = head
@@ -529,14 +553,19 @@ function checkActivities(head: string, all: Check[], needs: Needs, state: Cursor
 	const inWorkflow = (entry: Check) => entry.workflow !== undefined && needs.workflows.includes(entry.workflow);
 	const required =
 		needs.names.size || needs.workflows.length ? all.filter((entry) => entry.required || inWorkflow(entry)) : all;
-	const reached = (outcome: "passed" | "failed", entry: Check | undefined): Activity[] => {
-		const id = `${head}:${outcome}`;
-		if (!entry?.result || entry.result.time < state.since || state.reported.includes(id)) return [];
+	const reached = (
+		outcome: "passed" | "failed",
+		entry: Check | undefined,
+		optional = false,
+		at = entry?.result,
+	): Activity[] => {
+		const id = optional ? `${head}:optional:${entry?.name}:${entry?.url}:${at?.point}` : `${head}:${outcome}`;
+		if (!entry?.result || !at || at.time < state.since || state.reported.includes(id)) return [];
 		return [
 			{
-				point: entry.result.point,
-				time: entry.result.time,
-				type: `checks:${outcome}`,
+				point: at.point,
+				time: at.time,
+				type: `${optional ? "check" : "checks"}:${outcome}`,
 				actor: entry.name.replace(/\s/g, "_"),
 				url: entry.url ?? `${prUrl}/checks`,
 				id,
@@ -546,21 +575,29 @@ function checkActivities(head: string, all: Check[], needs: Needs, state: Cursor
 	const settled = required.flatMap((entry) => (entry.result ? [{ ...entry, result: entry.result }] : []));
 	settled.sort((a, b) => a.result.time - b.result.time);
 	const failed = settled.find((entry) => entry.result.outcome === "failed" && entry.result.time >= state.since);
-	// GitHub lists a check only once it starts, so a pass waits until nothing on the head is still
-	// going: no pending check, no workflow run that may yet create a job, and every required name
-	// and workflow present. It is dated by the last check to finish, when the head went idle.
+	// A pass waits for the head to go idle, including jobs a running workflow
+	// may still create. Its date is the last completion, but its name and link
+	// always identify a required check that passed.
 	const idle =
 		all.every((entry) => entry.result && !entry.running) &&
 		[...needs.names].every((name) => all.some((entry) => entry.name === name)) &&
 		needs.workflows.every((path) => all.some((entry) => entry.workflow === path));
 	const passed =
 		idle && settled.length === required.length && settled.every((entry) => entry.result.outcome === "passed")
-			? all.reduce<Check | undefined>(
-					(last, entry) => (!last || entry.result!.time >= last.result!.time ? entry : last),
-					undefined,
-				)
+			? settled.at(-1)
 			: undefined;
-	return [...reached("failed", failed), ...reached("passed", passed)];
+	const last = idle
+		? all.reduce<Check | undefined>(
+				(latest, entry) => (!latest || entry.result!.time >= latest.result!.time ? entry : latest),
+				undefined,
+			)
+		: undefined;
+	const optional = all.filter((entry) => !required.includes(entry) && entry.result?.outcome === "failed");
+	return [
+		...reached("failed", failed),
+		...optional.flatMap((entry) => reached("failed", entry, true)),
+		...reached("passed", passed, false, last?.result),
+	];
 }
 
 function timedActivity(row: ObjectValue, type: string, timeField: string, fallback: string): Activity {
@@ -609,6 +646,9 @@ function decodeCursor(value: string, pr: string): Cursor {
 		const parsed = object(JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8")));
 		const marks = object(parsed.marks);
 		const checks = object(parsed.checks);
+		// Older resumable cursors predate edited-comment tracking. Start that
+		// source at the original baseline so an edit is never silently skipped.
+		marks.edits ??= { time: checks.since, ids: [] };
 		if (
 			parsed.pr !== pr ||
 			!SOURCES.every((source) => {
