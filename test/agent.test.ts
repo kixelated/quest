@@ -176,14 +176,14 @@ function managed() {
 	vi.stubEnv("QUEST_WORKTREE_HOME", home);
 	vi.spyOn(systemdScopes, "check").mockImplementation(() => {});
 	vi.spyOn(systemdScopes, "run").mockImplementation(
-		(_unit, cwd, command, io) =>
+		(_unit, cwd, command, options) =>
 			new Promise((resolve, reject) => {
 				const child = spawn(command[0], command.slice(1), {
 					cwd,
-					env: io?.env,
+					env: options?.env,
 					stdio: ["pipe", "pipe", "pipe"],
 				});
-				io!.spawned(child);
+				options!.spawned!(child);
 				child.once("error", reject);
 				child.once("close", (code) => resolve(code ?? 1));
 			}),
