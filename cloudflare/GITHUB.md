@@ -199,14 +199,15 @@ on a decision.
 Labels need `issues: write` on the upstream; landing needs `contents: write`
 and `pull_requests: write` there, as a direct merge does.
 
-kix pull requests come from upstream branches, so the repository's
-`pull_request` workflows run agent-written code with the secrets and write
-tokens those workflows expose. This is an accepted trust boundary: for example,
-moq-dev/moq's `check.yml` passes R2 keys to its checks. Review the upstream's
-workflow configuration accordingly. Workflows such as `pull_request_target` or
-`workflow_run` that check out a PR head also run contributed code with any
-credentials they provide. Treat kix pull requests as untrusted contributions;
-kix never runs them in the publisher and grants runners no GitHub credentials.
+kix pull requests come from upstream branches, and GitHub gives workflows on
+same-repository branches the repository's secrets, unlike fork pull requests.
+So enrolled repositories must keep pull-request CI read-only: a read-only
+default `GITHUB_TOKEN`, no write secrets at repository level, and write
+credentials only in environments limited to protected branches. Agent-written
+code then runs in CI before review with nothing it can write through.
+`pull_request_target` and `workflow_run` jobs that check out a PR head fall
+under the same rule. kix never runs pull request code in the publisher and
+grants runners no GitHub credentials.
 
 Installation grants are broader than any one publication: `contents: write`
 and `pull_requests: write` cover every installed repository. Each token names
