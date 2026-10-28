@@ -13,10 +13,7 @@ If you cannot push to the PR's branch, stop and report.
 Read the PR, its linked issues and quest, the reviews and comments posted on it, and the surrounding code.
 `quest status <pr>` reports its checks, reviews by head, and unresolved threads in one call.
 Judge the approach before touching anything: would you take a different one?
-Checkpoint the design across review rounds, as the merge skill does.
-A review round is one pushed head that drew reviews, counted from the PR's full history (`gh pr view <pr> --json reviews,comments`) since its last comment that starts with `Design change:`.
-On every fourth round, report your judgment of the approach and what remains before fixing more findings, recommending to continue, rethink the approach, or drop the PR; that choice is the user's.
-Record a design change you make, including a rethink the user picks, in a PR comment that starts with `Design change:`.
+Follow the guide's Reviews section for the shared design checkpoint across review rounds.
 
 Settle every decision this PR needs with the grill skill's interview, starting from the user's feedback: those its `## Decisions needed` section lists, those your judgment of the approach or the review findings raise, and any you find along the way.
 Record the settled decisions in this PR's description as the paper trail, then implement them.
