@@ -7,6 +7,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
+import { MERGE_LABEL } from "../core";
 import { repositoryPath } from "./claims";
 import {
 	GitHub,
@@ -140,7 +141,6 @@ const MORE_CONTEXTS = `query($owner: String!, $name: String!, $oid: GitObjectID!
  */
 export const UPHELD: Record<string, string> = {
 	creation: "the gate never creates the base",
-	update: "only the gate's push, which the rule must let bypass, updates the base",
 	deletion: "the gate never deletes the base",
 	non_fast_forward: "the gate only fast-forwards the base",
 	required_linear_history: "the gate lands squash commits in a line",
@@ -842,7 +842,7 @@ async function eject(github: GitHub, plan: Plan, ejection: Ejection, run: string
 	}
 	const [owner, repo] = plan.repository.split("/");
 	const issue = `${repositoryPath({ owner, repo })}/issues/${ejection.number}`;
-	await github.request(`${issue}/labels/${encodeURIComponent("quest:merge")}`, { method: "DELETE", allow: [404] });
+	await github.request(`${issue}/labels/${encodeURIComponent(MERGE_LABEL)}`, { method: "DELETE", allow: [404] });
 	const link = run === undefined ? "" : ` ([run](${run}))`;
 	await github.request(`${issue}/comments`, {
 		body: {
