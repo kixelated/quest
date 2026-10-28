@@ -9,7 +9,7 @@ For a draft, summarize the open decisions its body lists.
 Skip each PR another session holds: one with a `quest:*` label, or a draft without a `## Decisions needed` section.
 List those with how long ago each was last active, and offer to take over only one that looks stale.
 The skill argument can be used to filter the PRs in scope.
-Each merge is performed in parallel by a sub-agent.
+Each merge is performed in parallel by a sub-agent, following the guide's Reviews section for the shared design checkpoint across review rounds.
 
 Ask synchronously with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), following the guide's Questions section and including your recommendation:
 - `/quest-ready`: Are drafts ready for review.

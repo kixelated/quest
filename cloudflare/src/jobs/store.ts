@@ -727,12 +727,16 @@ export async function readJob(db: D1Database, id: string) {
 	]);
 	const row = job!.results[0] as Job | undefined;
 	if (!row) return null;
+	return jobView(row, events!.results as Event[], questions!.results as Question[]);
+}
+
+function jobView(row: Job, events: Event[], questions: Question[]) {
 	const json = (value: string | null): unknown => (value === null ? null : JSON.parse(value));
 	return {
 		...row,
 		result: json(row.result),
-		events: (events!.results as Event[]).map((e) => ({ ...e, body: json(e.body as string) })),
-		questions: (questions!.results as Question[]).map((q) => ({
+		events: events.map((e) => ({ ...e, body: json(e.body as string) })),
+		questions: questions.map((q) => ({
 			...q,
 			prompt: json(q.prompt as string),
 			answer: json(q.answer as string | null),
@@ -740,12 +744,40 @@ export async function readJob(db: D1Database, id: string) {
 	};
 }
 
+/** Hydrate a selection in three snapshot queries, without multiplying events by questions. */
+async function readJobs(db: D1Database, select: string, ...parameters: (string | number)[]) {
+	const [jobs, events, questions] = await db.batch([
+		db.prepare(select).bind(...parameters),
+		db
+			.prepare(
+				`WITH selected AS (${select}) SELECT e.job,e.attempt,e.kind,e.body,e.at
+				FROM job_events e JOIN selected j ON j.id=e.job ORDER BY e.rowid`,
+			)
+			.bind(...parameters),
+		db
+			.prepare(
+				`WITH selected AS (${select}) SELECT q.job,q.id,q.attempt,q.kind,q.prompt,q.answer,q.answeredBy,q.askedAt,q.answeredAt,q.approvedAt
+				FROM job_questions q JOIN selected j ON j.id=q.job ORDER BY q.askedAt,q.rowid`,
+			)
+			.bind(...parameters),
+	]);
+	const byJob = <T extends { job: string }>(rows: T[]) => {
+		const grouped = new Map<string, Omit<T, "job">[]>();
+		for (const { job, ...row } of rows) {
+			if (!grouped.has(job)) grouped.set(job, []);
+			grouped.get(job)!.push(row);
+		}
+		return grouped;
+	};
+	const eventRows = byJob(events!.results as (Event & { job: string })[]);
+	const questionRows = byJob(questions!.results as (Question & { job: string })[]);
+	return (jobs!.results as Job[]).map((row) =>
+		jobView(row, eventRows.get(row.id) ?? [], questionRows.get(row.id) ?? []),
+	);
+}
+
 export async function listJobs(db: D1Database, repository: number) {
-	const rows = await db
-		.prepare("SELECT id FROM jobs WHERE repository=? ORDER BY createdAt DESC,id LIMIT 50")
-		.bind(repository)
-		.all<{ id: string }>();
-	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+	return readJobs(db, "SELECT * FROM jobs WHERE repository=? ORDER BY createdAt DESC,id LIMIT 50", repository);
 }
 
 export type Published = Pick<Job, "branch" | "head" | "pending" | "pull">;
@@ -777,16 +809,15 @@ export async function active(db: D1Database, repository: number, target: string)
  * one of the `observed` issues, pull requests, or ready quests.
  */
 export async function listInboxJobs(db: D1Database, repository: number, observed: string[]) {
-	const rows = await db
-		.prepare(
-			`SELECT id FROM jobs j WHERE repository=?1
+	return readJobs(
+		db,
+		`SELECT * FROM jobs j WHERE repository=?1
 				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
 				AND (state IN ('queued','running','waiting','failed') OR target IN (SELECT value FROM json_each(?2)))
 			ORDER BY createdAt DESC,id`,
-		)
-		.bind(repository, JSON.stringify(observed))
-		.all<{ id: string }>();
-	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+		repository,
+		JSON.stringify(observed),
+	);
 }
 
 /** The most follow-ups a delivery suggests, and the longest one, in characters. */
@@ -848,17 +879,16 @@ export async function followupRequest(db: D1Database, repository: number, job: s
  * delivered is one of the `open` ones and no later job works on that pull request.
  */
 export async function listActivityJobs(db: D1Database, repository: number, open: number[]) {
-	const rows = await db
-		.prepare(
-			`SELECT id FROM jobs j WHERE repository=?1
+	return readJobs(
+		db,
+		`SELECT * FROM jobs j WHERE repository=?1
 				AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target=j.target AND (n.createdAt>j.createdAt OR (n.createdAt=j.createdAt AND n.id<j.id)))
 				AND (state IN ('queued','running','waiting') OR (pull IN (SELECT value FROM json_each(?2))
 					AND NOT EXISTS(SELECT 1 FROM jobs n WHERE n.repository=?1 AND n.target='pulls/'||j.pull AND n.id<>j.id AND n.createdAt>=j.createdAt)))
 			ORDER BY createdAt DESC,id`,
-		)
-		.bind(repository, JSON.stringify(open))
-		.all<{ id: string }>();
-	return (await Promise.all(rows.results.map((row) => readJob(db, row.id)))).filter((job) => job !== null);
+		repository,
+		JSON.stringify(open),
+	);
 }
 
 type Pin = { runner: string; account: string };
@@ -875,13 +905,53 @@ function pinOf(kind: QuestionKind, reply: unknown): Pin | null {
 /** Whether the chosen account is still on its runner; the runner may drop it at any time. */
 const pinned = "(? IS NULL OR EXISTS(SELECT 1 FROM runner_accounts WHERE runner=? AND id=?))";
 
+export type Continuation = { head: string; from: string; revision: string };
+
+/** A continuation names only the exact branch version offered by the service's publication decision. */
+export function continuationOf(prompt: unknown, reply: unknown): Continuation | null {
+	const head = (reply as { continue?: unknown } | null)?.continue;
+	if (head === undefined) return null;
+	const offer = (prompt as { continuation?: Continuation } | null)?.continuation;
+	if (
+		!offer ||
+		head !== offer.head ||
+		![offer.head, offer.from, offer.revision].every((sha) => typeof sha === "string" && /^[a-f0-9]{40}$/.test(sha))
+	)
+		throw new JobError("This continuation is no longer offered; review the new head again");
+	return offer;
+}
+
 /**
  * Requeue a job whose question was just approved at `now`, in the same batch
  * as the approval. An account decision pins the chosen account and starts a
  * new session from the job's summaries.
  */
-function resume(db: D1Database, job: string, question: string, pin: Pin | null, now: number) {
+function resume(
+	db: D1Database,
+	job: string,
+	question: string,
+	pin: Pin | null,
+	now: number,
+	continuation: Continuation | null = null,
+) {
 	const approved = "EXISTS(SELECT 1 FROM job_questions WHERE id=? AND approvedAt=?)";
+	if (continuation)
+		return [
+			db
+				.prepare(
+					`UPDATE jobs SET state='queued',head=?,revision=?,trusted=0,updatedAt=? WHERE id=? AND state='waiting' AND head=? AND revision=? AND pending IS NULL AND ${approved}`,
+				)
+				.bind(
+					continuation.head,
+					continuation.head,
+					now,
+					job,
+					continuation.from,
+					continuation.revision,
+					question,
+					now,
+				),
+		];
 	if (!pin)
 		return [
 			db
@@ -913,11 +983,15 @@ function resume(db: D1Database, job: string, question: string, pin: Pin | null, 
 export async function answer(db: D1Database, job: string, question: string, user: string, reply: unknown, now: number) {
 	const open = await db
 		.prepare(
-			"SELECT q.kind,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.approvedAt IS NULL AND (q.answer IS NULL OR j.actor=?) AND q.attempt=j.attempt AND j.state='waiting'",
+			"SELECT q.kind,q.prompt,j.actor,j.trusted FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.approvedAt IS NULL AND (q.answer IS NULL OR j.actor=?) AND q.attempt=j.attempt AND j.state='waiting'",
 		)
 		.bind(question, job, user)
-		.first<{ kind: QuestionKind; actor: string; trusted: number }>();
+		.first<{ kind: QuestionKind; prompt: string; actor: string; trusted: number }>();
 	if (!open) throw new JobError("Question is no longer open");
+	const continuation = open.kind === "publication" ? continuationOf(JSON.parse(open.prompt), reply) : null;
+	const guard = continuation
+		? " AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND head=? AND revision=? AND pending IS NULL)"
+		: "";
 	const pin = pinOf(open.kind, reply);
 	if (
 		pin &&
@@ -934,7 +1008,7 @@ export async function answer(db: D1Database, job: string, question: string, user
 		db
 			.prepare(
 				`UPDATE job_questions SET answer=?,answeredBy=?,answeredAt=?,approvedAt=? WHERE id=? AND job=? AND approvedAt IS NULL
- AND (answer IS NULL OR ?=(SELECT actor FROM jobs WHERE id=?)) AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND ${pinned}`,
+ AND (answer IS NULL OR ?=(SELECT actor FROM jobs WHERE id=?)) AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting') AND ${pinned}${guard}`,
 			)
 			.bind(
 				JSON.stringify(reply),
@@ -949,8 +1023,9 @@ export async function answer(db: D1Database, job: string, question: string, user
 				pin?.runner ?? null,
 				pin?.runner ?? null,
 				pin?.account ?? null,
+				...(continuation ? [job, continuation.from, continuation.revision] : []),
 			),
-		...(own ? resume(db, job, question, pin, now) : []),
+		...(own ? resume(db, job, question, pin, now, continuation) : []),
 	];
 	const results = await db.batch(statements);
 	if (results[0]!.meta.changes !== 1)
@@ -962,17 +1037,22 @@ export async function answer(db: D1Database, job: string, question: string, user
 export async function approve(db: D1Database, job: string, question: string, user: string, now: number) {
 	const pending = await db
 		.prepare(
-			"SELECT q.kind,q.answer,j.actor FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NOT NULL AND q.approvedAt IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
+			"SELECT q.kind,q.prompt,q.answer,j.actor FROM job_questions q JOIN jobs j ON j.id=q.job WHERE q.id=? AND q.job=? AND q.answer IS NOT NULL AND q.approvedAt IS NULL AND q.attempt=j.attempt AND j.state='waiting'",
 		)
 		.bind(question, job)
-		.first<{ kind: QuestionKind; answer: string; actor: string }>();
+		.first<{ kind: QuestionKind; prompt: string; answer: string; actor: string }>();
 	if (!pending) throw new JobError("No answer awaits approval");
 	if (pending.actor !== user) throw new JobError("Only the job's requester can approve another maintainer's answer");
+	const continuation =
+		pending.kind === "publication" ? continuationOf(JSON.parse(pending.prompt), JSON.parse(pending.answer)) : null;
+	const guard = continuation
+		? " AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND head=? AND revision=? AND pending IS NULL)"
+		: "";
 	const pin = pinOf(pending.kind, JSON.parse(pending.answer));
 	const results = await db.batch([
 		db
 			.prepare(
-				`UPDATE job_questions SET approvedAt=? WHERE id=? AND job=? AND answer=? AND approvedAt IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting' AND actor=?) AND ${pinned}`,
+				`UPDATE job_questions SET approvedAt=? WHERE id=? AND job=? AND answer=? AND approvedAt IS NULL AND attempt=(SELECT attempt FROM jobs WHERE id=? AND state='waiting' AND actor=?) AND ${pinned}${guard}`,
 			)
 			.bind(
 				now,
@@ -984,8 +1064,9 @@ export async function approve(db: D1Database, job: string, question: string, use
 				pin?.runner ?? null,
 				pin?.runner ?? null,
 				pin?.account ?? null,
+				...(continuation ? [job, continuation.from, continuation.revision] : []),
 			),
-		...resume(db, job, question, pin, now),
+		...resume(db, job, question, pin, now, continuation),
 	]);
 	if (results[0]!.meta.changes !== 1)
 		throw new JobError(pin ? "No answer awaits approval, or the account is gone" : "No answer awaits approval");
@@ -1048,13 +1129,17 @@ export async function hold(db: D1Database, job: string, input: { summary: string
 }
 
 /**
- * Record the `quest:merge` label a merge job holds its pull request with,
- * while the job is still queued. Returns false once it was stopped meanwhile,
- * so the caller gives the label back.
+ * Record the acquired `quest:merge` label even if the job was stopped meanwhile,
+ * so the sweep can recover a failed immediate release. Returns whether the job
+ * is still queued and may start.
  */
 export async function held(db: D1Database, job: string, token: string) {
-	const { meta } = await db.prepare("UPDATE jobs SET hold=? WHERE id=? AND state='queued'").bind(token, job).run();
-	return meta.changes === 1;
+	const row = await db
+		.prepare("UPDATE jobs SET hold=? WHERE id=? AND workflow='merge' AND (hold IS NULL OR hold=?) RETURNING state")
+		.bind(token, job, token)
+		.first<{ state: JobState }>();
+	// Retain a stopped job's token too, so a failed immediate release remains recoverable.
+	return row?.state === "queued";
 }
 
 /** A merge job's hold on its pull request is over. */

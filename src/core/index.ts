@@ -32,3 +32,14 @@ export { type Blocker, blockers, label, lookup, ready, renderBlocker } from "./r
 export { type Finding, ROOT, check, formatFinding } from "./rules";
 export { type RankedQuest, unblocked } from "./unblocked";
 export { type Chunk, type Clean, type Conflict, LABELS, chunks, render, resolveLists } from "./merge";
+
+export {
+	HOLD_PREFIX,
+	MERGE_LABEL,
+	type HoldEvent,
+	type HoldSnapshot,
+	isHoldLabel,
+	latestHold,
+	heldToken,
+	spentMergeHold,
+} from "./hold";
