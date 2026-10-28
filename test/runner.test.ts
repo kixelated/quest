@@ -1239,6 +1239,7 @@ describe("quest runner", () => {
 			enabled: true,
 			failIfUnavailable: true,
 			allowUnsandboxedCommands: false,
+			allowNestedUserNamespaces: false,
 			filesystem: { allowRead: [checkout, repository, launch.tmp], allowWrite: [launch.tmp] },
 			// A trusted revision's commands reach the package registries and nothing else.
 			network: { allowedDomains: REGISTRIES, strictAllowlist: true },

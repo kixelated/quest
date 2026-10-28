@@ -745,8 +745,8 @@ heads' devShells in a VM, and a job resumes with another maintainer's answer
 only once you approve it in the inbox. opencode runs as `opencode serve` on
 localhost behind a password made for each turn.
 
-The flake's `runner` package is a `quest` whose Claude Code and opencode (and on
-Linux, bubblewrap and socat) are pinned by this repository's lock
+The flake's `runner` package pins Claude Code 2.1.305 from its official release
+manifest; opencode (and on Linux, bubblewrap and socat) follow this repository's lock
 (`nix run github:kixelated/quest#runner -- runner`);
 otherwise `claude` and `opencode` come from `QUEST_RUNNER_CLAUDE` and
 `QUEST_RUNNER_OPENCODE`, or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
