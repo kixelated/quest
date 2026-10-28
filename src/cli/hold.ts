@@ -97,7 +97,7 @@ export async function readHoldStatus(pr: PullRequest, deps: GitHubDependencies):
 		snapshot.state !== "OPEN"
 			? []
 			: snapshot.labels.map((label): HoldFact => {
-					const event = latest(snapshot, label);
+					const event = latestHold(snapshot.events, label);
 					return {
 						label,
 						token: event?.id ?? null,
