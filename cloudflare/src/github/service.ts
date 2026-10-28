@@ -17,6 +17,7 @@ import {
 	activityQuery,
 	type ActivityPage,
 	type ProjectState,
+	type Pull,
 	type Scan,
 	reconcile,
 	readState,
@@ -584,7 +585,7 @@ export class GitHubService {
 				throw new GitHubError("Project is not enrolled for this installation");
 			// A lost maintainer role during the read must not publish fresh observations.
 			if (refresh)
-				await this.#read(token, repo, current, installation, () => this.#maintainer(token, repo, userId));
+				await this.#read(token, repo, current, installation, () => this.#maintainer(token, repo, userId), true);
 			return this.#observations(repo, installation);
 		});
 	}
@@ -600,6 +601,7 @@ export class GitHubService {
 		current: Repository,
 		installation: number,
 		recheck: () => Promise<void>,
+		full = false,
 	) {
 		await this.#env.DB.prepare("INSERT OR IGNORE INTO github_project_state(repository,epoch) VALUES(?,?)")
 			.bind(repo.id, crypto.randomUUID())
@@ -614,9 +616,21 @@ export class GitHubService {
 		// small, restarts to observe a possibly opened, closed, or claimed quest.
 		const scan: Scan = {
 			history:
-				previous && !previous.history.complete
+				previous?.history.since && !previous.history.complete && (!full || previous.history.full)
 					? previous.history
-					: { id: crypto.randomUUID(), issues: null, pulls: null, complete: false },
+					: {
+							id: crypto.randomUUID(),
+							issues: null,
+							pulls: null,
+							complete: false,
+							since: full
+								? { issues: null, pulls: null }
+								: (previous?.history.watermark ?? { issues: null, pulls: null }),
+							watermark: full
+								? { issues: null, pulls: null }
+								: (previous?.history.watermark ?? { issues: null, pulls: null }),
+							full,
+						},
 			occupancy:
 				previous && !previous.occupancy.complete && row!.invalidated !== 1
 					? previous.occupancy
@@ -649,6 +663,7 @@ export class GitHubService {
 				error.path?.length !== 2 || error.path[0] !== "repository" || !/^s\d+$/.test(String(error.path[1])),
 		);
 		if (partial || !response.data?.repository) throw new GitHubError("Project activity unavailable");
+		await this.#draftBodies(token, repo, scan, response.data.repository, stale);
 		// A rename, transfer, visibility change, or revocation during the read
 		// must not publish fresh observations.
 		const latest = await this.#api<Repository>(token, repositoryPath(repo));
@@ -660,6 +675,70 @@ export class GitHubService {
 		await this.#gate(installation);
 		if ((await this.#state(repo, installation)) === null) throw new GitHubError("Project enrollment changed");
 		await reconcile(this.#env.DB, repo, snapshot, scan, response.data.repository, stale, row!.revision, row!.epoch);
+	}
+
+	async #draftBodies(
+		token: string,
+		repo: GitHubRepository,
+		scan: Scan,
+		page: ActivityPage,
+		stale: Awaited<ReturnType<typeof staleEntities>>,
+	) {
+		// Bodies are needed only to classify open drafts. Metadata pages never request them.
+		// Read those drafts in one batch, then require the same identity/version before publishing.
+		const drafts = new Map<number, (Pull & { body?: string })[]>();
+		const rows = [
+			...(scan.history.pulls !== false
+				? (page.pullRequests?.nodes ?? []).filter(
+						(item) =>
+							!scan.history.since?.pulls ||
+							Date.parse(item.updatedAt) >= Date.parse(scan.history.since.pulls),
+					)
+				: []),
+			...(scan.occupancy.open !== false ? (page.open?.nodes ?? []) : []),
+			...stale.map((_, i) => page[`s${i}`]),
+		];
+		for (const item of rows) {
+			if (!item || !("isDraft" in item) || !item.isDraft || item.state !== "OPEN") continue;
+			const draft = item as Pull & { body?: string };
+			if (!positiveId(draft.number)) throw new GitHubError("Invalid draft observation");
+			drafts.set(draft.number, [...(drafts.get(draft.number) ?? []), draft]);
+		}
+		if (drafts.size) {
+			const numbers = [...drafts.keys()];
+			const result = await this.#api<{
+				data?: {
+					repository?: Record<
+						string,
+						| (Pick<Pull, "databaseId" | "updatedAt" | "headRefOid" | "state" | "isDraft"> & {
+								body: string;
+						  })
+						| null
+					>;
+				};
+				errors?: unknown[];
+			}>(token, "/graphql", "POST", {
+				query: `query($owner: String!, $name: String!) { repository(owner:$owner,name:$name) { ${numbers.map((number, i) => `b${i}:pullRequest(number:${number}) { databaseId:fullDatabaseId updatedAt headRefOid state isDraft body }`).join("\n")} } }`,
+				variables: { owner: repo.owner, name: repo.name },
+			});
+			if (result.errors?.length || !result.data?.repository) throw new GitHubError("Draft bodies unavailable");
+			for (const [i, number] of numbers.entries()) {
+				const body = result.data.repository[`b${i}`];
+				for (const item of drafts.get(number)!) {
+					if (
+						!body ||
+						typeof body.body !== "string" ||
+						body.databaseId !== item.databaseId ||
+						body.updatedAt !== item.updatedAt ||
+						body.headRefOid !== item.headRefOid ||
+						body.state !== "OPEN" ||
+						!body.isDraft
+					)
+						throw new ProjectChanged();
+					item.body = body.body;
+				}
+			}
+		}
 	}
 
 	/**
