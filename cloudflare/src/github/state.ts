@@ -353,7 +353,9 @@ export async function reconcile(
 			.bind(JSON.stringify(gone), repo.id, repo.id, revision, epoch),
 		db
 			.prepare(
-				`UPDATE github_project_activity SET missing=1 WHERE repository=? AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND ${current}`,
+				// An entity updated mid-pass can move ahead of an update-ordered cursor, so absence is
+				// not deletion: mark it stale, and the next read checks it by number before it goes missing.
+				`UPDATE github_project_activity SET stale=stale+1 WHERE repository=? AND missing=0 AND (seenIn IS NULL OR seenIn<>?) AND ?=1 AND ${current}`,
 			)
 			.bind(
 				repo.id,

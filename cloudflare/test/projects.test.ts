@@ -1221,10 +1221,27 @@ describe("enrolled project observations", () => {
 		expect(next!.activity.every((item) => item.missing === 0)).toBe(true);
 		expect(next!.project.changes).toEqual([]);
 		expect(next!.project.issues).toHaveLength(1);
-		// A missed delete webhook cannot appear in the update connection. Explicit Refresh repairs it.
+		// A missed delete webhook cannot appear in the update connection. Explicit Refresh
+		// marks unseen entities stale, and the next read confirms the deletion by number.
+		const swept = await empty.service.projectState(repo, "enrollment-test", true);
+		expect(swept!.activity.every((item) => item.missing === 0)).toBe(true);
 		const repaired = await empty.service.projectState(repo, "enrollment-test", true);
 		expect(repaired!.activity.every((item) => item.missing === 1)).toBe(true);
 		expect(repaired!.project.issues).toEqual([]);
+	});
+
+	it("keeps an entity that moved ahead of a full pass's cursor", async () => {
+		await enrolled();
+		await github().service.projectState(repo, "enrollment-test", true);
+		const page = activity();
+		page.issues = connection([]);
+		// The issue was updated after the pass read its first page, so no history page holds it.
+		const { service } = github({ activity: page, entities: { 1: { ...issue(), title: "Edited mid-pass" } } });
+		await service.projectState(repo, "enrollment-test", true);
+		const next = await service.projectState(repo, "enrollment-test", true);
+		const item = next!.activity.find((entry) => entry.id === "100")!;
+		expect(item.missing).toBe(0);
+		expect((item.data as { title: string }).title).toBe("Edited mid-pass");
 	});
 
 	it("retains observations while paused, clears candidates, and cascades caches on disconnect", async () => {
