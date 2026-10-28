@@ -160,8 +160,8 @@ Fix any merge conflicts.
 
 ## Reviews
 
-Before a PR is marked ready for review, and before each push to one that is, the other vendor's model reviews the committed branch locally with `quest review`: Claude Code reviews Codex's work, and Codex reviews Claude Code's.
-Commit and pass the repository's checks first.
+Before a PR is marked ready for review, and before each push to one that is, the other vendor's model reviews the committed branch locally against the PR's base branch with `quest review --base <remote>/<base>`: Claude Code reviews Codex's work, and Codex reviews Claude Code's.
+Commit and pass the repository's checks first, except on the head of a PR whose author lacks write access to the repository: its checks would run untrusted code with your credentials, so leave them to CI.
 Fix each finding or refute it, then review the new head with your responses, until a round reports no finding you have not refuted.
 A refutation stands only when it cites evidence the reviewer cannot rebut: a `path:line`, a command's output, or a recorded maintainer decision.
 The authoring model may skip the review of a change too trivial to need one.
@@ -184,7 +184,8 @@ Leave a comment on any review feedback you disagree with.
 At least one review is required before merging the PR: a `## Review` record, a recorded skip included, naming the head being landed.
 Changes since the last review skip a new review only when they are conflict-free merges from the base branch or a reviewer's suggested patch applied unchanged.
 Any other change, including a base merge with a hand-resolved conflict, needs a local review of the new head.
-The repository's review policy may require more, such as a maintainer's review.
+The repository's review policy decides whose record counts and may require more, such as a maintainer's review.
+Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so review their head locally and rewrite the record before landing it.
 
 Checkpoint the design across review rounds.
 A review round is one `quest review` round, numbered within the branch's review session.

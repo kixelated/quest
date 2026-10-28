@@ -12,7 +12,7 @@ If it refuses because another session holds the PR, stop and report what it prin
 A draft you started in this session has no `## Decisions needed` section, so it is still yours and the command refuses it: review it without taking it, and take it once you have marked it ready below.
 
 Work in a checkout of the PR's head branch, checking out the head first when someone else opened it.
-Commit everything, then run the repository's local checks and fix any failure.
+Commit everything, then run the repository's local checks, unless the guide's Reviews section leaves them to CI, and fix any failure.
 
 Review the committed branch with `quest review`, as the guide's Reviews section describes; `quest review --help` explains the round.
 Run it in the foreground; a round takes minutes.

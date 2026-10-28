@@ -251,6 +251,32 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	expect(JSON.parse(readFileSync(schema, "utf8")).required).toEqual(["findings"]);
 });
 
+fakes("--base reviews against another branch, fetched first, with that branch's instructions", async () => {
+	const s = setup();
+	git(s.repo, "checkout", "-qb", "release", "main");
+	write(s.repo, "AGENTS.md", "RELEASE-ROOT rule\n");
+	git(s.repo, "commit", "-qam", "release");
+	git(s.repo, "push", "-q", "origin", "release");
+	const base = git(s.repo, "rev-parse", "HEAD");
+	git(s.repo, "update-ref", "-d", "refs/remotes/origin/release");
+	git(s.repo, "checkout", "-qb", "backport");
+	write(s.repo, "src/lib.ts", "export const x = 5;\n");
+	git(s.repo, "commit", "-qam", "backport");
+
+	const result = await quest("--root", s.repo, "review", "--base", "origin/release");
+	expect(result.code).toBe(0);
+	expect(result.stdout).toContain(`base ${base} origin/release\n`);
+	const [, first] = s.calls();
+	expect(first.argv.slice(0, 4)).toEqual(["exec", "review", "--base", "origin/release"]);
+	const instructions = first.argv.find((arg) => arg.startsWith("developer_instructions="))!;
+	expect(instructions).toContain("RELEASE-ROOT rule");
+	expect(instructions).not.toContain("BASE-ROOT rule");
+
+	const unknown = await quest("--root", s.repo, "review", "--base", "upstream/release", "--new");
+	expect(unknown.code).toBe(2);
+	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
+});
+
 fakes("claude reviews read-only with the base's instructions, then reports in the schema", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	const result = await quest("--root", s.repo, "review", "--model", "opus", "--effort", "low", "--json");

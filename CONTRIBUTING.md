@@ -37,9 +37,10 @@ scope and after required repository checks and reviews pass. Never block on a
 CodeRabbit review; it is optional.
 Quest execution stops at PR creation; it merges only when the user picks /quest-merge.
 
-The PR body's `## Review` record of a local `quest review` round satisfies the
-guide's required review when it names the exact head being landed, with no
-finding left unfixed or unrefuted; so does a recorded skip of a trivial change.
+On a PR whose author has write access, the PR body's `## Review` record of a
+local `quest review` round satisfies the guide's required review when it names
+the exact head being landed, with no finding left unfixed or unrefuted; so does
+a recorded skip of a trivial change.
 A hand-resolved conflict needs a local review of the new head, but does not
 require a maintainer review specifically. The guide's exemptions for a
 conflict-free base merge or a reviewer's suggested patch applied unchanged
