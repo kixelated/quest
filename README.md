@@ -673,6 +673,17 @@ quest agent stop .worktrees/foo
 quest agent stop --all
 ```
 
+Codex starts and resumes only in a checkout registered by `quest worktree create`,
+on Linux with the `quest worktree run` supervisor available.
+Ownership and host support are checked before keys are resolved. Each turn uses
+the same lifecycle as `quest worktree run`: restore the reservation before the
+turn, then release it and prune declared scratch after the agent and its
+remaining descendants exit. Source changes and the session remain available
+for resume, including after a decision pause or failed turn. Reinstall or rebuild
+pruned dependencies when the next turn needs them. Claude continues to run
+directly in the supplied checkout. Codex desktop threads use the desktop app's
+native archival instead.
+
 Options go before the worktree, and the prompt or message follows it, so text
 starting with `-` is never read as an option. `--key` names a key by its
 1-based position. The first launch resolves every 1Password `op://` entry in
