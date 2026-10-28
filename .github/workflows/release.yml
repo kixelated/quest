@@ -127,10 +127,13 @@ jobs:
       - name: Check the binary's lifecycle
         shell: bash
         run: bash scripts/lifecycle-check.sh "$RUNNER_TEMP/quest"
-      # Ubuntu 22.04's systemd 249 is too old for Quest's scopes, so it checks the process-group fallback.
+      # Check's suite runs on Linux and Windows only. The gate's owners run live
+      # here without admission, which can wait out the job on a busy runner.
       - name: Check that the gate owns its command's descendants
-        shell: bash
-        run: bash scripts/gate-check.sh "$RUNNER_TEMP/quest"
+        if: runner.os == 'macOS'
+        run: |
+          bun install --frozen-lockfile
+          bun run test test/gate.test.ts
 
   windows:
     name: check (${{ matrix.target }})
