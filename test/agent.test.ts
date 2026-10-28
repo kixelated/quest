@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	chmodSync,
@@ -25,8 +25,13 @@ import {
 } from "../src/cli/agent";
 import { type Output, main } from "../src/cli/main";
 import { tempDir } from "./fixture";
+import { systemdScopes } from "../src/cli/supervise";
+import { Worktrees } from "../src/cli/worktree";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+	vi.unstubAllEnvs();
+	vi.restoreAllMocks();
+});
 
 /** The fake agent CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
 const fakes = test.skipIf(process.platform === "win32");
@@ -89,6 +94,11 @@ if (process.env.FAKE_MODE === "late-thread") {
 }
 event({ type: "thread.started", thread_id: resume ? argv[argv.length - 2] : "thread-1" });
 event({ type: "turn.started" });
+if (process.env.FAKE_MODE === "crash") process.kill(process.pid, "SIGKILL");
+if (process.env.FAKE_MODE === "decision") {
+	event({ type: "item.completed", item: { type: "agent_message", text: "Which option?" } });
+	return;
+}
 if (process.env.FAKE_MODE === "exhausted") {
 	event({ type: "error", message: "insufficient_quota: You exceeded your current quota" });
 	event({ type: "turn.failed", error: { message: "insufficient_quota" } });
@@ -157,6 +167,46 @@ function setup(keys = "sk-literal op://vault/item/second"): Setup {
 						.map((line) => JSON.parse(line) as Record<string, unknown>)
 				: [],
 	};
+}
+
+/** Real registry and release/restore lifecycle; only the process-ownership backend and CLI are fake. */
+function managed() {
+	const s = setup();
+	const home = join(s.runtime, "worktrees");
+	vi.stubEnv("QUEST_WORKTREE_HOME", home);
+	vi.spyOn(systemdScopes, "check").mockImplementation(() => {});
+	vi.spyOn(systemdScopes, "run").mockImplementation(
+		(_unit, cwd, command, io) =>
+			new Promise((resolve, reject) => {
+				const child = spawn(command[0], command.slice(1), {
+					cwd,
+					env: io?.env,
+					stdio: ["pipe", "pipe", "pipe"],
+				});
+				io!.spawned(child);
+				child.once("error", reject);
+				child.once("close", (code) => resolve(code ?? 1));
+			}),
+	);
+	writeFileSync(join(s.worktree, ".gitignore"), "cache/\n.worktrees/\n");
+	writeFileSync(join(s.worktree, "source"), "original");
+	execFileSync("git", ["-C", s.worktree, "add", "."]);
+	execFileSync("git", [
+		"-C",
+		s.worktree,
+		"-c",
+		"user.name=Fixture",
+		"-c",
+		"user.email=fixture@localhost",
+		"commit",
+		"-qm",
+		"initial",
+	]);
+	const worktrees = new Worktrees(home);
+	worktrees.configure(100_000_000);
+	const record = worktrees.create(s.worktree, "agent", 10_000_000, "HEAD", ["cache"]);
+	s.worktree = record.path;
+	return { ...s, worktrees, record };
 }
 
 async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -242,7 +292,11 @@ fakes("start runs claude with every launch setting, one resolved key, and no key
 		execFileSync("git", ["-C", s.worktree, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim(),
 	);
 	// Only its own key: no session credentials, harness markers, other keys, or secret-manager token.
-	expect(call.env).toEqual({ ANTHROPIC_API_KEY: "resolved-second", CODEX_HOME: process.env.CODEX_HOME });
+	expect(call.env).toEqual({
+		ANTHROPIC_API_KEY: "resolved-second",
+		CODEX_HOME: process.env.CODEX_HOME,
+		QUEST_WORKTREE_HOME: process.env.QUEST_WORKTREE_HOME,
+	});
 	expect(result.stdout).toBe(`session ${session}\ncost 0.25\noutcome finished\n\ndone with <key 2>\n`);
 	expect(result.stdout + result.stderr).not.toContain("resolved-second");
 	// The op:// entry resolved in one invocation; the literal key never reached op.
@@ -312,7 +366,7 @@ fakes("a key with no credit exits 3 so the spawn resumes on the next key", async
 });
 
 fakes("codex runs with its key variable and reports its thread and last message", async () => {
-	const s = setup();
+	const s = managed();
 	const started = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
 	expect(started).toEqual({ code: 0, stdout: "session thread-1\noutcome finished\n\nfinal reply\n", stderr: "" });
 	expect(s.calls()[0].argv).toEqual([
@@ -328,7 +382,11 @@ fakes("codex runs with its key variable and reports its thread and last message"
 		'approval_policy="never"',
 		"-",
 	]);
-	expect(s.calls()[0].env).toEqual({ CODEX_API_KEY: "sk-literal", CODEX_HOME: process.env.CODEX_HOME });
+	expect(s.calls()[0].env).toEqual({
+		CODEX_API_KEY: "sk-literal",
+		CODEX_HOME: process.env.CODEX_HOME,
+		QUEST_WORKTREE_HOME: process.env.QUEST_WORKTREE_HOME,
+	});
 
 	const resumed = await quest("agent", "resume", ...launch("codex", "2"), s.worktree, "thread-1", "answer");
 	expect(resumed.code).toBe(0);
@@ -404,7 +462,7 @@ fakes("a finished turn whose reply mentions credit is not an exhausted key", asy
 });
 
 fakes("a retried codex stream error does not fail a completed turn", async () => {
-	const s = setup();
+	const s = managed();
 	vi.stubEnv("FAKE_MODE", "reconnect");
 	const result = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
 	expect(result).toEqual({ code: 0, stdout: "session thread-1\noutcome finished\n\nfinal reply\n", stderr: "" });
@@ -446,7 +504,7 @@ fakes("a launch refuses while stop --all is ending the spawn", async () => {
 });
 
 fakes("an agent whose record is lost is killed rather than left running untracked", async () => {
-	const s = setup();
+	const s = managed();
 	vi.stubEnv("FAKE_MODE", "late-thread");
 	const running = quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
 	await vi.waitFor(() => expect(s.calls()).toHaveLength(1));
@@ -531,4 +589,82 @@ fakes("missing keys, positions past the list, and unknown references are usage e
 	expect((await quest("agent", "start", ...launch("claude", "1"), s.worktree, "go")).code).toBe(2);
 	expect((await quest("agent", "stop")).code).toBe(2);
 	expect(s.calls()).toEqual([]);
+});
+
+for (const mode of ["finished", "decision", "crash"]) {
+	fakes(`Codex ${mode} releases scratch and resume restores the registered checkout`, async () => {
+		const s = managed();
+		vi.stubEnv("FAKE_MODE", mode);
+		mkdirSync(join(s.worktree, "cache"));
+		writeFileSync(join(s.worktree, "cache", "build"), "scratch");
+		writeFileSync(join(s.worktree, "source"), "local source survives");
+		writeFileSync(join(s.worktree, "untracked"), "new source survives");
+		const run = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+		expect(run.code).toBe(mode === "crash" ? 1 : 0);
+		if (mode === "decision") expect(run.stdout).toContain("Which option?");
+		expect(s.worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+		expect(existsSync(join(s.worktree, "cache"))).toBe(false);
+		expect(readFileSync(join(s.worktree, "source"), "utf8")).toBe("local source survives");
+		expect(readFileSync(join(s.worktree, "untracked"), "utf8")).toBe("new source survives");
+		const runScope = vi.mocked(systemdScopes.run).getMockImplementation()!;
+		vi.mocked(systemdScopes.run).mockImplementation((...args) => {
+			expect(s.worktrees.status().records[0]).toMatchObject({ phase: "active" });
+			expect(s.worktrees.status().records[0].runs).toHaveLength(1);
+			return runScope(...args);
+		});
+		vi.stubEnv("FAKE_MODE", "finished");
+		const resumed = await quest("agent", "resume", ...launch("codex", "1"), s.worktree, "thread-1", "answer");
+		expect(resumed.code).toBe(0);
+		expect(s.worktrees.status().records[0]).toMatchObject({ phase: "released", runs: [] });
+		expect(s.calls()[1].stdin).toBe("answer");
+	});
+}
+
+fakes("Codex refuses an unmanaged checkout before resolving credentials or writing key state", async () => {
+	const s = setup("op://vault/item/secret");
+	vi.stubEnv("QUEST_WORKTREE_HOME", join(s.runtime, "worktrees"));
+	vi.spyOn(systemdScopes, "check").mockImplementation(() => {});
+	const result = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+	expect(result.code).toBe(2);
+	expect(result.stderr).toContain("registered Quest checkout");
+	expect(s.calls()).toEqual([]);
+	expect(existsSync(s.opLog)).toBe(false);
+	expect(existsSync(join(s.runtime, "quest", "agent"))).toBe(false);
+});
+
+fakes("Codex refuses unsupported supervision before resolving credentials", async () => {
+	const s = managed();
+	vi.mocked(systemdScopes.check).mockImplementation(() => {
+		throw new Error("unsupported host");
+	});
+	const result = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("unsupported host");
+	expect(existsSync(s.opLog)).toBe(false);
+	expect(existsSync(join(s.runtime, "quest", "agent"))).toBe(false);
+	expect(s.calls()).toEqual([]);
+});
+
+fakes("Codex rejects a registered path whose Git ownership was replaced before credentials", async () => {
+	const s = managed();
+	rmSync(join(s.worktree, ".git"));
+	execFileSync("git", ["-C", s.worktree, "init", "-q"]);
+	const result = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("checkout ownership/lock changed");
+	expect(existsSync(s.opLog)).toBe(false);
+	expect(s.calls()).toEqual([]);
+});
+
+fakes("a Codex release failure is reported instead of a finished outcome", async () => {
+	const s = managed();
+	mkdirSync(join(s.worktree, "cache"));
+	writeFileSync(join(s.worktree, "cache", "tracked"), "keep");
+	execFileSync("git", ["-C", s.worktree, "add", "-f", "cache/tracked"]);
+	const result = await quest("agent", "start", ...launch("codex", "1"), s.worktree, "go");
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("release failed");
+	expect(result.stdout).not.toContain("outcome finished");
+	expect(existsSync(join(s.worktree, "cache", "tracked"))).toBe(true);
+	expect(s.worktrees.status().records[0]).toMatchObject({ phase: "active", runs: [] });
 });

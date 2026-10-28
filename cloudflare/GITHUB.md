@@ -18,7 +18,9 @@ and installation tokens stay inside the Worker; agents receive neither.
 | Commit statuses: read | Observe legacy CI status contexts                                          | Check reads only                                               |
 
 The manifest subscribes to push, issues, issue comments, pull requests, reviews,
-checks and statuses. GitHub also sends installation lifecycle and repository
+review threads, inline review comments, checks and statuses. Existing App registrations
+must enable `pull_request_review_thread` and `pull_request_review_comment` in their
+webhook subscriptions so resolving discussions and replying inline wake merge jobs. GitHub also sends installation lifecycle and repository
 selection events automatically. No organization, administration, workflow,
 checks-write, or user permissions are requested. These installation grants
 are necessarily broader than individual operations: minted tokens always name

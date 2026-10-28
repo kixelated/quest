@@ -46,4 +46,3 @@ every user would have to add it.
 ## Related
 
 - [Agent lifecycle integration](/quest/m0/worktree-agents.md) - reclaims the checkouts of finished and suspended Claude agents
-- [Codex checkouts](/quest/m0/codex-checkouts.md) - `quest agent` runs Codex inside `quest worktree run`, releasing its checkout on exit

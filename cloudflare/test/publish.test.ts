@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitHubService } from "../src/github/service";
 import { app } from "../src/index";
 import * as landing from "../src/jobs/landing";
-import { refusal, restart, validPath } from "../src/jobs/publish";
+import { refusal, restart, validPath, validateContinuation } from "../src/jobs/publish";
 import * as store from "../src/jobs/store";
 import { type Repo, type World, blob, commitOf, fakeGitHub, intercept as around } from "../dev/github";
 import { privateKey } from "./github-key";
@@ -1172,6 +1172,75 @@ describe("merge jobs", () => {
 		expect(pull()).toMatchObject({ merged: true, closed: true });
 	});
 
+	it("lands an UNKNOWN head after GitHub refuses auto-merge as clean, with one reread", async () => {
+		const id = await merging();
+		pull().merge = "UNKNOWN";
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (String(init?.body ?? "").includes("enablePullRequestAutoMerge(")) {
+				pull().merge = "CLEAN";
+				return Response.json({ errors: [{ message: "Pull request is in clean status" }] });
+			}
+			return github(input, init);
+		});
+		const reads = () =>
+			requests().filter((r) => r.path === "/graphql" && r.body.query.includes("timelineItems(")).length;
+		const before = reads();
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: true } });
+		expect(lands().map((l) => [l.mutation, l.variables.sha, l.variables.method])).toEqual([
+			["enablePullRequestAutoMerge", prHead, "SQUASH"],
+			["mergePullRequest", prHead, "SQUASH"],
+		]);
+		expect(reads() - before).toBe(2);
+	});
+
+	it("leaves an accepted UNKNOWN head on auto-merge", async () => {
+		const id = await merging();
+		pull().merge = "UNKNOWN";
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: { method: "squash" } });
+		expect(await response.json()).toEqual({ head: prHead, landed: { merged: false } });
+		expect(lands().map((l) => l.mutation)).toEqual(["enablePullRequestAutoMerge"]);
+	});
+
+	it.each(["Pull request is in clean status", "Auto merge is not allowed for this repository"])(
+		"preserves an UNKNOWN auto-merge refusal: %s",
+		async (reason) => {
+			const id = await merging();
+			pull().merge = "UNKNOWN";
+			refuseLanding(reason);
+			const reads = () =>
+				requests().filter((r) => r.path === "/graphql" && r.body.query.includes("timelineItems(")).length;
+			const before = reads();
+			const response = await publish({ job: id, attempt: 1, head: prHead, land: {} });
+			expect(response.status).toBe(202);
+			expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+				type: "publication",
+				blocked: `GitHub refused to land the pull request: ${reason}`,
+			});
+			expect(lands().map((l) => l.mutation)).toEqual(["enablePullRequestAutoMerge"]);
+			expect(reads() - before).toBe(reason.includes("clean status") ? 2 : 1);
+		},
+	);
+
+	it.each(["head", "hold", "gate"])("does not merge if its %s changes after a clean refusal", async (change) => {
+		const id = await merging();
+		pull().merge = "UNKNOWN";
+		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+			if (String(init?.body ?? "").includes("enablePullRequestAutoMerge(")) {
+				pull().merge = "CLEAN";
+				if (change === "head") project.branches[pull().branch] = "c".repeat(40);
+				if (change === "hold") pull().labels = [];
+				if (change === "gate") project.required = ["quest land"];
+				return Response.json({ errors: [{ message: "Pull request is in clean status" }] });
+			}
+			return github(input, init);
+		});
+		const response = await publish({ job: id, attempt: 1, head: prHead, land: {} });
+		expect(response.status).toBe(202);
+		expect(lands().map((l) => l.mutation)).toEqual(["enablePullRequestAutoMerge"]);
+		expect(pull().merged).not.toBe(true);
+	});
+
 	it("refuses only the workflow changes its merge makes to the pull request's head", async () => {
 		// The pull request and its base branch both changed a workflow.
 		const workflow = ".github/workflows/ci.yml";
@@ -1214,28 +1283,115 @@ describe("merge jobs", () => {
 		expect(project.branches["contributor/fix"]).toBe(head);
 	});
 
-	it("refuses a merge that would revert submodules it cannot publish", async () => {
+	it("carries the head's existing submodule pointer into a merge tree", async () => {
 		const id = await merging();
 		const main = "f".repeat(40);
+		const pointer = { path: "vendor/lib", sha: "7".repeat(40) };
+		const tree = "8".repeat(40);
+		project.trees[tree] = { base: "e".repeat(40), entries: [{ ...pointer, mode: "160000", type: "commit" }] };
+		project.commits[prHead]!.tree = tree;
 		project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
 		project.branches.main = main;
-		const merge = { job: id, attempt: 1, head: prHead, message: "Merge main", changes: [], merge: main };
-		const refused = await publish({ ...merge, session: "s", submodules: ["vendor/lib"], land: {} });
-		expect(refused.status).toBe(202);
-		expect((await job(id)).questions.at(-1)!.prompt).toEqual({
-			type: "publication",
-			refused: [
-				{
-					path: "vendor/lib",
-					reason: "kix cannot publish submodule changes, so this merge would revert the submodule to the merged-in commit's version",
-				},
-			],
+		const merged = await publish({
+			job: id,
+			attempt: 1,
+			head: prHead,
+			message: "Merge main",
+			changes: [],
+			merge: main,
+			submodules: [pointer],
 		});
-		expect(project.branches["contributor/fix"]).toBe(prHead);
-		expect(lands()).toEqual([]);
-		// Only a merge lists them.
-		const plain = await publish({ job: id, attempt: 1, head: prHead, submodules: ["vendor/lib"], land: {} });
-		expect(await plain.json()).toEqual({ error: "Only a merge lists the submodules it cannot publish" });
+		expect(merged.status).toBe(200);
+		const { head } = (await merged.json()) as { head: string };
+		expect(project.commits[head]!.parents).toEqual([prHead, main]);
+		expect(project.trees[project.commits[head]!.tree]!.entries).toEqual([
+			{ ...pointer, mode: "160000", type: "commit" },
+		]);
+		const plain = await publish({ job: id, attempt: 1, head, submodules: [pointer], land: {} });
+		expect(await plain.json()).toEqual({ error: "Only a merge carries existing submodule pointers" });
+	});
+
+	it.each([false, true])(
+		"rejects a runner submodule pointer not already on the head (existing=%s)",
+		async (existing) => {
+			const id = await merging();
+			const main = "f".repeat(40);
+			project.commits[main] = { parents: [revision], tree: "1".repeat(40), message: "main" };
+			project.branches.main = main;
+			if (existing) {
+				const tree = "8".repeat(40);
+				project.trees[tree] = {
+					base: "e".repeat(40),
+					entries: [{ path: "vendor/lib", sha: "6".repeat(40), mode: "160000", type: "commit" }],
+				};
+				project.commits[prHead]!.tree = tree;
+			}
+			const refused = await publish({
+				job: id,
+				attempt: 1,
+				head: prHead,
+				message: "Merge main",
+				changes: [],
+				merge: main,
+				submodules: [{ path: "vendor/lib", sha: "7".repeat(40) }],
+				session: "s",
+			});
+			expect(refused.status).toBe(202);
+			expect((await job(id)).questions.at(-1)!.prompt).toEqual({
+				type: "publication",
+				blocked: "A merge can only retain the head's existing submodule pointer: vendor/lib",
+			});
+			expect(project.branches["contributor/fix"]).toBe(prHead);
+			expect(lands()).toEqual([]);
+		},
+	);
+
+	it("continues only the offered live head after owner approval, without granting trust", async () => {
+		const id = await merging();
+		const head = "9".repeat(40);
+		project.commits[head] = { parents: [prHead], tree: "e".repeat(40), message: "external" };
+		project.branches["contributor/fix"] = head;
+		await db.prepare("UPDATE jobs SET trusted=1 WHERE id=?").bind(id).run();
+		expect((await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} })).status).toBe(202);
+		const waiting = await job(id);
+		const question = waiting.questions.at(-1)!;
+		const continuation = store.continuationOf(question.prompt, { continue: head })!;
+		project.branches["contributor/fix"] = revision;
+		await expect(validateContinuation(testEnv, user, upstream, waiting, question, continuation)).rejects.toThrow(
+			"changed again",
+		);
+		project.branches["contributor/fix"] = head;
+		await db
+			.prepare(
+				"INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('other-publisher','Other','other-publisher@example.test',1,0,0)",
+			)
+			.run();
+		await store.answer(db, id, question.id, "other-publisher", { continue: head }, 1);
+		expect(await job(id)).toMatchObject({ state: "waiting", head: prHead, trusted: 1 });
+		await validateContinuation(testEnv, user, upstream, await job(id), question, continuation);
+		await store.approve(db, id, question.id, user, 2);
+		expect(await job(id)).toMatchObject({
+			state: "queued",
+			head,
+			revision: head,
+			trusted: 0,
+			pending: null,
+			session: "s",
+			runner: machine.id,
+		});
+		expect(project.branches["contributor/fix"]).toBe(head);
+	});
+
+	it("fences a continuation when the stored branch version changes before the answer", async () => {
+		const id = await merging();
+		project.branches["contributor/fix"] = revision;
+		await publish({ job: id, attempt: 1, head: prHead, session: "s", land: {} });
+		const question = (await job(id)).questions.at(-1)!;
+		await db.prepare("UPDATE jobs SET head=? WHERE id=?").bind("9".repeat(40), id).run();
+		await expect(store.answer(db, id, question.id, user, { continue: revision }, 1)).rejects.toThrow(
+			"no longer open",
+		);
+		expect((await job(id)).questions.at(-1)!.answer).toBeNull();
 	});
 
 	it("pauses on a decision when its head moved, its hold is gone, or GitHub refuses the landing", async () => {
@@ -1259,7 +1415,7 @@ describe("merge jobs", () => {
 			expect(response.status).toBe(202);
 			const waiting = await job(id);
 			expect(waiting.state).toBe("waiting");
-			expect(waiting.questions.at(-1)!.prompt).toEqual({ type: "publication", blocked });
+			expect(waiting.questions.at(-1)!.prompt).toMatchObject({ type: "publication", blocked });
 			await store.cancel(db, id, user, 0);
 		}
 		// The landing GitHub refused used the first merge method the repository allows.
@@ -1311,6 +1467,7 @@ describe("job context", () => {
 			owner: "upstream",
 			name: "project",
 			number: 4,
+			after: null,
 		});
 		// Only the current attempt of a known runner reads it.
 		expect((await read(id, 2)).status).toBe(409);
@@ -1376,9 +1533,117 @@ describe("job context", () => {
 		expect(
 			requests()
 				.filter((r) => r.path === "/graphql")
-				.map((r) => r.body.variables.threads),
+				.map((r) => r.body.variables.after),
 		).toEqual([null, "100", "200"]);
 	});
+
+	it("reads every page of comments, reviews, nested replies, and mixed check contexts", async () => {
+		const pull = project.pulls[0]!;
+		pull.comments = Array.from({ length: 251 }, (_, i) => ({
+			author: i ? "reader" : null,
+			body: `comment ${i}`,
+			at,
+		}));
+		pull.reviews = Array.from({ length: 151 }, (_, i) => ({
+			author: "reviewer",
+			state: "COMMENTED",
+			body: `review ${i}`,
+		}));
+		pull.threads = Array.from({ length: 101 }, (_, i) => ({
+			path: `file${i}.ts`,
+			line: i,
+			resolved: i !== 100,
+			outdated: i === 100,
+			comments: Array.from({ length: i === 100 ? 151 : 1 }, (_, j) => ({
+				author: "reviewer",
+				body: `reply ${j}`,
+				at,
+			})),
+		}));
+		pull.runs = Array.from({ length: 251 }, (_, i) => ({
+			name: `check ${i}`,
+			conclusion: "SUCCESS",
+			url: `https://ci.test/${i}`,
+			context: i % 2 === 1,
+		}));
+		const id = await running({
+			workflow: "iterate",
+			target: "pulls/2",
+			revision: prHead,
+			branch: "contributor/fix",
+			trusted: false,
+		});
+		const response = await read(id, 1);
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as Record<string, any>;
+		expect(body.comments).toEqual(pull.comments.map((c) => c));
+		expect(body.reviews.map((r: { body: string }) => r.body)).toEqual(pull.reviews.map((r) => r.body));
+		expect(body.threads).toEqual([
+			{ path: "file100.ts", line: 100, outdated: true, comments: pull.threads[100]!.comments },
+		]);
+		expect(body.checks.runs).toEqual(
+			pull.runs.map((r) => ({
+				name: r.name,
+				state: r.conclusion,
+				url: r.url,
+				...(r.context && { description: null }),
+			})),
+		);
+	});
+
+	it.each(["comments", "reviews", "reviewThreads", "thread comments", "checks"])(
+		"refuses missing or cycling cursors in %s",
+		async (connection) => {
+			const pull = project.pulls[0]!;
+			pull.comments = Array.from({ length: 201 }, (_, i) => ({ author: "reader", body: String(i), at }));
+			pull.reviews = Array.from({ length: 101 }, () => ({ author: "reviewer", state: "COMMENTED" }));
+			pull.threads = Array.from({ length: 201 }, (_, i) => ({
+				path: String(i),
+				line: i,
+				comments: Array.from({ length: 101 }, () => ({ author: "reviewer", body: "reply", at })),
+			}));
+			pull.runs = Array.from({ length: 201 }, (_, i) => ({
+				name: String(i),
+				conclusion: "SUCCESS",
+				url: "https://ci.test",
+			}));
+			const id = await running({
+				workflow: "iterate",
+				target: "pulls/2",
+				revision: prHead,
+				branch: "contributor/fix",
+				trusted: false,
+			});
+			for (const invalid of ["missing", "cycle"] as const) {
+				let pages = 0;
+				vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+					const response = await github(input, init);
+					if (new URL(String(input)).pathname !== "/graphql") return response;
+					const data = (await response.json()) as Record<string, any>;
+					const item = data.data?.repository?.pullRequest;
+					const page =
+						connection === "thread comments"
+							? data.data?.node?.comments
+							: connection === "checks"
+								? (data.data?.repository?.object?.statusCheckRollup?.contexts ??
+									item?.commits?.nodes[0]?.commit?.statusCheckRollup?.contexts)
+								: item?.[connection];
+					if (page) {
+						pages++;
+						page.pageInfo = {
+							hasNextPage: true,
+							endCursor: invalid === "missing" ? null : pages % 2 ? "100" : "200",
+						};
+					}
+					return Response.json(data);
+				});
+				const response = await read(id, 1);
+				expect(response.status).toBe(403);
+				expect(await response.json()).toMatchObject({ error: expect.stringContaining("unavailable") });
+				expect(pages).toBeGreaterThan(0);
+			}
+		},
+	);
 
 	it("has nothing to read for a quest's job", async () => {
 		const id = await running();

@@ -65,7 +65,9 @@ export interface Job {
 }
 
 export type Push =
-	{ type: "assign"; job: Job; instructions: string | null } | { type: "cancel"; job: string; attempt: number };
+	| { type: "assign"; job: Job; instructions: string | null }
+	| { type: "cancel"; job: string; attempt: number }
+	| { type: "wake"; job: string; attempt: number };
 
 export interface AccountReport {
 	id: string;
@@ -96,9 +98,15 @@ const SHA = /^[0-9a-f]{40}$/;
 /** Read one hub push, or null for anything else (replies are matched elsewhere). */
 export function parsePush(value: unknown): Push | null {
 	const body = record(value);
-	if (body?.type === "cancel") {
-		if (typeof body.job !== "string" || !Number.isSafeInteger(body.attempt)) return null;
-		return { type: "cancel", job: body.job, attempt: body.attempt as number };
+	if (body?.type === "cancel" || body?.type === "wake") {
+		if (
+			typeof body.job !== "string" ||
+			!ID.test(body.job) ||
+			!Number.isSafeInteger(body.attempt) ||
+			(body.attempt as number) < 1
+		)
+			return null;
+		return { type: body.type, job: body.job, attempt: body.attempt as number };
 	}
 	if (body?.type !== "assign") return null;
 	const job = record(body.job);

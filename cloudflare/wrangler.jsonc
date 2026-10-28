@@ -40,8 +40,8 @@
 	// Raw agent output, one object per chunk under output/<job>/<attempt>/<seq>. A bucket lifecycle
 	// rule expires output/ after 30 days; see README.md.
 	"r2_buckets": [{ "binding": "OUTPUT", "bucket_name": "quest-output" }],
-	// Daily: delete expired output index rows and retry output cleanup after a disconnect.
-	"triggers": { "crons": ["17 4 * * *"] },
+	// Every five minutes: release ended merge holds. Daily: retain output and retry disconnect cleanup.
+	"triggers": { "crons": ["*/5 * * * *", "17 4 * * *"] },
 	// One RunnerHub per owner holds their runners' live connections and routes their jobs.
 	"durable_objects": { "bindings": [{ "name": "RUNNERS", "class_name": "RunnerHub" }] },
 	"exports": {
