@@ -1,7 +1,7 @@
 // `quest iterate`, `ready`, `merge`, and `release`: one session owns a PR at a
 // time. It holds one `quest:<state>` label, and the ID of the timeline event
 // that added the label is its hold token, since sessions often share an account.
-import { handedBack } from "../core";
+import { HOLD_PREFIX, MERGE_LABEL, handedBack, isHoldLabel, latestHold, heldToken, spentMergeHold } from "../core";
 import { repositoryPath } from "./claims";
 import {
 	array,
@@ -19,8 +19,6 @@ import { Refusal, ago } from "./start";
 export type State = "iterate" | "ready" | "merge";
 export type Method = "merge" | "squash" | "rebase";
 
-const PREFIX = "quest:";
-const MERGE = `${PREFIX}merge`;
 /** Merge states GitHub merges at once, where it refuses to enable auto-merge. */
 const IMMEDIATE = ["CLEAN", "HAS_HOOKS", "UNSTABLE"];
 
@@ -203,7 +201,7 @@ async function acquire(
 	token: string | undefined,
 	check?: (snapshot: Snapshot) => void,
 ): Promise<{ hold: Hold; snapshot: Snapshot }> {
-	const label = PREFIX + state;
+	const label = HOLD_PREFIX + state;
 	let snapshot = await labels.read();
 	if (snapshot.state !== "OPEN") {
 		throw new Refusal(`${snapshot.url} is ${snapshot.state.toLowerCase()}; a push now would bring its branch back`);
@@ -222,12 +220,12 @@ async function acquire(
 
 	await labels.add(label);
 	const after = await labels.read();
-	const ours = latest(after, label);
+	const ours = latestHold(after.events, label);
 	if (!ours) throw new Error(`added ${label} to ${after.url}, but its timeline does not show it`);
 	// Another session took the PR at the same time: the first label added keeps it.
 	const rival = after.labels.find((name) => {
 		if (name === label || name === mine) return false;
-		const added = latest(after, name);
+		const added = latestHold(after.events, name);
 		return !added || after.events.indexOf(added) < after.events.indexOf(ours);
 	});
 	if (rival !== undefined) {
@@ -247,7 +245,7 @@ function held(snapshot: Snapshot, token: string): string {
 			`${event.label} is off ${snapshot.url} since ${token} added it, so this session no longer holds it`,
 		);
 	}
-	if (latest(snapshot, event.label) !== event) {
+	if (heldToken(snapshot, event.label) !== token) {
 		throw new Refusal(
 			`${event.label} was added to ${snapshot.url} again after ${token}, so another session holds it`,
 		);
@@ -261,17 +259,9 @@ function unknown(snapshot: Snapshot, token: string): string {
 
 /** Who holds `label`, for a person deciding whether to wait or take over a stale hold. */
 function holder(snapshot: Snapshot, label: string, now: number): string {
-	const added = latest(snapshot, label);
+	const added = latestHold(snapshot.events, label);
 	const since = added ? `, added ${ago(now, added.time)} as token ${added.id}` : "";
 	return `${snapshot.url} is held by ${label}${since}; if it looks stale, ask the user before releasing it`;
-}
-
-/** The latest event that added `label`. */
-function latest(snapshot: Snapshot, label: string): Event | undefined {
-	for (let index = snapshot.events.length - 1; index >= 0; index--) {
-		if (snapshot.events[index].label === label) return snapshot.events[index];
-	}
-	return undefined;
 }
 
 /** `body` without its `## Decisions needed` sections, each running to the next heading of level 1 or 2. */
@@ -326,7 +316,7 @@ class Labels {
 			landing: row.autoMergeRequest !== null || row.mergeQueueEntry !== null,
 			labels: array(object(row.labels).nodes)
 				.map((label) => string(label.name))
-				.filter((name) => name.startsWith(PREFIX)),
+				.filter(isHoldLabel),
 			events: array(object(row.timelineItems).nodes).map(event),
 		};
 	}
@@ -348,15 +338,12 @@ class Labels {
 	 * `quest:merge` label is spent once a landing started after it was added.
 	 */
 	async dequeued(snapshot: Snapshot): Promise<Snapshot> {
-		const added = latest(snapshot, MERGE);
-		if (!added || snapshot.landing || !snapshot.labels.includes(MERGE)) return snapshot;
-		const landed = snapshot.events.slice(snapshot.events.indexOf(added) + 1).some((later) => later.label === null);
-		if (!landed) return snapshot;
-		await this.remove(MERGE);
+		if (!spentMergeHold(snapshot)) return snapshot;
+		await this.remove(MERGE_LABEL);
 		this.deps.warn(
-			`${snapshot.url} left the merge queue unmerged, so ${MERGE} was removed; quest status shows why under landing-stopped`,
+			`${snapshot.url} left the merge queue unmerged, so ${MERGE_LABEL} was removed; quest status shows why under landing-stopped`,
 		);
-		return { ...snapshot, labels: snapshot.labels.filter((name) => name !== MERGE) };
+		return { ...snapshot, labels: snapshot.labels.filter((name) => name !== MERGE_LABEL) };
 	}
 }
 
