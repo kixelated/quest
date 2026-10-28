@@ -274,6 +274,17 @@ command registers the driver in a fresh clone or worktree whose
 falls back to `git merge-file`, and GitHub's merges ignore drivers, so a PR
 shows as conflicting until a local merge from its base is pushed.
 
+The registered driver passes Git's conflict marker length and revision labels
+to `quest resolve`, including the ancestor label for `diff3` conflicts. A direct
+invocation defaults to seven-character markers and `ours`/`base`/`theirs`;
+`--marker-size`, `--ours-label`, `--base-label`, and `--theirs-label` override
+them. Labels must fit on one line. The fallback carries the same Git metadata
+when `quest` is missing or too old to accept those options.
+
+Existing configured drivers are preserved. For a checkout still using the old
+quest-generated command, clear its local `merge.quest.driver` entry and run any
+quest command to register the current one.
+
 ## Wait for pull request activity
 
 `quest wait` blocks until a GitHub PR has a review, comment, review-thread
@@ -753,6 +764,18 @@ with a private `HOME`.
 On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
 pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
 AppArmor allows them only for programs with a profile granting `userns`.
+Merge jobs retain existing PR submodule pointers when merging the base. Their
+`wait` tool wakes on GitHub webhook hints or reconnects and rereads the PR;
+a hint never approves work. If someone moves the head, the maintainer can
+continue from that exact head through the existing approval flow. The same
+runner checkpoints and merges its unpublished source locally; conflicts pause
+for a decision. Stale local changes are preserved in the runner's bare clone
+under `refs/kix/checkpoints/<job>/`, and are not reapplied after another runner
+publishes. Existing failover still restarts from the latest published branch
+checkpoint. Initialized submodules leave their checkout intact until their
+local commits and changes can be preserved explicitly; this path never deletes
+them to force continuation.
+
 The agent reports through kix tools: `checkpoint` summaries publish
 work in progress to the job's branch, `ask` pauses the job on a decision for you,
 and `deliver` publishes the result and its pull request, listing any suggested

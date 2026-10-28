@@ -228,11 +228,17 @@ function AgentForm(props: { item: Item; prompt: Prompt }) {
 
 /** A publication decision's prompt. kix wrote it, but its paths came from the runner. */
 function publication(question: QuestionView) {
-	const prompt = question.prompt as { refused?: unknown; blocked?: unknown; restart?: unknown } | null;
+	const prompt = question.prompt as {
+		refused?: unknown;
+		blocked?: unknown;
+		restart?: unknown;
+		continuation?: { head?: unknown };
+	} | null;
 	return {
 		refused: Array.isArray(prompt?.refused) ? (prompt.refused as { path: string; reason: string }[]) : [],
 		blocked: typeof prompt?.blocked === "string" ? prompt.blocked : null,
 		restart: prompt?.restart === true,
+		continuation: typeof prompt?.continuation?.head === "string" ? prompt.continuation.head : null,
 	};
 }
 
@@ -242,7 +248,7 @@ function publication(question: QuestionView) {
  */
 function PublicationForm(props: { item: Item }) {
 	const { item } = props;
-	const { refused, blocked, restart } = publication(item.question!);
+	const { refused, blocked, restart, continuation } = publication(item.question!);
 	return (
 		<form method="post" action={`${jobsURL(item)}/${item.job!.id}/answer`} class="decision-form">
 			<input type="hidden" name="question" value={item.question!.id} />
@@ -264,6 +270,19 @@ function PublicationForm(props: { item: Item }) {
 				<textarea id="publication-text" name="text" rows={3} maxlength={PUBLICATION_REPLY} required />
 			</fieldset>
 			<button class="button primary">Send to the agent</button>
+			{continuation && (
+				<>
+					<input type="hidden" name="head" value={continuation} />
+					<p>
+						Continue from <code>{continuation}</code>. On the same runner, unpublished work is preserved and
+						merged with this head; conflicts need another decision. A replacement runner starts from the
+						latest published checkpoint.
+					</p>
+					<button class="button quiet" name="continue" value="1" formnovalidate>
+						Continue from this head
+					</button>
+				</>
+			)}
 			{restart && (
 				<>
 					<p class="note-small muted">
