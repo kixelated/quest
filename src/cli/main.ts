@@ -729,6 +729,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Run one headless agent turn per call in the foreground, billed to one of the keys in QUEST_API_KEYS, " +
 				"so a spawn launches every agent with one legible command.\n\n" +
+				"Codex requires a registered Quest checkout and Linux worktree supervision; these are checked before resolving keys. " +
+				"It uses the quest worktree run lifecycle: restore before each turn and release declared scratch after exit. Claude runs directly in the given checkout.\n\n" +
 				"QUEST_API_KEYS lists keys separated by whitespace; --key names one by its 1-based position. An " +
 				"entry may be a 1Password op:// reference: the first launch resolves every reference in one " +
 				"`op inject` and keeps the keys in a user-only store under $XDG_RUNTIME_DIR (or the temporary " +
