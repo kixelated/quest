@@ -311,17 +311,15 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	}
 });
 
-fakes("--strong picks each reviewer's stronger model, which --model cannot also name", async () => {
+fakes("--deep picks each reviewer's stronger model, which --model cannot also name", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ findings: [] }));
-	expect((await quest("--root", s.repo, "review", "--strong")).stdout).toContain(
-		"reviewer codex gpt-6-astra medium\n",
-	);
-	const claude = await quest("--root", s.repo, "review", "--harness", "claude", "--strong", "--new");
+	expect((await quest("--root", s.repo, "review", "--deep")).stdout).toContain("reviewer codex gpt-6-astra medium\n");
+	const claude = await quest("--root", s.repo, "review", "--harness", "claude", "--deep", "--new");
 	expect(claude.stdout).toContain("reviewer claude claude-fable-5-1 medium\n");
 	expect(s.calls().at(-1)!.argv).toContain("claude-fable-5-1");
 
-	const both = await quest("--root", s.repo, "review", "--strong", "--model", "opus");
+	const both = await quest("--root", s.repo, "review", "--deep", "--model", "opus");
 	expect(both.code).toBe(2);
 	expect(both.stderr).toContain("cannot be used with");
 });

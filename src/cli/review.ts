@@ -20,20 +20,20 @@ export class ReviewInputError extends Error {}
 export const SEVERITIES = ["high", "medium", "low"] as const;
 
 /**
- * Each reviewer's model and effort: `default` for routine work, and `strong`
+ * Each reviewer's model and effort: `default` for routine work, and `deep`
  * for a high-stakes change such as security, a wire format or public API, or a
  * risk of data loss. `--model` and `--effort` override either.
  */
 export const MODELS = {
 	claude: {
 		default: { model: "claude-opus-5-5", effort: "medium" },
-		strong: { model: "claude-fable-5-1", effort: "medium" },
+		deep: { model: "claude-fable-5-1", effort: "medium" },
 	},
 	codex: {
 		default: { model: "gpt-6.1-sol", effort: "medium" },
-		strong: { model: "gpt-6-astra", effort: "medium" },
+		deep: { model: "gpt-6-astra", effort: "medium" },
 	},
-} as const satisfies Record<HarnessName, Record<"default" | "strong", { model: string; effort: string }>>;
+} as const satisfies Record<HarnessName, Record<"default" | "deep", { model: string; effort: string }>>;
 
 export interface Finding {
 	/** Repository-relative path. */
@@ -115,8 +115,8 @@ export interface ReviewOptions {
 	base?: string;
 	/** The reviewer; defaults to the harness this command is not running under. */
 	harness?: HarnessName;
-	/** Review with the reviewer's `strong` tier in `MODELS`. */
-	strong?: boolean;
+	/** Review with the reviewer's `deep` tier in `MODELS`. */
+	deep?: boolean;
 	model?: string;
 	effort?: string;
 	/** The author's fixes and refutations of the last round's findings. */
@@ -664,7 +664,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const schemaFile = join(dir, "schema.json");
 	save(schemaFile, SCHEMA);
 	const files = baseInstructions(root, baseSha, changed);
-	const tier = MODELS[harness][options.strong ? "strong" : "default"];
+	const tier = MODELS[harness][options.deep ? "deep" : "default"];
 	const context: Context = {
 		base: baseRef,
 		instructions: instructionsPrompt(baseSha, files),
