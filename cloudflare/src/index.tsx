@@ -18,6 +18,7 @@ import * as inbox from "./inbox/model";
 import { AgentCards, InboxPage } from "./inbox/page";
 import { purge, retain } from "./jobs/output";
 import { INBOX_HEADER } from "./jobs/hub";
+import * as landing from "./jobs/landing";
 import { BootstrapRequired, fromForm, hub, inboxURL, jobs, nextURL, resume, stop } from "./jobs/routes";
 import { JobError, active, listActivityJobs, listRunners, moveAccount, registerRunner } from "./jobs/store";
 import { Layout, type Page, type User } from "./layout";
@@ -667,8 +668,9 @@ app.onError((error, c) => {
 });
 export default {
 	fetch: app.fetch,
-	async scheduled(_controller, env) {
-		await retain(env, Date.now());
+	async scheduled(controller, env) {
+		await landing.sweep(env);
+		if (controller.cron !== landing.SWEEP_CRON) await retain(env, Date.now());
 	},
 } satisfies ExportedHandler<Env>;
 export { RunnerHub } from "./jobs/hub";

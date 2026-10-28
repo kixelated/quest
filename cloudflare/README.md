@@ -94,7 +94,7 @@ observations read it. `iterate` and `merge` jobs are untrusted and route
 only to Linux runners that declare VM builds. A `merge` job runs the merge
 skill's loop on an open, non-draft pull request and lands it; it holds the PR
 with the `quest:merge` label that local `quest merge` sessions share
-(`src/jobs/landing.ts`), as described in [GITHUB.md](GITHUB.md#merge-jobs). Without a `flake.nix`, the route
+(`src/jobs/landing.ts`), as described in [GITHUB.md](GITHUB.md#merge-jobs). A five-minute scheduled sweep retries ended jobs’ hold releases even when a lifecycle callback or GitHub read was missed; a live job, a replacement hold, or an active landing keeps its label. Without a `flake.nix`, the route
 offers a `bootstrap` job instead. A paused project gets no new jobs and none are
 claimed; resuming it dispatches the jobs that waited. Disconnecting a project
 deletes its jobs and their output and tells their runners to stop. Duplicate
