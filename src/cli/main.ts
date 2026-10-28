@@ -18,7 +18,16 @@ import {
 	renderBlocker,
 	unblocked,
 } from "../core";
-import { AgentInputError, HARNESSES, type Launch, processDependencies, runAgent, stopAgent, stopAll } from "./agent";
+import {
+	AgentInputError,
+	HARNESSES,
+	type HarnessName,
+	type Launch,
+	processDependencies,
+	runAgent,
+	stopAgent,
+	stopAll,
+} from "./agent";
 import {
 	DEFAULT_URL,
 	RunnerInputError,
@@ -37,6 +46,7 @@ import { LAND_CHECK, checkQueue, parsePlan, parseResult, pushQueue, resolveQueue
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { type ResolveOptions, resolveFile } from "./resolve";
+import { MODELS, ReviewInputError, processDependencies as reviewDependencies, review, roundLines } from "./review";
 import { heal, init, uninstall } from "./setup";
 import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { GUIDE, SKILLS, skill } from "./skills";
@@ -816,6 +826,75 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				agentFailure,
 			);
 		});
+
+	const models = (tier: "default" | "deep") =>
+		HARNESSES.map((h) => `${MODELS[h][tier].model} at ${MODELS[h][tier].effort} effort for ${h}`).join(" and ");
+	program
+		.command("review")
+		.summary("Have the other vendor's model review the committed branch, read-only")
+		.description(
+			"Review the checkout's committed branch against its base with the other harness: Codex when run from " +
+				"Claude Code, Claude Code when run from Codex, detected from the variables each sets. --harness names " +
+				"the reviewer instead; there is no other fallback. The reviewer uses its CLI's own login, " +
+				`with ${models("default")}. --deep, for a high-stakes change, picks ${models("deep")}. ` +
+				"--model and --effort override either.\n\n" +
+				"The first round runs the reviewer's own review (`codex exec review --base`, or Claude Code's " +
+				"`/code-review <effort> <base>...HEAD`), then resumes that session for one turn that applies the base's " +
+				"REVIEW.md, if any, and reports the findings in one JSON schema. Later rounds on the branch resume the " +
+				"same session with the new head and --responses, the author's fixes and refutations of the last " +
+				"round's findings, required while that round reported any. A resumed session keeps the instructions it " +
+				"started with, so when the applicable AGENTS.md or CLAUDE.md files change, the round starts a new " +
+				"session that still weighs --responses. --new starts a new session. The session is kept per branch in the clone's common Git directory, so any worktree of the clone resumes it.\n\n" +
+				"The reviewer is read-only: Codex in its read-only sandbox without execpolicy rules or user config, Claude Code with " +
+				"no settings files, only read tools, and the Bash commands it judges read-only. It follows the base's AGENTS.md and CLAUDE.md, from the root and " +
+				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
+				"reviewer. The base is fetched first, since the sandbox has no network.\n\n" +
+				"Prints the reviewer, model, and effort, session, round, base, head, a usage line per turn (input tokens, the " +
+				"part read from the prompt cache, and output), the finding count, then each finding. --json prints " +
+				"the same as one object. Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
+				"or a checkout or CLI that cannot be reviewed, and 1 for other failures.",
+		)
+		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
+		.addOption(new Option("--harness <name>", "Reviewer to run instead of the other harness").choices(HARNESSES))
+		.option("--deep", "Review with the stronger model, for a high-stakes change")
+		.addOption(new Option("--model <model>", "Model the reviewer runs instead").conflicts("deep"))
+		.option("--effort <level>", "Reasoning effort the reviewer runs at instead")
+		.option("--responses <file>", "The author's responses to the last round's findings; - reads stdin")
+		.option("--new", "Start a new review session instead of resuming the branch's")
+		.option("--json", "Print one JSON object")
+		.action(
+			(options: {
+				base?: string;
+				harness?: HarnessName;
+				deep?: boolean;
+				model?: string;
+				effort?: string;
+				responses?: string;
+				new?: boolean;
+				json?: boolean;
+			}) => {
+				const responses =
+					options.responses === undefined
+						? undefined
+						: readFileSync(options.responses === "-" ? 0 : options.responses, "utf8");
+				const run = review({ ...options, root: root(), responses, fresh: options.new }, reviewDependencies());
+				pending = run.then(
+					(round) => {
+						if (options.json) print(JSON.stringify(round));
+						else for (const line of roundLines(round)) print(line);
+						return 0;
+					},
+					(error: unknown) => {
+						if (error instanceof ReviewInputError) {
+							out.stderr(`error: ${error.message}\n`);
+							return 2;
+						}
+						warn(error instanceof Error ? error.message : String(error));
+						return 1;
+					},
+				);
+			},
+		);
 
 	const runnerIO = () => ({ stdout: out.stdout, stderr: out.stderr, env: process.env });
 	const runnerFailure = (error: unknown) => {

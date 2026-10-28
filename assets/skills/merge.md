@@ -5,16 +5,16 @@ description: Merge a quest once reviews and CI pass.
 Before you begin, run `quest guide` and read its output completely.
 
 Parse the arguments to determine the PR number, otherwise resolve it from the current context/branch.
-If a draft, stop and offer `/quest-ready` instead.
+If a draft, stop and offer `/quest-review` instead.
 Take the PR with `quest merge <pr>` before acting, passing a token you already hold from another state to swap it, and keep the hold token it prints; `quest merge --help` explains holds.
 If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
 Hand it back with `quest release <pr> <token>` whenever you stop before it lands, including to ask.
 
 Read the PR's head, checks, merge state, reviews by head, and unresolved threads with `quest status <pr>`, including after each `quest wait` wakes, instead of chaining `gh` queries.
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
-Address any review findings, fixing those you agree with and leaving a comment on any you disagree with.
-Keep fixing automated review findings, following the guide's Reviews section for the shared design checkpoint across rounds.
-Never request a review, including by toggling a ready PR to draft and back.
+Address the review findings already posted on the head, fixing those you agree with and leaving a comment on any you disagree with.
+Never wait for or request a review, including an `@codex review` comment or toggling a ready PR to draft and back.
+Before pushing any change, review the new head locally, following the guide's Reviews section, including its design checkpoint across rounds.
 
 Abort the merge if there is a significant decision to be made.
 Interactively prompt the user with your recommendation and any alternatives.
@@ -22,18 +22,16 @@ Suggested follow-ups do not hold the merge; once the PR merges, run `/quest-plan
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead.
 
-When waiting for CI or a required review, run
+When waiting for CI, run
 `quest wait <pr> --timeout 3300` as one blocking command instead of polling
 GitHub in a loop; it also reports the head's required checks as `checks:failed`
 or `checks:passed`, so no separate check watcher is needed.
-Inspect the events and decide whether they satisfy the wait;
-the command does not decide whose review counts. If activity is irrelevant
-(including bot notices), call it again with `--since` set to the last field of
-its last line. Exit 3 means the deadline passed with no activity.
-If waiting for a required review of a changed head, stop and ask the user, as the guide's Reviews section requires; do not start another wait for that review.
-For other waits, re-run with `--since` set to the printed cursor, so nothing during the first wait is missed.
+Inspect the events and decide whether they satisfy the wait. If activity is
+irrelevant (including bot notices and reviews), call it again with `--since`
+set to the last field of its last line. Exit 3 means the deadline passed with
+no activity; re-run with `--since` set to the printed cursor, so nothing during
+the first wait is missed.
 Other failures must be reported rather than treated as activity.
-Do not wait for optional reviews.
 Run each wait so its exit wakes you, such as a background task that notifies on
 exit, and end your turn until then. Never poll its output or rerun it under a
 foreground time limit; each wake rereads your whole context. The hour bound
@@ -48,6 +46,7 @@ Run a `quest` the PR cannot modify, such as an installed release or a build from
 A stale local base can predate the quest and skip the check.
 On a finding, fix the branch: delete the finished quest with `quest rm`, or rewrite it to the remainder the PR body names.
 Then push, re-check, and continue; ask the user only when what remains is unclear.
+Land only a head named by a `## Review` record the guide counts, or one the guide's review exemptions cover.
 Leave a summary of the changes and decisions made, then land the head you checked with `quest merge <pr> <token> --land <full 40-character head SHA>`.
 It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 On a base that requires the `quest land` check, it queues the PR for `quest land`, whose chain merges and tests against the current base; do not merge the base or rerun checks per PR just to queue it.
