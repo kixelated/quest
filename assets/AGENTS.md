@@ -81,7 +81,8 @@ Do not advance the interview or act on an unanswered choice.
 Already authorized background work may continue while the foreground waits.
 
 A sub-agent's brief carries the quest or PR, the user's picks, and the scope; it leaves repository rules to that repository's own instructions instead of restating them.
-A background agent reports any decision needing user input, with context and a recommendation, to the foreground agent instead of prompting the user itself.
+A background agent records any decision needing user input under `## Decisions needed` in its PR, with context and a recommendation, reports it to the foreground agent instead of prompting the user itself, and terminates.
+The foreground agent asks the user, records the answers in the PR description, and starts a fresh agent on them, such as `/quest-iterate`, rather than resuming the one that asked.
 Honor explicit instructions to proceed unattended within their scope; do not ask a question and then silently choose its answer.
 When recorded decisions conflict, such as a newer PR comment or quest Plan against an older brief, follow the newest and note the change in the PR body; ask only when it is unclear which is newer.
 A decision about an open PR never authorizes closing it. Confirm a close as its own question, and comment on the PR before or with it.
@@ -171,11 +172,9 @@ The PR body's `## Review` section records the latest round: the reviewer harness
 Rewrite it after each round.
 A review counts for the head whose SHA it names.
 
-Run checks and the required review locally before the final publication.
-Publish the completed attempt, report the PR and its state, then terminate the agent.
-Never wait for GitHub CI, online reviews, or merge-queue activity.
-A separate process owns GitHub monitoring and can dispatch a new local attempt when work is needed.
-At the start of that attempt, address findings already posted; review any fixes locally before publishing again.
+Run checks and the required review locally before the final publication, then report the PR and its state.
+Never wait for GitHub CI, online reviews, or merge-queue activity: nothing local watches a PR after publication.
+A later invocation addresses the findings already posted when it starts, and reviews its fixes locally before publishing again.
 
 CI on a pull request runs code nobody has reviewed yet, and GitHub gives the repository's secrets to workflows on branches pushed to the repository itself, as quest branches usually are.
 Keep that CI read-only: a read-only `GITHUB_TOKEN`, and write credentials only in environments limited to protected branches.
@@ -222,6 +221,15 @@ Run expensive builds and test suites through `quest gate <command>`, which waits
 Run no more sub-agents at once than the harness allows; queue the rest and start one as each reports.
 
 Wait for local checks and reviews with a blocking command that ends on its terminal state.
-GitHub waits, polling loops, and background watchers do not belong to the coding agent.
+Never wait or poll for GitHub activity, and start no background watchers.
 A sub-agent ends its turn only with a final result or a question, never with background work still running.
+
+A foreground session coordinates; its background sub-agents are workers.
+Every resume rereads a worker's whole context, which its prompt cache keeps for only 5 idle minutes, so a worker does one burst of work.
+Each of its tool calls returns within 4 minutes, such as targeted tests rather than the full suite; it then commits, pushes, reports, and terminates.
+The coordinator runs the long waits in the worker's checkout: the full checks, `quest review` rounds, and gated commands.
+Its prompt cache lasts an hour, so it bounds each wait under an hour.
+It starts a fresh worker for the next burst, such as `/quest-iterate` with a round's findings, rather than resuming the last one.
+A worker doing a coordinator's fixes works under the coordinator's hold and takes none of its own.
+A foreground session working alone does both.
 Back out when progress stalls rather than burn tokens.

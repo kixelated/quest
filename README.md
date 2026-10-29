@@ -288,8 +288,8 @@ quest command to register the current one.
 ## Publish and hand off
 
 Agents complete implementation, checks, and reviews locally, publish the result,
-and terminate. GitHub CI, online reviews, and merge-queue activity are monitored
-by a separate process, which can dispatch another local attempt when needed.
+and report. Nothing waits on GitHub CI, online reviews, or merge-queue activity:
+a later invocation reads the PR's state with `quest status` and acts on it.
 Quest exposes a one-shot PR snapshot and queue submission, with no GitHub wait
 command or runner wait tool. Local checks and reviews still run to completion.
 

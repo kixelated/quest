@@ -15,17 +15,16 @@ Fix any mechanical issues with the PR, such as merge conflicts and failing CI ch
 Address the review findings already posted on the head, fixing those you agree with and leaving a comment on any you disagree with.
 Never wait for or request a review, including an `@codex review` comment or toggling a ready PR to draft and back.
 Before pushing any change, review the new head locally, following the guide's Reviews section, including its design checkpoint across rounds.
+With background workers, give the fixes to a fresh worker, and run the checks, review rounds, and landing yourself, as the guide's Workspace section describes.
 
 Abort the merge if there is a significant decision to be made.
 Interactively prompt the user with your recommendation and any alternatives.
-Suggested follow-ups do not hold the merge; include them in the handoff for a later `/quest-plan` invocation.
+Suggested follow-ups do not hold the merge; report them with the result.
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead.
 
-Complete the local fixes, checks, and review before publishing.
 Do not wait for GitHub checks, online reviews, or merge-queue activity.
-Submit the authorized landing to the queue when possible. If submission is refused pending a GitHub event, report the PR, head, pending condition, and the user's authorizing decision, release the hold, and terminate.
-A later invocation or separate monitor can start a new attempt under that decision and acquire a new hold with `quest merge <pr>`. This workflow does not start a monitor or promise an automatic retry.
+If landing is refused pending a GitHub event, report the PR, its head, and the pending condition, and release the hold; a later `/quest-merge` lands it under the same pick.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Before landing it, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
@@ -39,8 +38,8 @@ It makes a merge commit; add `--squash` or `--rebase` when the repository's root
 On a base that requires the `quest land` check, it queues the PR for `quest land`, whose chain merges and tests against the current base; do not merge the base or rerun checks per PR just to queue it.
 On an ungated base, the command refuses a head that does not contain the current base. Merge the base locally (never rebase), rerun the repository's checks, push, and land the new head after satisfying the guide's review rule for those changes.
 The `quest:merge` label stays on while the PR is queued or auto-merging.
-Report once it is landing, then terminate the agent; the queue re-checks it without you.
+Report once it is landing; do not wait for it to merge, since the queue re-checks it without you.
 A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
-After `merge_conflict`, `failed_checks`, or `checks_pending`, the user's existing merge decision authorizes a later invocation or monitor to dispatch `/quest-merge` again without asking, once actionable. That attempt takes a new hold with `quest merge <pr>`; a spent label/token need not survive the ejection. The published agent has already terminated and does not observe or report that later event.
+After `merge_conflict`, `failed_checks`, or `checks_pending`, the pick still holds: a later `/quest-merge` takes a new hold, fixes it, and lands it again without asking.
 Any other reason, such as a person removing it, is the user's call, so report why instead of landing it again.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.

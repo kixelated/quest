@@ -16,6 +16,7 @@ Commit everything, then run the repository's local checks, unless the guide's Re
 
 Review the committed branch with `quest review`, as the guide's Reviews section describes; `quest review --help` explains the round.
 Run it in the foreground; a round takes minutes.
+With background workers, run the checks and rounds yourself and give each round's findings to a fresh `/quest-iterate` worker, as the guide's Workspace section describes.
 Pass `--deep` for a high-stakes change, such as security, a wire format or public API, or a risk of data loss; never for routine work.
 Fix each finding you agree with, or refute it with evidence the reviewer can check.
 Commit the fixes, rerun the checks, and run the next round with `--responses`, one response per finding, written in the checkout's `.tmp/`.
@@ -28,13 +29,13 @@ Push, then flip the PR to "Ready for Review" with `quest ready <pr> <token> --do
 For your own draft, mark it ready for review yourself, then take it with `quest ready <pr>`.
 Do not wait for online reviewers.
 
-Report the local review result, the published PR, and your recommended next action, then terminate:
+Summarize the review and CI from `quest status <pr>`, then interactively prompt the user with your recommendation:
 - `/quest-merge`: If the review left no significant issues.
 - `/quest-iterate`: If it raised significant issues or decisions.
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Settle any decision needed to publish before the final push. The final report recommends a next action; it does not start another workflow after publication.
+A background agent that cannot prompt lists these in its report instead.
 
-Hand the PR back with `quest release <pr> <token>` before you report. Never wait for CI or online reviews after publishing.
-A later invocation can take the PR for `/quest-iterate` or `/quest-merge`; this coding attempt ends at its publication handoff.
+Hand the PR back with `quest release <pr> <token>` before you ask or report.
+To go straight on to `/quest-iterate` or `/quest-merge` in this session, pass the token to its command instead, which swaps the label.

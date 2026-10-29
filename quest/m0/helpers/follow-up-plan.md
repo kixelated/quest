@@ -2,21 +2,12 @@
 
 ## Goal
 
-One guide rule defines how callers hand off a published delegate's suggested
-follow-ups for a separate `/quest-plan` invocation. Consolidate the copies in
-`complete.md` and `spawn.md` while preserving each skill's particular workflow.
-Published coding agents terminate rather than starting another interview.
+A caller that receives a merged PR's suggested follow-ups from a sub-agent,
+such as a background `/quest-merge`, runs `/quest-plan` on them without
+asking first, and its interview lets the user drop any. One rule in the
+guide says this, replacing the copies in `complete.md` and `spawn.md`.
 
 ## Plan
-
-Decided 2026-10-29 (user, publish-and-terminate workflow): an agent finishes
-locally, publishes, reports the handoff, and terminates. This supersedes the
-post-publication automatic interview trigger below. Follow-up planning can run
-before a caller's final publication or in a separate invocation, never by
-keeping the published coding agent alive. The remaining work is to consolidate
-that handoff rule in the guide.
-
-Historical decision, superseded only as to the post-publication trigger:
 
 Decided 2026-10-28 (user, /quest-plan of the follow-ups from [kixelated/quest#271](https://github.com/kixelated/quest/pull/271)).
 

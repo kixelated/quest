@@ -7,7 +7,7 @@ auto-merge never merges a head nobody landed. On a repository that allows only
 squash it squashes without `--squash`. It works from outside a checkout when
 given a PR URL. A direct merge releases its `quest:merge` label. When
 auto-merge is left on for a head other than the one landed, `quest status`
-says so for a separate monitor or a new local attempt.
+says so.
 
 ## Plan
 
@@ -32,6 +32,6 @@ Decided 2026-10-28 (user, /quest-plan of the follow-ups from a 25-PR /quest-comp
   - The merge skill says to disable auto-merge before any push to a PR that
     has it.
   - `quest status` reports the head auto-merge was enabled on next to the
-    current one, so a separate monitor can detect when they differ.
+    current one, so a later invocation can see when they differ.
   - Rejected: `quest` disabling auto-merge itself, since it doesn't see the
     push.
