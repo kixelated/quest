@@ -226,8 +226,8 @@ A sub-agent ends its turn only with a final result or a question, never with bac
 
 A foreground session coordinates; its background sub-agents are workers.
 Every resume rereads a worker's whole context, which its prompt cache keeps for only 5 idle minutes, so a worker does one burst of work.
-Each of its tool calls returns within 4 minutes, such as targeted tests rather than the full suite; it then commits, pushes, reports, and terminates.
-The coordinator runs the long waits in the worker's checkout: the full checks, `quest review` rounds, and gated commands.
+Each of its tool calls returns within 4 minutes, such as targeted tests rather than the full suite; it then commits, reports, and terminates, pushing only to a draft.
+The coordinator runs the long waits in the worker's checkout: the full checks, `quest review` rounds, and gated commands. It pushes to a PR that is ready for review only once they pass.
 Its prompt cache lasts an hour, so it bounds each wait under an hour.
 It starts a fresh worker for the next burst, such as `/quest-iterate` with a round's findings, rather than resuming the last one.
 A worker doing a coordinator's fixes works under the coordinator's hold and takes none of its own.
