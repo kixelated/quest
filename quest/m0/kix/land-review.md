@@ -31,6 +31,18 @@ Decided 2026-10-28 (user, /quest-plan trust audit):
   an AI comment from the author's account, and under protection that requires
   reviews without dismissing stale ones.
 
+Decided 2026-10-28 (user, /quest-plan of the follow-ups from
+[kixelated/quest#271](https://github.com/kixelated/quest/pull/271)):
+
+- The PR body's `## Review` record is self-reported: anyone who can edit the
+  body can write one. For a head a runner published, kix counts a local
+  review only when the runner published its `quest review` result as a
+  GitHub App check run on that exact head SHA. Only the App can write one,
+  and GitHub binds it to the commit. A maintainer's own `## Review` record
+  still counts for the maintainer's PRs.
+- Test a body-only `## Review` record on a runner head, which does not count,
+  and a check run on an older head.
+
 ## Related
 
 - [Web execution](/quest/m0/kix/execution.md) - merge jobs this rule gates
