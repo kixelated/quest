@@ -19,19 +19,18 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 - `/quest-delete`: Should be deleted.
 
 Include a brief summary of each PR.
-Act on a PR only after the user picks its action in this session, including PRs found on a later refresh.
+Act on a PR only after the user picks its action in this session.
 A blanket answer, such as "accept all" or "use your recommendations", picks your recommendation for every PR in scope, `/quest-merge` included, except a PR whose recommendation settles a decision you have not yet shown; ask about those.
-A skip or hold stands until the user lifts it: do not ask about that PR again on a refresh, and state the hold in every sub-agent brief for it.
+A skip or hold stands until the user lifts it: do not dispatch that PR again, and state the hold in every sub-agent brief for it.
 GitHub auto-merge is that pick: enabling it takes write access, and GitHub disables it when anyone without write access pushes.
 Do not ask about a PR with auto-merge enabled; leave it to land, and dispatch `/quest-merge` only when a conflict, failing check, or review finding stalls it.
-A pick covers the PR until it lands or needs the user: when its push draws new review findings, send the agent back without asking; the merge skill's design checkpoint counts rounds from the PR, so it fires across those re-dispatches.
+A pick covers the PR until it lands or needs the user. A separate GitHub monitor may dispatch a new local attempt for new failures or review findings under that pick; the merge skill's design checkpoint counts rounds across those attempts.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.
 Consider ordering, queuing any merges if they would result in conflicts.
 
 Run each `/quest-review`, `/quest-merge`, or `/quest-iterate` in its own sub-agent with its own isolated worktree.
-Each sub-agent blocks on its own waits and reports back only when done or blocked.
-For GitHub CI, review, or merge activity, it uses one `quest wait` and resumes with the
-returned cursor as described by `quest skill merge`, rather than polling GitHub.
+Each sub-agent finishes its local checks and review, publishes or hands off its result, and terminates.
+It blocks only on local work and never waits or polls for GitHub activity.
 
 Merge sub-agents report once their PR is landing; do not watch the queue or wait for merges.
 An open PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.
@@ -39,11 +38,11 @@ After `merge_conflict` or `failed_checks`, its pick still holds, even from an ea
 Any other reason, such as a person removing it, is the user's call, so ask about the PR again.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents to finish.
-Refresh the open PR list whenever a sub-agent reports, and once more before finishing; ask about each new PR in scope the same way.
+Work from the initial PR snapshot. Later GitHub activity belongs to a separate monitor or a new user invocation.
 
 As each sub-agent reports, include a summary and interactively prompt the user for any outstanding decisions.
-Collect each merged PR's suggested follow-ups, and once every sub-agent has finished, run `/quest-plan` on them without asking first; its interview lets the user drop any.
+Collect each published PR's suggested follow-ups and include them in the handoff for a later `/quest-plan` invocation.
 Dispatch already selected actions before asking the next question; background work can continue while the foreground waits.
 
-Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
+Once every sub-agent has finished, report the published and queued PRs and terminate. Remove local worktrees and branches only when a merge is already known; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.

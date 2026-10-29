@@ -53,7 +53,6 @@ import { GUIDE, SKILLS, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, exists, load, snapshot, under } from "./tree";
 import { pullRequestStatus, statusLines } from "./status";
-import { waitForActivity, WaitTimeout } from "./wait";
 import { Worktrees } from "./worktree";
 
 /** Where the command writes; the process streams, or a buffer under test. */
@@ -346,43 +345,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				(started) => {
 					if (typeof started === "number") return started;
 					print(started.url ?? started.branch);
-				},
-			);
-		});
-
-	program
-		.command("wait")
-		.summary("Wait for pull request activity on GitHub")
-		.description(
-			"Wait for a review, comment or comment edit, review-thread reply, reaction to the PR or a review, push, merge, close, " +
-				"merge-queue removal, disabled auto-merge, label change, or CI result. Polls every 5 minutes, and once more 30 seconds before the timeout; rate limits and longer GitHub poll intervals delay requests. No timeout by default.\n\n" +
-				"Prints one plain line per event: timestamp (or commit SHA), type, actor, URL; the last line adds a resume cursor. " +
-				"Reactions print as reacted:<content>, such as reacted:thumbs_up, and label changes as labeled:<name> or unlabeled:<name>. " +
-				"The head's first failing required check prints as checks:failed, and every required check passing as checks:passed, " +
-				"each once per head, with the required check's name as the actor and its details URL. " +
-				"Results count as quest status counts them, so neutral and skipped results pass. " +
-				"checks:passed waits until no check is pending, no GitHub Actions run is unfinished, and every check and workflow the base branch names is present, then names the last required check that passed. " +
-				"Optional failures print separately as check:failed; a base branch requiring no checks requires them all. " +
-				"Pass the final field of the last line to --since to resume without replaying events. " +
-				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Label changes, replies, and reactions by that account are ignored. " +
-				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
-				"Issue-comment edits print as edited, including updates to older bot status comments. The account's own edits are ignored.",
-		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
-		.option("--since <point>", "ISO timestamp, pushed-tip SHA, or resume cursor (default: current head push time)")
-		.option("--timeout <seconds>", "Maximum wait in seconds", positiveSeconds)
-		.action((value: string, options: { since?: string; timeout?: number }) => {
-			const pr = pullRequest(value, root());
-			pending = waitForActivity(pr, options, gitHubDependencies(warn)).then(
-				(lines) => {
-					for (const line of lines) print(line);
-					return 0;
-				},
-				(error: unknown) => {
-					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
-					warn(error instanceof Error ? error.message : String(error));
-					return error instanceof WaitTimeout ? 3 : error instanceof GitHubInputError ? 2 : 1;
 				},
 			);
 		});
@@ -1128,15 +1090,6 @@ function withinRoot(root: string, path: string): string | null {
 	} catch {
 		return null;
 	}
-}
-
-/** A deadline must be finite, positive, and safe for the platform's timer. */
-function positiveSeconds(value: string): number {
-	const seconds = Number(value);
-	if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) {
-		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
-	}
-	return seconds;
 }
 
 /**

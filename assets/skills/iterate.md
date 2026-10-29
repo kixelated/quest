@@ -4,7 +4,7 @@ description: Iterate on an open PR to settle its open decisions, fix CI and revi
 
 Before you begin, run `quest guide` and `quest skill grill`, and read their output completely.
 
-You own this PR until it is landable.
+Complete one local attempt using the feedback already available, then publish and hand it off.
 Parse the arguments to determine the PR number. Any other text is the user's feedback on the PR; interpret it against the diff.
 Take it with `quest iterate <pr>` before acting, and keep the hold token it prints; `quest iterate --help` explains holds.
 If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
@@ -24,9 +24,10 @@ Address the automated review findings already posted, without waiting on optiona
 One round only; never request a review, including by toggling a ready PR to draft and back.
 
 Before pushing to a PR that is ready for review, review the new head locally as the guide's Reviews section describes.
-Push your changes to the PR and update its summary.
-Summarize the changes made.
+Finish the local checks and review before the final push and PR summary update.
 
 Once nothing is unfinished and no decisions need the user, run `/quest-review` with your token, which reviews the branch, pushes, and marks the PR ready.
 Hand it back with `quest release <pr> <token>`, using the latest token printed, whenever you stop, including to ask.
 Never merge; that is `/quest-merge`, once the user picks it.
+
+Report the published result and terminate; do not wait for another CI or review cycle.

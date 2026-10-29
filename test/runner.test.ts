@@ -24,7 +24,6 @@ import { formatAnswer, resumePrompt, startPrompt, systemPrompt } from "../src/ru
 import type { Job } from "../src/runner/protocol";
 import { Runner } from "../src/runner/runner";
 import { REGISTRIES, type Sandbox, closeSandbox, openSandbox } from "../src/runner/sandbox";
-import { Changes, fingerprint, WAIT_LIMIT, waitForChange } from "../src/runner/wait";
 import { Workspace } from "../src/runner/workspace";
 import { tempDir } from "./fixture";
 
@@ -674,97 +673,6 @@ describe("Claude Code output", () => {
 	});
 });
 
-describe("waiting on a pull request", () => {
-	const pull = (checks: string, reviews = 0) => ({
-		state: "OPEN",
-		head: { oid: "a".repeat(40) },
-		checks: { commit: "a".repeat(40), state: checks, runs: [] },
-		reviews: Array.from({ length: reviews }, () => ({ body: "" })),
-		comments: [],
-		threads: [],
-	});
-
-	test("wakes when what the merge loop acts on changes, not on every check", async () => {
-		const reads = [pull("PENDING"), pull("PENDING"), pull("SUCCESS")];
-		const slept: number[] = [];
-		const waited = await waitForChange(async () => reads.shift(), {
-			since: fingerprint(pull("PENDING")),
-			until: 1_000_000,
-			stopped: () => null,
-			now: () => 0,
-			pause: async (ms) => slept.push(ms),
-		});
-		expect(waited).toEqual({ changed: true, context: pull("SUCCESS") });
-		expect(slept).toEqual([1_000_000, 1_000_000]);
-		expect(fingerprint(pull("SUCCESS", 1))).not.toBe(fingerprint(pull("SUCCESS")));
-		// A new review still counts once kix's window of the latest reviews is full.
-		const full = (newest: string) => ({
-			...pull("SUCCESS"),
-			reviews: [...Array.from({ length: 49 }, () => ({ body: "" })), { body: newest }],
-		});
-		expect(fingerprint(full("Approved"))).not.toBe(fingerprint(full("")));
-	});
-
-	test("ends at its deadline, or when the job stops", async () => {
-		let clock = 0;
-		const options = {
-			since: null,
-			until: 25,
-			now: () => clock,
-			pause: async (ms: number) => (clock += ms),
-		};
-		expect(await waitForChange(async () => pull("PENDING"), { ...options, stopped: () => null })).toEqual({
-			changed: false,
-			context: pull("PENDING"),
-		});
-		expect(await waitForChange(async () => pull("PENDING"), { ...options, stopped: () => "Stopped." })).toEqual({
-			stopped: "Stopped.",
-		});
-	});
-});
-
-test("a webhook arriving during the context read is not lost before subscribing", async () => {
-	const changes = new Changes();
-	let reads = 0;
-	const result = await waitForChange(
-		async () => {
-			if (reads++ === 0) {
-				changes.wake();
-				return { state: "OPEN" };
-			}
-			return { state: "CLOSED" };
-		},
-		{ since: fingerprint({ state: "OPEN" }), until: Date.now() + 60_000, stopped: () => null, changes },
-	);
-	expect(result).toEqual({ changed: true, context: { state: "CLOSED" } });
-	expect(reads).toBe(2);
-});
-
-test("a webhook wait reads only on a wake and wakes immediately when its job stops", async () => {
-	const changes = new Changes();
-	let stopped: string | null = null;
-	let reads = 0;
-	const result = waitForChange(
-		async () => {
-			reads++;
-			return { state: "OPEN" };
-		},
-		{
-			since: null,
-			until: Date.now() + 60_000,
-			stopped: () => stopped,
-			changes,
-		},
-	);
-	await vi.waitFor(() => expect(reads).toBe(1));
-	changes.wake();
-	await vi.waitFor(() => expect(reads).toBe(2));
-	stopped = "Stopped.";
-	changes.wake();
-	expect(await result).toEqual({ stopped: "Stopped." });
-	expect(reads).toBe(2);
-});
-
 describe("opencode", () => {
 	test("labels an account by the providers its home signed in to", () => {
 		const home = tempDir();
@@ -936,11 +844,12 @@ describe("prompts", () => {
 		expect(iterate).toContain("merging the base branch into the checkout with `git merge`");
 	});
 
-	test("run a merge job through the merge skill, landing with deliver and waiting with wait", () => {
+	test("run a merge job through the merge skill and end after delivery", () => {
 		const merge = startPrompt(job("a".repeat(40), { workflow: "merge", target: "pulls/9" }), null, tempDir());
 		expect(merge).toContain("Merge pull request #9 of owner/repo. The maintainer picked merge");
 		expect(merge).toContain("Where the workflow says to land with `quest merge --land`, call `deliver` instead");
-		expect(merge).toContain("Where the workflow says to run `quest wait`, call `wait`");
+		expect(merge).toContain("Never wait for GitHub checks, reviews, or merge-queue activity");
+		expect(merge).not.toContain("call `wait`");
 		expect(merge).toContain("# The merge workflow");
 		// The skill's design checkpoint still reaches the maintainer.
 		expect(merge).toContain("Every fourth round");
@@ -1166,11 +1075,7 @@ async function rpc(method, params) {
 		if (step.remove) fs.rmSync(step.remove);
 		if (step.git) require("node:child_process").execFileSync("git", ["-c", "user.name=Fake Agent", "-c", "user.email=fake@example.test", ...step.git], { stdio: "ignore" });
 		if (step.emit) out(step.emit);
-		if (step.backgroundWait) {
-			void rpc("tools/call", { name: "wait", arguments: {minutes:55} }).catch(() => {});
-			await rpc("tools/call", { name: "context", arguments: {} });
-			log({ backgroundWaitPid: process.pid });
-		}
+		if (step.listTools) log({ tools: (await rpc("tools/list", {})).tools.map((tool) => tool.name) });
 		if (step.tool) log({ tool: step.tool, reply: await rpc("tools/call", { name: step.tool, arguments: step.args }) });
 		if (step.wait) {
 			process.on("SIGTERM", () => { log({ terminated: true }); process.exit(143); });
@@ -1229,6 +1134,7 @@ async function prompt(session, input) {
 		if (step.write) fs.writeFileSync(step.write, step.content);
 		if (step.remove) fs.rmSync(step.remove);
 		if (step.emit) send({ ...step.emit, properties: { ...step.emit.properties, sessionID: session } });
+		if (step.listTools) log({ tools: (await rpc("tools/list", {})).tools.map((tool) => tool.name) });
 		if (step.tool) log({ tool: step.tool, reply: await rpc("tools/call", { name: step.tool, arguments: step.args }) });
 		if (step.wait) {
 			await new Promise((resolve) => (aborted = resolve));
@@ -1489,25 +1395,26 @@ describe("quest runner", () => {
 		}
 	});
 
-	posix("an agent crash cancels its pending webhook wait before the attempt ends", async () => {
-		const timers = vi.spyOn(globalThis, "setTimeout");
-		const cleared = vi.spyOn(globalThis, "clearTimeout");
+	posix("merge agents have no wait tool and stop reading GitHub after delivery", async () => {
 		const r = rig();
 		try {
-			r.steps({ start: [{ backgroundWait: true }, { wait: true }] });
+			r.steps({
+				start: [
+					{ listTools: true },
+					{ tool: "context", args: {} },
+					{ tool: "deliver", args: { summary: "Local work finished" } },
+					{ tool: "context", args: {} },
+				],
+			});
 			r.assign(job(r.upstream.commit, { workflow: "merge", target: "pulls/2", head: r.upstream.commit }));
-			await vi.waitFor(() => expect(r.calls().some((call) => call.backgroundWaitPid)).toBe(true));
-			const index = timers.mock.calls.findIndex(([, ms]) => typeof ms === "number" && ms > 60_000);
-			expect(index).toBeGreaterThanOrEqual(0);
-			const handle = timers.mock.results[index]!.value;
-			process.kill(r.calls().find((call) => call.backgroundWaitPid)!.backgroundWaitPid, "SIGKILL");
-			await r.result();
+			expect(await r.result()).toMatchObject({ outcome: "completed", summary: "Local work finished" });
 			await idle(r.runner);
-			expect(cleared).toHaveBeenCalledWith(handle);
+			expect(r.calls().find((call) => call.tools)!.tools).toEqual(["context", "checkpoint", "ask", "deliver"]);
+			expect(r.contexts).toHaveLength(1);
+			const reads = r.calls().filter((call) => call.tool === "context");
+			expect(reads[1]!.reply.content[0].text).toContain("The work was delivered. End your turn now");
 		} finally {
 			await r.runner.shutdown();
-			timers.mockRestore();
-			cleared.mockRestore();
 		}
 	});
 
@@ -1575,9 +1482,9 @@ describe("quest runner", () => {
 		// The tools' bearer token never appears on the command line.
 		expect(JSON.stringify(launch.argv)).not.toContain("Bearer");
 		expect(launch.gh).toBeNull();
-		// Tool calls may outlast Claude Code's 60s first-response limit for HTTP servers, up to the longest wait.
+		// Publishing a large checkpoint may outlast HTTP MCP defaults.
 		expect(launch.timeout).toBe(TOOL_TIMEOUT_MS);
-		expect(TOOL_TIMEOUT_MS).toBeGreaterThan(WAIT_LIMIT);
+		expect(TOOL_TIMEOUT_MS).toBe(60 * 60_000);
 		expect(launch.secret).toBeNull();
 		// Commands run sandboxed in the checkout, with a private temporary directory and the devShell sourced first.
 		const checkout = r.home.path("jobs", "job1");

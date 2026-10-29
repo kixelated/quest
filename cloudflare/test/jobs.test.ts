@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { app } from "../src/index";
 import * as landing from "../src/jobs/landing";
 import * as output from "../src/jobs/output";
-import { wake } from "../src/jobs/wake";
 import * as store from "../src/jobs/store";
 import { GRACE } from "../src/jobs/store";
 import { parse } from "../src/jobs/protocol";
@@ -1543,9 +1542,8 @@ describe("job routes", () => {
 	});
 });
 
-describe("merge wait webhook wakeups", () => {
-	it("wakes only the current merge attempt for the enrolled repository and matching head or PR", async () => {
-		// GitHub cannot verify the head here, so the merge job routes as untrusted to a VM runner.
+describe("GitHub activity belongs to monitoring, not running agents", () => {
+	it("does not wake a running merge attempt when a check event arrives", async () => {
 		const real = globalThis.fetch;
 		vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>
 			new URL(input instanceof Request ? input.url : input).hostname === "api.github.com"
@@ -1562,37 +1560,16 @@ describe("merge wait webhook wakeups", () => {
 		expect(await socket.next()).toMatchObject({ type: "assign", job: { id, attempt: 1 } });
 		socket.send(status(2, "main", [{ job: id, attempt: 1 }], 0));
 		await socket.next();
-		// Other repositories, installations, PRs and check heads cannot wake this job.
-		await wake(env, 99, 5, "pull_request_review", { pull_request: { number: 2 } });
-		await wake(env, 10, 99, "pull_request_review", { pull_request: { number: 2 } });
-		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 3 } });
-		await wake(env, 10, 5, "check_run", { check_run: { head_sha: commit, pull_requests: {} } });
-		await delivery("check_run", { installation: { id: 5 }, repository: { id: 10 }, check_run: { head_sha: head } });
-		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
-		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
-		expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
-		for (const [event, action] of [
-			["pull_request_review_thread", "resolved"],
-			["pull_request_review_thread", "unresolved"],
-			["pull_request_review_comment", "created"],
-			["pull_request_review_comment", "edited"],
-			["pull_request_review_comment", "deleted"],
-		]) {
-			expect(
-				(
-					await delivery(event!, {
-						installation: { id: 5 },
-						repository: { id: 10 },
-						action,
-						pull_request: { id: 201, number: 2 },
-					})
-				).status,
-			).toBe(202);
-			expect(await socket.next()).toEqual({ type: "wake", job: id, attempt: 1 });
-		}
-		await db.prepare("UPDATE jobs SET state='waiting' WHERE id=?").bind(id).run();
-		await wake(env, 10, 5, "pull_request_review", { pull_request: { number: 2 } });
-		socket.send(status(3, "main", [], 0));
+		expect(
+			(
+				await delivery("check_run", {
+					installation: { id: 5 },
+					repository: { id: 10 },
+					check_run: { head_sha: head },
+				})
+			).status,
+		).toBe(202);
+		socket.send(status(3, "main", [{ job: id, attempt: 1 }], 0));
 		expect(await socket.next()).toMatchObject({ type: "reply", id: 3 });
 	});
 });

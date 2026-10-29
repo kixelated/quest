@@ -53,6 +53,12 @@ test("the ready command is gone", () => {
 	expect(Tree.baseline().run("ready").code).toBe(2);
 });
 
+test("GitHub activity has no blocking wait command", () => {
+	const out = run("wait", "https://github.com/owner/repo/pull/1");
+	expect(out.code).toBe(2);
+	expect(out.stderr).toContain("unknown command 'wait'");
+});
+
 test("the root option is accepted after the command", () => {
 	const tree = Tree.baseline();
 	expect(run("unblocked", "--root", tree.path).stdout).toBe("1\tquest/m0/epic/one.md\n");

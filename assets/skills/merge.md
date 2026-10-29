@@ -10,7 +10,7 @@ Take the PR with `quest merge <pr>` before acting, passing a token you already h
 If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
 Hand it back with `quest release <pr> <token>` whenever you stop before it lands, including to ask.
 
-Read the PR's head, checks, merge state, reviews by head, and unresolved threads with `quest status <pr>`, including after each `quest wait` wakes, instead of chaining `gh` queries.
+Read one current snapshot of the PR's head, checks, merge state, reviews by head, and unresolved threads with `quest status <pr>`.
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
 Address the review findings already posted on the head, fixing those you agree with and leaving a comment on any you disagree with.
 Never wait for or request a review, including an `@codex review` comment or toggling a ready PR to draft and back.
@@ -18,27 +18,14 @@ Before pushing any change, review the new head locally, following the guide's Re
 
 Abort the merge if there is a significant decision to be made.
 Interactively prompt the user with your recommendation and any alternatives.
-Suggested follow-ups do not hold the merge; once the PR merges, run `/quest-plan` on them without asking first.
+Suggested follow-ups do not hold the merge; include them in the handoff for a later `/quest-plan` invocation.
 
 A background agent that cannot prompt lists its decisions and suggested follow-ups in its report instead.
 
-When waiting for CI, run
-`quest wait <pr> --timeout 3300` as one blocking command instead of polling
-GitHub in a loop; it also reports the head's required checks as `checks:failed`
-or `checks:passed`, so no separate check watcher is needed.
-Inspect the events and decide whether they satisfy the wait. If activity is
-irrelevant (including bot notices and reviews), call it again with `--since`
-set to the last field of its last line. Exit 3 means the deadline passed with
-no activity; re-run with `--since` set to the printed cursor, so nothing during
-the first wait is missed.
-Other failures must be reported rather than treated as activity.
-Run each wait so its exit wakes you, such as a background task that notifies on
-exit, and end your turn until then. Never poll its output or rerun it under a
-foreground time limit; each wake rereads your whole context. The hour bound
-keeps that reread cached; a wake after the prompt cache expires rewrites it all.
-A headless process ends when its turn ends, killing its background commands:
-run each wait in the foreground instead, bounded by the shell's own time limit,
-and apply the timeout rule above.
+Complete the local fixes, checks, and review before publishing.
+Do not wait for GitHub checks, online reviews, or merge-queue activity.
+Submit the authorized landing to the queue when possible. If submission is refused pending a GitHub event, report that state, release the hold, and terminate.
+A separate process may monitor GitHub and dispatch another local attempt.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Before landing it, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
@@ -52,9 +39,9 @@ It makes a merge commit; add `--squash` or `--rebase` when the repository's root
 On a base that requires the `quest land` check, it queues the PR for `quest land`, whose chain merges and tests against the current base; do not merge the base or rerun checks per PR just to queue it.
 On an ungated base, the command refuses a head that does not contain the current base. Merge the base locally (never rebase), rerun the repository's checks, push, and land the new head after satisfying the guide's review rule for those changes.
 The `quest:merge` label stays on while the PR is queued or auto-merging.
-Report once it is landing; do not wait for it to merge, since the queue re-checks it without you.
+Report once it is landing, then terminate the agent; the queue re-checks it without you.
 A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
-After `merge_conflict` or `failed_checks`, the pick still holds: fix it and land it again.
-After `checks_pending`, wait for its required checks to pass and land it again.
+A later `merge_conflict` or `failed_checks` event can start a new local attempt under the existing pick; the published agent does not stay alive to observe it.
+After `checks_pending`, report the pending checks, release the hold, and terminate; a separate process can retry the landing when they finish.
 Any other reason, such as a person removing it, is the user's call, so report why instead of landing it again.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.

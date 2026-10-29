@@ -53,7 +53,6 @@ export class Runner {
 			options.login.token,
 			{
 				open: () => {
-					for (const attempt of this.#live) attempt.wake();
 					this.status();
 				},
 				push: (push) => this.#push(push),
@@ -157,12 +156,9 @@ export class Runner {
 	}
 
 	#push(push: Push): void {
-		if (push.type === "cancel" || push.type === "wake") {
+		if (push.type === "cancel") {
 			const attempt = this.#current.get(push.job);
-			if (attempt?.attempt === push.attempt) {
-				if (push.type === "wake") attempt.wake();
-				else attempt.cancel();
-			}
+			if (attempt?.attempt === push.attempt) attempt.cancel();
 			return;
 		}
 		const { job, instructions } = push;

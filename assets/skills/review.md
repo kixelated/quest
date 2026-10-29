@@ -28,7 +28,7 @@ Push, then flip the PR to "Ready for Review" with `quest ready <pr> <token> --do
 For your own draft, mark it ready for review yourself, then take it with `quest ready <pr>`.
 Do not wait for online reviewers.
 
-Summarize the review and CI from `quest status <pr>`, then interactively prompt the user with your recommendation:
+Report the local review result, the published PR, and your recommended next action, then terminate:
 - `/quest-merge`: If the review left no significant issues.
 - `/quest-iterate`: If it raised significant issues or decisions.
 - skip: If the PR should not be merged yet.
@@ -36,5 +36,5 @@ Summarize the review and CI from `quest status <pr>`, then interactively prompt 
 
 A background agent that cannot prompt lists these in its report instead.
 
-Hand the PR back with `quest release <pr> <token>` before you ask or report.
+Hand the PR back with `quest release <pr> <token>` before you report. Never wait for CI or online reviews after publishing.
 To go straight on to `/quest-iterate` or `/quest-merge` in this session, pass the token to its command instead, which swaps the label.

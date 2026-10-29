@@ -330,7 +330,7 @@ function ejection(node: ObjectValue): string | null {
 
 /**
  * A check run or commit status from a `statusCheckRollup` context, and whether it passed, failed, or
- * is still pending. `quest wait` shares this, so both commands agree on what passes.
+ * is still pending. Landing uses the same classification as the status snapshot.
  */
 export function classifyCheck(context: ObjectValue): { check: Check; outcome: "passed" | "failing" | "pending" } {
 	const run = context.__typename === "CheckRun";

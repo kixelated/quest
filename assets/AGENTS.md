@@ -171,9 +171,11 @@ The PR body's `## Review` section records the latest round: the reviewer harness
 Rewrite it after each round.
 A review counts for the head whose SHA it names.
 
-Once "Ready to Review", CI and any online reviewers run.
-Address their findings already posted on the head when merging; never wait for or request one.
-Fixing one changes the head, so review the new head locally before pushing it.
+Run checks and the required review locally before the final publication.
+Publish the completed attempt, report the PR and its state, then terminate the agent.
+Never wait for GitHub CI, online reviews, or merge-queue activity.
+A separate process owns GitHub monitoring and can dispatch a new local attempt when work is needed.
+At the start of that attempt, address findings already posted; review any fixes locally before publishing again.
 
 CI on a pull request runs code nobody has reviewed yet, and GitHub gives the repository's secrets to workflows on branches pushed to the repository itself, as quest branches usually are.
 Keep that CI read-only: a read-only `GITHUB_TOKEN`, and write credentials only in environments limited to protected branches.
@@ -219,7 +221,7 @@ Finish with a clean checkout: intended changes committed and pushed, incidental 
 Run expensive builds and test suites through `quest gate <command>`, which waits until the host has room for them; never poll the load average or cap agents by core count yourself.
 Run no more sub-agents at once than the harness allows; queue the rest and start one as each reports.
 
-Wait on a PR's CI or reviews with `quest wait`, and on other background work with a blocking command that ends on its terminal state, not timed polls.
-Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout.
+Wait for local checks and reviews with a blocking command that ends on its terminal state.
+GitHub waits, polling loops, and background watchers do not belong to the coding agent.
 A sub-agent ends its turn only with a final result or a question, never with background work still running.
 Back out when progress stalls rather than burn tokens.
