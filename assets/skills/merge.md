@@ -8,7 +8,7 @@ Parse the arguments to determine the PR number, otherwise resolve it from the cu
 If a draft, stop and offer `/quest-review` instead.
 Take the PR with `quest merge <pr>` before acting, passing a token you already hold from another state to swap it, and keep the hold token it prints; `quest merge --help` explains holds.
 If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
-Release the hold with `quest release <pr> <token>` when a user decision or abandoned attempt needs the PR handed back. For a pending-GitHub handoff, preserve the durable merge pick as described below.
+Release the hold with `quest release <pr> <token>` whenever you stop before successful queue submission or enabling auto-merge, including to ask. The hold is temporary ownership, not the user's merge decision.
 
 Read one current snapshot of the PR's head, checks, merge state, reviews by head, and unresolved threads with `quest status <pr>`.
 Fix any mechanical issues with the PR, such as merge conflicts and failing CI checks.
@@ -24,8 +24,8 @@ A background agent that cannot prompt lists its decisions and suggested follow-u
 
 Complete the local fixes, checks, and review before publishing.
 Do not wait for GitHub checks, online reviews, or merge-queue activity.
-Submit the authorized landing to the queue when possible. If submission is refused pending a GitHub event, keep the `quest:merge` label as the durable pick, report the PR, head, hold token, and pending condition, and terminate.
-A separate monitor can read that label with `quest status` and pass its token to a new attempt. This workflow does not start a monitor or promise an automatic retry.
+Submit the authorized landing to the queue when possible. If submission is refused pending a GitHub event, report the PR, head, pending condition, and the user's authorizing decision, release the hold, and terminate.
+A later invocation or separate monitor can start a new attempt under that decision and acquire a new hold with `quest merge <pr>`. This workflow does not start a monitor or promise an automatic retry.
 
 Merge the PR *only* after all outstanding decisions have been confirmed.
 Before landing it, fetch the PR's base branch and head, check out the head, and run `quest --root <head-checkout> check --base <remote>/<base> --branch <head-branch>`.
@@ -41,7 +41,6 @@ On an ungated base, the command refuses a head that does not contain the current
 The `quest:merge` label stays on while the PR is queued or auto-merging.
 Report once it is landing, then terminate the agent; the queue re-checks it without you.
 A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
-A later `merge_conflict` or `failed_checks` event can start a new local attempt under the existing pick; the published agent does not stay alive to observe it.
-After `checks_pending`, keep the merge pick, report the pending checks and hold token, and terminate. A later monitor or user invocation can retry; this agent never waits for those checks.
+After `merge_conflict`, `failed_checks`, or `checks_pending`, the user's existing merge decision authorizes a later invocation or monitor to dispatch `/quest-merge` again without asking, once actionable. That attempt takes a new hold with `quest merge <pr>`; a spent label/token need not survive the ejection. The published agent has already terminated and does not observe or report that later event.
 Any other reason, such as a person removing it, is the user's call, so report why instead of landing it again.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.
