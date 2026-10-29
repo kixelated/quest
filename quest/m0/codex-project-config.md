@@ -16,9 +16,8 @@ Decided 2026-10-28 (user, /quest-plan of the follow-ups from [kixelated/quest#27
   that `--ignore-user-config` also skips the project layer, unlike its help
   text. #271 relies on exactly that to keep a reviewed head's MCP servers and
   hooks from running. A fix that matches the help text would reopen that hole.
-- Posting one comment on #49333 is approved: whichever way it is resolved,
-  keep a supported way to skip project layers, since review tools depend on
-  it. Do not open a separate issue.
+- Do not post upstream, on #49333 or a new issue; the maintainer declined.
+  Only watch for the change.
 - This quest waits on Codex. Check #49333 and Codex release notes each time
   ready work is triaged; [the live sandbox test](/quest/m0/review-sandbox.md)
   catches a release that changes the behavior first.
