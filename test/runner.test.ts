@@ -1404,6 +1404,9 @@ describe("quest runner", () => {
 					{ tool: "context", args: {} },
 					{ tool: "deliver", args: { summary: "Local work finished" } },
 					{ tool: "context", args: {} },
+					{ tool: "checkpoint", args: { summary: "Do not publish again" } },
+					{ tool: "ask", args: {} },
+					{ tool: "deliver", args: { summary: "Do not deliver again" } },
 				],
 			});
 			r.assign(job(r.upstream.commit, { workflow: "merge", target: "pulls/2", head: r.upstream.commit }));
@@ -1413,6 +1416,36 @@ describe("quest runner", () => {
 			expect(r.contexts).toHaveLength(1);
 			const reads = r.calls().filter((call) => call.tool === "context");
 			expect(reads[1]!.reply.content[0].text).toContain("The work was delivered. End your turn now");
+			for (const call of r.calls().filter((call) => ["checkpoint", "ask"].includes(call.tool))) {
+				expect(call.reply.content[0].text).toContain("The work was delivered. End your turn now");
+			}
+			expect(r.calls().filter((call) => call.tool === "deliver")[1]!.reply.content[0].text).toContain(
+				"The work was delivered. End your turn now",
+			);
+			expect(r.publishes).toHaveLength(1);
+			expect(r.hub.of("question")).toHaveLength(0);
+		} finally {
+			await r.runner.shutdown();
+		}
+	});
+
+	posix("a refused publication can be retried before delivery closes the tools", async () => {
+		let calls = 0;
+		const r = rig(() => (calls++ === 0 ? { status: 503, body: { error: "Publication unavailable" } } : undefined));
+		try {
+			r.steps({
+				start: [
+					{ tool: "deliver", args: { summary: "First publication" } },
+					{ tool: "deliver", args: { summary: "Published successfully" } },
+				],
+			});
+			r.assign(job(r.upstream.commit, { workflow: "merge", target: "pulls/2", head: r.upstream.commit }));
+			expect(await r.result()).toMatchObject({ outcome: "completed", summary: "Published successfully" });
+			await idle(r.runner);
+			const deliveries = r.calls().filter((call) => call.tool === "deliver");
+			expect(deliveries[0]!.reply.isError).toBe(true);
+			expect(deliveries[1]!.reply.isError).not.toBe(true);
+			expect(r.publishes).toHaveLength(2);
 		} finally {
 			await r.runner.shutdown();
 		}

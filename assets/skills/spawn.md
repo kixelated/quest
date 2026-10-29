@@ -41,13 +41,13 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Once every sub-agent has finished, run `/quest-plan` without asking first on the suggested follow-ups that merged PRs' `/quest-merge` sub-agents reported.
+Once every sub-agent has finished, include the published PRs' suggested follow-ups in the handoff for a separate `/quest-plan` invocation. Do not keep a published coding agent alive for follow-up planning.
 Include quest context, as many quests are concurrently in flight.
 
 Run each selected `/quest-review`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
 Run selected `/quest-plan` sessions in the foreground.
 
-Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
+Once every sub-agent has finished, report its publication or queue handoff and terminate. Remove local worktrees and branches only when a merge is already known; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
 
 ## API keys

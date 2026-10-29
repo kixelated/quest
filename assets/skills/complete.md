@@ -34,7 +34,7 @@ It blocks only on local work and never waits or polls for GitHub activity.
 
 Merge sub-agents report once their PR is landing; do not watch the queue or wait for merges.
 An open PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.
-After `merge_conflict` or `failed_checks`, its pick still holds, even from an earlier session: dispatch `/quest-merge` again without asking.
+After `merge_conflict` or `failed_checks`, an existing durable `quest:merge` pick still authorizes a new local attempt. Report the label/token at handoff so a later monitor or invocation can resume it; do not stay alive for that event.
 Any other reason, such as a person removing it, is the user's call, so ask about the PR again.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents to finish.

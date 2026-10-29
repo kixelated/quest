@@ -29,7 +29,7 @@ import type { Sandbox } from "./sandbox";
 
 const run = promisify(execFile);
 
-/** Publication can outlast HTTP MCP defaults; keep the existing one-hour tool deadline. */
+/** Maximum duration of one HTTP MCP tool call. */
 export const TOOL_TIMEOUT_MS = 60 * 60_000;
 
 /** The environment for an account's Claude Code, with the account's own home. */
@@ -184,7 +184,7 @@ export class Claude implements Adapter {
 					url: launch.tools.url,
 					headers: { Authorization: `Bearer ${launch.tools.token}` },
 					// HTTP tool calls otherwise fail after 60s without a first response byte
-					// (and 5 minutes idle), while a publication can include a large checkpoint.
+					// (and 5 minutes idle); apply the configured deadline to every kix call.
 					timeout: TOOL_TIMEOUT_MS,
 				},
 			},

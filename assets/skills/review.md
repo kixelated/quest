@@ -34,7 +34,7 @@ Report the local review result, the published PR, and your recommended next acti
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-A background agent that cannot prompt lists these in its report instead.
+Settle any decision needed to publish before the final push. The final report recommends a next action; it does not start another workflow after publication.
 
 Hand the PR back with `quest release <pr> <token>` before you report. Never wait for CI or online reviews after publishing.
-To go straight on to `/quest-iterate` or `/quest-merge` in this session, pass the token to its command instead, which swaps the label.
+A later invocation can take the PR for `/quest-iterate` or `/quest-merge`; this coding attempt ends at its publication handoff.

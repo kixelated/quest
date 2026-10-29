@@ -4,7 +4,7 @@
 
 Agents stop hand-writing `gh`, `jq`, and `sed` loops for routine quest
 workflow steps, because `quest` commands cover them and the skills point at
-those commands: CI results while waiting, a one-shot PR status, claiming
+those commands: a one-shot PR and CI status, claiming
 quests and PRs, moving and deleting quests, and unattended work. Skill
 rules that remove the maintainer's repeated steering belong here too.
 
@@ -22,7 +22,7 @@ commands from Sep-Oct. Session counts in each child come from that window.
   footer and wording are user and repository policy, and `gh api` already
   does the call. Parsing open decisions from a PR body is dropped from
   `quest status`, since that body format is a skill convention.
-- GitHub calls live in `src/cli/` beside `quest wait`, outside the
+- GitHub calls live in `src/cli/` beside `quest status`, outside the
   forge-agnostic core. Pure tree edits, such as link rewriting, go in the
   core. GitHub commands share the client in `src/cli/github.ts` (auth,
   rate-limit retry, same-origin pagination, GraphQL) instead of copying it.
@@ -73,7 +73,7 @@ commands from Sep-Oct. Session counts in each child come from that window.
 - [quest merge --land gaps](/quest/m0/helpers/merge-land.md) - squash on squash-only repositories, PR URLs outside a checkout, labels released after direct merges, and a warning when auto-merge outlives its head
 - [Visible merge-driver fallback](/quest/m0/helpers/merge-driver.md) - a merge without `quest` on PATH says so, and this repository's dev shell provides one
 - [Review rules](/quest/m0/helpers/review-rules.md) - a head whose diff matches the reviewed diff keeps its review
-- [Plan delegated follow-ups](/quest/m0/helpers/follow-up-plan.md) - a caller plans a background merge's follow-ups without asking
+- [Plan delegated follow-ups](/quest/m0/helpers/follow-up-plan.md) - consolidate published follow-up handoffs for a separate planning invocation
 - [Drop review-rounds](/quest/m0/helpers/review-rounds.md) - `quest status` stops counting GitHub reviews now that `quest review` numbers rounds
 - [Headless agents](/quest/m0/helpers/headless-agents.md) - `/quest-spawn api` launches, resumes, and stops billed agents through one command auto mode allows
 - [Sibling PRs through a server-side merge](/quest/m0/helpers/queue-siblings.md) - children of one epic land back to back through a merge queue without conflicting on its link list

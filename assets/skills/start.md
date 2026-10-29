@@ -19,9 +19,8 @@ Implement the quest until it is complete, or some blocker is hit. Finish the loc
 When done, explain the result in a few lines and summarize any issues encountered.
 List choices you made without asking in the PR body rather than waiting on them.
 
-If the quest is complete and you see no decision left for the maintainer, run `/quest-review` on it right away.
-Otherwise, prompt the user interactively for each open decision, including your recommendation, and record the outcome as a PR comment as a paper-trail.
-Once the quest is complete and the PR reflects the user's answers, run `/quest-review` on it.
+Settle open decisions before the final publication: prompt the user interactively, including your recommendation, and record the answers in the PR description.
+Once the quest is complete and no decision remains, run `/quest-review` once, then report the published result and terminate.
 
 A background agent that cannot prompt lists its open decisions in its report instead, running `/quest-review` only when the quest is complete and no decision is left for the maintainer.
 
