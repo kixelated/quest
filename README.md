@@ -285,96 +285,20 @@ Existing configured drivers are preserved. For a checkout still using the old
 quest-generated command, clear its local `merge.quest.driver` entry and run any
 quest command to register the current one.
 
-## Wait for pull request activity
+## Publish and hand off
 
-`quest wait` blocks until a GitHub PR has a review, comment, review-thread
-reply, reaction to the PR or one of its reviews, push, merge, close, removal
-from the merge queue, disabled auto-merge, or required CI result:
-
-```sh
-quest wait 101
-quest wait https://github.com/kixelated/quest/pull/101 --since 2026-10-07T12:00:00Z --timeout 1800
-quest wait 101 --since abcdef0123456789abcdef0123456789abcdef01
-```
-
-A number uses the repository's `origin`; a URL works from any directory.
-Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`.
-Without `--since`, the point is the current head's push time, so an existing
-review on that head is included. GitHub lists a push seconds to minutes after
-it lands, so for the current head the wait rereads the listing every 15 seconds
-until the push appears, warning once. Any other SHA must be a listed pushed tip;
-otherwise pass an ISO timestamp instead. Forks use the head
-repository's activity. Deleted head repositories require a timestamp.
-The initial PR commit listing must match the resolved head; a racing push or
-GitHub's 250-commit listing limit fails clearly instead of guessing membership.
-
-Output is plain, one line per event: timestamp (or SHA for a newly observed
-commit), type, actor, and URL. The last line adds a resume cursor. Pass its
-**last field** as `--since` on the next call. Cursors preserve commit membership
-and events sharing a timestamp; treat them as opaque, and use them only for the
-same PR. Explicit timestamps include events at that instant. Historical plain
-pushes come from repository activity; pushes observed while waiting come from new
-commit SHAs, regardless of git author dates. Force pushes come from the PR
-timeline, excluding the one that created the starting head. A merge through
-the queue prints `removed_from_merge_queue` about a second before `merged`, so a
-poll can catch the removal alone; check `quest status` before treating it as a
-failed merge. A label change prints as `labeled:<name>` or `unlabeled:<name>`
-(spaces as `_`), so a queue that dequeues by removing its label wakes the
-waiter; the authenticated account's own label changes are ignored. Actors are
-printed without deciding
-whose review counts. Edited issue comments print as `edited`, at their update
-time; edits to the authenticated account's own comments are ignored. Comment
-edits have their own cursor position and are read across every page, so editing
-an older bot status comment wakes a resumed wait. Review edits remain outside
-this command's scope.
-
-CI results are read for the current head. The first required check to fail
-prints `checks:failed` right away. `checks:passed` prints once nothing on the
-head is still going (no pending check and no unfinished GitHub Actions run, which
-may still create jobs), every check and workflow the base branch names is
-present (except `quest land`'s, which no head carries), and every required
-check passed; it names the last required check that passed and is dated when
-the head went idle. Each prints once per head, with the check's name
-(spaces as `_`) in the actor field and its details URL. Results count as
-`quest status` counts them, so neutral and skipped results pass. Each job of a
-workflow a ruleset requires is required.
-Requiredness comes from the base branch's protection and rulesets, readable
-with read access. A failed optional check prints separately as `check:failed`,
-with its own name and details URL; it never names the aggregate required pass.
-If the base branch requires no checks, every check is required. A result counts when it
-was reached at or after the starting point, so a wait started after CI finished
-still reports it; a push starts over for the new head, and the cursor records
-what was reported, so resuming never replays it.
-
-Review-thread replies and reactions never reach the PR timeline, so they are
-read separately. A reply prints as `replied`; a thread's first comment is part
-of a review and prints as `reviewed`. Reactions on the PR body or a review
-print as `reacted:<content>`, so a clean review that only leaves a 👍 prints
-`reacted:thumbs_up`. Each poll reads the newest 100 reactions on each, so a
-burst of more than that still wakes the waiter but prints only the newest;
-reactions on other comments are not read. Replies and
-reactions by the authenticated account are ignored, so an agent's own replies
-do not wake it; activity from a person sharing that account is ignored too.
-The cursor keeps a separate position for each source, so a reply that becomes
-visible after a newer reaction is still reported.
-
-Each poll makes one conditional timeline request and one conditional
-review-comment request every five minutes once it has read the existing pages,
-following a new page when the current one fills, plus one GraphQL query each
-for reactions and checks. It reads the base branch's required checks once per
-call. It honors GitHub's rate-limit headers and fails loudly on invalid responses.
-There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
-timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
-with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
-a cursor, or the given `--since` (else the head SHA) if setup had not finished.
-Retry with it, not the original command, so activity that landed during the
-first wait is still reported.
+Agents complete implementation, checks, and reviews locally, publish the result,
+and report. Nothing waits on GitHub CI, online reviews, or merge-queue activity:
+a later invocation reads the PR's state with `quest status` and acts on it.
+Quest exposes a one-shot PR snapshot and queue submission, with no GitHub wait
+command or runner wait tool. Local checks and reviews still run to completion.
 
 ## Read a pull request's state
 
-`quest status` prints a GitHub PR's current state in one call, such as after
-`quest wait` wakes. It accepts the same PR argument and authentication as
-`quest wait`, and reports facts without deciding whether the PR is ready or
+`quest status` prints a GitHub PR's current state in one call, without waiting
+for new activity. A number uses the repository's `origin`; a URL works from any
+directory. Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then
+`gh auth token`. It reports facts without deciding whether the PR is ready or
 whose review counts:
 
 ```console
@@ -411,7 +335,7 @@ comes last, and a missing value prints as `-`:
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. |
 | `review-rounds` | Count of distinct commits with submitted reviews since the latest comment starting `Design change:`, followed by that marker's time, author, and URL (`-` when absent). Pending reviews and reviews without a commit do not count. This reports history, not whose review satisfies repository policy. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
-| `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
+| `reacted:<content>` | Actor, time, and the PR or review reacted to. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
 | `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
 | `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
@@ -423,8 +347,8 @@ same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviewRounds`
 (`count`, and `since` with the marker's `at`, `actor`, `url`, or `null`), `reviews`, `reactions`,
-`threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
-as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
+`threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review.
+Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
 ## Own a pull request
@@ -465,7 +389,7 @@ and land the new head. This is a preflight check; GitHub can still move the base
 between that comparison and its head-pinned merge mutation. `quest:merge` stays
 on while the PR is queued or auto-merging; once the PR leaves the queue unmerged, the next command removes
 it. The commands accept the same PR argument and authentication as
-`quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
+`quest status`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.
 
 ## Land a batch with quest land
@@ -847,9 +771,10 @@ with a private `HOME`.
 On Linux the sandbox needs `bwrap` and `socat` (the flake's `runner` package
 pins both) and unprivileged user namespaces; on Ubuntu 23.10 and later,
 AppArmor allows them only for programs with a profile granting `userns`.
-Merge jobs retain existing PR submodule pointers when merging the base. Their
-`wait` tool wakes on GitHub webhook hints or reconnects and rereads the PR;
-a hint never approves work. If someone moves the head, the maintainer can
+Merge jobs retain existing PR submodule pointers when merging the base. Agents
+read the current PR once, complete local work, deliver, and terminate; GitHub
+webhooks never wake a coding attempt. The existing landing monitor releases
+ended merge jobs' holds when their queued landing stops. If someone moves the head, the maintainer can
 continue from that exact head through the existing approval flow. The same
 runner checkpoints and merges its unpublished source locally; conflicts pause
 for a decision. Stale local changes are preserved in the runner's bare clone

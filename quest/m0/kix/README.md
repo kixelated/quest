@@ -135,4 +135,5 @@ fixes what it finds:
 - [Job sandbox](/quest/m0/kix/sandbox/README.md) - untrusted PR devShells built in a VM on Linux runners, maintainer PR heads trusted, opencode sandboxed, and macOS verified
 - [Web execution](/quest/m0/kix/execution.md) - spawn and iterate through the UI, ending in contribution PRs
 - [Land review](/quest/m0/kix/land-review.md) - kix lands only heads with a review that counts on that exact head
+- [Fix ejected landings](/quest/m0/kix/eject-fix.md) - an ejection webhook starts a fresh merge job that fixes and relands, or leaves the PR labeled for the maintainer
 - [Onboarding guide](/quest/m0/kix/guide.md) - a complete maintainer path, from runner setup through a reviewed PR

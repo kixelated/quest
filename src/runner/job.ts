@@ -14,7 +14,6 @@ import { OutputUploader } from "./output";
 import { resumePrompt, startPrompt, systemPrompt } from "./prompt";
 import { type Job, type Message, type Outcome, clip } from "./protocol";
 import { type Sandbox, closeSandbox, openSandbox } from "./sandbox";
-import { Changes, fingerprint, WAIT_LIMIT, waitForChange } from "./wait";
 import { Workspace } from "./workspace";
 
 /** What an attempt needs from its runner. */
@@ -98,14 +97,6 @@ export class Attempt {
 	#preparing = new AbortController();
 	#publishing: Promise<unknown> = Promise.resolve();
 	#delivered: Delivery | undefined;
-	/** The fingerprint of the pull request as the agent last read it, which `wait` waits to change. */
-	#seen: string | null = null;
-	#changes = new Changes();
-
-	/** A webhook or reconnect is a hint to reread authoritative context, never approval to act. */
-	wake(): void {
-		this.#changes.wake();
-	}
 	#cancelled = false;
 	/** The hub no longer counts this attempt as this runner's. */
 	#stopped = false;
@@ -152,7 +143,6 @@ export class Attempt {
 	}
 
 	#halt(): void {
-		this.wake();
 		this.#preparing.abort();
 		this.#agent?.stop();
 	}
@@ -219,7 +209,6 @@ export class Attempt {
 					},
 				});
 				this.#paused = true;
-				this.wake();
 				return;
 			}
 			if (this.#ended()) return await this.#conclude(null, account);
@@ -263,7 +252,6 @@ export class Attempt {
 				exit = await this.#agent.done;
 			} finally {
 				this.#agentExited = true;
-				this.wake();
 				await tools.close();
 				await output.close();
 				if (sandbox) closeSandbox(sandbox);
@@ -331,7 +319,6 @@ export class Attempt {
 			this.ctx.log(`${job.id}: kix refused the ${outcome} result: ${error.message}`);
 		}
 		this.#reported = true;
-		this.wake();
 		// A limited job waits on an account choice, which may resume it here.
 		if (outcome !== "limited") await this.#workspace?.remove();
 	}
@@ -376,7 +363,6 @@ export class Attempt {
 			}
 			if (status === 202) {
 				this.#paused = true;
-				this.wake();
 				if (body.cancel) this.#cancelled = true;
 				return null;
 			}
@@ -417,6 +403,7 @@ export class Attempt {
 		if (this.#stopped || this.#abandoned || this.#agentExited || this.#reported) return STOPPED;
 		if (this.#paused) return PAUSED;
 		if (this.#cancelled) return "The maintainer stopped this job. End your turn now.";
+		if (this.#delivered) return "The work was delivered. End your turn now without further work.";
 		return null;
 	}
 
@@ -440,51 +427,13 @@ export class Attempt {
 							const closed = this.#closed();
 							if (closed) return closed;
 							const read = await this.ctx.context(job.id, job.attempt);
-							this.#seen = fingerprint(read);
 							return JSON.stringify(read, null, 1);
 						},
 					},
 				]
 			: [];
-		// A merge job waits for checks and reviews between its fixes, as `quest wait` would.
-		const wait: Tool[] =
-			job.workflow === "merge"
-				? [
-						{
-							name: "wait",
-							description:
-								"Wait until the pull request changes since you last read it: its checks finish, a review, comment, or thread arrives, or its head or state changes. Returns its context then, or says nothing changed by the deadline. Call it again to keep waiting.",
-							inputSchema: {
-								type: "object",
-								properties: {
-									minutes: {
-										type: "number",
-										description: `How long to wait at most, up to ${WAIT_LIMIT / 60_000} minutes; 30 by default`,
-									},
-								},
-							},
-							call: async (args) => {
-								const minutes =
-									typeof args.minutes === "number" && args.minutes > 0 ? args.minutes : 30;
-								const waited = await waitForChange(() => this.ctx.context(job.id, job.attempt), {
-									since: this.#seen,
-									changes: this.#changes,
-									until: Date.now() + Math.min(minutes * 60_000, WAIT_LIMIT),
-									stopped: () => this.#closed(),
-								});
-								if ("stopped" in waited) return waited.stopped;
-								this.#seen = fingerprint(waited.context);
-								const text = JSON.stringify(waited.context, null, 1);
-								return waited.changed
-									? `The pull request changed:\n${text}`
-									: `Nothing changed while waiting. The pull request now:\n${text}`;
-							},
-						},
-					]
-				: [];
 		return [
 			...context,
-			...wait,
 			{
 				name: "checkpoint",
 				description:
@@ -576,7 +525,6 @@ export class Attempt {
 						throw error;
 					}
 					this.#paused = true;
-					this.wake();
 					if (reply.cancel) this.#agent?.stop();
 					return "kix sent your questions to the maintainer and paused this job. End your turn now without further work; this session resumes with their answers.";
 				},

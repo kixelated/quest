@@ -5,7 +5,13 @@ import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { SKILLS } from "../src/cli/skills";
+import { GUIDE, SKILLS } from "../src/cli/skills";
+
+test("the shipped workflows have no GitHub wait command", () => {
+	for (const text of [GUIDE, ...SKILLS.map((skill) => skill.body)]) {
+		expect(text).not.toMatch(/\bquest wait\b/);
+	}
+});
 
 /**
  * The stub writes the installed name, so a `name:` in the source would install

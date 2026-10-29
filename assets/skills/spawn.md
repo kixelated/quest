@@ -25,13 +25,12 @@ Present those one at a time: a short paragraph explaining the problem, the quest
 - deprioritize: If the quest should wait behind other work; `/quest-plan` moves it down.
 - `/quest-delete`: If the quest should be deleted.
 
-Start each quest in a background sub-agent with its own isolated worktree, since agents cannot write to a worktree their parent created.
+Start each quest in a background worker with its own isolated worktree, since agents cannot write to a worktree their parent created.
+You coordinate them as the guide's Workspace section describes: each worker reports after one burst, and you run the long checks and start fresh workers.
 
-Each agent reports back only when done or blocked.
-
-When done, each agent's claim PR holds its work, still a draft if decisions or unfinished work remain.
+Each worker's claim PR holds its work, still a draft while decisions or unfinished work remain.
 Its report lists every open decision with a recommendation.
-Report each sub-agent's final status, staying silent on interim notifications, but do not monitor their PRs.
+Report each worker's status, staying silent on interim notifications, but do not monitor their PRs on GitHub.
 
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
 
@@ -41,13 +40,13 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 - skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
 
-Once every sub-agent has finished, run `/quest-plan` without asking first on the suggested follow-ups that merged PRs' `/quest-merge` sub-agents reported.
+Once every worker has finished, run `/quest-plan` without asking first on the suggested follow-ups the workers reported.
 Include quest context, as many quests are concurrently in flight.
 
-Run each selected `/quest-review`, `/quest-merge`, or `/quest-iterate` in a background sub-agent with its own isolated worktree, as for `/quest-start`.
+Coordinate each selected `/quest-review`, `/quest-merge`, or `/quest-iterate` the same way, giving its edits to background workers with their own isolated worktrees.
 Run selected `/quest-plan` sessions in the foreground.
 
-Once every sub-agent has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
+Once every worker has finished, remove local worktrees and branches whose tip is the head of a merged PR; squash merges leave that tip off the base branch.
 Leave the worktree you are running in and any holding uncommitted work; list those in your summary.
 
 ## API keys
@@ -62,8 +61,8 @@ Start each agent as a background command, in its own isolated worktree, so the h
 `quest agent start --harness <claude|codex> --key <position> --model <model> --effort <level> --permission-mode <mode> <worktree> <prompt>`.
 Pass this session's model, effort, and permission mode; Codex takes its sandbox mode.
 It prints the session id first, then the cost when the agent reports one, the outcome, and the agent's final reply.
-Tell the agent that it cannot prompt, so it ends with any decisions and its recommendations in its final reply, and that ending its turn ends the process and kills its background commands, so it waits in the foreground.
-Ask the user, then resume that session in the background with the answer, as you would message a sub-agent: `quest agent resume` with the same options, the worktree, the session id, and the answer.
+Tell the agent that it cannot prompt, so it ends with any decisions and its recommendations in its final reply, and that ending its turn ends the process and kills its background commands.
+Answer a decision as for any worker: record it in the PR and start a fresh agent on it.
 Stop one agent with `quest agent stop <worktree>`.
 When the spawn ends, run `quest agent stop --all`, which stops any agent still running and deletes the resolved keys.
 

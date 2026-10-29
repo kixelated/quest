@@ -20,7 +20,7 @@ When done, explain the result in a few lines and summarize any issues encountere
 List choices you made without asking in the PR body rather than waiting on them.
 
 If the quest is complete and you see no decision left for the maintainer, run `/quest-review` on it right away.
-Otherwise, prompt the user interactively for each open decision, including your recommendation, and record the outcome as a PR comment as a paper-trail.
+Otherwise, prompt the user interactively for each open decision, including your recommendation, and record the answers in the PR description.
 Once the quest is complete and the PR reflects the user's answers, run `/quest-review` on it.
 
-A background agent that cannot prompt lists its open decisions in its report instead, running `/quest-review` only when the quest is complete and no decision is left for the maintainer.
+A background worker does not run `/quest-review`: it runs only quick checks, pushes with any open decisions under `## Decisions needed`, and reports whether the quest is complete, leaving the review to its coordinator.

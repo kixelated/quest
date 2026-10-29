@@ -4,7 +4,7 @@
 
 Agents stop hand-writing `gh`, `jq`, and `sed` loops for routine quest
 workflow steps, because `quest` commands cover them and the skills point at
-those commands: CI results while waiting, a one-shot PR status, claiming
+those commands: a one-shot PR and CI status, claiming
 quests and PRs, moving and deleting quests, and unattended work. Skill
 rules that remove the maintainer's repeated steering belong here too.
 
@@ -22,7 +22,7 @@ commands from Sep-Oct. Session counts in each child come from that window.
   footer and wording are user and repository policy, and `gh api` already
   does the call. Parsing open decisions from a PR body is dropped from
   `quest status`, since that body format is a skill convention.
-- GitHub calls live in `src/cli/` beside `quest wait`, outside the
+- GitHub calls live in `src/cli/` beside `quest status`, outside the
   forge-agnostic core. Pure tree edits, such as link rewriting, go in the
   core. GitHub commands share the client in `src/cli/github.ts` (auth,
   rate-limit retry, same-origin pagination, GraphQL) instead of copying it.

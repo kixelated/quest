@@ -4,9 +4,10 @@ description: Iterate on an open PR to settle its open decisions, fix CI and revi
 
 Before you begin, run `quest guide` and `quest skill grill`, and read their output completely.
 
-You own this PR until it is landable.
+Address the feedback available now in one attempt, then push and hand the PR off.
 Parse the arguments to determine the PR number. Any other text is the user's feedback on the PR; interpret it against the diff.
 Take it with `quest iterate <pr>` before acting, and keep the hold token it prints; `quest iterate --help` explains holds.
+A worker given a coordinator's review findings works under the coordinator's hold instead: it takes and releases none, commits without pushing, writes one response per finding in the checkout's `.tmp/`, and reports instead of running `/quest-review`.
 If it refuses because another session holds the PR, stop and report what it printed; taking over a stale hold is the user's choice.
 If you cannot push to the PR's branch, stop and report.
 
