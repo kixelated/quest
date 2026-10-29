@@ -40,6 +40,7 @@ ownership-manifest design:
 ## Required
 
 - [Codex cloud off](/quest/m0/codex-cloud-off.md) - automatic Codex cloud reviews stop once no open PR relies on them
+- [Review reports an expired login](/quest/m0/review-login.md) - `quest review` says to log in again instead of failing with a 401
 - [Live sandbox test](/quest/m0/review-sandbox.md) - the real reviewer CLIs run nothing a reviewed head plants
 - [Kix decision UI](/quest/m0/kix/README.md) - planning and implementation through prompts and summaries, run on the maintainer's own runners
 - [Agent test environment](/quest/m0/agent-test-env.md) - `just test` passes inside agent sessions
