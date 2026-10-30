@@ -325,12 +325,16 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
 		const { checked, landing } = await forge.round();
 		expect(checked).toEqual([[1, 2, 3]]);
-		expect(landing.slice(0, 1)).toEqual(["ejected 4 merge_conflict"]);
-		expect(landing.slice(1).map((line) => line.split(" ")[1])).toEqual(["1", "2", "3"]);
+		expect(landing.slice(0, 3).map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
+			"landed 1",
+			"landed 2",
+			"landed 3",
+		]);
+		expect(landing.slice(3)).toEqual(["ejected 4 merge_conflict"]);
 		expect(git(forge.origin, "show", "main:quest/m0/README.md")).toBe(EPIC(["a", "b", "c"]).trim());
 		expect(clash.landing).toBe(false);
 		expect(clash.labels).toEqual([]);
-		expect(forge.comment(4)).toContain("in code.txt");
+		expect(forge.comment(4)).toContain("conflicts with the base now that #1, #2, #3 landed before it in code.txt");
 		expect(forge.comment(4)).toContain(`([run](${RUN}))`);
 		expect(forge.comment(4)).toMatch(/<!-- quest land: merge_conflict -->$/);
 	});
@@ -385,13 +389,78 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 	});
 
 	test("a PR that conflicted only with an ejected one joins the rest", async () => {
+		// moq-dev/moq's queue #6985, #7027, #6999: #7027 conflicted only with #6985, which failed alone.
 		const forge = new Forge();
 		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
 		forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
+		forge.pull("Three", { "3.txt": "3\n" });
 		const { checked, landing } = await forge.round();
-		expect(checked).toEqual([[1], [2]]);
-		expect(landing).toEqual(["ejected 1 failed_checks", `landed 2 ${forge.main()}`]);
+		expect(checked).toEqual([[1, 3], [1], [2, 3]]);
+		expect(landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
+			"ejected 1",
+			"landed 2",
+			"landed 3",
+		]);
+		expect(landing[0]).toBe("ejected 1 failed_checks");
 		expect(git(forge.origin, "show", "main:code.txt")).toBe("one\nII\nthree");
+	});
+
+	test("a PR that conflicts with one ejected after the budget is spent stays queued", async () => {
+		const forge = new Forge();
+		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
+		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
+		const first = await forge.round(0);
+		expect(first.checked).toEqual([[1]]);
+		expect(first.landing).toEqual(["ejected 1 failed_checks"]);
+		expect(clash.landing).toBe(true);
+		const second = await forge.round(0);
+		expect(second.checked).toEqual([[2]]);
+		expect(second.landing).toEqual([`landed 2 ${forge.main()}`]);
+	});
+
+	test("a PR that conflicts with one that did not land stays queued for the next run", async () => {
+		const forge = new Forge();
+		forge.pull("One", { "1.txt": "1\n" });
+		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
+		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
+		// The passing prefix #1 lands at once, so #2 is never checked alone, and #3 waits for it.
+		const first = await forge.round();
+		expect(first.checked).toEqual([[1, 2], [1]]);
+		expect(first.landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual(["landed 1"]);
+		expect(clash.landing).toBe(true);
+		expect(forge.comment(3)).toBeUndefined();
+		const second = await forge.round();
+		expect(second.checked).toEqual([[2], [3]]);
+		expect(second.landing).toEqual(["ejected 2 failed_checks", `landed 3 ${forge.main()}`]);
+	});
+
+	test("a PR that conflicts with one whose head moved stays queued", async () => {
+		const forge = new Forge();
+		const base = forge.main();
+		const a = forge.pull("Two is 2", { "code.txt": "one\n2\nthree\n" });
+		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
+		expect(result.checks.map((tested) => tested.numbers)).toEqual([[1]]);
+		const moved = git(
+			forge.origin,
+			"-c",
+			"user.name=Late",
+			"-c",
+			"user.email=late@example.test",
+			"commit-tree",
+			"-p",
+			a.head!,
+			"-m",
+			"late",
+			`${a.head}^{tree}`,
+		);
+		git(forge.origin, "update-ref", "refs/heads/topic-1", moved);
+		expect(await pushQueue(forge.clone(), plan, result, RUN, deps)).toEqual(["ejected 1 head_moved"]);
+		expect(forge.main()).toBe(base);
+		expect(clash.landing).toBe(true);
+		expect(forge.comment(2)).toBeUndefined();
 	});
 
 	test("a moved head stops the landing, and an earlier prefix never checked alone does not land", async () => {

@@ -516,13 +516,16 @@ both in one push would close the PRs unmerged. A moved head stops the landing,
 and the prefix before it lands only if a check passed on exactly that prefix,
 since a later PR can mask an earlier one's failure. A failed landing moves the
 branches back, so they stay queued. The rest of the queue waits for the next run.
+A PR that conflicts with the chain before it is ejected only once that chain
+lands, so with nothing before it, at once. Otherwise it stays queued, and the
+next run builds it again without the PRs that did not land.
 
 An ejected PR loses its auto-merge and `quest:merge` label and gets a comment
 with the reason, which `quest status` prints under `landing-stopped`:
 
 | Reason | Why |
 | --- | --- |
-| `merge_conflict` | It conflicts with the base or the PRs before it, beyond what `quest resolve` settles. |
+| `merge_conflict` | It conflicts with the base, or with the PRs that landed before it, beyond what `quest resolve` settles. |
 | `failed_checks` | The check failed with it alone on the base, or a required check failed on its head. |
 | `checks_pending` | A required check had not passed on its head. |
 | `review_required`, `changes_requested` | Its review decision blocks it. |

@@ -588,10 +588,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Land the prefix that passed and eject what cannot land")
 		.description(
 			"Rebuild the plan's chains, refuse a result that did not test exactly their prefixes, then eject the " +
-				"PRs the plan names, those that conflict, and those that failed alone. Land the prefix that passed: " +
+				"PRs the plan names and those that failed alone. Land the prefix that passed: " +
 				"move each PR's branch with a lease on its tested head (a fork's first, the rest in one atomic push " +
 				"with the base's fast-forward). A moved head stops the landing; the prefix before it lands only if " +
-				"a check passed on exactly that prefix. A failed landing moves fork branches back. Ejection " +
+				"a check passed on exactly that prefix. A failed landing moves fork branches back. A PR that " +
+				"conflicts with the chain before it is ejected once that chain lands, so with nothing before it, at " +
+				"once; otherwise it stays queued for the next run. Ejection " +
 				"comments link the GitHub Actions run when GITHUB_RUN_ID is set. Prints `landed <number> <commit>` " +
 				"and `ejected <number> <reason>` lines; any line means the queue changed, so a workflow can run " +
 				"the gate again. Needs push access through origin and to forks that allow maintainer edits, and " +

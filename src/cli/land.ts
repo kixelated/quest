@@ -447,10 +447,17 @@ interface Link {
 	tree: string;
 }
 
+/** A queued PR that conflicts with the chain built before it, which holds `after` links. */
+interface Conflict {
+	entry: Entry;
+	files: string[];
+	after: number;
+}
+
 /** The queue built onto the base, in order, without the PRs that conflict. */
 interface Chain {
 	links: Link[];
-	conflicts: { entry: Entry; files: string[] }[];
+	conflicts: Conflict[];
 }
 
 /**
@@ -482,7 +489,7 @@ function build(root: string, plan: Plan): Chain {
 				const files = lines(git(dir, ["diff", "--name-only", "--diff-filter=U"]));
 				if (files.length === 0)
 					throw new Error(`git merge --squash ${entry.head} failed: ${merged.stderr.trim()}`);
-				chain.conflicts.push({ entry, files });
+				chain.conflicts.push({ entry, files, after: chain.links.length });
 				git(dir, ["reset", "--quiet", "--hard", "HEAD"]);
 				continue;
 			}
@@ -559,14 +566,19 @@ export async function checkQueue(
 	deadline?: number,
 ): Promise<Result> {
 	const checks: Tested[] = [];
-	const reported = new Set<number>();
+	const reported = new Set<string>();
 	let queue = plan.queue;
 	for (;;) {
 		const chain = build(root, { ...plan, queue });
-		for (const { entry, files } of chain.conflicts) {
-			if (reported.has(entry.number)) continue;
-			reported.add(entry.number);
-			stderr(`quest land: #${entry.number} conflicts with the PRs before it in ${files.join(", ")}\n`);
+		for (const conflict of chain.conflicts) {
+			const before = chain.links.slice(0, conflict.after).map((link) => `#${link.entry.number}`);
+			const line =
+				before.length === 0
+					? `#${conflict.entry.number} conflicts with the base in ${conflict.files.join(", ")}`
+					: `#${conflict.entry.number} conflicts with ${before.join(" ")} before it in ${conflict.files.join(", ")}; it stays queued unless they land`;
+			if (reported.has(line)) continue;
+			reported.add(line);
+			stderr(`quest land: ${line}\n`);
 		}
 		let failed: Entry | undefined;
 		for (let count = chain.links.length; count > 0; count = Math.ceil(count / 2)) {
@@ -609,7 +621,8 @@ function execute(cwd: string, command: string[], stderr: (text: string) => void)
  * what cannot land, then land the prefix that passed: move each PR's branch to
  * its squash commit with a lease on the head that was tested, and fast-forward
  * the base to the last one. A head that moved stops the landing; the prefix
- * before it lands only if a check passed on exactly that prefix.
+ * before it lands only if a check passed on exactly that prefix. A PR that
+ * conflicts is ejected only once the chain before it has landed, if any.
  */
 export async function pushQueue(
 	root: string,
@@ -621,13 +634,6 @@ export async function pushQueue(
 	const { chain, failed } = replay(root, plan, result);
 	const ejections = [...plan.eject];
 	const ejectLink = (entry: Entry, reason: Reason, detail: string) => ejections.push(ejection(entry, reason, detail));
-	for (const { entry, files } of chain.conflicts) {
-		ejectLink(
-			entry,
-			"merge_conflict",
-			`it conflicts with the base or the PRs queued before it in ${files.join(", ")}; merge the base, push, and land it again`,
-		);
-	}
 	for (const entry of failed) {
 		ejectLink(
 			entry,
@@ -676,28 +682,46 @@ export async function pushQueue(
 	}
 
 	const github = new GitHub(deps);
-	for (const ejection of ejections) {
+	const report = async (ejection: Ejection) => {
 		if (await eject(github, plan, ejection, run)) output.push(`ejected ${ejection.number} ${ejection.reason}`);
-	}
-	if (count === 0) return output;
-
-	const links = chain.links.slice(0, count);
-	const refused = await landLinks(root, plan, links, deps);
-	if (refused === null) {
-		for (const link of links) output.push(`landed ${link.entry.number} ${link.commit}`);
-		return output;
-	}
-	// A refused push stops the landing; it lands again on the next run, without the PR that stopped it.
-	const stop = async (entry: Entry, reason: Reason, detail: string) => {
-		if (await eject(github, plan, ejection(entry, reason, detail), run)) {
-			output.push(`ejected ${entry.number} ${reason}`);
-		}
-		return output;
 	};
+	for (const ejection of ejections) await report(ejection);
+
+	let landed = 0;
+	if (count > 0) {
+		const links = chain.links.slice(0, count);
+		const refused = await landLinks(root, plan, links, deps);
+		if (refused === null) {
+			for (const link of links) output.push(`landed ${link.entry.number} ${link.commit}`);
+			landed = count;
+		} else {
+			// A refused push stops the landing; it lands again on the next run, without the PR that stopped it.
+			await report(stopper(root, plan, refused));
+		}
+	}
+	// A PR that conflicts with the chain before it conflicts with the base once that chain lands. Until
+	// then it stays queued: the next run builds it again without the PRs that did not land.
+	for (const { entry, files, after } of chain.conflicts) {
+		if (after > landed) continue;
+		const before = chain.links.slice(0, after).map((link) => `#${link.entry.number}`);
+		const now = before.length === 0 ? "" : ` now that ${before.join(", ")} landed before it`;
+		await report(
+			ejection(
+				entry,
+				"merge_conflict",
+				`it conflicts with the base${now} in ${files.join(", ")}; merge the base, push, and land it again`,
+			),
+		);
+	}
+	return output;
+}
+
+/** The PR that stopped a refused landing push, to eject; throws when none did. */
+function stopper(root: string, plan: Plan, refused: { links: Link[]; stderr: string }): Ejection {
 	for (const { entry } of refused.links) {
 		const head = remoteHead(root, remoteOf(plan, entry), entry.branch);
 		if (head !== entry.head) {
-			return stop(
+			return ejection(
 				entry,
 				"head_moved",
 				`its head moved from ${entry.head} to ${head ?? "nothing"} while the gate checked it`,
@@ -706,7 +730,7 @@ export async function pushQueue(
 	}
 	const [first] = refused.links;
 	if (refused.links.length === 1 && !local(plan, first.entry)) {
-		return stop(first.entry, "push_failed", `the gate could not move its head: ${refused.stderr}`);
+		return ejection(first.entry, "push_failed", `the gate could not move its head: ${refused.stderr}`);
 	}
 	throw new Error(`the landing push failed, so nothing landed: ${refused.stderr}`);
 }
