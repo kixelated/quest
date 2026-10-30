@@ -40,7 +40,3 @@ Decided 2026-10-30 (user, /quest-plan); see the
   the approval, so they may not touch what runs outside the sandbox:
   `flake.nix`, `flake.lock`, `nix/`, `.envrc`, or `.github/`. A fix that
   needs them is handed back, and the daemon refuses to push one that does.
-
-## Required
-
-- [Host daemon](/quest/m0/host-land/daemon.md) - ejects batches and starts the fixer

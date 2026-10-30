@@ -90,6 +90,5 @@ can hand off instead.
 
 ## Required
 
-- [Host daemon](/quest/m0/host-land/daemon.md) - `quest land serve` lands batches and ejects without bisecting
 - [Gate host](/quest/m0/host-land/host.md) - kixelated/nixos runs the daemon as its own user, checks in nspawn containers, and retires the Actions runner
 - [Codex fixer](/quest/m0/host-land/fixer.md) - ejected batches get one mechanical fix attempt and healthy PRs are requeued

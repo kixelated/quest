@@ -42,7 +42,8 @@ import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteRepository, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
-import { LAND_CHECK, checkQueue, parsePlan, parseResult, pushQueue, resolveQueue } from "./land";
+import { LAND_CHECK } from "./land";
+import { serve, type ServeOptions } from "./land-serve";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
 import { type ResolveOptions, resolveFile } from "./resolve";
@@ -497,123 +498,24 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			},
 		);
 
-	const landing = program
+	program
 		.command("land")
-		.summary("Land every queued PR as one tested batch, from the repository's CI")
+		.summary("Land queued PRs through a host daemon")
+		.command("serve")
 		.description(
-			"A batched merge gate for a GitHub repository, run from its own CI in three phases so PR code never " +
-				"sees a push credential. `resolve` reads the queue, `check` builds and tests it with a read-only " +
-				"token, and `push` lands what passed.\n\n" +
-				`The base branch requires the \`${LAND_CHECK}\` check, which nothing reports on a PR head, so ` +
-				"GitHub's auto-merge only waits and its merge button cannot land around the gate. On such a base, " +
-				"`quest merge --land <sha>` queues a PR: it enables squash auto-merge whose commit body pins that head. " +
-				"A PR is queued while auto-merge is enabled and the pin is its current head, so a push by anyone " +
-				"but the gate dequeues it. The queue is in the order auto-merge was enabled.\n\n" +
-				"The gate builds the queued PRs, in order, into a chain of squash commits on the base, resolving " +
-				"quest files with `quest resolve`, and runs the check command once on the chain's tip. When that " +
-				"fails, it checks the first half, and so on, until a prefix passes, which lands at once, or one PR " +
-				"fails alone, which is ejected while the same run checks the rest the same way. Landing moves each PR's branch, " +
-				"with a lease on the head that was tested, to its squash commit, then fast-forwards the base to the " +
-				"tip, so GitHub shows each PR as merged and the base only ever holds a tested tree.\n\n" +
-				"An ejected PR loses auto-merge and `quest:merge`, and gets a comment with the reason, which " +
-				"`quest status` prints under landing-stopped: merge_conflict (a conflict `quest resolve` cannot " +
-				"settle), failed_checks (the check failed with it alone on the base, or a required check failed on " +
-				"its head), checks_pending, review_required, changes_requested, unresolved_conversations, " +
-				"no_maintainer_edits (a fork the " +
-				"gate cannot push to), head_moved, not_pinned (auto-merge enabled without `quest merge --land`), " +
-				"or push_failed. Required reviews, conversation resolution, and the base's other required checks " +
-				"still apply.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token, and origin for the repository. Exits 0 when done, " +
-				"2 for invalid arguments, and 1 for other failures.",
-		);
-	landing
-		.command("resolve")
-		.summary("Print the queue as a plan for the other phases")
-		.description(
-			"Read the queue from GitHub with a read-only token and print it as a JSON plan: the base's commit, " +
-				"the queued PRs in order, and the PRs to eject with their reasons. Fails unless the base requires " +
-				`the \`${LAND_CHECK}\` check, and on a ruleset rule or classic protection setting the gate does not ` +
-				"uphold. Classic protection needs a token with administration read.",
+			"Run one daemon per repository. Check a base PR plus up to floor(log2 n) cleanly merging PRs once through the sandbox. Failed batches are ejected together, never bisected. Requires quest on PATH and flock. Sandbox and fixer wrappers MUST run code as a different user from the App key owner (for example in nspawn containers); environment filtering alone cannot isolate /proc or host files. The sandbox receives the checkout path; the optional detached fixer receives the log path followed by PR numbers. Neither receives credentials. State retains full logs and pending ejections across restarts. After revalidating the queue, merge the base into each behind-base PR head with quest resolve, verify the tested tree, and lease-push that head before the pinned GitHub squash API merge. A permissions-refused branch push falls back to a leased fast-forward of the tested squash to the base, closing the PR with a linked-commit comment and removing quest:merge. A recorded daemon merge atop the original pin is recognized after restart; other moved heads require maintainer requeueing. Pending mergeability is retried briefly; confirmed conflicts or moved heads eject the remaining batch. A refusal that would repeat, such as squash being disabled, ejects as merge_refused without the fixer. An unexpected squash parent rebuilds the queue without ejecting; a tree mismatch logs CRITICAL and ejects the rest as tree_mismatch. Merged PRs drop out of the queue after restart.",
 		)
-		.option("--base <branch>", "The base branch (default: the repository's default branch)")
-		.action((options: { base?: string }) => {
+		.option("--base <branch>", "Base branch (default: repository default)")
+		.option("--state <path>", "Private daemon state directory (default: $STATE_DIRECTORY or the XDG state home)")
+		.requiredOption("--sandbox <command>", "Sandbox executable that checks the supplied checkout path")
+		.option("--fixer <command>", "Detached fixer executable")
+		.requiredOption("--app-id <id>", "GitHub App id")
+		.option("--timeout <minutes>", "Fail a check that runs longer than this", positiveInteger("timeout"), 60)
+		.action((options: ServeOptions) => {
 			const { repository } = remoteRepository(root(), "origin");
 			if (!repository) throw new Error("origin must name a github.com repository");
-			pending = resolveQueue(repository, options.base, gitHubDependencies(warn)).then(
-				(plan) => {
-					print(JSON.stringify(plan));
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
-		});
-	landing
-		.command("check")
-		.summary("Build the queue onto the base and test it, printing the result")
-		.description(
-			"Fetch the plan's base and heads from origin, build the chain, and run <command> in the checkout on " +
-				"its tip, then on the first half while it fails, until a prefix passes or one PR fails alone. That " +
-				"PR is left out and the rest rebuilt and checked the same way, until a prefix passes, the queue is " +
-				"empty, or --budget is spent. Each run checks out the commit it tests; untracked files stay. Needs `quest` on PATH for the merge " +
-				"driver and a git identity for the throwaway commits. The command's output goes to stderr; stdout " +
-				"is the JSON result for `push`. Needs no GitHub token.",
-		)
-		.argument("<plan>", "The plan file `resolve` printed")
-		.argument("<command>", "Executable to run; put -- before it when any argument starts with -")
-		.argument("[args...]", "Arguments forwarded verbatim")
-		.option(
-			"--budget <minutes>",
-			"Stop checking the rest after an ejection once this many minutes have passed, so a job time limit keeps what was found",
-			minutes,
-		)
-		.action((file: string, command: string, args: string[], options: { budget?: number }) => {
-			const plan = parsePlan(readFileSync(file, "utf8"));
-			const deadline = options.budget === undefined ? undefined : Date.now() + options.budget * 60_000;
-			pending = checkQueue(root(), plan, [command, ...args], out.stderr, deadline).then(
-				(result) => {
-					print(JSON.stringify(result));
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
-		});
-	landing
-		.command("push")
-		.summary("Land the prefix that passed and eject what cannot land")
-		.description(
-			"Rebuild the plan's chains, refuse a result that did not test exactly their prefixes, then eject the " +
-				"PRs the plan names and those that failed alone. Land the prefix that passed: " +
-				"move each PR's branch with a lease on its tested head (a fork's first, the rest in one atomic push " +
-				"with the base's fast-forward). A moved head stops the landing; the prefix before it lands only if " +
-				"a check passed on exactly that prefix. A failed landing moves fork branches back. A PR that " +
-				"conflicts with the chain before it is ejected once that chain lands, so with nothing before it, at " +
-				"once; otherwise it stays queued for the next run. Ejection " +
-				"comments link the GitHub Actions run when GITHUB_RUN_ID is set. Prints `landed <number> <commit>` " +
-				"and `ejected <number> <reason>` lines; any line means the queue changed, so a workflow can run " +
-				"the gate again. Needs push access through origin and to forks that allow maintainer edits, and " +
-				"`quest` on PATH.",
-		)
-		.argument("<plan>", "The plan file `resolve` printed")
-		.argument("<result>", "The result file `check` printed")
-		.action((planFile: string, resultFile: string) => {
-			const plan = parsePlan(readFileSync(planFile, "utf8"));
-			const result = parseResult(readFileSync(resultFile, "utf8"));
-			const env = process.env;
-			const run =
-				env.GITHUB_RUN_ID && env.GITHUB_REPOSITORY
-					? `${env.GITHUB_SERVER_URL ?? "https://github.com"}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`
-					: undefined;
-			pending = pushQueue(root(), plan, result, run, gitHubDependencies(warn)).then(
-				(lines) => {
-					for (const line of lines) print(line);
-					return 0;
-				},
+			pending = serve(root(), repository, options, warn).then(
+				() => 0,
 				(error: unknown) => {
 					warn(error instanceof Error ? error.message : String(error));
 					return 1;
@@ -1140,15 +1042,6 @@ function withinRoot(root: string, path: string): string | null {
 }
 
 /** A deadline must be finite, positive, and safe for the platform's timer. */
-/** A non-negative number of minutes. */
-function minutes(value: string): number {
-	const parsed = Number(value);
-	if (value.trim() === "" || !Number.isFinite(parsed) || parsed < 0) {
-		throw new InvalidArgumentError("expected a non-negative number of minutes");
-	}
-	return parsed;
-}
-
 function positiveSeconds(value: string): number {
 	const seconds = Number(value);
 	if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) {

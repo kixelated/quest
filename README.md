@@ -470,180 +470,92 @@ and 1 for other failures.
 
 ## Land a batch with quest land
 
-`quest land` is a batched merge gate that a GitHub repository runs from its own
-CI, including a user-owned one that cannot use GitHub's merge queue. It lands
-every queued PR as one tested batch: it builds them, in order, into a chain of
-squash commits on the base, resolving quest files with `quest resolve`, runs
-the repository's check once on the chain's tip, and fast-forwards the base to
-the longest passing prefix. The base only ever holds a tree the gate tested,
-and each landed PR shows as merged.
-
-A gated base requires the `quest land` status check, which nothing reports on
-a PR head, so GitHub's auto-merge only waits and its merge button cannot land
-around the gate. Only the gate's push credential bypasses that rule; pin the
-check's source to an app installed on the repository that never reports it, so
-no one can satisfy it with a status. GitHub rejects an uninstalled app as a
-required check's source. There,
-`quest merge <pr> <token> --land <sha>` queues a PR: it enables squash
-auto-merge whose commit body pins the head it approved
-(`Quest-Land-Head: <sha>`). A PR is queued while its auto-merge is enabled and
-the pin is its current head, so a push by anyone but the gate dequeues it.
-The queue is in the order auto-merge was enabled.
-
-Each run of the gate has three phases, so PR code never sees a push credential:
+`quest land serve` runs on a maintainer's host, with one process per repository.
+It replaces the Land workflow; landing needs no GitHub Actions.
+The base requires the unreported `quest land` check, keeping auto-merge waiting.
+Queue an approved head with `quest merge <pr> <token> --land <sha>`.
 
 ```sh
-quest land resolve > plan.json              # read the queue, with a read-only token
-quest land check plan.json -- just check > result.json  # build and test, with no push credential
-quest land push plan.json result.json       # land what passed, eject what cannot land
+QUEST_LAND_KEY=/run/credentials/quest-land/key quest land serve --app-id 1039466 \
+  --sandbox /usr/local/bin/check-sandbox --fixer /usr/local/bin/fix-sandbox
 ```
 
-`check` runs the command on the chain's tip. When it fails, it runs it on the
-first half, and so on, until a prefix passes or one PR fails alone, with no
-retries and no batch-size limit. A PR that fails alone is left out, and the
-rest is rebuilt and checked the same way in the same run, until a prefix
-passes, which lands at once, or the queue is empty. `--budget <minutes>` stops
-after an ejection once that much time has passed, so a job's time limit keeps
-the ejections found so far. `push` rebuilds the chains itself and refuses a
-result that did not test exactly their prefixes. It reads the queue again and
-lands only PRs still queued as they were when checked, and prints a PR that
-left the queue as `withdrawn` so the workflow runs again for the rest. It moves each PR's branch, with
-a lease on the head that was tested, to that PR's squash commit: a fork's
-branch first, then every other branch in one atomic push. Once GitHub shows
-every PR at its new head, it fast-forwards the base to the tip. GitHub marks a
-PR merged only when the base reaches a head it has already seen, so moving
-both in one push would close the PRs unmerged. A moved head stops the landing,
-and the prefix before it lands only if a check passed on exactly that prefix,
-since a later PR can mask an earlier one's failure. A failed landing moves the
-branches back, so they stay queued. The rest of the queue waits for the next run.
-A PR that conflicts with the chain before it is ejected only once that chain
-lands, so with nothing before it, at once. Otherwise it stays queued, and the
-next run builds it again without the PRs that did not land.
+The sandbox executable receives the chain's checkout path and must isolate PR
+code from the host's credentials and filesystem. Both the sandbox and fixer
+wrappers **must run code as a different user from the App key owner**, for example
+inside nspawn containers. Environment filtering cannot protect the key or later
+merge tokens from a process running under the daemon's UID through `/proc`.
+The sandbox gets the committed files without `.git`, ignoring export attributes;
+its working directory is that tree. The fixer runs in an independent repository with batch history, no remotes,
+no alternates, and no link to the daemon's private bare repository. Fetches and
+chain construction use only that private repository in the state directory.
+The sandbox runs the repository's checks
+(`just check` and `just test` here). No credential or inherited home configuration
+is passed to it. The daemon refuses to start without `--sandbox`. The optional
+fixer runs detached, receiving the full log path followed by the batch's PR
+numbers, with the same restricted environment. Host provisioning and isolation
+belong to the host; these commands are executable paths, not shell expressions.
+Wrappers must expose only the supplied tree and log, never the state directory
+or its private bare repository.
 
-An ejected PR loses its auto-merge and `quest:merge` label and gets a comment
-with the reason, which `quest status` prints under `landing-stopped`:
+The oldest queued PR is the base. Add up to floor(log2 n) further PRs that merge
+cleanly in queue order, resolving quest links with `quest resolve`. Conflicting
+additions stay queued. A base conflict ejects only the base. The sandbox checks
+the tip once: success lands one squash commit per PR, while failure ejects every
+PR in that batch, without bisection. Ejection disables auto-merge, removes
+`quest:merge`, and comments with the reason and the last 100 output lines.
+`quest status` reads the hidden reason marker. Full logs stay in the state directory: `--state`, or by default systemd's
+`$STATE_DIRECTORY` or the XDG state home, never inside the checkout. A check
+that runs past `--timeout` minutes (60 by default) is killed and fails its batch.
 
-| Reason | Why |
-| --- | --- |
-| `merge_conflict` | It conflicts with the base, or with the PRs that landed before it, beyond what `quest resolve` settles. |
-| `failed_checks` | The check failed with it alone on the base, or a required check failed on its head. |
-| `checks_pending` | A required check had not passed on its head. |
-| `review_required`, `changes_requested` | Its review decision blocks it. |
-| `unresolved_conversations` | The base requires conversation resolution, and it has unresolved review threads. |
-| `no_maintainer_edits` | It comes from a fork the gate cannot push to. |
-| `head_moved` | Its head moved after it was queued or while it was checked. |
-| `not_pinned` | Auto-merge was enabled without `quest merge --land`. |
-| `push_failed` | The gate could not move its fork's branch. |
+Queue reads happen about once a minute and between batches. Pins, required
+checks, reviews, conversations, rulesets, and classic protection remain enforced;
+unsupported protection settings prevent landing. Heads moved since approval are
+ejected as `head_moved`. Before landing, the daemon revalidates queue membership
+and the base. Before landing each PR, the daemon merges the current base into its
+head with `quest resolve` in the private repository if the head does not already
+contain that base. The resulting tree must equal the tested chain link's tree.
+It pushes that merge commit to the PR branch with a lease on the pinned head,
+then calls GitHub's squash-merge API pinned to the prepared head. Up-to-date
+heads need no merge commit. After each API merge, it compares the commit's parent
+and tree before proceeding to the next PR.
 
-The gate's push bypasses the base's rulesets and classic branch protection, so
-the gate upholds them itself. It requires each PR's review decision to allow
-it, each of the base's other required checks to pass on its head, counting
-every check and only those from the app a rule names, and, when the base
-requires conversation resolution, each of its review threads to be resolved.
-Its push satisfies `creation`, `deletion`, `non_fast_forward`, and
-`required_linear_history`, and `copilot_code_review` blocks nothing. `resolve`
-fails, before anything lands, on any other rule type and on `pull_request`
-settings the review decision does not cover: last-push approval, merge methods
-without squash, and required reviewers. It refuses `update`: that rule
-restricts who can move the base, while the gate can land a PR any writer queues.
+If the PR branch push is refused for permissions, the daemon instead pushes the
+tested squash to the base as a fast-forward, leased on the expected parent. It
+closes the PR with a comment linking the landed commit and removes `quest:merge`.
+Such a fork PR is closed rather than shown as merged by GitHub. A PR branch lease
+failure ejects `head_moved`. A locally prepared or API squash tree mismatch logs
+CRITICAL and ejects the remaining batch as `tree_mismatch`.
 
-On a base with classic protection, `resolve` reads its settings, which needs
-administration read (a GitHub App's "Administration: read", or a token with
-admin rights), and fails if it cannot. It upholds required status checks (strict
-included), required reviews (approving count, code owners, and dismissing stale
-reviews), conversation resolution, linear history, and blocked creations, and
-allows force pushes, deletions, and fork syncing. It fails on any other setting
-that is on, such as signed commits, push restrictions, a locked branch,
-last-push approval, or `enforce_admins`: only an admin's push bypasses classic
-protection, and only while it does not apply to admins.
+After an API refusal, the daemon re-reads mergeability and briefly retries
+pending mergeability or a base refresh. Confirmed conflicts and moved heads eject
+the remainder; a persistent policy refusal ejects as `merge_refused` without the
+fixer. Already-merged PRs are skipped. An unexpected API squash parent means the
+base moved: the remainder is rebuilt without ejection.
 
-A workflow runs the phases in three jobs, with `quest` on PATH in each,
-installed from a source the PR cannot modify:
+Restart accepts a changed head only if the private state records that exact
+daemon-authored merge for the same original pin and queue time, with the pin as
+first parent, the tested base as second parent, and the tested tree. Author text
+alone is not trusted. Every other changed head needs a maintainer to requeue it.
+Checks remain bound to the original pin. Merged PRs drop out of the queue, and
+an interrupted fallback close resumes from its private intent record without
+repeating a landed base push. `flock` prevents two
+daemons using the repository (including separate worktrees) or one state directory; `quest` must be on
+PATH for the merge driver.
 
-```yaml
-name: Land
-on:
-  pull_request_target:
-    types: [auto_merge_enabled]
-  workflow_dispatch:
-# One run at a time; waiting triggers collapse into one run that reads the whole queue.
-concurrency:
-  group: land
-permissions: {}
-jobs:
-  resolve:
-    runs-on: ubuntu-latest
-    permissions: { contents: read, pull-requests: read, checks: read, statuses: read }
-    outputs:
-      plan: ${{ steps.resolve.outputs.plan }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      # Install quest here.
-      - id: resolve
-        env:
-          # Under classic protection, a token with administration read instead.
-          GH_TOKEN: ${{ github.token }}
-        run: echo "plan=$(quest land resolve)" >> "$GITHUB_OUTPUT"
-  check:
-    needs: resolve
-    runs-on: ubuntu-latest
-    permissions: { contents: read }
-    outputs:
-      result: ${{ steps.check.outputs.result }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      # Install quest here, outside the checkout.
-      - id: check
-        env:
-          PLAN: ${{ needs.resolve.outputs.plan }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
-          echo "result=$(quest land check "$RUNNER_TEMP/plan.json" -- just check)" >> "$GITHUB_OUTPUT"
-  land:
-    needs: [resolve, check]
-    runs-on: ubuntu-latest
-    permissions: { contents: write, pull-requests: write, issues: write, actions: write, checks: read, statuses: read }
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      # Install quest here.
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          PLAN: ${{ needs.resolve.outputs.plan }}
-          RESULT: ${{ needs.check.outputs.result }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
-          printf '%s' "$RESULT" > "$RUNNER_TEMP/result.json"
-          quest land push "$RUNNER_TEMP/plan.json" "$RUNNER_TEMP/result.json" > "$RUNNER_TEMP/landing"
-          cat "$RUNNER_TEMP/landing"
-          # The queue changed, so run again for the rest.
-          if [ -s "$RUNNER_TEMP/landing" ]; then gh workflow run land.yml --ref "$GITHUB_REF_NAME"; fi
-```
-
-The land job's token pushes the base and PR branches. Grant the ruleset's bypass
-to a GitHub App installed on the repository, and mint its token from an
-environment only the base branch can use, or keep the key out of the repository
-with a broker that trades the land job's GitHub OIDC token for an App token only
-when this workflow runs on the base branch, as moq-dev's `token.moq.dev` does. Ejecting a PR disables its auto-merge,
-which needs `contents: write` on the token in `GH_TOKEN` even when another credential
-pushes. The check job holds only a read token, so it can run on a self-hosted
-runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,
-the land job needs a token with admin rights, and the resolve job one with
-administration read, which `github.token` cannot have. Pushing to a fork's
-branch needs a credential the fork accepts maintainer edits from. `resolve` reads
-the repository from `origin` and fails unless its base requires the
-`quest land` check. Ejection comments link the run. `push` merges PR files
-with its credential in reach, so it runs `quest resolve` from the clone's git
-directory, where a queued PR's `bunfig.toml` or `.env` cannot configure it.
+The App key stays on the host, in `$CREDENTIALS_DIRECTORY/github-app-key` or a
+file named by `QUEST_LAND_KEY`, never in argv, where `/proc` would show it. Its fetches carry no
+credential, so it lands only public repositories for now. Installation
+tokens are scoped to this repository, with contents and pull requests write.
+Tokens are minted for each push or API merge and passed only to trusted git
+and GitHub clients, never the sandbox or fixer. A PR-branch push also requests
+workflow write when the head-to-merge range carries workflow changes from the base. Workflow write is requested only when that PR's squash changes
+`.github/workflows`. Queue API tokens, which disable auto-merge on ejection and
+so need contents write, stay in the daemon, refresh before expiry, and are
+replaced on a 401. Batch errors are logged and retried with bounded exponential
+backoff. Grant the App the base ruleset's bypass and the read permissions needed
+to inspect branch protection. The bypass actor's API merge of a pinned PR with
+the unreported required `quest land` check must be verified on the live host.
 
 ## Gate expensive commands
 

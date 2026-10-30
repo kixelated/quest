@@ -49,9 +49,16 @@ never waited for. Dependabot PRs that only bump patch versions or a lockfile
 need no review.
 
 PRs land on `main` only through `quest land` (see the README): queue one with
-`quest merge <pr> <token> --land <sha>`, and the Land workflow runs `just check`
-and `just test` once per batch. The admin bypass of `main`'s ruleset is for
-emergencies.
+`quest merge <pr> <token> --land <sha>`, and the host daemon
+`quest land serve` runs `just check` and `just test` once per batch through its
+configured sandbox. Before each landing, the daemon merges the base into the PR
+head with the quest merge driver and verifies the tested tree, then pushes that
+head with a lease and squash-merges it through GitHub. If branch permissions
+refuse the push, it fast-forwards the base to the tested squash with a lease and
+closes the PR with a linked-commit comment instead. Confirmed conflicts, moved heads, or a tree mismatch eject the
+remaining batch. Transient refusals are retried; a racing base rebuilds the queue; already merged PRs stay merged. Failed batches are ejected together, with
+a log tail in each comment and the full log retained on the host. The admin bypass of `main`'s
+ruleset is for emergencies.
 
 Every AI-authored GitHub post must end with `(written by <model>)`, naming the
 running model. This is separate from commit co-author trailers.

@@ -55,6 +55,3 @@ which `main`'s ruleset lets bypass the `quest land` check.
   `ProtectHome=yes`, `PrivateTmp`, and a state directory for the checkout
   and the logs.
 
-## Required
-
-- [Host daemon](/quest/m0/host-land/daemon.md) - the `quest land serve` this host runs

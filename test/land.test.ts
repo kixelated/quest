@@ -1,35 +1,37 @@
 // `quest land` against the shared fake GitHub and local git repositories
-// standing in for github.com, so every push and lease is real git.
+// standing in for github.com, including real squash commits behind the fake merge API.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "../cloudflare/dev/github";
+import { resolvePreparedQueue, prepareHead, finishFallback } from "../src/cli/land-head";
 import type { GitHubDependencies } from "../src/cli/github";
+import { type Plan, UPHELD, UPHELD_CLASSIC, build, mergeBase, pin, resolveQueue } from "../src/cli/land";
 import {
-	type Plan,
-	UPHELD,
-	UPHELD_CLASSIC,
-	checkQueue,
-	parsePlan,
-	parseResult,
-	pin,
-	pushQueue,
-	resolveQueue,
-} from "../src/cli/land";
-import { type Output, main } from "../src/cli/main";
+	apiDependencies,
+	daemonLoop,
+	privateRepository,
+	commandEnvironment,
+	defaultState,
+	excerpt,
+	installationToken,
+	keyPath,
+	lockCheckout,
+	lockRepository,
+	resumeFailure,
+	serveBatch,
+} from "../src/cli/land-serve";
+import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "./fixture";
 
 const bin = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
 const bunfig = fileURLToPath(new URL("../bunfig.toml", import.meta.url));
 const REPOSITORY = { owner: "upstream", repo: "project" };
-const RUN = "https://github.com/upstream/project/actions/runs/9";
-/** The check: a file named `broken` fails it, unless a file named `fixed` is there too. */
-const CHECK = ["sh", "-c", "test ! -e broken || test -e fixed"];
 
 const PATH = process.env.PATH;
 /** Each directory `quest` ran in, one per line. */
@@ -42,10 +44,6 @@ beforeEach(() => {
 	chmodSync(join(tools, "quest"), 0o755);
 	process.env.PATH = `${tools}:${PATH}`;
 });
-
-function lines(text: string): string[] {
-	return text.split("\n").filter((line) => line !== "");
-}
 
 function git(cwd: string, ...args: string[]): string {
 	return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -129,6 +127,16 @@ class Forge {
 		return dir;
 	}
 
+	advance(files: Record<string, string>): void {
+		git(this.work, "fetch", "--quiet", "origin", "main");
+		git(this.work, "checkout", "--quiet", "-B", "main", this.main());
+		this.write(files);
+		git(this.work, "add", ".");
+		git(this.work, "commit", "--quiet", "-m", "advance main");
+		git(this.work, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+		this.repo.branches.main = this.main();
+	}
+
 	main(): string {
 		return git(this.origin, "rev-parse", "refs/heads/main");
 	}
@@ -191,6 +199,7 @@ class Forge {
 			branch,
 			head,
 			checks: "SUCCESS",
+			merge: "CLEAN",
 			runs: [{ name: "test", conclusion: "SUCCESS", url: "https://ci.test/1" }],
 			review: null,
 			labels: ["quest:merge"],
@@ -224,7 +233,18 @@ class Forge {
 					encoding: "utf8",
 				},
 			);
-			if (tip.status === 0) pull.head = tip.stdout.trim();
+			if (tip.status === 0) {
+				pull.head = tip.stdout.trim();
+				if (pull.contributor)
+					git(
+						join(this.hub, `${holder}.git`),
+						"push",
+						"--quiet",
+						this.origin,
+						`${pull.head}:refs/pull/${pull.number}/head`,
+					);
+				else git(this.origin, "update-ref", `refs/pull/${pull.number}/head`, pull.head);
+			}
 		}
 	}
 
@@ -241,6 +261,10 @@ class Forge {
 			}
 		}
 	}
+
+	readonly merges: { number: number; body: Record<string, unknown>; authorization: string | null }[] = [];
+	beforeMerge?: (number: number) => void;
+	mismatch?: number;
 
 	/** A token for the gate, with `permissions` beyond reading and writing the queue. */
 	async deps(permissions: Record<string, string> = {}): Promise<GitHubDependencies> {
@@ -263,9 +287,57 @@ class Forge {
 		// The fake refuses a method call, as workerd's fetch does; the CLI calls it as one.
 		let clock = 0;
 		return {
-			fetch: (input, init) => {
+			fetch: async (input, init) => {
+				const number = /\/pulls\/(\d+)\/merge$/.exec(String(input))?.[1];
+				if (number && init?.method === "PUT") this.beforeMerge?.(Number(number));
 				this.sync();
-				return fetch(input, init);
+				let root: string | undefined;
+				if (number && init?.method === "PUT") {
+					const body = JSON.parse(String(init.body));
+					this.merges.push({
+						number: Number(number),
+						body,
+						authorization: new Headers(init.headers).get("Authorization"),
+					});
+					const pull = this.repo.pulls.find((pull) => pull.number === Number(number))!;
+					if (pull.head === body.sha && pull.merge === "CLEAN") {
+						root = this.clone();
+						git(root, "checkout", "--quiet", "--detach", this.main());
+						const result = spawnSync(
+							"git",
+							["-c", "core.hooksPath=/dev/null", "merge", "--squash", pull.head!],
+							{ cwd: root },
+						);
+						if (result.status !== 0) pull.merge = "DIRTY";
+						else {
+							git(
+								root,
+								"commit",
+								"--quiet",
+								"--allow-empty",
+								"-m",
+								`${pull.title} (#${pull.number})`,
+								"-m",
+								"Native GitHub squash",
+							);
+							pull.squash = git(root, "rev-parse", "HEAD");
+							this.repo.commits[pull.squash] = {
+								parents: [this.main()],
+								tree:
+									this.mismatch === pull.number
+										? "f".repeat(40)
+										: git(root, "rev-parse", "HEAD^{tree}"),
+								message: `${pull.title} (#${pull.number})`,
+							};
+						}
+					}
+				}
+				const response = await fetch(input, init);
+				if (root && response.ok && ((await response.clone().json()) as { merged?: boolean }).merged) {
+					const pull = this.repo.pulls.find((pull) => pull.number === Number(number))!;
+					git(root, "push", "--quiet", "origin", `${pull.squash}:refs/heads/main`);
+				}
+				return response;
 			},
 			now: () => clock,
 			sleep: async (milliseconds) => {
@@ -276,14 +348,15 @@ class Forge {
 		};
 	}
 
-	/** One run of the gate: resolve, check in one clone, and push from another. */
-	async round(deadline?: number): Promise<{ plan: Plan; checked: number[][]; landing: string[] }> {
+	async round(): Promise<{ plan: Plan; checked: number[][]; landing: string[] }> {
 		const deps = await this.deps();
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(this.clone(), plan, CHECK, () => undefined, deadline);
-		const landing = await pushQueue(this.clone(), plan, result, RUN, deps);
+		const root = this.clone();
+		const chain = build(root, plan);
+		const checked = chain.links.length ? [chain.links.map((link) => link.entry.number)] : [];
+		const landing = await serveBatch(root, plan, sandbox(), deps, async () => deps.token);
 		this.settle();
-		return { plan, checked: result.checks.map((tested) => tested.numbers), landing };
+		return { plan, checked, landing };
 	}
 
 	comment(number: number): string | undefined {
@@ -293,262 +366,331 @@ class Forge {
 
 // The fake `quest` on PATH is a shell script, as the merge driver tests' is.
 describe.skipIf(process.platform === "win32")("quest land", () => {
-	test("lands the queue as one chain of squash commits, each PR's branch at its own", async () => {
+	test("squash merges a clean batch in order with pinned or prepared heads", async () => {
 		const forge = new Forge();
 		const base = forge.main();
-		const one = forge.pull("Add b", { "b.txt": "b\n" });
-		const two = forge.pull("Add c", { "c.txt": "c\n" });
-		const { plan, checked, landing } = await forge.round();
-		expect(plan.queue.map((entry) => entry.number)).toEqual([1, 2]);
+		const one = forge.pull("Add b", { "b.txt": "b" });
+		const two = forge.pull("Add c", { "c.txt": "c" });
+		const heads = [one.head, two.head];
+		const { checked, landing } = await forge.round();
 		expect(checked).toEqual([[1, 2]]);
-		const tip = forge.main();
-		expect(landing).toEqual([`landed 1 ${forge.ref("upstream/project", "topic-1")}`, `landed 2 ${tip}`]);
-		expect(git(forge.origin, "rev-parse", `${tip}~2`)).toBe(base);
-		expect(forge.ref("upstream/project", "topic-2")).toBe(tip);
-		expect(git(forge.origin, "log", "--format=%an <%ae>%n%B", "-1", "topic-1")).toBe(
-			"Author <author@example.test>\nAdd b (#1)\n\n* Add b\n\nCo-authored-by: Helper <helper@example.test>",
-		);
+		expect(forge.merges.map(({ number }) => number)).toEqual([1, 2]);
+		expect(forge.merges[0].body).toEqual({ sha: heads[0], merge_method: "squash" });
+		expect(forge.merges[1].body).toEqual({ sha: two.head, merge_method: "squash" });
+		expect(git(forge.origin, "show", "-s", "--format=%P", two.head!)).toBe(`${heads[1]} ${one.squash}`);
+		expect(landing).toEqual([`landed 1 ${one.squash}`, `landed 2 ${two.squash}`]);
+		expect(git(forge.origin, "rev-parse", "main~2")).toBe(base);
+		expect(forge.ref("upstream/project", "topic-1")).toBe(heads[0]);
 		expect([one.merged, two.merged]).toEqual([true, true]);
 	});
 
-	test("resolves quest files with the merge driver and ejects a conflict elsewhere", async () => {
+	test("prepares a behind-base PR with quest resolve and the exact tested tree", async () => {
 		const forge = new Forge();
-		forge.pull("Add b quest", {
-			"quest/m0/README.md": EPIC(["a", "b"]),
-			"quest/m0/b.md": "# [S] B\n\n## Goal\n\nB.\n",
+		forge.advance({ "quest/m0/README.md": EPIC(["a", "b"]) });
+		const pull = forge.pull("Remove a", { "quest/m0/README.md": EPIC(["b"]) });
+		const pin = pull.head!;
+		forge.advance({ "quest/m0/README.md": EPIC(["a"]) });
+		const base = forge.main();
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const link = build(root, plan).links[0];
+		expect(await serveBatch(root, plan, sandbox(), deps, async () => deps.token)).toEqual([
+			`landed 1 ${pull.squash}`,
+		]);
+		expect(pull.head).not.toBe(pin);
+		expect(git(forge.origin, "show", "-s", "--format=%P", pull.head!)).toBe(`${pin} ${base}`);
+		expect(git(forge.origin, "rev-parse", `${pull.squash}^{tree}`)).toBe(link.tree);
+	});
+
+	test.each(["adding", "deleting"])("two sibling PRs %s their own Required line both land", async (mode) => {
+		const forge = new Forge();
+		const adding = mode === "adding";
+		if (!adding) forge.advance({ "quest/m0/README.md": EPIC(["a", "b", "c"]) });
+		const one = forge.pull("Change b", { "quest/m0/README.md": EPIC(adding ? ["a", "b"] : ["a", "c"]) });
+		const two = forge.pull("Change c", { "quest/m0/README.md": EPIC(adding ? ["a", "c"] : ["a", "b"]) });
+		expect((await forge.round()).landing).toEqual([`landed 1 ${one.squash}`, `landed 2 ${two.squash}`]);
+		expect(git(forge.origin, "show", "main:quest/m0/README.md")).toBe(
+			EPIC(adding ? ["a", "b", "c"] : ["a"]).trim(),
+		);
+	});
+
+	test("an up-to-date head needs no merge commit or push token", async () => {
+		const forge = new Forge();
+		const pull = forge.pull("Current", { "ok.txt": "yes" });
+		const head = pull.head;
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		let tokens = 0;
+		await serveBatch(forge.clone(), plan, sandbox(), deps, async () => {
+			tokens++;
+			return deps.token;
 		});
-		forge.pull("Add c quest", {
-			"quest/m0/README.md": EPIC(["a", "c"]),
-			"quest/m0/c.md": "# [S] C\n\n## Goal\n\nC.\n",
-		});
-		forge.pull("Two is 2", { "code.txt": "one\n2\nthree\n" });
-		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
-		const { checked, landing } = await forge.round();
-		expect(checked).toEqual([[1, 2, 3]]);
-		expect(landing.slice(0, 3).map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
-			"landed 1",
-			"landed 2",
-			"landed 3",
-		]);
-		expect(landing.slice(3)).toEqual(["ejected 4 merge_conflict"]);
-		expect(git(forge.origin, "show", "main:quest/m0/README.md")).toBe(EPIC(["a", "b", "c"]).trim());
-		expect(clash.landing).toBe(false);
-		expect(clash.labels).toEqual([]);
-		expect(forge.comment(4)).toContain("conflicts with the base now that #1, #2, #3 landed before it in code.txt");
-		expect(forge.comment(4)).toContain(`([run](${RUN}))`);
-		expect(forge.comment(4)).toMatch(/<!-- quest land: merge_conflict -->$/);
-	});
-
-	test("bisects by prefix: a passing prefix lands at once, and a PR failing alone is ejected", async () => {
-		const forge = new Forge();
-		forge.pull("One", { "1.txt": "1\n" });
-		forge.pull("Two", { "2.txt": "2\n" });
-		forge.pull("Break", { broken: "\n" });
-		forge.pull("Four", { "4.txt": "4\n" });
-		const first = await forge.round();
-		expect(first.checked).toEqual([
-			[1, 2, 3, 4],
-			[1, 2],
-		]);
-		expect(first.landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual(["landed 1", "landed 2"]);
-
-		// The PR that fails alone is left out, and the same run checks the rest.
-		const second = await forge.round();
-		expect(second.plan.queue.map((entry) => entry.number)).toEqual([3, 4]);
-		expect(second.checked).toEqual([[3, 4], [3], [4]]);
-		expect(second.landing).toEqual(["ejected 3 failed_checks", `landed 4 ${forge.main()}`]);
-		expect(forge.comment(3)).toContain("failed with it alone on the base");
-		expect(git(forge.origin, "ls-tree", "--name-only", "main")).not.toContain("broken");
-	});
-
-	test("a broken PR at the front does not hold the rest for another run", async () => {
-		const forge = new Forge();
-		forge.pull("Break", { broken: "\n" });
-		forge.pull("Two", { "2.txt": "2\n" });
-		forge.pull("Three", { "3.txt": "3\n" });
-		const { checked, landing } = await forge.round();
-		expect(checked).toEqual([[1, 2, 3], [1, 2], [1], [2, 3]]);
-		expect(landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
-			"ejected 1",
-			"landed 2",
-			"landed 3",
-		]);
-		expect(landing[0]).toBe("ejected 1 failed_checks");
-	});
-
-	test("stops after an ejection once the time budget is spent, keeping the ejection", async () => {
-		const forge = new Forge();
-		forge.pull("Break", { broken: "\n" });
-		forge.pull("Two", { "2.txt": "2\n" });
-		const first = await forge.round(0);
-		expect(first.checked).toEqual([[1, 2], [1]]);
-		expect(first.landing).toEqual(["ejected 1 failed_checks"]);
-		const second = await forge.round(0);
-		expect(second.checked).toEqual([[2]]);
-		expect(second.landing).toEqual([`landed 2 ${forge.main()}`]);
-	});
-
-	test("a PR that conflicted only with an ejected one joins the rest", async () => {
-		// moq-dev/moq's queue #6985, #7027, #6999: #7027 conflicted only with #6985, which failed alone.
-		const forge = new Forge();
-		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
-		forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
-		forge.pull("Three", { "3.txt": "3\n" });
-		const { checked, landing } = await forge.round();
-		expect(checked).toEqual([[1, 3], [1], [2, 3]]);
-		expect(landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
-			"ejected 1",
-			"landed 2",
-			"landed 3",
-		]);
-		expect(landing[0]).toBe("ejected 1 failed_checks");
-		expect(git(forge.origin, "show", "main:code.txt")).toBe("one\nII\nthree");
-	});
-
-	test("a PR that conflicts with one ejected after the budget is spent stays queued", async () => {
-		const forge = new Forge();
-		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
-		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
-		const first = await forge.round(0);
-		expect(first.checked).toEqual([[1]]);
-		expect(first.landing).toEqual(["ejected 1 failed_checks"]);
-		expect(clash.landing).toBe(true);
-		const second = await forge.round(0);
-		expect(second.checked).toEqual([[2]]);
-		expect(second.landing).toEqual([`landed 2 ${forge.main()}`]);
-	});
-
-	test("a PR that conflicts with one that did not land stays queued for the next run", async () => {
-		const forge = new Forge();
-		forge.pull("One", { "1.txt": "1\n" });
-		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
-		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
-		// The passing prefix #1 lands at once, so #2 is never checked alone, and #3 waits for it.
-		const first = await forge.round();
-		expect(first.checked).toEqual([[1, 2], [1]]);
-		expect(first.landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual(["landed 1"]);
-		expect(clash.landing).toBe(true);
-		expect(forge.comment(3)).toBeUndefined();
-		const second = await forge.round();
-		expect(second.checked).toEqual([[2], [3]]);
-		expect(second.landing).toEqual(["ejected 2 failed_checks", `landed 3 ${forge.main()}`]);
-	});
-
-	test("a PR that conflicts with one whose head moved stays queued", async () => {
-		const forge = new Forge();
-		const base = forge.main();
-		const a = forge.pull("Two is 2", { "code.txt": "one\n2\nthree\n" });
-		const clash = forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		expect(result.checks.map((tested) => tested.numbers)).toEqual([[1]]);
-		const moved = git(
-			forge.origin,
-			"-c",
-			"user.name=Late",
-			"-c",
-			"user.email=late@example.test",
-			"commit-tree",
-			"-p",
-			a.head!,
-			"-m",
-			"late",
-			`${a.head}^{tree}`,
-		);
-		git(forge.origin, "update-ref", "refs/heads/topic-1", moved);
-		expect(await pushQueue(forge.clone(), plan, result, RUN, deps)).toEqual(["ejected 1 head_moved"]);
-		expect(forge.main()).toBe(base);
-		expect(clash.landing).toBe(true);
-		expect(forge.comment(2)).toBeUndefined();
-	});
-
-	test("a moved head stops the landing, and an earlier prefix never checked alone does not land", async () => {
-		const forge = new Forge();
-		const base = forge.main();
-		// A fails alone, but B fixes it, so only A+B is checked and it passes.
-		forge.pull("A", { broken: "\n" });
-		const b = forge.pull("B", { fixed: "\n" });
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		expect(result.checks.map((tested) => [tested.numbers, tested.passed])).toEqual([[[1, 2], true]]);
-		const moved = git(
-			forge.origin,
-			"-c",
-			"user.name=Late",
-			"-c",
-			"user.email=late@example.test",
-			"commit-tree",
-			"-p",
-			b.head!,
-			"-m",
-			"late",
-			`${b.head}^{tree}`,
-		);
-		git(forge.origin, "update-ref", "refs/heads/topic-2", moved);
-		expect(await pushQueue(forge.clone(), plan, result, undefined, deps)).toEqual(["ejected 2 head_moved"]);
-		expect(forge.main()).toBe(base);
-		expect(forge.ref("upstream/project", "topic-1")).toBe(forge.repo.pulls[0].head);
-	});
-
-	test("moves a fork's branch when it allows maintainer edits, and ejects one that does not", async () => {
-		const forge = new Forge();
-		const shut = forge.pull("Shut", { "s.txt": "s\n" }, { contributor: "closed" });
-		forge.pull("Open", { "o.txt": "o\n" }, { contributor: "friend", edits: true });
-		const { plan, landing } = await forge.round();
-		expect(plan.eject.map((ejected) => [ejected.number, ejected.reason])).toEqual([[1, "no_maintainer_edits"]]);
-		expect(landing).toEqual(["ejected 1 no_maintainer_edits", `landed 2 ${forge.main()}`]);
-		expect(forge.ref("friend/project", "topic-2")).toBe(forge.main());
-		expect(forge.ref("closed/project", "topic-1")).toBe(shut.head);
-	});
-
-	test("a failed landing push moves fork branches back, so they stay queued", async () => {
-		const forge = new Forge();
-		const open = forge.pull("Open", { "o.txt": "o\n" }, { contributor: "friend", edits: true });
-		const head = open.head;
-		const base = forge.main();
-		const hook = join(forge.origin, "hooks", "pre-receive");
-		writeFileSync(hook, "#!/bin/sh\necho 'main is frozen' >&2\nexit 1\n");
-		chmodSync(hook, 0o755);
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		await expect(pushQueue(forge.clone(), plan, result, undefined, deps)).rejects.toThrow(/main is frozen/);
-		expect(forge.main()).toBe(base);
-		expect(forge.ref("friend/project", "topic-1")).toBe(head);
-		expect(open.landing).toBe(true);
-	});
-
-	test("pushes the base only once GitHub shows every moved head, so each PR merges", async () => {
-		const forge = new Forge();
-		const one = forge.pull("Add b", { "b.txt": "b\n" });
-		const two = forge.pull("Add c", { "c.txt": "c\n" });
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		forge.lag = 3;
-		const landing = await pushQueue(forge.clone(), plan, result, RUN, deps);
-		forge.settle();
-		expect(landing.map((line) => line.split(" ")[0])).toEqual(["landed", "landed"]);
-		expect([one.merged, two.merged]).toEqual([true, true]);
-	});
-
-	test("lands nothing and moves heads back when GitHub never shows them", async () => {
-		const forge = new Forge();
-		const one = forge.pull("Add b", { "b.txt": "b\n" });
-		const head = one.head;
-		const base = forge.main();
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		forge.lag = Infinity;
-		await expect(pushQueue(forge.clone(), plan, result, RUN, deps)).rejects.toThrow(
-			"GitHub did not show the moved heads",
-		);
-		expect(forge.main()).toBe(base);
+		expect(tokens).toBe(1);
 		expect(forge.ref("upstream/project", "topic-1")).toBe(head);
-		expect(one.landing).toBe(true);
+	});
+
+	test.each([false, true])(
+		"a fork denied branch pushes falls back to a leased base push (maintainer edits %s)",
+		async (edits) => {
+			const forge = new Forge();
+			const pull = forge.pull("Fork", { "fork.txt": "yes" }, { contributor: "friend", edits });
+			const head = pull.head;
+			forge.advance({ "base.txt": "new" });
+			const base = forge.main();
+			writeFileSync(
+				join(forge.hub, "friend/project.git/hooks/pre-receive"),
+				"#!/bin/sh\necho 'permission denied' >&2\nexit 1\n",
+				{ mode: 0o755 },
+			);
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			let minted = 0;
+			const output = await serveBatch(forge.clone(), plan, sandbox(), deps, async () => {
+				minted++;
+				return deps.token;
+			});
+			expect(minted).toBe(edits ? 2 : 1);
+			expect(output).toEqual([`landed 1 ${forge.main()}`]);
+			expect(git(forge.origin, "show", "-s", "--format=%P", "main")).toBe(base);
+			expect(pull.closed).toBe(true);
+			expect(pull.merged).not.toBe(true);
+			expect(pull.labels).toEqual([]);
+			expect(forge.comment(1)).toContain(`https://github.com/upstream/project/commit/${forge.main()}`);
+			expect(forge.comment(1)).toContain("GitHub cannot show a fork PR as merged");
+			expect(forge.ref("friend/project", "topic-1")).toBe(head);
+			expect(forge.merges).toEqual([]);
+		},
+	);
+
+	test.each(["refused", "moved"])("fallback base push %s stops without closing", async (mode) => {
+		const forge = new Forge();
+		const pull = forge.pull("Fork", { "fork.txt": "yes" }, { contributor: "friend", edits: false });
+		forge.advance({ "base.txt": "new" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = sandbox();
+		const root = forge.clone();
+		const output = await serveBatch(root, plan, options, deps, async () => {
+			if (mode === "moved") forge.advance({ "race.txt": "new" });
+			else
+				writeFileSync(join(forge.origin, "hooks/pre-receive"), "#!/bin/sh\necho GH013 >&2\nexit 1\n", {
+					mode: 0o755,
+				});
+			return deps.token;
+		});
+		expect(output).toEqual(mode === "moved" ? [] : ["ejected 1 merge_refused"]);
+		expect(pull.closed).not.toBe(true);
+		expect(existsSync(join(options.state, "fallback.json"))).toBe(false);
+	});
+
+	test("a preparation merge refusal returns merge_conflict", async () => {
+		const forge = new Forge();
+		const pull = forge.pull("Conflict", { "code.txt": "PR\n" });
+		forge.advance({ "code.txt": "base\n" });
+		const root = forge.clone();
+		git(root, "fetch", "origin", pull.head!);
+		expect(mergeBase(root, pull.head!, forge.main())).toMatchObject({ reason: "merge_conflict" });
+	});
+
+	test("same-repository branch refusal ejects instead of closing", async () => {
+		const forge = new Forge();
+		const pull = forge.pull("Local", { "local.txt": "yes" });
+		forge.advance({ "base.txt": "new" });
+		writeFileSync(join(forge.origin, "hooks/pre-receive"), "#!/bin/sh\necho GH006 >&2\nexit 1\n", { mode: 0o755 });
+		const { landing } = await forge.round();
+		expect(landing).toEqual(["ejected 1 merge_refused"]);
+		expect(pull.closed).not.toBe(true);
+		expect(forge.comment(1)).toContain("GH006");
+	});
+
+	test("a fallback landing continues with the next sibling PR", async () => {
+		const forge = new Forge();
+		const first = forge.pull("Fork", { "fork.txt": "yes" }, { contributor: "friend", edits: true });
+		const second = forge.pull("Sibling", { "sibling.txt": "yes" });
+		forge.advance({ "base.txt": "new" });
+		writeFileSync(
+			join(forge.hub, "friend/project.git/hooks/pre-receive"),
+			"#!/bin/sh\necho 'permission denied' >&2\nexit 1\n",
+			{ mode: 0o755 },
+		);
+		const result = await forge.round();
+		expect(result.landing[0]).toMatch(/^landed 1 /);
+		expect(result.landing[1]).toBe(`landed 2 ${second.squash}`);
+		expect(first.closed).toBe(true);
+		expect(second.merged).toBe(true);
+	});
+
+	test("a fallback after an API merge reparents the tested tree onto the actual landing SHA", async () => {
+		const forge = new Forge();
+		const first = forge.pull("Native", { "native.txt": "yes" });
+		const second = forge.pull("Fork", { "fork.txt": "yes" }, { contributor: "friend", edits: true });
+		writeFileSync(
+			join(forge.hub, "friend/project.git/hooks/pre-receive"),
+			"#!/bin/sh\necho 'permission denied' >&2\nexit 1\n",
+			{ mode: 0o755 },
+		);
+		const result = await forge.round();
+		expect(result.landing).toEqual([`landed 1 ${first.squash}`, `landed 2 ${forge.main()}`]);
+		expect(git(forge.origin, "show", "-s", "--format=%P", "main")).toBe(first.squash);
+		expect(git(forge.origin, "show", "main:native.txt")).toBe("yes");
+		expect(git(forge.origin, "show", "main:fork.txt")).toBe("yes");
+		expect(second.closed).toBe(true);
+		expect(second.merged).not.toBe(true);
+	});
+
+	test.each([false, true])("restart revalidates fallback close (requeued %s)", async (requeued) => {
+		const forge = new Forge();
+		const pull = forge.pull("Fork", { "fork.txt": "yes" }, { contributor: "friend", edits: true });
+		forge.advance({ "base.txt": "new" });
+		writeFileSync(
+			join(forge.hub, "friend/project.git/hooks/pre-receive"),
+			"#!/bin/sh\necho 'permission denied' >&2\nexit 1\n",
+			{ mode: 0o755 },
+		);
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const options = sandbox();
+		const original = deps.fetch;
+		deps.fetch = ((input, init) => {
+			if (String(input).endsWith("/pulls/1") && init?.method === "PATCH") throw new Error("interrupted close");
+			return original(input, init);
+		}) as typeof fetch;
+		await expect(serveBatch(root, plan, options, deps, async () => deps.token)).rejects.toThrow(
+			"interrupted close",
+		);
+		const landed = forge.main();
+		if (requeued) {
+			pull.head = "f".repeat(40);
+			pull.autoMerge = { ...pull.autoMerge!, enabledAt: "2026-10-30T00:00:00Z" };
+		}
+		const restarted = await forge.deps();
+		expect(
+			await finishFallback(root, options.state, restarted, async () => {
+				throw new Error("must not repeat base push");
+			}),
+		).toBe(`landed 1 ${landed}`);
+		expect(forge.main()).toBe(landed);
+		// The landed commit is always recorded once; only the PR as tested is closed and unlabeled.
+		expect(pull.comments?.filter((comment) => comment.body.includes(`landed ${landed}`))).toHaveLength(1);
+		expect(pull.closed === true).toBe(!requeued);
+		expect(pull.labels?.includes("quest:merge") ?? false).toBe(requeued);
+	});
+
+	test("a branch lease failure ejects head_moved", async () => {
+		const forge = new Forge();
+		forge.pull("Old", { "old.txt": "yes" });
+		forge.advance({ "new.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		let calls = 0;
+		const output = await serveBatch(forge.clone(), plan, sandbox(), deps, async () => {
+			if (++calls === 1) git(forge.origin, "update-ref", "refs/heads/topic-1", forge.main());
+			return deps.token;
+		});
+		expect(output).toEqual(["ejected 1 head_moved"]);
+		expect(forge.merges).toEqual([]);
+	});
+
+	test("restart after a prepared-head push accepts only that recorded daemon merge", async () => {
+		const forge = new Forge();
+		forge.pull("Old", { "old.txt": "yes" });
+		forge.advance({ "new.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const options = sandbox();
+		const link = build(root, plan).links[0];
+		const prepared = await prepareHead(
+			root,
+			options.state,
+			plan,
+			plan.queue[0],
+			plan.base.sha,
+			link.tree,
+			async () => deps.token,
+		);
+		expect(prepared).toHaveProperty("head");
+		const resumed = await resolvePreparedQueue(root, options.state, REPOSITORY, undefined, deps);
+		expect(resumed.eject).toEqual([]);
+		expect(resumed.queue[0].head).not.toBe(resumed.queue[0].approved);
+		expect((await serveBatch(root, resumed, options, deps, async () => deps.token))[0]).toMatch(/^landed 1 /);
+	});
+
+	test("a stale queue head reuses the daemon's recorded pushed merge", async () => {
+		const forge = new Forge();
+		forge.pull("Old", { "old.txt": "yes" });
+		forge.advance({ "new.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const options = sandbox();
+		const link = build(root, plan).links[0];
+		const first = await prepareHead(
+			root,
+			options.state,
+			plan,
+			plan.queue[0],
+			plan.base.sha,
+			link.tree,
+			async () => deps.token,
+		);
+		const reused = await prepareHead(
+			root,
+			options.state,
+			plan,
+			plan.queue[0],
+			plan.base.sha,
+			link.tree,
+			async () => {
+				throw new Error("must not push again");
+			},
+		);
+		expect(reused).toEqual(first);
+	});
+
+	test("a pushed head's transient API 409 is retried rather than ejected as head_moved", async () => {
+		const forge = new Forge();
+		const pull = forge.pull("Old", { "old.txt": "yes" });
+		forge.advance({ "new.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		pull.mergeRefusals = [{ status: 409, message: "Head branch was modified" }];
+		const pauses: number[] = [];
+		deps.sleep = async (delay) => {
+			pauses.push(delay);
+		};
+		expect(await serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token)).toEqual([
+			`landed 1 ${pull.squash}`,
+		]);
+		expect(pauses).toEqual([500]);
+		expect(forge.comment(1)).toBeUndefined();
+	});
+
+	test("restart rejects a writer's commit after a recorded merge", async () => {
+		const forge = new Forge();
+		forge.pull("Old", { "old.txt": "yes" });
+		forge.advance({ "new.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const options = sandbox();
+		const link = build(root, plan).links[0];
+		await prepareHead(root, options.state, plan, plan.queue[0], plan.base.sha, link.tree, async () => deps.token);
+		git(forge.origin, "update-ref", "refs/heads/topic-1", plan.base.sha);
+		expect((await resolvePreparedQueue(root, options.state, REPOSITORY, undefined, deps)).eject[0].reason).toBe(
+			"head_moved",
+		);
+	});
+
+	test("merges fork PRs without maintainer edits and never moves fork heads", async () => {
+		const forge = new Forge();
+		const pull = forge.pull("Fork", { "f.txt": "yes" }, { contributor: "friend" });
+		const head = pull.head;
+		expect((await forge.round()).landing).toEqual([`landed 1 ${pull.squash}`]);
+		expect(forge.ref("friend/project", "topic-1")).toBe(head);
+		expect(pull.merged).toBe(true);
 	});
 
 	test("runs the merge driver outside the chain, where a queued PR's runtime config cannot reach it", async () => {
@@ -566,65 +708,16 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		});
 		const { landing } = await forge.round();
 		expect(landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual(["landed 1", "landed 2"]);
-		const dirs = lines(readFileSync(ran, "utf8")).filter((dir) => dir.endsWith(".git"));
-		// Once in check and once in push, each from its clone's git directory.
-		expect(dirs).toHaveLength(2);
-		expect(lines(readFileSync(ran, "utf8")).some((dir) => dir.includes("quest-land"))).toBe(false);
-	});
-
-	test("lands only PRs still queued as they were when checked", async () => {
-		const forge = new Forge();
-		const one = forge.pull("Add b", { "b.txt": "b\n" });
-		const two = forge.pull("Add c", { "c.txt": "c\n" });
-		const base = forge.main();
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		one.review = "CHANGES_REQUESTED";
-		two.landing = false;
-		const landing = await pushQueue(forge.clone(), plan, result, RUN, deps);
-		forge.settle();
-		// Only the whole chain was checked, so nothing before #1 can land either.
-		expect(landing).toEqual(["ejected 1 changes_requested"]);
-		expect(forge.main()).toBe(base);
-		expect([one.merged, two.merged]).toEqual([undefined, undefined]);
-	});
-
-	test("reports a PR withdrawn while checked, so the rest gets another run", async () => {
-		const forge = new Forge();
-		const one = forge.pull("Add b", { "b.txt": "b\n" });
-		const two = forge.pull("Add c", { "c.txt": "c\n" });
-		const base = forge.main();
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		one.landing = false;
-		expect(await pushQueue(forge.clone(), plan, result, RUN, deps)).toEqual(["withdrawn 1"]);
-		forge.settle();
-		expect(forge.main()).toBe(base);
-		expect([one.merged, two.merged]).toEqual([undefined, undefined]);
-		const next = await resolveQueue(REPOSITORY, undefined, deps);
-		expect(next.queue.map((entry) => entry.number)).toEqual([2]);
-	});
-
-	test("moves heads back when reading them fails", async () => {
-		const forge = new Forge();
-		const one = forge.pull("Add b", { "b.txt": "b\n" });
-		const head = one.head;
-		const base = forge.main();
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		const offline: GitHubDependencies = {
-			...deps,
-			fetch: (input, init) =>
-				String(init?.body).includes("{ headRefOid }")
-					? Promise.reject(new Error("offline"))
-					: deps.fetch(input, init),
-		};
-		await expect(pushQueue(forge.clone(), plan, result, RUN, offline)).rejects.toThrow("offline");
-		expect(forge.main()).toBe(base);
-		expect(forge.ref("upstream/project", "topic-1")).toBe(head);
+		const dirs = readFileSync(ran, "utf8")
+			.split("\n")
+			.filter((dir) => dir.endsWith(".git"));
+		// The test probe and daemon both build from the trusted git directory.
+		expect(dirs.length).toBeGreaterThanOrEqual(2);
+		expect(
+			readFileSync(ran, "utf8")
+				.split("\n")
+				.some((dir) => dir.includes("quest-land")),
+		).toBe(false);
 	});
 
 	test("ejects auto-merging PRs that are not queued or not ready, in enqueue order", async () => {
@@ -816,53 +909,643 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		await expect(refused).rejects.toThrow(`It upholds only ${Object.keys(UPHELD_CLASSIC).join(", ")}`);
 		expect(forge.repo.pulls[0].landing).toBe(true);
 	});
+});
 
-	test("refuses a check result for any other chain", async () => {
+function sandbox(script = 'cd "$1"; test ! -e broken || test -e fixed') {
+	const state = tempDir();
+	const command = join(state, "sandbox");
+	writeFileSync(command, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+	return { state, sandbox: command, timeout: 60 };
+}
+
+describe.skipIf(process.platform === "win32")("host daemon", () => {
+	afterEach(() => vi.unstubAllEnvs());
+
+	test.each([1, 2, 3, 4, 8])("selects a base plus floor(log2 %i) additions", async (count) => {
 		const forge = new Forge();
-		forge.pull("One", { "1.txt": "1\n" });
-		const deps = await forge.deps();
-		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(forge.clone(), plan, CHECK, () => undefined);
-		const forged = { ...result, checks: [{ ...result.checks[0], tree: "0".repeat(40) }] };
-		await expect(pushQueue(forge.clone(), plan, forged, undefined, deps)).rejects.toThrow("tested another tree");
-		await expect(pushQueue(forge.clone(), plan, { ...result, checks: [] }, undefined, deps)).rejects.toThrow(
-			"nothing was checked",
-		);
-		// A PR that failed alone is out of every later chain.
-		const failing = { numbers: [1], tree: result.checks[0].tree, passed: false };
-		await expect(
-			pushQueue(
-				forge.clone(),
-				plan,
-				{ ...result, checks: [failing, { ...failing, passed: true }] },
-				undefined,
-				deps,
-			),
-		).rejects.toThrow("check 2 did not cover the whole chain");
-		expect(() => parseResult(JSON.stringify({ base: plan.base.sha, checks: [{ numbers: ["1"] }] }))).toThrow();
-		expect(parsePlan(JSON.stringify(plan))).toEqual(plan);
+		for (let i = 0; i < count; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "ok" });
+		const plan = await resolveQueue(REPOSITORY, undefined, await forge.deps());
+		expect(build(forge.clone(), plan).links).toHaveLength(1 + Math.floor(Math.log2(count)));
 	});
 
-	test("check runs the command after -- and prints the result as JSON", async () => {
+	test("skips a conflicting addition and leaves it queued, adding a later clean PR", async () => {
 		const forge = new Forge();
-		forge.pull("One", { "1.txt": "1\n" });
-		const plan = await resolveQueue(REPOSITORY, undefined, await forge.deps());
-		const file = join(forge.dir, "plan.json");
-		writeFileSync(file, JSON.stringify(plan));
-		let stdout = "";
-		let stderr = "";
-		const out: Output = { stdout: (text) => void (stdout += text), stderr: (text) => void (stderr += text) };
-		const clone = forge.clone();
-		expect(
-			await main(["--root", clone, "land", "check", file, "--", "sh", "-c", "echo checking; exit 3"], out),
-		).toBe(0);
-		const result = parseResult(stdout);
-		expect(result.checks.map((tested) => [tested.numbers, tested.passed])).toEqual([[[1], false]]);
-		expect(stderr).toContain("checking\n");
+		forge.pull("One", { "code.txt": "one\nII\nthree\n" });
+		const clash = forge.pull("Clash", { "code.txt": "one\n2\nthree\n" });
+		forge.pull("Clean", { "clean.txt": "ok" });
+		const { checked, landing } = await forge.round();
+		expect(checked).toEqual([[1, 3]]);
+		expect(landing.map((line) => line.split(" ")[0])).toEqual(["landed", "landed"]);
+		expect(clash.landing).toBe(true);
+		expect(forge.comment(2)).toBeUndefined();
+		// Once it is the oldest, its own conflict with main ejects it.
+		expect((await forge.round()).landing).toEqual(["ejected 2 merge_conflict"]);
+		expect(clash.labels).toEqual([]);
+	});
 
-		stdout = "";
-		expect(await main(["--root", clone, "land", "check", file, "--budget", "soon", "--", "true"], out)).toBe(2);
-		expect(await main(["--root", clone, "land", "check", file, "--budget", "0", "--", "true"], out)).toBe(0);
-		expect(parseResult(stdout).checks.map((tested) => tested.passed)).toEqual([true]);
+	test("ejects the whole failing batch with a log tail, retaining the complete log", async () => {
+		const forge = new Forge();
+		forge.pull("Broken", { broken: "yes" });
+		forge.pull("Healthy", { "ok.txt": "yes" });
+		forge.pull("Waiting", { "later.txt": "yes" });
+		const options = sandbox('i=1; while [ "$i" -le 120 ]; do echo "line-$i"; i=$((i + 1)); done; exit 1');
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		expect(
+			await serveBatch(forge.clone(), plan, options, deps, async () => {
+				throw new Error("no merge on failure");
+			}),
+		).toEqual(["ejected 1 failed_checks", "ejected 2 failed_checks"]);
+		for (const number of [1, 2]) {
+			expect(forge.comment(number)).toContain("line-21\n");
+			expect(forge.comment(number)).not.toContain("line-20\n");
+			expect(forge.comment(number)).toContain("line-120");
+			expect(forge.comment(number)).toContain("<!-- quest land: failed_checks -->");
+		}
+		expect(forge.repo.pulls[2].landing).toBe(true);
+		expect(
+			readFileSync(
+				join(
+					options.state,
+					(await import("node:fs")).readdirSync(options.state).find((name) => name.endsWith(".log"))!,
+				),
+				"utf8",
+			),
+		).toContain("line-1\n");
+	});
+
+	test("revalidates a moved head after checking and never merges the batch", async () => {
+		const forge = new Forge();
+		forge.pull("One", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const old = forge.main();
+		const options = sandbox(`git -C '${forge.origin}' update-ref refs/heads/topic-1 ${old}`);
+		expect(
+			await serveBatch(root, plan, options, deps, async () => {
+				throw new Error("must not merge");
+			}),
+		).toEqual(["ejected 1 head_moved"]);
+		expect(forge.main()).toBe(old);
+	});
+
+	test("exports only files into the sandbox, separate from the private bare repository", async () => {
+		const forge = new Forge();
+		forge.pull("One", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = sandbox(
+			'test "$PWD" = "$1" && test ! -e .git && test ! -e key.pem && test ! -e repository.git && test -f one.txt',
+		);
+		const trusted = privateRepository(options.state);
+		forge.configure(trusted);
+		writeFileSync(join(options.state, "key.pem"), "secret outside the tree");
+		expect(git(trusted, "rev-parse", "--is-bare-repository")).toBe("true");
+		expect(existsSync(join(trusted, "objects/info/alternates"))).toBe(false);
+		expect((await serveBatch(trusted, plan, options, deps, async () => deps.token))[0]).toMatch(/^landed 1 /);
+	});
+
+	test("checks the files as committed, ignoring export attributes", async () => {
+		const forge = new Forge();
+		forge.pull("Hide", {
+			".gitattributes": "hidden.txt export-ignore\nsubst.txt export-subst\n",
+			"hidden.txt": "here",
+			"subst.txt": "$Format:%H$",
+		});
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = sandbox("test -f hidden.txt && test \"$(cat subst.txt)\" = '$Format:%H$'");
+		const trusted = privateRepository(options.state);
+		forge.configure(trusted);
+		expect((await serveBatch(trusted, plan, options, deps, async () => deps.token))[0]).toMatch(/^landed 1 /);
+	});
+
+	test("starts the fixer detached in its own standalone repository, including on a base conflict", async () => {
+		const forge = new Forge();
+		forge.pull("Clash", { "code.txt": "one\nII\nthree\n" });
+		forge.advance({ "code.txt": "one\n2\nthree\n" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = { ...sandbox(), fixer: join(tempDir(), "fixer") };
+		const result = join(options.state, "fixer-result");
+		writeFileSync(
+			options.fixer,
+			`#!/bin/sh
+read -r pid comm status ppid pgrp session rest < /proc/$$/stat
+printf '%s\\n' "$PWD" "$1" "$2" "$pid" "$session" > '${result}.new'
+mv '${result}.new' '${result}'
+`,
+			{ mode: 0o755 },
+		);
+		const trusted = privateRepository(options.state);
+		forge.configure(trusted);
+		let watcher: ReturnType<typeof watch>;
+		const launched = new Promise<void>((done) => {
+			watcher = watch(options.state, (_event, name) => {
+				if (name === "fixer-result" && existsSync(result)) done();
+			});
+		});
+		try {
+			expect(await serveBatch(trusted, plan, options, deps, async () => deps.token)).toEqual([
+				"ejected 1 merge_conflict",
+			]);
+			await launched;
+			const [cwd, log, number, pid, session] = readFileSync(result, "utf8").trim().split("\n");
+			expect(log).toMatch(/batch-.*\.log$/);
+			expect(number).toBe("1");
+			expect(pid).toBe(session); // Detached processes lead a new session.
+			expect(cwd).not.toBe(trusted);
+			expect(lstatSync(join(cwd, ".git")).isDirectory()).toBe(true);
+			expect(existsSync(join(cwd, ".git/objects/info/alternates"))).toBe(false);
+			expect(git(cwd, "remote")).toBe("");
+			expect(git(cwd, "rev-parse", "HEAD")).toBe(plan.queue[0].head);
+			expect(git(cwd, "rev-parse", "base")).toBe(plan.base.sha);
+		} finally {
+			watcher!.close();
+		}
+	});
+
+	test.each(["base", "dequeued", "requeued"])("refuses a batch whose %s changes during a check", async (change) => {
+		const forge = new Forge();
+		const pull = forge.pull("One", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const original = deps.fetch;
+		deps.fetch = ((input, init) => {
+			if (change === "base") forge.repo.branches.main = "f".repeat(40);
+			else if (change === "dequeued") {
+				pull.landing = false;
+				pull.autoMerge = undefined;
+			} else pull.autoMerge!.enabledAt = "2026-10-30T00:00:00Z";
+			return original(input, init);
+		}) as typeof fetch;
+		expect(
+			await serveBatch(forge.clone(), plan, sandbox(), deps, async () => {
+				throw new Error("must not merge");
+			}),
+		).toEqual([]);
+	});
+
+	test.each(["merge_conflict", "head_moved"])(
+		"a refused second merge ejects the remaining batch as %s and starts the fixer",
+		async (reason) => {
+			const forge = new Forge();
+			for (let i = 1; i <= 4; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "yes" });
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			forge.beforeMerge = (number) => {
+				if (number === 2) {
+					if (reason === "head_moved") git(forge.origin, "update-ref", "refs/heads/topic-2", forge.main());
+					else forge.repo.pulls[1].merge = "DIRTY";
+				}
+			};
+			const options = { ...sandbox(), fixer: join(tempDir(), "fixer") };
+			const result = join(options.state, "fixer-result");
+			writeFileSync(
+				options.fixer,
+				`#!/bin/sh
+printf '%s\\n' "$1" "$2" "$3" > '${result}.new'
+mv '${result}.new' '${result}'
+`,
+				{ mode: 0o755 },
+			);
+			let watcher: ReturnType<typeof watch>;
+			const launched = new Promise<void>((done) => {
+				watcher = watch(options.state, (_event, name) => {
+					if (name === "fixer-result" && existsSync(result)) done();
+				});
+			});
+			try {
+				const output = await serveBatch(forge.clone(), plan, options, deps, async () => deps.token);
+				await launched;
+				expect(output).toEqual([
+					`landed 1 ${forge.repo.pulls[0].squash}`,
+					`ejected 2 ${reason}`,
+					`ejected 3 ${reason}`,
+				]);
+				expect(forge.merges.map(({ number }) => number)).toEqual([1, 2]);
+				expect(readFileSync(result, "utf8").trim().split("\n").slice(1)).toEqual(["2", "3"]);
+				expect(forge.repo.pulls[0].merged).toBe(true);
+				expect(forge.repo.pulls[3].landing).toBe(true);
+				expect(forge.comment(2)).toContain(`<!-- quest land: ${reason} -->`);
+			} finally {
+				watcher!.close();
+			}
+		},
+	);
+
+	test.each(["base modified", "mergeability pending"])(
+		"retries a transient %s refusal and then merges",
+		async (mode) => {
+			const forge = new Forge();
+			const pull = forge.pull("One", { "one.txt": "yes" });
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			pull.mergeRefusals = [
+				{
+					status: 405,
+					message:
+						mode === "base modified"
+							? "Base branch was modified. Review and try the merge again"
+							: "Mergeability is pending",
+				},
+			];
+			let attempts = 0;
+			forge.beforeMerge = () => {
+				attempts++;
+				pull.mergeable = mode === "mergeability pending" && attempts === 1 ? null : true;
+			};
+			const pauses: number[] = [];
+			deps.sleep = async (delay) => {
+				pauses.push(delay);
+			};
+			expect(await serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token)).toEqual([
+				`landed 1 ${pull.squash}`,
+			]);
+			expect(attempts).toBe(2);
+			expect(pauses).toEqual([500]);
+			expect(forge.comment(1)).toBeUndefined();
+		},
+	);
+
+	test.each(["false", "dirty", "squash disabled", "required check", "closed", "merged", "pending", "base modified"])(
+		"classifies a refused merge with %s",
+		async (mode) => {
+			const forge = new Forge();
+			const pull = forge.pull("One", { "one.txt": "yes" });
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			const message =
+				mode === "base modified" ? "Base branch was modified. Review and try the merge again" : mode;
+			pull.mergeRefusals = Array.from({ length: 4 }, () => ({ status: 405 as const, message }));
+			forge.beforeMerge = () => {
+				pull.mergeable = mode === "false" ? false : mode === "pending" ? null : true;
+				pull.mergeableState = mode === "dirty" ? "dirty" : mode === "required check" ? "blocked" : "clean";
+				if (mode === "closed" || mode === "merged") pull.closed = true;
+				if (mode === "merged") pull.merged = true;
+			};
+			const pauses: number[] = [];
+			deps.sleep = async (delay) => {
+				pauses.push(delay);
+			};
+			const run = serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token);
+			if (mode === "false" || mode === "dirty") {
+				expect(await run).toEqual(["ejected 1 merge_conflict"]);
+			} else if (mode === "merged") {
+				expect(await run).toEqual([]);
+				expect(forge.merges).toHaveLength(1);
+				expect((await resolveQueue(REPOSITORY, undefined, deps)).queue).toEqual([]);
+				expect(await serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token)).toEqual([]);
+				expect(forge.merges).toHaveLength(1);
+				expect(forge.comment(1)).toBeUndefined();
+			} else if (mode === "squash disabled" || mode === "required check") {
+				// A refusal that would repeat every round is ejected with GitHub's reason, without a fixer.
+				expect(await run).toEqual(["ejected 1 merge_refused"]);
+				expect(forge.comment(1)).toContain(message);
+				expect(pull.labels).not.toContain("quest:merge");
+			} else if (mode === "closed") {
+				// Closed by hand: nothing to eject, and nothing left to retry.
+				expect(await run).toEqual([]);
+				expect(forge.comment(1)).toBeUndefined();
+			} else {
+				await expect(run).rejects.toThrow(message);
+				expect(forge.comment(1)).toBeUndefined();
+				expect(pull.labels).toContain("quest:merge");
+			}
+			if (mode === "pending" || mode === "base modified") expect(pauses).toEqual([500, 1000, 2000]);
+		},
+	);
+
+	test.each([1, 2])(
+		"a base push before merge %i stops the batch without ejecting or reporting tree mismatch",
+		async (number) => {
+			const forge = new Forge();
+			for (let i = 1; i <= 4; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "yes" });
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			const warnings: string[] = [];
+			deps.warn = (message) => {
+				warnings.push(message);
+			};
+			forge.beforeMerge = (current) => {
+				if (current === number) forge.advance({ "racing-main.txt": "base moved" });
+			};
+			const output = await serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token);
+			expect(output).toHaveLength(number);
+			expect(output.every((line) => line.startsWith("landed "))).toBe(true);
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("base moved");
+			expect(warnings[0]).not.toContain("CRITICAL");
+			expect(forge.repo.pulls.slice(number).every((pull) => pull.landing)).toBe(true);
+			expect(forge.repo.pulls.every((pull) => !pull.comments?.length)).toBe(true);
+		},
+	);
+
+	test("a tree mismatch logs CRITICAL, keeps landed PRs, and ejects only the unmerged batch suffix", async () => {
+		const forge = new Forge();
+		for (let i = 1; i <= 4; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "yes" });
+		forge.mismatch = 2;
+		const deps = await forge.deps();
+		const warnings: string[] = [];
+		deps.warn = (message) => {
+			warnings.push(message);
+		};
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = sandbox();
+		const output = await serveBatch(forge.clone(), plan, options, deps, async () => deps.token);
+		expect(output).toEqual([
+			`landed 1 ${forge.repo.pulls[0].squash}`,
+			`landed 2 ${forge.repo.pulls[1].squash}`,
+			"ejected 3 tree_mismatch",
+		]);
+		expect(forge.merges.map(({ number }) => number)).toEqual([1, 2]);
+		expect(warnings[0]).toContain("CRITICAL");
+		expect(forge.comment(3)).toContain("tested chain");
+		expect(forge.repo.pulls.slice(0, 2).every((pull) => pull.merged)).toBe(true);
+		expect(forge.repo.pulls[3].landing).toBe(true);
+	});
+
+	test("scopes each merge token to that PR's squash, preserving it through the queue token cache", async () => {
+		const forge = new Forge();
+		forge.pull("Workflow", { ".github/workflows/one.yml": "one" });
+		forge.pull("Code", { "code-two.txt": "two" });
+		forge.pull("Workflow again", { ".github/workflows/three.yml": "three" });
+		forge.pull("Waiting", { "four.txt": "four" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const scopes: boolean[] = [];
+		const tokens: string[] = [];
+		const cached = apiDependencies(async () => deps.token, deps);
+		await serveBatch(forge.clone(), plan, sandbox(), cached, async (workflows) => {
+			scopes.push(workflows);
+			const minted = await forge.deps(workflows ? { workflows: "write" } : {});
+			tokens.push(minted.token);
+			return minted.token;
+		});
+		expect(scopes).toEqual([true, true, false, true, true]);
+		expect(forge.merges.map(({ authorization }) => authorization)).toEqual(
+			[tokens[0], tokens[2], tokens[4]].map((token) => `Bearer ${token}`),
+		);
+	});
+
+	test("a lost merge response never re-merges or ejects the merged PR after restart", async () => {
+		const forge = new Forge();
+		for (let i = 1; i <= 3; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const original = deps.fetch;
+		deps.fetch = (async (input, init) => {
+			const response = await original(input, init);
+			if (String(input).endsWith("/pulls/1/merge")) throw new Error("lost merge response");
+			return response;
+		}) as typeof fetch;
+		await expect(serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token)).rejects.toThrow(
+			"lost merge response",
+		);
+		const restarted = await forge.deps();
+		const remaining = await resolveQueue(REPOSITORY, undefined, restarted);
+		expect(remaining.queue.map(({ number }) => number)).toEqual([2, 3]);
+		await serveBatch(forge.clone(), remaining, sandbox(), restarted, async () => restarted.token);
+		expect(forge.merges.map(({ number }) => number)).toEqual([1, 2, 3]);
+		expect(forge.comment(1)).toBeUndefined();
+		expect(forge.repo.pulls[0].merged).toBe(true);
+	});
+
+	test("a restart resolves only PRs left after successful API merges", async () => {
+		const forge = new Forge();
+		for (let i = 1; i <= 4; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const options = sandbox();
+		const original = deps.fetch;
+		let interrupted = false;
+		deps.fetch = ((input, init) => {
+			if (String(input).endsWith("/pulls/2/merge")) {
+				interrupted = true;
+				throw new Error("daemon interrupted");
+			}
+			return original(input, init);
+		}) as typeof fetch;
+		await expect(serveBatch(root, plan, options, deps, async () => deps.token)).rejects.toThrow(
+			"daemon interrupted",
+		);
+		expect(interrupted).toBe(true);
+		const restarted = await forge.deps();
+		const remaining = await resolvePreparedQueue(root, options.state, REPOSITORY, undefined, restarted);
+		expect(remaining.queue.map(({ number }) => number)).toEqual([2, 3, 4]);
+		expect(
+			(await serveBatch(root, remaining, options, restarted, async () => restarted.token)).map((line) =>
+				line.split(" ").slice(0, 2).join(" "),
+			),
+		).toEqual(["landed 2", "landed 3"]);
+	});
+
+	test("refreshes API tokens across a long check and after a 401", async () => {
+		let clock = 0;
+		let minted = 0;
+		const seen: string[] = [];
+		let unauthorized = false;
+		const deps = apiDependencies(async () => `token-${++minted}`, {
+			now: () => clock,
+			sleep: async () => {},
+			warn: () => {},
+			fetch: (async (_input, init) => {
+				seen.push(new Headers(init?.headers).get("Authorization")!);
+				if (unauthorized) {
+					unauthorized = false;
+					return new Response(null, { status: 401 });
+				}
+				return Response.json({});
+			}) as typeof fetch,
+		});
+		await deps.fetch("https://api.github.com/test");
+		clock += 61 * 60_000;
+		await deps.fetch("https://api.github.com/test");
+		unauthorized = true;
+		await deps.fetch("https://api.github.com/test");
+		expect(seen).toEqual(["Bearer token-1", "Bearer token-2", "Bearer token-2", "Bearer token-3"]);
+	});
+
+	test("resumes all pending ejections after a restart during a failing batch", async () => {
+		const forge = new Forge();
+		forge.pull("One", { "one.txt": "yes" });
+		forge.pull("Two", { "two.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = sandbox();
+		writeFileSync(
+			join(options.state, "failure.json"),
+			JSON.stringify({
+				plan,
+				log: join(options.state, "full.log"),
+				numbers: [1, 2],
+				ejections: plan.queue.map((entry) => ({ ...entry, reason: "failed_checks", detail: "batch failed" })),
+			}),
+		);
+		expect(await resumeFailure(forge.clone(), options, deps)).toEqual([
+			"ejected 1 failed_checks",
+			"ejected 2 failed_checks",
+		]);
+		expect(await resumeFailure(forge.clone(), options, deps)).toEqual([]);
+	});
+
+	test.each([false, true])(
+		"requests workflow write only when the selected batch touches workflows (%s)",
+		async (workflows) => {
+			const forge = new Forge();
+			forge.pull("One", { [workflows ? ".github/workflows/check.yml" : "one.txt"]: "yes" });
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			const scopes: boolean[] = [];
+			await serveBatch(forge.clone(), plan, sandbox(), deps, async (scope) => {
+				scopes.push(scope);
+				return deps.token;
+			});
+			// One fresh token per PR merge.
+			expect(scopes).toEqual([workflows]);
+		},
+	);
+
+	test("backs off batch failures and continues rather than exiting the daemon", async () => {
+		let attempts = 0;
+		const delays: number[] = [];
+		const warnings: string[] = [];
+		await daemonLoop(
+			async () => {
+				attempts++;
+				if (attempts < 3) throw new Error(attempts === 1 ? "GitHub HTTP 503" : "landing push failed");
+				return false;
+			},
+			{
+				sleep: async (delay) => {
+					delays.push(delay);
+				},
+				warn: (message) => {
+					warnings.push(message);
+				},
+			},
+			() => attempts === 3,
+		);
+		expect(delays).toEqual([1000, 2000, 60000]);
+		expect(warnings).toHaveLength(2);
+	});
+
+	test("holds one OS lock per checkout and releases it", async () => {
+		const lock = join(tempDir(), "lock");
+		const release = await lockCheckout(lock);
+		await expect(lockCheckout(lock)).rejects.toThrow("another quest land serve");
+		release();
+	});
+
+	test("shares the repository lock across linked worktrees", async () => {
+		const forge = new Forge();
+		const root = forge.clone();
+		const linked = join(tempDir(), "linked");
+		git(root, "worktree", "add", "--detach", linked, "HEAD");
+		const release = await lockRepository(root);
+		try {
+			await expect(lockRepository(linked)).rejects.toThrow("another quest land serve");
+		} finally {
+			release();
+		}
+	});
+
+	test("reads the App key path only from the environment and keeps state outside the checkout", () => {
+		vi.stubEnv("QUEST_LAND_KEY", "");
+		vi.stubEnv("CREDENTIALS_DIRECTORY", "/run/credentials/quest-land.service");
+		expect(keyPath()).toBe("/run/credentials/quest-land.service/github-app-key");
+		vi.stubEnv("STATE_DIRECTORY", "/var/lib/quest-land");
+		expect(defaultState(REPOSITORY)).toBe(join("/var/lib/quest-land", `${REPOSITORY.owner}-${REPOSITORY.repo}`));
+	});
+
+	test("fails a batch whose check outlives the timeout", async () => {
+		const forge = new Forge();
+		forge.pull("PR", { "a.txt": "ok" });
+		const root = forge.clone();
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, "main", deps);
+		const options = { ...sandbox("sleep 30"), timeout: 0.002 };
+		const started = Date.now();
+		expect(await serveBatch(root, plan, options, deps, async () => deps.token)).toEqual([
+			"ejected 1 failed_checks",
+		]);
+		expect(Date.now() - started).toBeLessThan(20_000);
+		expect(forge.comment(1)).toContain("was killed");
+	});
+
+	test("bounds a base conflict's comment however many paths conflict", async () => {
+		const forge = new Forge();
+		const many = Object.fromEntries(
+			Array.from({ length: 200 }, (_, i) => [`${"x".repeat(200)}/${"y".repeat(200)}-${i}.txt`, "pr\n"]),
+		);
+		forge.pull("Clash", many);
+		forge.advance(Object.fromEntries(Object.keys(many).map((path) => [path, "base\n"])));
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		expect(await serveBatch(forge.clone(), plan, sandbox(), deps, async () => deps.token)).toEqual([
+			"ejected 1 merge_conflict",
+		]);
+		expect(forge.comment(1)!.length).toBeLessThan(65_536);
+	}, 30_000);
+
+	test("bounds the ejection comment's log excerpt", () => {
+		expect(excerpt("a < b")).toBe("a &lt; b");
+		const long = excerpt("&".repeat(100_000));
+		expect(long.length).toBeLessThan(65_536 - 1000);
+		expect(long.startsWith("…&amp;")).toBe(true);
+	});
+
+	test("does not pass credentials or home configuration to sandbox/fixer commands", () => {
+		expect(Object.keys(commandEnvironment()).sort()).toEqual(["LANG", "PATH"]);
+	});
+
+	test.each([false, true])("scopes App tokens to the repository, workflows=%s", async (workflows) => {
+		const key = join(tempDir(), "key.pem");
+		writeFileSync(
+			key,
+			generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }),
+		);
+		let body: unknown;
+		vi.stubEnv("QUEST_LAND_KEY", key);
+		const token = await installationToken(REPOSITORY, { appId: "123" }, workflows, {
+			now: Date.now,
+			fetch: (async (input, init) => {
+				if (String(input).endsWith("/installation")) return Response.json({ id: 5 });
+				body = JSON.parse(String(init?.body));
+				return Response.json({ token: "scoped" });
+			}) as typeof fetch,
+		});
+		expect(token).toBe("scoped");
+		expect(body).toEqual({
+			repositories: ["project"],
+			permissions: { contents: "write", pull_requests: "write", ...(workflows ? { workflows: "write" } : {}) },
+		});
+		await installationToken(
+			REPOSITORY,
+			{ appId: "123" },
+			false,
+			{
+				now: Date.now,
+				fetch: (async (input, init) => {
+					if (String(input).endsWith("/installation")) return Response.json({ id: 5 });
+					body = JSON.parse(String(init?.body));
+					return Response.json({ token: "api" });
+				}) as typeof fetch,
+			},
+			true,
+		);
+		expect(body).toEqual({
+			repositories: ["project"],
+			permissions: {
+				contents: "write",
+				issues: "write",
+				pull_requests: "write",
+				administration: "read",
+				checks: "read",
+				statuses: "read",
+			},
+		});
 	});
 });
