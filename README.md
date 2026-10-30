@@ -485,8 +485,9 @@ code from the host's credentials and filesystem. Both the sandbox and fixer
 wrappers **must run code as a different user from the App key owner**, for example
 inside nspawn containers. Environment filtering cannot protect the key or later
 merge tokens from a process running under the daemon's UID through `/proc`.
-The sandbox gets the committed files without `.git`, ignoring export attributes;
-its working directory is that tree. The fixer runs in an independent repository with batch history, no remotes,
+The sandbox gets a standalone, depth-1 clone of the tested commit, with no remote
+and no alternates, so `HEAD` is the commit being checked and nothing links back to
+the daemon's repository; its working directory is that clone. The fixer runs in an independent repository with batch history, no remotes,
 no alternates, and no link to the daemon's private bare repository. Fetches and
 chain construction use only that private repository in the state directory.
 The sandbox runs the repository's checks
