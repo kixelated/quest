@@ -14,7 +14,8 @@ A draft you started in this session has no `## Decisions needed` section, so it 
 Work in a checkout of the PR's head branch, checking out the head first when someone else opened it.
 Commit everything, then run the repository's local checks, unless the guide's Reviews section says to run no code from the head, and fix any failure.
 
-Review the committed branch with `quest review`, as the guide's Reviews section describes; `quest review --help` explains the round.
+If the PR body's `## Review` section already names the committed head, with no finding left unrefuted, run no new round and go on to pushing and marking it ready below.
+Otherwise, review the committed branch with `quest review`, as the guide's Reviews section describes; `quest review --help` explains the round.
 Run it in the foreground; a round takes minutes.
 Pass `--deep` for a high-stakes change, such as security, a wire format or public API, or a risk of data loss; never for routine work.
 Fix each finding you agree with, or refute it with evidence the reviewer can check.
