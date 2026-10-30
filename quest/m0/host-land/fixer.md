@@ -28,8 +28,16 @@ Decided 2026-10-30 (user, /quest-plan); see the
   maintainer's last pick.
 - A flaky failure the fixer requeues becomes a suggested follow-up in its
   comment.
-- Codex runs with the maintainer's own Codex login and a write credential
-  for pushing to the PR branch and requeueing, never the bot key.
+- **Credentials** (user, 2026-10-30). Codex runs in the gate's sandbox with
+  no git or GitHub credential and network only to the host's CLIProxyAPI,
+  through the gate's client key ([setup](/quest/m0/host-land/bot-key.md)).
+  It commits locally. The daemon checks the commits against the rules here,
+  pushes them as moq-bot, and requeues.
+- **Off-limits paths.** A maintainer's approval covers the pinned head, so
+  the gate may evaluate that head's devShell. The fixer's commits come after
+  the approval, so they may not touch what runs outside the sandbox:
+  `flake.nix`, `flake.lock`, `nix/`, `.envrc`, or `.github/`. A fix that
+  needs them is handed back, and the daemon refuses to push one that does.
 
 ## Required
 

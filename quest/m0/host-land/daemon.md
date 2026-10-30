@@ -19,9 +19,22 @@ Decided 2026-10-30 (user, /quest-plan); see the
   floor(log₂ n) for n queued PRs. A PR that conflicts with the chain is
   skipped and stays queued. Only the base's own conflict ejects it.
 - **Check.** Run the repository's check (`just check` and `just test` here)
-  on the tip through `quest gate`, in a sandbox holding no GitHub token,
-  `gh` config, SSH agent, or the bot key. Reuse the runner's sandbox where it
-  fits.
+  on the tip through `quest gate`, in the runner's sandbox
+  (`src/runner/sandbox.ts`): no home directories, GitHub token, `gh` config,
+  SSH agent, or keys, and network only to package registries.
+- **Trust** (user, 2026-10-30). A maintainer approved the pinned head, so
+  the gate evaluates its devShell even when it has non-maintainer commits.
+  The pin is what makes that safe, so never check a head other than the
+  pinned one.
+  - Base devShell, untrusted flake changes handed back
+  - Refuse untrusted heads until the VM ships
+  - Wait for the VM
+  - ✅ Fine as is: a maintainer already approved the merge
+- **Credentials.** Run as the gate's own user
+  ([setup](/quest/m0/host-land/bot-key.md)). Mint a moq-bot installation
+  token for each push, scoped to this repository with contents and
+  pull-request write, adding workflows write only when the batch touches
+  `.github/workflows`.
 - **Eject.** On a failing tip, eject every PR in the batch: disable
   auto-merge, remove `quest:merge`, and comment with the reason, keeping the
   hidden marker `quest status` reads. Keep the resolve-time ejections
@@ -39,4 +52,4 @@ Decided 2026-10-30 (user, /quest-plan); see the
 
 ## Required
 
-- [moq-bot's App key](/quest/m0/host-land/bot-key.md) - the host can push as moq-bot
+- [Gate host setup](/quest/m0/host-land/bot-key.md) - the gate's user can push as moq-bot and reach Codex

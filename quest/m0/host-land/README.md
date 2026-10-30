@@ -69,6 +69,13 @@ can hand off instead.
   fixes live wrong ejections until the host gate replaces that code; close
   [moq-dev/quest#277](https://github.com/moq-dev/quest/pull/277), since an
   ejection now removes `quest:merge` and the fixer adds it back.
+- Security (user, 2026-10-30): the gate runs as a dedicated user under a
+  hardened unit. PR code and Codex run in the runner's sandbox with no
+  credentials. moq-bot tokens are minted per push and scoped to this
+  repository. Codex reaches its model through the host's CLIProxyAPI, so the
+  Codex login stays outside the sandbox. A maintainer's approval of the
+  pinned head covers evaluating its devShell, but the fixer may not touch
+  files that run outside the sandbox.
 - This epic ranks first in m0. It replaces the hook-started kix fixer that
   [moq-dev/quest#276](https://github.com/moq-dev/quest/pull/276) proposes
   (`kix/eject-fix`).
@@ -80,6 +87,6 @@ can hand off instead.
 
 ## Required
 
-- [moq-bot's App key](/quest/m0/host-land/bot-key.md) - condition: the maintainer places the key on the gate host
+- [Gate host setup](/quest/m0/host-land/bot-key.md) - a dedicated user holding moq-bot's key and a CLIProxyAPI client key, unreachable from the sandbox
 - [Host daemon](/quest/m0/host-land/daemon.md) - `quest land serve` lands batches and ejects without bisecting
 - [Codex fixer](/quest/m0/host-land/fixer.md) - ejected batches get one mechanical fix attempt and healthy PRs are requeued
