@@ -103,18 +103,21 @@ export function privateRepository(state: string): string {
 }
 
 /**
- * The tip's files exactly as committed, with no `.git` link back to the daemon. Unlike `git archive`, a
- * checkout ignores `export-ignore` and `export-subst`, so a PR cannot hide files from the check.
+ * A standalone, depth-1 clone of the tip: `HEAD` is the commit being checked, so tools that need a
+ * repository work. It has no remote and no alternates, so nothing in it links back to the daemon's
+ * repository, and a checkout ignores `export-ignore` and `export-subst`, so a PR cannot hide files.
  */
 function sandboxTree(root: string, state: string, tip: string): string {
 	const checkout = mkdtempSync(join(state, "check-"));
-	const index = join(state, "check.index");
-	const env = { GIT_INDEX_FILE: index };
+	// A shallow fetch needs a ref; this one lives only for the fetch.
+	const ref = "refs/quest-land/check";
+	git(root, ["update-ref", ref, tip]);
 	try {
-		git(root, ["read-tree", tip], { env });
-		git(root, [`--work-tree=${checkout}`, "checkout-index", "--all", "--force"], { env });
+		git(checkout, ["init", "--quiet"]);
+		git(checkout, ["fetch", "--quiet", "--no-tags", "--depth=1", `file://${root}`, ref]);
+		git(checkout, ["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
 	} finally {
-		rmSync(index, { force: true });
+		git(root, ["update-ref", "-d", ref]);
 	}
 	return checkout;
 }

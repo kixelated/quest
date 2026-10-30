@@ -990,13 +990,15 @@ describe.skipIf(process.platform === "win32")("host daemon", () => {
 		expect(forge.main()).toBe(old);
 	});
 
-	test("exports only files into the sandbox, separate from the private bare repository", async () => {
+	test("gives the sandbox a standalone shallow clone, separate from the private bare repository", async () => {
 		const forge = new Forge();
 		forge.pull("One", { "one.txt": "yes" });
 		const deps = await forge.deps();
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
 		const options = sandbox(
-			'test "$PWD" = "$1" && test ! -e .git && test ! -e key.pem && test ! -e repository.git && test -f one.txt',
+			'test "$PWD" = "$1" && test -d .git && test -z "$(git remote)" && test ! -e .git/objects/info/alternates && ' +
+				'test "$(git rev-parse --is-shallow-repository)" = true && test "$(git log --format=%s)" = "One (#1)" && ' +
+				"git diff --quiet HEAD && test ! -e key.pem && test ! -e repository.git && test -f one.txt",
 		);
 		const trusted = privateRepository(options.state);
 		forge.configure(trusted);
