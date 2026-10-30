@@ -12,7 +12,7 @@ version and installs small stubs that call it.
 Paste this into Claude Code or Codex from your repository root:
 
 ```text
-Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest here.
+Follow https://github.com/moq-dev/quest/blob/main/SETUP.md to set up Quest here.
 ```
 
 [SETUP.md](../SETUP.md) has the agent install and pin the binary with mise or a
