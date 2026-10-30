@@ -1,4 +1,5 @@
 // Host orchestration: PR code runs only through the configured sandbox.
+import { startFixer, collectFixers, handbackRepeated } from "./land-fixer";
 import { spawn } from "node:child_process";
 import { createPrivateKey, createSign } from "node:crypto";
 import {
@@ -18,7 +19,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { GitHub, type GitHubDependencies, type Repository, object, string } from "./github";
 import { forgetHeads, prepareHead, resolvePreparedQueue, landFallback, finishFallback } from "./land-head";
-import { build, eject, ejection, git, type Plan } from "./land";
+import { build, commandEnvironment, eject, ejection, git, type Plan } from "./land";
 
 export interface ServeOptions {
 	base?: string;
@@ -29,11 +30,6 @@ export interface ServeOptions {
 	appId: string;
 	/** Minutes the sandbox may run before the batch fails. */
 	timeout: number;
-}
-
-/** Deliberately exclude HOME, Git configuration, agents, tokens, and systemd credentials. */
-export function commandEnvironment(): NodeJS.ProcessEnv {
-	return { PATH: process.env.PATH, LANG: "C.UTF-8" };
 }
 
 /** Mint a short-lived token for this repository, never the installation's other repositories. */
@@ -169,7 +165,7 @@ export function apiDependencies(
 	};
 }
 
-interface Failure {
+export interface Failure {
 	plan: Plan;
 	ejections: Plan["eject"];
 	numbers: number[];
@@ -198,7 +194,7 @@ export async function resumeFailure(
 	if (options.fixer && failure.numbers.length > 0) {
 		const checkout = mkdtempSync(join(options.state, "fix-"));
 		try {
-			await startFixer(root, checkout, failure, options.fixer);
+			await startFixer(root, checkout, failure, options.fixer, options.state, deps);
 		} catch (error) {
 			rmSync(checkout, { recursive: true, force: true });
 			throw error;
@@ -206,37 +202,6 @@ export async function resumeFailure(
 	}
 	rmSync(path);
 	return output;
-}
-
-/** Give the fixer its own repository of the batch, with no remotes or link back, and leave it running. */
-async function startFixer(root: string, checkout: string, failure: Failure, fixer: string): Promise<void> {
-	git(checkout, ["init", "--quiet"]);
-	git(checkout, [
-		"fetch",
-		"--quiet",
-		"--no-tags",
-		"--no-write-fetch-head",
-		root,
-		`${failure.tip}:refs/heads/batch`,
-		`${failure.plan.base.sha}:refs/heads/base`,
-		...failure.plan.queue
-			.filter((entry) => failure.numbers.includes(entry.number))
-			.map((entry) => `${entry.head}:refs/heads/pr-${entry.number}`),
-	]);
-	git(checkout, ["config", "user.name", "quest fixer"]);
-	git(checkout, ["config", "user.email", "quest-fixer@localhost"]);
-	git(checkout, ["checkout", "--quiet", "--detach", failure.tip]);
-	const child = spawn(fixer, [failure.log, ...failure.numbers.map(String)], {
-		cwd: checkout,
-		detached: true,
-		env: commandEnvironment(),
-		stdio: "ignore",
-	});
-	await new Promise<void>((done, reject) => {
-		child.once("spawn", done);
-		child.once("error", reject);
-	});
-	child.unref();
 }
 
 /** GitHub refuses comments over 65,536 characters. Escaping grows a character at most 5x (`&amp;`). */
@@ -304,7 +269,10 @@ export async function serveBatch(
 		if (await eject(github, plan, item)) output.push(`ejected ${item.number} ${item.reason}`);
 		forgetHeads(options.state, item.number);
 	};
-	for (const item of plan.eject) await report(item);
+	for (const item of plan.eject) {
+		await report(item);
+		await handbackRepeated(options.state, plan, item, deps);
+	}
 	if (plan.queue.length === 0) return output;
 	const chain = build(root, plan);
 	const conflict = chain.conflict;
@@ -555,6 +523,7 @@ export async function serve(
 			{ fetch, now: Date.now, sleep, warn },
 		);
 		await daemonLoop(async () => {
+			for (const line of await collectFixers(trusted, options.state, deps, mint)) warn(line);
 			for (const line of await resumeFailure(trusted, options, deps)) warn(line);
 			const completed = await finishFallback(trusted, options.state, deps, mint);
 			if (completed) warn(completed);

@@ -493,8 +493,34 @@ chain construction use only that private repository in the state directory.
 The sandbox runs the repository's checks
 (`just check` and `just test` here). No credential or inherited home configuration
 is passed to it. The daemon refuses to start without `--sandbox`. The optional
-fixer runs detached, receiving the full log path followed by the batch's PR
-numbers, with the same restricted environment. Host provisioning and isolation
+fixer runs as tracked background work, receiving the full log path followed by
+PR numbers, with the same restricted environment (`PATH` and `LANG` only).
+Its cwd is the standalone repository, with `batch`, `base`, and `pr-<n>` branches.
+The wrapper starts an ephemeral container and runs `quest land fix <log> <prs...>`
+there, exposing that repository read/write and the log read-only at the given paths.
+It supplies a fresh HOME, `OPENAI_BASE_URL` (the OpenAI-compatible Responses
+endpoint, including `/v1`) and `OPENAI_API_KEY` (the gate's proxy client key).
+The daemon never supplies these or any Git/GitHub credential; the wrapper must
+restrict network access to the model proxy. Codex login stays on CLIProxyAPI.
+The wrapper waits for the payload, returns its exit status, and tears down its
+container on exit or interruption. The payload defaults
+to `codex exec`; `--agent <executable>` and repeatable `--agent-arg <argument>`
+replace it for another CLI. It writes `<cwd>/quest-land-result.json`: an array of
+`{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
+`{number, action:"handback", diagnosis, recommendation}`, with no extra fields.
+Reasons and diagnoses are single lines. Fixed heads must be committed on `pr-<n>`.
+
+Jobs and attempts persist across daemon restarts. After the wrapper exits, the
+daemon validates every result, ancestry, and protected path before lease-pushing
+as the bot. A protected-path edit means content or mode matching neither the pin
+nor the current base; protected paths are `flake.nix`, `flake.lock`, `nix/`, `.envrc`,
+and `.github/`. It records `mechanical fix by Codex: <reason>` and the new head in
+`## Review`, enables head-pinned auto-merge, and adds `quest:merge`. Healthy PRs
+requeue unchanged. Forks refusing maintainer edits, refused pushes, invalid results,
+crashes, or the 60-minute fixer deadline hand back with a marked comment. A flaky
+requeue suggests a follow-up. Each maintainer pick gets one attempt; the daemon
+records the fixer's new auto-merge `enabledAt` so its second ejection hands back.
+A new maintainer pick resets the attempt. Host provisioning and isolation
 belong to the host; these commands are executable paths, not shell expressions.
 Wrappers must expose only the supplied tree and log, never the state directory
 or its private bare repository.

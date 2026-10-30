@@ -91,4 +91,4 @@ can hand off instead.
 ## Required
 
 - [Gate host](/quest/m0/host-land/host.md) - kixelated/nixos runs the daemon as its own user, checks in nspawn containers, and retires the Actions runner
-- [Codex fixer](/quest/m0/host-land/fixer.md) - ejected batches get one mechanical fix attempt and healthy PRs are requeued
+- [Fixer proxy access](/quest/m0/host-land/fixer.md) - connect the nixos fixer container to CLIProxyAPI with the gate client key and maintainer login
