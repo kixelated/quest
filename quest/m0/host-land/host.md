@@ -55,3 +55,29 @@ which `main`'s ruleset lets bypass the `quest land` check.
   `ProtectHome=yes`, `PrivateTmp`, and a state directory for the checkout
   and the logs.
 
+
+Deployed 2026-10-30 from
+[kixelated/nixos#16](https://github.com/kixelated/nixos/pull/16) (live as
+`deploy/quest-land`):
+
+- `quest-land.service` runs the daemon as its own user with the bot key
+  through `LoadCredential`. Each check runs in an ephemeral nspawn container
+  started by a root-owned socket launcher that accepts uploads only from that
+  user. Egress follows the CI runners' public-IPv4 policy (user, 2026-10-30),
+  not a registry allowlist.
+- moq-bot gained Checks read, Commit statuses read, Administration read, and
+  Issues write (user, 2026-10-30), since the daemon reads the queue as
+  moq-bot where land.yml used Actions' own token.
+
+What remains:
+
+- Land a batch live, which also confirms that moq-bot's API merge bypasses
+  the unreported `quest land` check.
+- Retire the `quest-land` Actions runner in `modules/ci-runners.nix`, which
+  still mounts the same key, and merge #16 once
+  [kixelated/nixos#13](https://github.com/kixelated/nixos/pull/13) lands.
+- The fixer's container access to CLIProxyAPI and the Codex login, which the
+  [fixer](/quest/m0/host-land/fixer.md) needs.
+- VM tests for three more symlink attacks (an escaping chain, a link to a
+  directory, a write through a symlinked directory), which the extraction
+  already rejects.
