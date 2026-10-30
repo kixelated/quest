@@ -47,6 +47,7 @@ A stale local base can predate the quest and skip the check.
 On a finding, fix the branch: delete the finished quest with `quest rm`, or rewrite it to the remainder the PR body names.
 Then push, re-check, and continue; ask the user only when what remains is unclear.
 Land only a head named by a `## Review` record the guide counts, or one the guide's review exemptions cover.
+When no record the guide counts names the head (none, one naming another head, or one the guide does not count, such as an author without write access), review the checked-out head locally as the guide's Reviews section describes and rewrite the record before landing; when a counted record names this head, run no new round.
 Leave a summary of the changes and decisions made, then land the head you checked with `quest merge <pr> <token> --land <full 40-character head SHA>`.
 It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 On a base that requires the `quest land` check, it queues the PR for `quest land`, whose chain merges and tests against the current base; do not merge the base or rerun checks per PR just to queue it.
