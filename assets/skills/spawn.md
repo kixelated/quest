@@ -38,8 +38,10 @@ As each agent reports, explain its result in a few lines, then ask about its PR 
 - `/quest-review`: If the PR is a draft ready for review.
 - `/quest-merge`: If the PR is ready for review and landable as `/quest-merge` defines it: a review the guide counts on its head, required status checks passed, and every automated review finding on GitHub fixed or refuted.
 - `/quest-iterate`: If the PR has failing checks, unaddressed review findings, other significant issues, or decisions, or has no counted review of its head.
-- skip: If the PR should not be merged yet, including while its checks or automated reviews are still running.
+- skip: If the PR should not be merged yet.
 - `/quest-delete`: If the quest should be deleted.
+
+While its required checks or automated reviews are still running, report that instead of asking about it; `/quest-complete` asks once they finish.
 
 Once every sub-agent has finished, plan the suggested follow-ups of the PRs `/quest-merge` queued, as the guide describes.
 Include quest context, as many quests are concurrently in flight.
