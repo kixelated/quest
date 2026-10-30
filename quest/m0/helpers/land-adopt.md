@@ -21,9 +21,11 @@ verification.
   on every repository, so moq-bot replaces the planned single-repository App.
   moq-bot needs Workflows write, which lets it land PRs that change
   `.github/workflows`; it had Contents write but not Workflows on 2026-10-29.
-  The `land` environment, deployable only from `main`, holds its client ID
-  as the variable `LAND_APP_CLIENT_ID` and its key as the secret
-  `LAND_APP_PRIVATE_KEY`.
+  The land job reads its key as `APP_CLIENT_ID` and `APP_PRIVATE_KEY`, today
+  organization secrets that every moq-dev workflow can read. Open (user):
+  restrict them to protected environments, such as `land` here and `publish`
+  in moq-dev/moq, so a pushed branch's workflow cannot mint a token that
+  bypasses `main`. The same names in the environment keep the workflow as is.
 - **Ruleset (user).** `main`'s ruleset blocks deletion and non-fast-forward
   pushes and requires two checks: `check` from GitHub Actions, and
   `quest land` pinned to moq-bot, which has no checks or statuses
