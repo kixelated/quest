@@ -80,7 +80,6 @@ can hand off instead.
 
 ## Required
 
-- [Inline merge](/quest/m0/host-land/inline-merge.md) - `/quest-merge` queues inline or recommends `/quest-iterate`; no per-PR merge sub-agents
 - [moq-bot's App key](/quest/m0/host-land/bot-key.md) - condition: the maintainer places the key on the gate host
 - [Host daemon](/quest/m0/host-land/daemon.md) - `quest land serve` lands batches and ejects without bisecting
 - [Codex fixer](/quest/m0/host-land/fixer.md) - ejected batches get one mechanical fix attempt and healthy PRs are requeued

@@ -992,8 +992,8 @@ the version you pin decides what your agents follow:
 | `quest-spawn` | Triage ready quests and send several agents out in parallel. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-review` | Review a PR's branch locally with the other vendor's model, then mark it ready for review. |
-| `quest-merge` | Merge a quest's PR once CI and reviews pass, completing the quest. |
-| `quest-complete` | Decide which open PRs to merge, then merge them in parallel. |
+| `quest-merge` | Queue a reviewed PR to land, or send it to `quest-iterate`. |
+| `quest-complete` | Decide which open PRs to merge, then queue them. |
 | `quest-afk` | Keep starting agreed work while you are away, leaving every decision for your return. |
 | `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
