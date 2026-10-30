@@ -39,6 +39,7 @@ ownership-manifest design:
 
 ## Required
 
+- [Merge through a host gate](/quest/m0/host-land/README.md) - inline merge picks, small batches landed from the maintainer's host, and a Codex fixer instead of bisection
 - [Codex cloud off](/quest/m0/codex-cloud-off.md) - automatic Codex cloud reviews stop once no open PR relies on them
 - [Review reports an expired login](/quest/m0/review-login.md) - `quest review` says to log in again instead of failing with a 401
 - [Live sandbox test](/quest/m0/review-sandbox.md) - the real reviewer CLIs run nothing a reviewed head plants

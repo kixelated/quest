@@ -36,3 +36,11 @@ What remains is the fork path.
   quest is done only once a fork PR that allows maintainer edits lands
   through the gate and shows as merged; any fix it needs lands here. GitHub
   offers maintainer edits only on forks a user owns, not an organization.
+- **Host gate (user, 2026-10-30).** The gate moves to the maintainer's host
+  ([host daemon](/quest/m0/host-land/daemon.md)), which pushes with moq-bot's
+  App key instead of the `token.moq.dev` exchange above, and land.yml goes
+  away. Verify the fork path on the host gate.
+
+## Required
+
+- [Host daemon](/quest/m0/host-land/daemon.md) - the gate the fork path is verified on

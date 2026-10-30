@@ -1,0 +1,86 @@
+# Merge through a host gate
+
+## Goal
+
+Picking a PR to merge starts no long-lived agent. `/quest-merge` queues it
+inline only when a counted review names its head, or the head is trivial;
+otherwise `/quest-iterate` runs first. A gate on the maintainer's host lands
+small batches: a base PR plus up to floor(log₂ n) others that merge cleanly,
+checked once on the chain's tip and pushed as one squash commit per PR. A
+conflict on the base PR or a failing batch ejects the PRs and hands them to an
+asynchronous Codex fixer, which makes only mechanical fixes and requeues the
+healthy PRs. Bisection goes away.
+
+Non-goals: other repositories adopting the gate (moq-dev/moq, moq-dev/moq.pro
+plan their own; moq.pro needs only `allow_auto_merge` and the ruleset, since
+moq-dev is on GitHub Team), and changing the review policy beyond the
+mechanical-fix exemption.
+
+## Plan
+
+Decided 2026-10-30 (user, /quest-plan). Per-PR `/quest-merge` sub-agents were
+wasteful: each one stayed alive to fix conflicts and failures that the gate
+can hand off instead.
+
+- Goal, as stated above:
+  - ✅ Yes, as stated
+  - Also include moq adoption
+  - Narrower: only the skill changes
+- Where the gate runs. Keeping it in GitHub Actions was recommended, since it
+  is live and isolates the push credential; the user chose the host.
+  - Keep GitHub Actions
+  - ✅ Move to this host
+- Architecture, once on the host:
+  - Host orchestrates, CI on Actions
+  - ✅ Everything on this host: the worker runs the check locally through
+    `quest gate`, pushes, and starts Codex. No Actions involved in landing.
+  - Everything stays in Actions
+- Queue signal. The user asked for a check nobody reports, so PRs stay in
+  auto-merge until the host reaches them; `main`'s ruleset already requires
+  the unreported `quest land` check. GitHub keeps auto-merge across a
+  writer's push, so the gate compares the head to the pin and ejects
+  `head_moved`.
+  - ✅ Pinned auto-merge (`quest merge --land`) plus `quest:merge`
+  - Label only, with the label's time against the last push
+- Retry cap for the fixer:
+  - 2 attempts
+  - ✅ 1 attempt
+  - The review-round checkpoint
+- Push credential:
+  - Your gh auth through the admin bypass, check sandboxed
+  - ✅ A moq-bot App key on this host, check sandboxed
+  - Your gh auth, no sandbox
+- Runtime. A one-pass systemd timer was recommended:
+  - systemd timer, one pass per run
+  - ✅ A long-running daemon
+- Review of the fixer's changes:
+  - Claude reviews them through `quest review`
+  - ✅ None: Codex makes only mechanical fixes; anything that would need a
+    review is ejected and handed back
+- Mechanical fixes:
+  - ✅ No behavior change, recorded in `## Review`
+  - Tool-verifiable only
+- Batch:
+  - ✅ The longest-queued PR as the base, plus the next PRs in queue order
+    that merge cleanly onto the chain, up to floor(log₂ n)
+  - Quest priority order
+- Open PRs: land
+  [moq-dev/quest#289](https://github.com/moq-dev/quest/pull/289) now, as it
+  fixes live wrong ejections until the host gate replaces that code; close
+  [moq-dev/quest#277](https://github.com/moq-dev/quest/pull/277), since an
+  ejection now removes `quest:merge` and the fixer adds it back.
+- This epic ranks first in m0. It replaces the hook-started kix fixer that
+  [moq-dev/quest#276](https://github.com/moq-dev/quest/pull/276) proposes
+  (`kix/eject-fix`).
+- The epic finishes with an end-to-end run on moq-dev/quest: a batch with one
+  PR that fails a check, one that conflicts with the base, and one healthy
+  PR. The healthy PR lands after the requeue, the mechanical one lands after
+  its fix, and the other is handed back. `CONTRIBUTING.md` and the README's
+  landing section describe the host gate.
+
+## Required
+
+- [Inline merge](/quest/m0/host-land/inline-merge.md) - `/quest-merge` queues inline or recommends `/quest-iterate`; no per-PR merge sub-agents
+- [moq-bot's App key](/quest/m0/host-land/bot-key.md) - condition: the maintainer places the key on the gate host
+- [Host daemon](/quest/m0/host-land/daemon.md) - `quest land serve` lands batches and ejects without bisecting
+- [Codex fixer](/quest/m0/host-land/fixer.md) - ejected batches get one mechanical fix attempt and healthy PRs are requeued
