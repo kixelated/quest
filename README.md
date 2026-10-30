@@ -624,7 +624,9 @@ jobs:
 
 The land job's token pushes the base and PR branches. Grant the ruleset's bypass
 to a GitHub App installed on the repository, and mint its token from an
-environment only the base branch can use. Ejecting a PR disables its auto-merge,
+environment only the base branch can use, or keep the key out of the repository
+with a broker that trades the land job's GitHub OIDC token for an App token only
+when this workflow runs on the base branch, as moq-dev's `token.moq.dev` does. Ejecting a PR disables its auto-merge,
 which needs `contents: write` on the token in `GH_TOKEN` even when another credential
 pushes. The check job holds only a read token, so it can run on a self-hosted
 runner; make it ephemeral, since it runs the queued PRs' code. Under classic protection,

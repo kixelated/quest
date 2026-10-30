@@ -77,22 +77,23 @@ jobs:
     needs: [resolve, check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # moq-bot, which main's ruleset lets bypass it, pushes the landing. Its key
-    # is the moq-dev organization's APP_CLIENT_ID and APP_PRIVATE_KEY; the
-    # environment, which only main can deploy to, is where it belongs once the
-    # organization stops sharing it with every workflow. Only this job may use it.
-    environment: land
+    # moq-bot, which main's ruleset lets bypass it, pushes the landing. No
+    # repository holds its key: token.moq.dev trades this job's GitHub ID token
+    # for a moq-bot token scoped to this repository, and only for land.yml on
+    # main. So this job must never run a queued PR's code, and no other job may
+    # request an ID token.
     # contents: write lets github.token disable auto-merge when it ejects a PR.
-    permissions: { contents: write, pull-requests: write, issues: write, actions: write, checks: read, statuses: read }
+    permissions:
+      { contents: write, pull-requests: write, issues: write, actions: write, checks: read, statuses: read, id-token: write }
     steps:
       - id: app
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ secrets.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          # Workflows lets it land PRs that change this directory.
-          permission-contents: write
-          permission-workflows: write
+        # bash runs with pipefail, so a refused request fails here rather than as an empty token.
+        shell: bash
+        run: |
+          id=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=token.moq.dev" | jq -er .value)
+          token=$(curl -fsS -X POST -H "Authorization: Bearer $id" https://token.moq.dev/land | jq -er .token)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
