@@ -2,7 +2,7 @@
 // phases keep the push credential away from PR code. `resolve` reads the queue
 // from GitHub; `check` builds the queue into a chain of squash commits on the
 // base and runs the repository's check on it, with no push credential; `push`
-// rebuilds the same chain, lands the prefix that passed, and ejects what cannot
+// rebuilds the same chains, lands the prefix that passed, and ejects what cannot
 // land.
 import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -545,30 +545,52 @@ function message(dir: string, base: string, entry: Entry): string {
 
 /**
  * Build the chain and run `command` in `root` on its tip. When it fails, run it
- * on the first half of the chain, and so on, until a prefix passes or a single
- * PR fails alone. The command's output goes to `stderr`.
+ * on the first half of the chain, and so on, until a prefix passes, which ends
+ * the run so it lands at once, or a single PR fails alone. That PR is left out,
+ * and the rest of the queue is rebuilt and checked the same way, until a prefix
+ * passes, the queue is empty, or `deadline` (epoch milliseconds) has passed. The
+ * command's output goes to `stderr`.
  */
 export async function checkQueue(
 	root: string,
 	plan: Plan,
 	command: string[],
 	stderr: (text: string) => void,
+	deadline?: number,
 ): Promise<Result> {
-	const chain = build(root, plan);
-	for (const { entry, files } of chain.conflicts) {
-		stderr(`quest land: #${entry.number} conflicts with the PRs before it in ${files.join(", ")}\n`);
-	}
 	const checks: Tested[] = [];
-	for (let count = chain.links.length; count > 0; count = Math.ceil(count / 2)) {
-		const tip = chain.links[count - 1];
-		const numbers = chain.links.slice(0, count).map((link) => link.entry.number);
-		git(root, ["checkout", "--quiet", "--force", "--detach", tip.commit]);
-		stderr(`quest land: checking ${numbers.map((number) => `#${number}`).join(" ")} at ${tip.commit}\n`);
-		const passed = (await execute(root, command, stderr)) === 0;
-		checks.push({ numbers, tree: tip.tree, passed });
-		if (passed || count === 1) break;
+	const reported = new Set<number>();
+	let queue = plan.queue;
+	for (;;) {
+		const chain = build(root, { ...plan, queue });
+		for (const { entry, files } of chain.conflicts) {
+			if (reported.has(entry.number)) continue;
+			reported.add(entry.number);
+			stderr(`quest land: #${entry.number} conflicts with the PRs before it in ${files.join(", ")}\n`);
+		}
+		let failed: Entry | undefined;
+		for (let count = chain.links.length; count > 0; count = Math.ceil(count / 2)) {
+			const tip = chain.links[count - 1];
+			const numbers = chain.links.slice(0, count).map((link) => link.entry.number);
+			git(root, ["checkout", "--quiet", "--force", "--detach", tip.commit]);
+			stderr(`quest land: checking ${numbers.map((number) => `#${number}`).join(" ")} at ${tip.commit}\n`);
+			const passed = (await execute(root, command, stderr)) === 0;
+			checks.push({ numbers, tree: tip.tree, passed });
+			if (passed) return { base: plan.base.sha, checks };
+			if (count === 1) {
+				failed = chain.links[0].entry;
+				break;
+			}
+		}
+		if (failed === undefined) return { base: plan.base.sha, checks };
+		const left = failed.number;
+		queue = queue.filter((entry) => entry.number !== left);
+		if (deadline !== undefined && Date.now() >= deadline) {
+			stderr(`quest land: #${left} fails alone, and the time budget is spent; the rest waits for the next run\n`);
+			return { base: plan.base.sha, checks };
+		}
+		stderr(`quest land: #${left} fails alone; checking the rest without it\n`);
 	}
-	return { base: plan.base.sha, checks };
 }
 
 /** Run `command` in `cwd` with both of its output streams sent to `stderr`, resolving its exit code. */
@@ -596,8 +618,7 @@ export async function pushQueue(
 	run: string | undefined,
 	deps: GitHubDependencies,
 ): Promise<string[]> {
-	const chain = build(root, plan);
-	validate(chain, plan, result);
+	const { chain, failed } = replay(root, plan, result);
 	const ejections = [...plan.eject];
 	const ejectLink = (entry: Entry, reason: Reason, detail: string) => ejections.push(ejection(entry, reason, detail));
 	for (const { entry, files } of chain.conflicts) {
@@ -607,14 +628,14 @@ export async function pushQueue(
 			`it conflicts with the base or the PRs queued before it in ${files.join(", ")}; merge the base, push, and land it again`,
 		);
 	}
-	const last = result.checks.at(-1);
-	if (last !== undefined && !last.passed && last.numbers.length === 1) {
+	for (const entry of failed) {
 		ejectLink(
-			chain.links[0].entry,
+			entry,
 			"failed_checks",
 			"the repository's check failed with it alone on the base; fix it and land it again",
 		);
 	}
+	const last = result.checks.at(-1);
 	const passed = new Set(result.checks.filter((tested) => tested.passed).map((tested) => tested.numbers.length));
 	let count = last?.passed ? last.numbers.length : 0;
 	if (count > 0) {
@@ -796,15 +817,27 @@ function move(link: Link, to: string, from: string): string[] {
 	return [`${to}:${ref}`, `--force-with-lease=${ref}:${from}`];
 }
 
-/** Fail unless `result` tested prefixes of this chain on this base, shrinking, with only the last passing. */
-function validate(chain: Chain, plan: Plan, result: Result): void {
+/**
+ * Rebuild each chain `result` checked, failing unless it tested them on this
+ * base as `checkQueue` does: each chain whole first, then shorter prefixes of it,
+ * a new chain without each PR that failed alone, and only the last check
+ * passing. Returns the last chain, without any PR that failed alone, and those PRs.
+ */
+function replay(root: string, plan: Plan, result: Result): { chain: Chain; failed: Entry[] } {
 	const bad = (why: string) => new Error(`the check result does not match the chain: ${why}`);
 	if (result.base !== plan.base.sha) throw bad(`it was built on ${result.base}, not ${plan.base.sha}`);
+	let queue = plan.queue;
+	let chain = build(root, plan);
+	if (result.checks.length === 0 && chain.links.length > 0) throw bad("nothing was checked");
+	const failed: Entry[] = [];
 	let previous = Infinity;
-	result.checks.forEach((tested, index) => {
+	for (const [index, tested] of result.checks.entries()) {
 		const count = tested.numbers.length;
-		if (count === 0 || count >= previous || count > chain.links.length)
+		if (previous === Infinity) {
+			if (count !== chain.links.length) throw bad(`check ${index + 1} did not cover the whole chain`);
+		} else if (count === 0 || count >= previous) {
 			throw bad(`check ${index + 1} is not a shorter prefix`);
+		}
 		previous = count;
 		const prefix = chain.links.slice(0, count);
 		if (prefix.some((link, at) => link.entry.number !== tested.numbers[at])) {
@@ -813,11 +846,15 @@ function validate(chain: Chain, plan: Plan, result: Result): void {
 		if (prefix[count - 1].tree !== tested.tree) throw bad(`check ${index + 1} tested another tree`);
 		if (tested.passed && index !== result.checks.length - 1)
 			throw bad(`check ${index + 1} passed but was not the last`);
-	});
-	if (result.checks.length === 0 && chain.links.length > 0) throw bad("nothing was checked");
-	if (result.checks.length > 0 && result.checks[0].numbers.length !== chain.links.length) {
-		throw bad("the first check did not cover the whole chain");
+		if (!tested.passed && count === 1) {
+			const left = chain.links[0].entry;
+			failed.push(left);
+			queue = queue.filter((entry) => entry.number !== left.number);
+			chain = build(root, { ...plan, queue });
+			previous = Infinity;
+		}
 	}
+	return { chain, failed };
 }
 
 /**

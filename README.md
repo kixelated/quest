@@ -500,8 +500,12 @@ quest land push plan.json result.json       # land what passed, eject what canno
 
 `check` runs the command on the chain's tip. When it fails, it runs it on the
 first half, and so on, until a prefix passes or one PR fails alone, with no
-retries and no batch-size limit. `push` rebuilds the chain itself and refuses a
-result that did not test exactly its prefixes. It reads the queue again and
+retries and no batch-size limit. A PR that fails alone is left out, and the
+rest is rebuilt and checked the same way in the same run, until a prefix
+passes, which lands at once, or the queue is empty. `--budget <minutes>` stops
+after an ejection once that much time has passed, so a job's time limit keeps
+the ejections found so far. `push` rebuilds the chains itself and refuses a
+result that did not test exactly their prefixes. It reads the queue again and
 lands only PRs still queued as they were when checked, and prints a PR that
 left the queue as `withdrawn` so the workflow runs again for the rest. It moves each PR's branch, with
 a lease on the head that was tested, to that PR's squash commit: a fork's

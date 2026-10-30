@@ -512,7 +512,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The gate builds the queued PRs, in order, into a chain of squash commits on the base, resolving " +
 				"quest files with `quest resolve`, and runs the check command once on the chain's tip. When that " +
 				"fails, it checks the first half, and so on, until a prefix passes, which lands at once, or one PR " +
-				"fails alone, which is ejected; the rest waits for the next run. Landing moves each PR's branch, " +
+				"fails alone, which is ejected while the same run checks the rest the same way. Landing moves each PR's branch, " +
 				"with a lease on the head that was tested, to its squash commit, then fast-forwards the base to the " +
 				"tip, so GitHub shows each PR as merged and the base only ever holds a tested tree.\n\n" +
 				"An ejected PR loses auto-merge and `quest:merge`, and gets a comment with the reason, which " +
@@ -555,17 +555,24 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Build the queue onto the base and test it, printing the result")
 		.description(
 			"Fetch the plan's base and heads from origin, build the chain, and run <command> in the checkout on " +
-				"its tip, then on the first half while it fails, until a prefix passes or one PR fails alone. " +
-				"Each run checks out the commit it tests; untracked files stay. Needs `quest` on PATH for the merge " +
+				"its tip, then on the first half while it fails, until a prefix passes or one PR fails alone. That " +
+				"PR is left out and the rest rebuilt and checked the same way, until a prefix passes, the queue is " +
+				"empty, or --budget is spent. Each run checks out the commit it tests; untracked files stay. Needs `quest` on PATH for the merge " +
 				"driver and a git identity for the throwaway commits. The command's output goes to stderr; stdout " +
 				"is the JSON result for `push`. Needs no GitHub token.",
 		)
 		.argument("<plan>", "The plan file `resolve` printed")
 		.argument("<command>", "Executable to run; put -- before it when any argument starts with -")
 		.argument("[args...]", "Arguments forwarded verbatim")
-		.action((file: string, command: string, args: string[]) => {
+		.option(
+			"--budget <minutes>",
+			"Stop checking the rest after an ejection once this many minutes have passed, so a job time limit keeps what was found",
+			minutes,
+		)
+		.action((file: string, command: string, args: string[], options: { budget?: number }) => {
 			const plan = parsePlan(readFileSync(file, "utf8"));
-			pending = checkQueue(root(), plan, [command, ...args], out.stderr).then(
+			const deadline = options.budget === undefined ? undefined : Date.now() + options.budget * 60_000;
+			pending = checkQueue(root(), plan, [command, ...args], out.stderr, deadline).then(
 				(result) => {
 					print(JSON.stringify(result));
 					return 0;
@@ -580,8 +587,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("push")
 		.summary("Land the prefix that passed and eject what cannot land")
 		.description(
-			"Rebuild the plan's chain, refuse a result that did not test exactly its prefixes, then eject the " +
-				"PRs the plan names, those that conflict, and one that failed alone. Land the prefix that passed: " +
+			"Rebuild the plan's chains, refuse a result that did not test exactly their prefixes, then eject the " +
+				"PRs the plan names, those that conflict, and those that failed alone. Land the prefix that passed: " +
 				"move each PR's branch with a lease on its tested head (a fork's first, the rest in one atomic push " +
 				"with the base's fast-forward). A moved head stops the landing; the prefix before it lands only if " +
 				"a check passed on exactly that prefix. A failed landing moves fork branches back. Ejection " +
@@ -1131,6 +1138,15 @@ function withinRoot(root: string, path: string): string | null {
 }
 
 /** A deadline must be finite, positive, and safe for the platform's timer. */
+/** A non-negative number of minutes. */
+function minutes(value: string): number {
+	const parsed = Number(value);
+	if (value.trim() === "" || !Number.isFinite(parsed) || parsed < 0) {
+		throw new InvalidArgumentError("expected a non-negative number of minutes");
+	}
+	return parsed;
+}
+
 function positiveSeconds(value: string): number {
 	const seconds = Number(value);
 	if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) {

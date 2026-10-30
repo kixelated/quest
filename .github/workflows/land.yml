@@ -71,7 +71,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
-          echo "result=$(quest land check "$RUNNER_TEMP/plan.json" -- nix develop --command bash -c 'just install && just check && just test')" >> "$GITHUB_OUTPUT"
+          # After an ejection the check keeps going on the rest; the budget stops it with room
+          # left in the job's 45 minutes for the bisection already under way.
+          echo "result=$(quest land check "$RUNNER_TEMP/plan.json" --budget 20 -- nix develop --command bash -c 'just install && just check && just test')" >> "$GITHUB_OUTPUT"
 
   land:
     needs: [resolve, check]

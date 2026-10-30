@@ -277,10 +277,10 @@ class Forge {
 	}
 
 	/** One run of the gate: resolve, check in one clone, and push from another. */
-	async round(): Promise<{ plan: Plan; checked: number[][]; landing: string[] }> {
+	async round(deadline?: number): Promise<{ plan: Plan; checked: number[][]; landing: string[] }> {
 		const deps = await this.deps();
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
-		const result = await checkQueue(this.clone(), plan, CHECK, () => undefined);
+		const result = await checkQueue(this.clone(), plan, CHECK, () => undefined, deadline);
 		const landing = await pushQueue(this.clone(), plan, result, RUN, deps);
 		this.settle();
 		return { plan, checked: result.checks.map((tested) => tested.numbers), landing };
@@ -348,16 +348,50 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		]);
 		expect(first.landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual(["landed 1", "landed 2"]);
 
+		// The PR that fails alone is left out, and the same run checks the rest.
 		const second = await forge.round();
 		expect(second.plan.queue.map((entry) => entry.number)).toEqual([3, 4]);
-		expect(second.checked).toEqual([[3, 4], [3]]);
-		expect(second.landing).toEqual(["ejected 3 failed_checks"]);
+		expect(second.checked).toEqual([[3, 4], [3], [4]]);
+		expect(second.landing).toEqual(["ejected 3 failed_checks", `landed 4 ${forge.main()}`]);
 		expect(forge.comment(3)).toContain("failed with it alone on the base");
-
-		const third = await forge.round();
-		expect(third.checked).toEqual([[4]]);
-		expect(third.landing).toEqual([`landed 4 ${forge.main()}`]);
 		expect(git(forge.origin, "ls-tree", "--name-only", "main")).not.toContain("broken");
+	});
+
+	test("a broken PR at the front does not hold the rest for another run", async () => {
+		const forge = new Forge();
+		forge.pull("Break", { broken: "\n" });
+		forge.pull("Two", { "2.txt": "2\n" });
+		forge.pull("Three", { "3.txt": "3\n" });
+		const { checked, landing } = await forge.round();
+		expect(checked).toEqual([[1, 2, 3], [1, 2], [1], [2, 3]]);
+		expect(landing.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
+			"ejected 1",
+			"landed 2",
+			"landed 3",
+		]);
+		expect(landing[0]).toBe("ejected 1 failed_checks");
+	});
+
+	test("stops after an ejection once the time budget is spent, keeping the ejection", async () => {
+		const forge = new Forge();
+		forge.pull("Break", { broken: "\n" });
+		forge.pull("Two", { "2.txt": "2\n" });
+		const first = await forge.round(0);
+		expect(first.checked).toEqual([[1, 2], [1]]);
+		expect(first.landing).toEqual(["ejected 1 failed_checks"]);
+		const second = await forge.round(0);
+		expect(second.checked).toEqual([[2]]);
+		expect(second.landing).toEqual([`landed 2 ${forge.main()}`]);
+	});
+
+	test("a PR that conflicted only with an ejected one joins the rest", async () => {
+		const forge = new Forge();
+		forge.pull("Two is 2, broken", { "code.txt": "one\n2\nthree\n", broken: "\n" });
+		forge.pull("Two is II", { "code.txt": "one\nII\nthree\n" });
+		const { checked, landing } = await forge.round();
+		expect(checked).toEqual([[1], [2]]);
+		expect(landing).toEqual(["ejected 1 failed_checks", `landed 2 ${forge.main()}`]);
+		expect(git(forge.origin, "show", "main:code.txt")).toBe("one\nII\nthree");
 	});
 
 	test("a moved head stops the landing, and an earlier prefix never checked alone does not land", async () => {
@@ -725,6 +759,17 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		await expect(pushQueue(forge.clone(), plan, { ...result, checks: [] }, undefined, deps)).rejects.toThrow(
 			"nothing was checked",
 		);
+		// A PR that failed alone is out of every later chain.
+		const failing = { numbers: [1], tree: result.checks[0].tree, passed: false };
+		await expect(
+			pushQueue(
+				forge.clone(),
+				plan,
+				{ ...result, checks: [failing, { ...failing, passed: true }] },
+				undefined,
+				deps,
+			),
+		).rejects.toThrow("check 2 did not cover the whole chain");
 		expect(() => parseResult(JSON.stringify({ base: plan.base.sha, checks: [{ numbers: ["1"] }] }))).toThrow();
 		expect(parsePlan(JSON.stringify(plan))).toEqual(plan);
 	});
@@ -745,5 +790,10 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		const result = parseResult(stdout);
 		expect(result.checks.map((tested) => [tested.numbers, tested.passed])).toEqual([[[1], false]]);
 		expect(stderr).toContain("checking\n");
+
+		stdout = "";
+		expect(await main(["--root", clone, "land", "check", file, "--budget", "soon", "--", "true"], out)).toBe(2);
+		expect(await main(["--root", clone, "land", "check", file, "--budget", "0", "--", "true"], out)).toBe(0);
+		expect(parseResult(stdout).checks.map((tested) => tested.passed)).toEqual([true]);
 	});
 });
