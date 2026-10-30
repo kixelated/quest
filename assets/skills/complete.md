@@ -14,9 +14,9 @@ Run each `/quest-review` and `/quest-iterate` in parallel in a sub-agent, follow
 
 Ask synchronously with one question per PR, never grouping PRs into one question (a prompt may hold a few questions), following the guide's Questions section and including your recommendation:
 - `/quest-review`: Are drafts ready for review.
-- `/quest-merge`: Are ready for review, with a review the guide counts on the head and no outstanding issues.
-- `/quest-iterate`: Have issues, need decisions, or have no counted review of the head.
-- skip: Are not ready to be merged yet.
+- `/quest-merge`: Are ready for review and landable as `/quest-merge` defines it: a review the guide counts on the head, required status checks passed, and every automated review finding on GitHub fixed or refuted.
+- `/quest-iterate`: Have failing checks, unaddressed review findings, other issues, or decisions, or have no counted review of the head.
+- skip: Are not ready to be merged yet, including while their checks or automated reviews are still running; ask again on a later refresh.
 - `/quest-delete`: Should be deleted.
 
 Include a brief summary of each PR.

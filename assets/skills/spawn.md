@@ -36,9 +36,9 @@ Report each sub-agent's final status, staying silent on interim notifications, b
 As each agent reports, explain its result in a few lines, then ask about its PR in the same way, offering:
 
 - `/quest-review`: If the PR is a draft ready for review.
-- `/quest-merge`: If the PR is ready for review, with a review the guide counts on its head and no significant issues.
-- `/quest-iterate`: If the PR has significant issues, needs decisions, or has no counted review of its head.
-- skip: If the PR should not be merged yet.
+- `/quest-merge`: If the PR is ready for review and landable as `/quest-merge` defines it: a review the guide counts on its head, required status checks passed, and every automated review finding on GitHub fixed or refuted.
+- `/quest-iterate`: If the PR has failing checks, unaddressed review findings, other significant issues, or decisions, or has no counted review of its head.
+- skip: If the PR should not be merged yet, including while its checks or automated reviews are still running.
 - `/quest-delete`: If the quest should be deleted.
 
 Once every sub-agent has finished, plan the suggested follow-ups of the PRs `/quest-merge` queued, as the guide describes.

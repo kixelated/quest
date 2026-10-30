@@ -29,9 +29,9 @@ For your own draft, mark it ready for review yourself, then take it with `quest 
 Do not wait for online reviewers.
 
 Summarize the review and CI from `quest status <pr>`, then interactively prompt the user with your recommendation:
-- `/quest-merge`: If the review left no significant issues.
+- `/quest-merge`: If the PR is landable as `/quest-merge` defines it, which needs its required status checks passed and every automated review finding on GitHub fixed or refuted; just after marking it ready, they are usually still running.
 - `/quest-iterate`: If it raised significant issues or decisions.
-- skip: If the PR should not be merged yet.
+- skip: If the PR should not be merged yet, including while its checks or automated reviews are still running; `/quest-complete` asks again later.
 - `/quest-delete`: If the quest should be deleted.
 
 A background agent that cannot prompt lists these in its report instead.

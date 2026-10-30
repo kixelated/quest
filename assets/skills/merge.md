@@ -17,7 +17,7 @@ Read the PR's head, checks, merge state, reviews by head, and unresolved threads
 The head is landable when:
 
 - a `## Review` record the guide counts names it, or the guide's review exemptions cover the changes since the one it names;
-- no review finding posted on it still needs a change, and no decision is open;
+- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head or answered with a refutation, and no decision is open;
 - its required checks passed, other than the gate's own `quest land` check, which never reports on a head, and it does not conflict with its base.
 
 Otherwise recommend `/quest-iterate`, saying what it needs: a review of the head, fixes, or decisions.
