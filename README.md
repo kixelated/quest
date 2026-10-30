@@ -71,14 +71,14 @@ Build from source with [Bun](https://bun.sh) (or enter the pinned shell with
 `nix develop`), then link the `quest` command:
 
 ```sh
-git clone https://github.com/kixelated/quest.git
+git clone https://github.com/moq-dev/quest.git
 cd quest
 bun install --frozen-lockfile
 bun run build
 bun link
 ```
 
-With Nix, `nix run github:kixelated/quest -- --help` builds and runs it instead.
+With Nix, `nix run github:moq-dev/quest -- --help` builds and runs it instead.
 Native Windows needs no WSL for Quest: see [installation and removal](docs/windows.md).
 Windows ZIP artifacts are added by the next release containing this change;
 older releases remain macOS/Linux-only.
@@ -293,7 +293,7 @@ from the merge queue, disabled auto-merge, or required CI result:
 
 ```sh
 quest wait 101
-quest wait https://github.com/kixelated/quest/pull/101 --since 2026-10-07T12:00:00Z --timeout 1800
+quest wait https://github.com/moq-dev/quest/pull/101 --since 2026-10-07T12:00:00Z --timeout 1800
 quest wait 101 --since abcdef0123456789abcdef0123456789abcdef01
 ```
 
@@ -379,7 +379,7 @@ whose review counts:
 
 ```console
 $ quest status 128
-url https://github.com/kixelated/quest/pull/128
+url https://github.com/moq-dev/quest/pull/128
 state open
 draft false
 head 0ade9d977d54c6f48152410532c58e9ea78db3d0
@@ -391,10 +391,10 @@ merge-queue -
 landing-stopped -
 checks success passed=14 failing=0 pending=0
 review-rounds 2 -
-review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5543745302
-review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/kixelated/quest/pull/128#pullrequestreview-5551703054
-thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/kixelated/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
-hold quest:merge LE_example 2026-10-16T17:57:16.000Z https://api.github.com/repos/kixelated/quest/issues/events/123456 1 hour ago
+review stale commented kixelated 2026-10-16T06:14:04Z https://github.com/moq-dev/quest/pull/128#pullrequestreview-5543745302
+review current commented chatgpt-codex-connector 2026-10-16T17:57:16Z https://github.com/moq-dev/quest/pull/128#pullrequestreview-5551703054
+thread PRRT_kwDOUhuoys6tUUV2 current chatgpt-codex-connector https://github.com/moq-dev/quest/pull/128#discussion_r4297708263 src/cli/gate.ts:115
+hold quest:merge LE_example 2026-10-16T17:57:16.000Z https://api.github.com/repos/moq-dev/quest/issues/events/123456 1 hour ago
 ```
 
 Each line starts with its record type; any free text, a check name or a path,
@@ -881,7 +881,7 @@ localhost behind a password made for each turn.
 
 The flake's `runner` package pins Claude Code 2.1.305 from its official release
 manifest; opencode (and on Linux, bubblewrap and socat) follow this repository's lock
-(`nix run github:kixelated/quest#runner -- runner`);
+(`nix run github:moq-dev/quest#runner -- runner`);
 otherwise `claude` and `opencode` come from `QUEST_RUNNER_CLAUDE` and
 `QUEST_RUNNER_OPENCODE`, or `PATH`. State lives in `$QUEST_RUNNER_HOME`, by default
 `$XDG_DATA_HOME/quest/runner`; one `quest runner` runs in a home at a time. To keep a runner up, run `quest runner` as a user
@@ -1007,7 +1007,7 @@ the other keys.
 To use Quest in your own repository, paste this into your agent:
 
 ```text
-Follow https://github.com/kixelated/quest/blob/main/SETUP.md to set up Quest here.
+Follow https://github.com/moq-dev/quest/blob/main/SETUP.md to set up Quest here.
 ```
 
 The [getting started guide](docs/getting-started.md) covers what happens next.
