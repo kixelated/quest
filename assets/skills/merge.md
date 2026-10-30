@@ -51,7 +51,7 @@ Leave a summary of the changes and decisions made, then land the head you checke
 It makes a merge commit; add `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 On a base that requires the `quest land` check, it queues the PR for `quest land`, whose chain merges and tests against the current base; do not merge the base or rerun checks per PR just to queue it.
 On an ungated base, the command refuses a head that does not contain the current base. Merge the base locally (never rebase), rerun the repository's checks, push, and land the new head after satisfying the guide's review rule for those changes.
-The `quest:merge` label stays on while the PR is queued or auto-merging.
+The `quest:merge` label stays on while the PR is queued or auto-merging, and after it leaves the queue unmerged, as the user's pick: `quest status` then shows it as `pick`, and `quest merge <pr>` takes it over with a new token.
 Report once it is landing; do not wait for it to merge, since the queue re-checks it without you.
 A PR that left the queue unmerged or lost auto-merge shows why under `landing-stopped` in `quest status <pr>`.
 After `merge_conflict` or `failed_checks`, the pick still holds: fix it and land it again.

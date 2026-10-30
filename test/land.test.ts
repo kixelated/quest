@@ -329,7 +329,8 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		expect(landing.slice(1).map((line) => line.split(" ")[1])).toEqual(["1", "2", "3"]);
 		expect(git(forge.origin, "show", "main:quest/m0/README.md")).toBe(EPIC(["a", "b", "c"]).trim());
 		expect(clash.landing).toBe(false);
-		expect(clash.labels).toEqual([]);
+		// The ejected PR keeps its merge pick for the next `quest merge`.
+		expect(clash.labels).toEqual(["quest:merge"]);
 		expect(forge.comment(4)).toContain("in code.txt");
 		expect(forge.comment(4)).toContain(`([run](${RUN}))`);
 		expect(forge.comment(4)).toMatch(/<!-- quest land: merge_conflict -->$/);

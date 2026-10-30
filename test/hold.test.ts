@@ -427,19 +427,32 @@ describe("merge --land", () => {
 		expect(pull.labels).toEqual(["quest:merge"]);
 	});
 
-	test("a PR that left the queue unmerged drops quest:merge", async () => {
+	test("a PR that left the queue unmerged keeps quest:merge as the pick", async () => {
 		const pull = new FakePull();
 		const { token } = await take(PR, "merge", undefined, pull.deps());
 		await land(PR, token, HEAD, "merge", pull.deps());
 		// Auto-merge is disabled, as when a required check fails.
 		pull.autoMerge = null;
-		const warnings: string[] = [];
-		expect(await refused(land(PR, token, HEAD, "merge", pull.deps(warnings)))).toContain("no longer holds it");
-		expect(warnings).toEqual([
-			`${URL_} left the merge queue unmerged, so quest:merge was removed; quest status shows why under landing-stopped`,
-		]);
-		expect(pull.labels).toEqual([]);
-		expect((await take(PR, "iterate", undefined, pull.deps())).label).toBe("quest:iterate");
+		expect(pull.labels).toEqual(["quest:merge"]);
+		// The pick is no session's hold: other states refuse it, naming the pick.
+		expect(await refused(take(PR, "iterate", undefined, pull.deps()))).toContain("is picked for merge");
+		// A new merge session takes it over with a fresh token.
+		const next = await take(PR, "merge", undefined, pull.deps());
+		expect(next.label).toBe("quest:merge");
+		expect(next.token).not.toBe(token);
+		expect(pull.labels).toEqual(["quest:merge"]);
+		// The taken-over hold is live again, so a third session is refused.
+		expect(await refused(take(PR, "merge", undefined, pull.deps()))).toContain("is held by quest:merge");
+		await land(PR, next.token, HEAD, "merge", pull.deps());
+	});
+
+	test("the session that landed can land its pick again with its token", async () => {
+		const pull = new FakePull();
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "merge", pull.deps());
+		pull.autoMerge = null;
+		expect((await land(PR, token, HEAD, "merge", pull.deps())).token).toBe(token);
+		expect(pull.labels).toEqual(["quest:merge"]);
 	});
 });
 

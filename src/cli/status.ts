@@ -388,7 +388,7 @@ export function statusLines(status: Status): string[] {
 		...(status.holds.length
 			? status.holds.map(
 					(hold) =>
-						`hold ${hold.label} ${dash(hold.token)} ${dash(hold.takenAt)} ${dash(hold.eventUrl)} ${hold.age ?? "unknown age"}`,
+						`${hold.picked ? "pick" : "hold"} ${hold.label} ${dash(hold.token)} ${dash(hold.takenAt)} ${dash(hold.eventUrl)} ${hold.age ?? "unknown age"}`,
 				)
 			: ["hold -"]),
 		...(status.starterHold

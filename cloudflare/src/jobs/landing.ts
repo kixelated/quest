@@ -1,7 +1,8 @@
 // A merge job holds its pull request with the `quest:merge` label, as local
-// `quest merge` sessions do: from when the maintainer picks merge until the
-// job ends without landing, or until a landing it started ends unmerged. Then
-// the bot removes the label, and the pull request is an idle decision again.
+// `quest merge` sessions do, from when the maintainer picks merge. A job that
+// ends without landing has the bot remove the label, and the pull request is
+// an idle decision again. A landing it started that ends unmerged leaves the
+// label on as the maintainer's pick, so the next merge takes it over.
 import { GitHubService } from "../github/service";
 import { pullOf } from "./publish";
 import * as store from "./store";

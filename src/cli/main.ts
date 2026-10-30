@@ -433,8 +433,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		"Given a token, a command refuses unless the token is still the latest add of the PR's label, then swaps " +
 		"that label for its own; if a later step then fails, the error names the new token. When two sessions add different labels at once, the first label added keeps the " +
 		"PR; GitHub records no event when a label already on the PR is added again, so two takes of one state " +
-		"within the same moment are not told apart. A quest:merge label is removed once the PR leaves the merge " +
-		"queue unmerged.\n\n" +
+		"within the same moment are not told apart. A quest:merge label stays on after the PR leaves the merge " +
+		"queue unmerged, as the maintainer's pick that no session holds; quest merge without a token takes it " +
+		"over, and the other commands refuse it. Remove the label to withdraw the pick.\n\n" +
 		"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 3 when refused, 2 for invalid " +
 		"arguments, and 1 for other failures.";
 	/** A PR state command: take the PR or swap to `state`, then do its step. Prints the hold token. */
@@ -515,7 +516,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"fails alone, which is ejected; the rest waits for the next run. Landing moves each PR's branch, " +
 				"with a lease on the head that was tested, to its squash commit, then fast-forwards the base to the " +
 				"tip, so GitHub shows each PR as merged and the base only ever holds a tested tree.\n\n" +
-				"An ejected PR loses auto-merge and `quest:merge`, and gets a comment with the reason, which " +
+				"An ejected PR loses auto-merge, keeps `quest:merge` as its pick, and gets a comment with the reason, which " +
 				"`quest status` prints under landing-stopped: merge_conflict (a conflict `quest resolve` cannot " +
 				"settle), failed_checks (the check failed with it alone on the base, or a required check failed on " +
 				"its head), checks_pending, review_required, changes_requested, unresolved_conversations, " +

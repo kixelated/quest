@@ -1655,9 +1655,9 @@ export class GitHubService {
 	 * Hold an open pull request for a merge job with the `quest:merge` label,
 	 * the contract `quest merge --help` states for local sessions too. Refused
 	 * while another session holds a `quest:*` label; a `quest:merge` whose
-	 * landing ended unmerged is spent and removed first. When two sessions
-	 * label it at once, the first label added keeps it. Returns the hold's
-	 * token: the timeline event that added the label.
+	 * landing ended unmerged is the maintainer's pick, replaced by this hold.
+	 * When two sessions label it at once, the first label added keeps it.
+	 * Returns the hold's token: the timeline event that added the label.
 	 */
 	holdPullRequest(repo: GitHubRepository, userId: string, pull: number) {
 		return this.#authorized(repo, userId, { issues: "write", pull_requests: "read" }, async (token) => {
@@ -1691,14 +1691,18 @@ export class GitHubService {
 	/**
 	 * Release a merge job's `quest:merge` hold unless its pull request is
 	 * queued or auto-merging. The App acts on its own label here, with no
-	 * maintainer request behind it. Returns whether the hold is over: released
-	 * now, already removed or replaced, or its pull request no longer open.
+	 * maintainer request behind it. A landing that ended unmerged leaves the
+	 * label on as the maintainer's pick, which the next merge takes over; a job
+	 * that ended without landing removes it. Returns whether the hold is over:
+	 * released now, left as a pick, already removed or replaced, or its pull
+	 * request no longer open.
 	 */
 	releasePullRequest(repo: GitHubRepository, pull: number, hold: string) {
 		return this.#withRepository(repo, { issues: "write", pull_requests: "read" }, async (token) => {
 			const holds = await this.#holds(token, repo, pull);
 			if (holds.state !== "OPEN" || heldToken(holds, MERGE_LABEL) !== hold) return true;
 			if (holds.landing) return false;
+			if (spentMergeHold(holds)) return true;
 			await this.#unhold(token, repo, pull);
 			return true;
 		});

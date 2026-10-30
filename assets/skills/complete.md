@@ -8,6 +8,7 @@ The goal is to evaluate the open PRs in the repository, drafts included, and dec
 For a draft, summarize the open decisions its body lists.
 Read each PR with `quest status` and skip one another session holds, using its `hold` and `starter-hold` records instead of a separate label read. A `hold` names the label, acquisition token/time, event URL, and age. A `starter-hold` identifies a draft without a `## Decisions needed` section and reports when it was last active; that is not an acquisition time.
 List those with how long ago each was last active, and offer to take over only one that looks stale.
+A `pick` record is the user's earlier merge pick, which no session holds: do not ask about that PR, and dispatch `/quest-merge` for it right away, even when an earlier session made the pick.
 The skill argument can be used to filter the PRs in scope.
 Each merge is performed in parallel by a sub-agent, following the guide's Reviews section for the shared design checkpoint across review rounds.
 
@@ -34,9 +35,8 @@ For GitHub CI, review, or merge activity, it uses one `quest wait` and resumes w
 returned cursor as described by `quest skill merge`, rather than polling GitHub.
 
 Merge sub-agents report once their PR is landing; do not watch the queue or wait for merges.
-An open PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.
-After `merge_conflict` or `failed_checks`, its pick still holds, even from an earlier session: dispatch `/quest-merge` again without asking.
-Any other reason, such as a person removing it, is the user's call, so ask about the PR again.
+An open PR that left the queue unmerged keeps `quest:merge` as a `pick`, and shows why under `landing-stopped` in `quest status <pr>`; dispatch `/quest-merge` for it again without asking.
+A person withdraws a pick by removing the label; ask about that PR again like any other.
 
 Keep going until all PRs have been decided, then wait for all spawned sub-agents to finish.
 Refresh the open PR list whenever a sub-agent reports, and once more before finishing; ask about each new PR in scope the same way.

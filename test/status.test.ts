@@ -428,11 +428,35 @@ test("reports the latest acquisition, age, and verified paged event URL for each
 	});
 	const status = await pullRequestStatus(pr, fixture.deps);
 	expect(status.holds).toEqual([
-		{ label, token: "new", takenAt: "2026-10-07T11:00:00.000Z", age: "1 hour ago", eventUrl },
+		{ label, picked: false, token: "new", takenAt: "2026-10-07T11:00:00.000Z", age: "1 hour ago", eventUrl },
 	]);
 	expect(statusLines(status)).toContain(`hold ${label} new 2026-10-07T11:00:00.000Z ${eventUrl} 1 hour ago`);
 	expect(fixture.eventRequests).toHaveLength(2);
 	expect(status.starterHold).toBeNull();
+});
+
+test("reports a quest:merge left on after its landing ended as the pick", async () => {
+	const label = "quest:merge";
+	const fixture = setup(
+		[pull({ checks: null, reviews: page([]), threads: page([]), labels: { nodes: [{ name: label }] } })],
+		{
+			now: Date.parse("2026-10-07T12:00:00Z"),
+			holdFields: {
+				timelineItems: {
+					nodes: [
+						holdEvent("picked", label),
+						{ __typename: "AddedToMergeQueueEvent", id: "queued", createdAt: "2026-10-07T11:10:00Z" },
+					],
+				},
+			},
+			eventPages: [
+				{ rows: [{ node_id: "picked", event: "labeled", label: { name: label }, url: "picked-url" }] },
+			],
+		},
+	);
+	const status = await pullRequestStatus(pr, fixture.deps);
+	expect(status.holds[0]).toMatchObject({ label, picked: true, token: "picked" });
+	expect(statusLines(status)).toContain(`pick ${label} picked 2026-10-07T11:00:00.000Z picked-url 1 hour ago`);
 });
 
 test("retains a hold fact when its acquisition is outside the available timeline", async () => {
@@ -440,7 +464,9 @@ test("retains a hold fact when its acquisition is outside the available timeline
 		pull({ checks: null, reviews: page([]), threads: page([]), labels: { nodes: [{ name: "quest:ready" }] } }),
 	]);
 	const status = await pullRequestStatus(pr, fixture.deps);
-	expect(status.holds).toEqual([{ label: "quest:ready", token: null, takenAt: null, age: null, eventUrl: null }]);
+	expect(status.holds).toEqual([
+		{ label: "quest:ready", picked: false, token: null, takenAt: null, age: null, eventUrl: null },
+	]);
 	expect(statusLines(status)).toContain("hold quest:ready - - - unknown age");
 	expect(fixture.eventRequests).toEqual([]);
 });

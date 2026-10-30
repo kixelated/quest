@@ -1353,10 +1353,10 @@ describe("job routes", () => {
 		await delivery("pull_request", { ...dequeued, action: "auto_merge_enabled" }, undefined, {}, testEnv);
 		expect(github.labels).toEqual(["quest:merge"]);
 		expect(await state(id)).toMatchObject({ hold: "LE_1" });
-		// It left the queue unmerged: the bot removes the label.
+		// It left the queue unmerged: the job's hold ends, and the label stays on as the maintainer's pick.
 		github.landing = false;
 		await delivery("pull_request", dequeued, undefined, {}, testEnv);
-		expect(github.labels).toEqual([]);
+		expect(github.labels).toEqual(["quest:merge"]);
 		expect(await state(id)).toMatchObject({ hold: null });
 	});
 

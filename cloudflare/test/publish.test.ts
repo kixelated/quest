@@ -1100,7 +1100,7 @@ describe("merge jobs", () => {
 		return id;
 	}
 
-	it("merges its base in, lands exactly the head it published, and keeps its hold while queued", async () => {
+	it("merges its base in, lands exactly the head it published, and keeps its pick after the landing ends", async () => {
 		const id = await merging();
 		expect(pull().labels).toEqual(["quest:merge"]);
 		// The base branch moved on; the job merged it into the checkout.
@@ -1141,10 +1141,10 @@ describe("merge jobs", () => {
 		await store.finish(db, machine, id, 1, { outcome: "completed", summary: "Landing", result: undefined }, 0);
 		await landing.ended(testEnv, id);
 		expect(pull().labels).toEqual(["quest:merge"]);
-		// Once the landing ends unmerged, the bot gives the pull request back.
+		// Once the landing ends unmerged, the job's hold ends and the label stays on as the maintainer's pick.
 		pull().landing = false;
 		await landing.release(testEnv, 10, "pulls/2");
-		expect(pull().labels).toEqual([]);
+		expect(pull().labels).toEqual(["quest:merge"]);
 		expect(await job(id)).toMatchObject({ hold: null });
 	});
 

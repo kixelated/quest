@@ -74,6 +74,8 @@ export interface Hold {
 
 export interface HoldFact {
 	label: string;
+	/** A `quest:merge` left on as the maintainer's pick after its landing ended unmerged; no session holds it. */
+	picked: boolean;
 	/** Null when the acquisition is older than the available timeline. */
 	token: string | null;
 	takenAt: string | null;
@@ -98,6 +100,7 @@ export async function readHoldStatus(pr: PullRequest, deps: GitHubDependencies):
 					const event = latestHold(snapshot.events, label);
 					return {
 						label,
+						picked: label === MERGE_LABEL && spentMergeHold(snapshot),
 						token: event?.id ?? null,
 						takenAt: event ? new Date(event.time).toISOString() : null,
 						age: event ? ago(deps.now(), event.time) : null,
@@ -294,7 +297,11 @@ async function acquire(
 	if (snapshot.state !== "OPEN") {
 		throw new Refusal(`${snapshot.url} is ${snapshot.state.toLowerCase()}; a push now would bring its branch back`);
 	}
-	snapshot = await labels.dequeued(snapshot);
+	// A merge pick whose landing ended unmerged is no session's hold; `quest merge` takes it with a fresh token.
+	if (token === undefined && state === "merge" && spentMergeHold(snapshot)) {
+		await labels.remove(MERGE_LABEL);
+		snapshot = { ...snapshot, labels: snapshot.labels.filter((name) => name !== MERGE_LABEL) };
+	}
 	const mine = token === undefined ? undefined : held(snapshot, token);
 	const other = snapshot.labels.find((name) => name !== mine);
 	if (other !== undefined) throw new Refusal(holder(snapshot, other, labels.deps.now()));
@@ -349,6 +356,9 @@ function unknown(snapshot: Snapshot, token: string): string {
 function holder(snapshot: Snapshot, label: string, now: number): string {
 	const added = latestHold(snapshot.events, label);
 	const since = added ? `, added ${ago(now, added.time)} as token ${added.id}` : "";
+	if (label === MERGE_LABEL && spentMergeHold(snapshot)) {
+		return `${snapshot.url} is picked for merge: ${label}${since} stays on after its landing ended unmerged; take it with quest merge, or ask the user before releasing it`;
+	}
 	return `${snapshot.url} is held by ${label}${since}; if it looks stale, ask the user before releasing it`;
 }
 
@@ -420,19 +430,6 @@ class Labels {
 			method: "DELETE",
 			allow: [404],
 		});
-	}
-
-	/**
-	 * A landing that ended unmerged ends the merge session's hold, so a
-	 * `quest:merge` label is spent once a landing started after it was added.
-	 */
-	async dequeued(snapshot: Snapshot): Promise<Snapshot> {
-		if (!spentMergeHold(snapshot)) return snapshot;
-		await this.remove(MERGE_LABEL);
-		this.deps.warn(
-			`${snapshot.url} left the merge queue unmerged, so ${MERGE_LABEL} was removed; quest status shows why under landing-stopped`,
-		);
-		return { ...snapshot, labels: snapshot.labels.filter((name) => name !== MERGE_LABEL) };
 	}
 }
 

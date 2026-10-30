@@ -414,6 +414,7 @@ comes last, and a missing value prints as `-`:
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
 | `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
+| `pick` | A `quest:merge` left on after its landing ended unmerged, with the same fields as `hold`: the maintainer's merge pick, which no session holds and `quest merge` takes over. |
 | `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
@@ -463,8 +464,10 @@ On an ungated base, it compares the live base against that head and refuses a
 head that is behind or diverged: merge the base, rerun the repository's checks,
 and land the new head. This is a preflight check; GitHub can still move the base
 between that comparison and its head-pinned merge mutation. `quest:merge` stays
-on while the PR is queued or auto-merging; once the PR leaves the queue unmerged, the next command removes
-it. The commands accept the same PR argument and authentication as
+on while the PR is queued or auto-merging, and after it leaves the queue unmerged
+as the maintainer's pick that no session holds: `quest merge` without a token
+takes it over with a new token, and the other commands refuse it. Remove the
+label to withdraw the pick. The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
 and 1 for other failures.
 
@@ -513,8 +516,8 @@ and the prefix before it lands only if a check passed on exactly that prefix,
 since a later PR can mask an earlier one's failure. A failed landing moves the
 branches back, so they stay queued. The rest of the queue waits for the next run.
 
-An ejected PR loses its auto-merge and `quest:merge` label and gets a comment
-with the reason, which `quest status` prints under `landing-stopped`:
+An ejected PR loses its auto-merge, keeps its `quest:merge` label as the
+maintainer's pick, and gets a comment with the reason, which `quest status` prints under `landing-stopped`:
 
 | Reason | Why |
 | --- | --- |
