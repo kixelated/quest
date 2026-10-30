@@ -16,7 +16,9 @@ Ask synchronously with one question per PR, never grouping PRs into one question
 - `/quest-review`: Are drafts ready for review.
 - `/quest-merge`: Are ready for review and landable as `/quest-merge` defines it: a review the guide counts on the head, required status checks passed, and every automated review finding on GitHub fixed or refuted.
 - `/quest-iterate`: Have failing checks, unaddressed review findings, other issues, or decisions, or have no counted review of the head.
-- skip: Are not ready to be merged yet, including while their checks or automated reviews are still running; ask again on a later refresh.
+- skip: Are not ready to be merged yet.
+
+Do not ask yet about a PR whose required checks or automated reviews are still running: it is not a skip, so ask about it on a later refresh once they finish.
 - `/quest-delete`: Should be deleted.
 
 Include a brief summary of each PR.
