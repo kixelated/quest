@@ -18,3 +18,4 @@ additional login providers. This milestone does not gate the first release.
 - [Worker dev setup](/quest/m1/worker-dev.md) - per-server cookies, seeded raw output, static assets, one fake GitHub, each test run alone
 - [Gate ownership everywhere](/quest/m1/gate-ownership.md) - delegated sub-cgroups for nested gates and Windows Job Objects
 - [Fewer git processes on Windows](/quest/m1/windows-git.md) - batched git lookups in the CLI and reused fixture repositories in tests
+- [Private repositories through the host gate](/quest/m1/land-private.md) - the land daemon fetches with a read-only token
