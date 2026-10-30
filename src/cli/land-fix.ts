@@ -1,7 +1,7 @@
 // Untrusted agent side. The host wrapper supplies only a model endpoint and its client key.
 import { spawn } from "node:child_process";
-import { constants, closeSync, fstatSync, openSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { constants, closeSync, fstatSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import prompt from "../../assets/land-fix.md";
 
 export const FIX_RESULT = "quest-land-result.json";
@@ -15,10 +15,11 @@ export function readFixResult(root: string): string {
 		closeSync(fd);
 	}
 }
-export type FixResult =
+export type FixResult = { agent?: string; model?: string } & (
 	| { number: number; action: "requeue"; reason: string }
 	| { number: number; action: "fixed"; head: string; reason: string }
-	| { number: number; action: "handback"; diagnosis: string; recommendation: string };
+	| { number: number; action: "handback"; diagnosis: string; recommendation: string }
+);
 
 /** Reject extra fields, duplicate/missing PRs, multiline reasons, and oversized output. */
 export function parseFixResult(text: string, numbers: number[]): FixResult[] {
@@ -44,7 +45,14 @@ export function parseFixResult(text: string, numbers: number[]): FixResult[] {
 					: item.action === "handback"
 						? ["number", "action", "diagnosis", "recommendation"]
 						: [];
-		if (fields.length === 0 || Object.keys(item).length !== fields.length || fields.some((key) => !(key in item)))
+		const metadata = ["agent", "model"].filter((key) => key in item);
+		if (metadata.some((key) => typeof item[key] !== "string" || !/^[a-zA-Z0-9 ._/-]{1,100}$/.test(item[key])))
+			throw new Error("invalid fixer identity");
+		if (
+			fields.length === 0 ||
+			Object.keys(item).length !== fields.length + metadata.length ||
+			fields.some((key) => !(key in item))
+		)
 			throw new Error("invalid fixer action or fields");
 		for (const key of fields.filter((key) => key !== "number")) {
 			if (
@@ -66,6 +74,7 @@ export async function fix(
 	numbers: number[],
 	agent = "codex",
 	args?: string[],
+	model?: string,
 ): Promise<void> {
 	if (
 		!numbers.length ||
@@ -108,6 +117,7 @@ export async function fix(
 		'model_providers.quest-fixer.env_key="OPENAI_API_KEY"',
 		"-c",
 		'model_providers.quest-fixer.wire_api="responses"',
+		...(model ? ["--model", model] : []),
 		"-",
 	];
 	await new Promise<void>((done, reject) => {
@@ -117,5 +127,11 @@ export async function fix(
 		child.stdin.end(`${prompt}\n\nFailure log: ${JSON.stringify(log)}\nPRs: ${numbers.join(", ")}\n`);
 		child.once("close", (code) => (code === 0 ? done() : reject(new Error(`fixer agent exited ${code}`))));
 	});
-	parseFixResult(readFixResult(root), numbers);
+	const results = parseFixResult(readFixResult(root), numbers);
+	const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
+	const ranModel = index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8);
+	const identity = { agent: basename(agent), model: ranModel ?? "Codex" };
+	const result = JSON.stringify(results.map((item) => ({ ...item, ...identity })));
+	parseFixResult(result, numbers);
+	writeFileSync(join(root, FIX_RESULT), result);
 }

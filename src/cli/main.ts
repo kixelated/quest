@@ -508,13 +508,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("<log>", "Full failure log exposed by the wrapper")
 		.argument("<prs...>", "PR numbers with pr-<n> branches")
 		.option("--agent <executable>", "Agent executable", "codex")
+		.option("--model <id>", "Agent model recorded in the result (passed to default Codex)")
 		.option(
 			"--agent-arg <argument>",
 			"Replace default codex exec arguments (repeatable)",
 			(value: string, previous: string[]) => [...previous, value],
 			[] as string[],
 		)
-		.action((log: string, prs: string[], options: { agent: string; agentArg: string[] }) => {
+		.action((log: string, prs: string[], options: { agent: string; agentArg: string[]; model?: string }) => {
 			settle(
 				fix(
 					root(),
@@ -522,6 +523,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					prs.map(Number),
 					options.agent,
 					options.agentArg.length ? options.agentArg : undefined,
+					options.model,
 				),
 				() => print("fixer result written"),
 			);

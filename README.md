@@ -503,18 +503,23 @@ endpoint, including `/v1`) and `OPENAI_API_KEY` (the gate's proxy client key).
 The daemon never supplies these or any Git/GitHub credential; the wrapper must
 restrict network access to the model proxy. Codex login stays on CLIProxyAPI.
 The wrapper waits for the payload, returns its exit status, and tears down its
-container on exit or interruption. The payload defaults
+container on exit or SIGTERM. On timeout the daemon sends SIGTERM, allows at
+least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
 to `codex exec`; `--agent <executable>` and repeatable `--agent-arg <argument>`
 replace it for another CLI. It writes `<cwd>/quest-land-result.json`: an array of
 `{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
 `{number, action:"handback", diagnosis, recommendation}`, with no extra fields.
+The payload adds `agent` and `model` metadata to each result (`--model <id>`
+selects the default Codex model; unknown models fall back to `Codex`).
 Reasons and diagnoses are single lines. Fixed heads must be committed on `pr-<n>`.
 
 Jobs and attempts persist across daemon restarts. After the wrapper exits, the
 daemon validates every result, ancestry, and protected path before lease-pushing
-as the bot. A protected-path edit means content or mode matching neither the pin
-nor the current base; protected paths are `flake.nix`, `flake.lock`, `nix/`, `.envrc`,
-and `.github/`. It records `mechanical fix by Codex: <reason>` and the new head in
+as the bot. The protected set as a whole must match the pinned head or its merge with the
+current base, including content and mode. It covers `flake.nix`, `flake.lock`,
+`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
+anywhere. Collection copies at most 100 MiB of Git metadata into a clean object
+repository, ignores fixer configuration, and never follows Git alternates. It records `mechanical fix by Codex: <reason>` and the new head in
 `## Review`, enables head-pinned auto-merge, and adds `quest:merge`. Healthy PRs
 requeue unchanged. Forks refusing maintainer edits, refused pushes, invalid results,
 crashes, or the 60-minute fixer deadline hand back with a marked comment. A flaky

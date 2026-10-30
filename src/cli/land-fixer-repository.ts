@@ -1,0 +1,100 @@
+// Never run Git in a contributor-controlled repository: import regular object files into a fresh bare repo.
+import {
+	constants,
+	closeSync,
+	existsSync,
+	fstatSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { git } from "./land";
+
+export const MAX_FIXER_BYTES = 100 * 1024 * 1024;
+export function importFixer(root: string, state: string, checkout: string, number: number, head: string): void {
+	const source = join(checkout, ".git");
+	if (!lstatSync(checkout).isDirectory() || !lstatSync(source).isDirectory() || lstatSync(source).isSymbolicLink())
+		throw new Error("fixer .git must be a real directory");
+	let bytes = 0;
+	let files = 0;
+	const objects: string[] = [];
+	const walk = (path: string, relative = "") => {
+		for (const name of readdirSync(path)) {
+			if (++files > 100_000) throw new Error("fixer repository has too many files");
+			const child = join(path, name);
+			const rel = relative ? `${relative}/${name}` : name;
+			const stat = lstatSync(child);
+			if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile()))
+				throw new Error("fixer git metadata must contain only real files and directories");
+			if (stat.isDirectory()) walk(child, rel);
+			else {
+				bytes += stat.size;
+				if (bytes > MAX_FIXER_BYTES) throw new Error("fixer repository exceeds 100 MiB");
+				if (/^objects\/(?:[0-9a-f]{2}\/[0-9a-f]{38}|pack\/pack-[0-9a-f]+\.(?:pack|idx|rev))$/.test(rel))
+					objects.push(rel);
+			}
+		}
+	};
+	walk(source);
+	for (const path of ["objects/info/alternates", "info/grafts", "shallow"]) {
+		const file = join(source, path);
+		if (existsSync(file)) unlinkSync(file);
+	}
+	const read = (path: string) => {
+		const fd = openSync(join(source, path), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+		try {
+			const stat = fstatSync(fd);
+			if (!stat.isFile() || stat.size > MAX_FIXER_BYTES) throw new Error("invalid fixer metadata file");
+			return readFileSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+	};
+	const ref = `refs/heads/pr-${number}`;
+	const actual = existsSync(join(source, ref))
+		? read(ref).toString().trim()
+		: existsSync(join(source, "packed-refs"))
+			? read("packed-refs")
+					.toString()
+					.split("\n")
+					.find((line) => line.endsWith(` ${ref}`))
+					?.split(" ")[0]
+			: undefined;
+	if (actual !== head) throw new Error("result head differs from PR branch or pr-N is missing");
+	const clean = mkdtempSync(join(state, "fix-import-"));
+	try {
+		git(clean, ["init", "--bare", "--quiet"]);
+		let copied = 0;
+		for (const path of objects) {
+			const data = read(path);
+			copied += data.length;
+			if (copied > MAX_FIXER_BYTES) throw new Error("fixer objects exceed 100 MiB");
+			const dest = join(clean, path);
+			mkdirSync(dirname(dest), { recursive: true });
+			writeFileSync(dest, data);
+		}
+		git(clean, ["update-ref", ref, head]);
+		git(root, [
+			"-c",
+			`safe.directory=${clean}`,
+			"-c",
+			"protocol.file.allow=always",
+			"fetch",
+			"--quiet",
+			"--no-tags",
+			pathToFileURL(clean).href,
+			ref,
+		]);
+		if (git(root, ["rev-parse", "FETCH_HEAD"]) !== head) throw new Error("imported fixer head differs from result");
+	} finally {
+		rmSync(clean, { recursive: true, force: true });
+	}
+}
