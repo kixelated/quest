@@ -70,12 +70,15 @@ can hand off instead.
   [moq-dev/quest#277](https://github.com/moq-dev/quest/pull/277), since an
   ejection now removes `quest:merge` and the fixer adds it back.
 - Security (user, 2026-10-30): the gate runs as a dedicated user under a
-  hardened unit. PR code and Codex run in the runner's sandbox with no
+  hardened unit. PR code and Codex run in ephemeral nspawn containers with no
   credentials. moq-bot tokens are minted per push and scoped to this
   repository. Codex reaches its model through the host's CLIProxyAPI, so the
-  Codex login stays outside the sandbox. A maintainer's approval of the
+  Codex login stays outside the container. A maintainer's approval of the
   pinned head covers evaluating its devShell, but the fixer may not touch
   files that run outside the sandbox.
+- No GitHub Actions in landing (user, 2026-10-30): the daemon replaces the
+  Land workflow and the host's `quest-land` Actions runner, and ejection
+  comments carry the failing log's tail.
 - This epic ranks first in m0. It replaces the hook-started kix fixer that
   [moq-dev/quest#276](https://github.com/moq-dev/quest/pull/276) proposes
   (`kix/eject-fix`).
@@ -87,6 +90,6 @@ can hand off instead.
 
 ## Required
 
-- [Gate host setup](/quest/m0/host-land/bot-key.md) - a dedicated user holding moq-bot's key and a CLIProxyAPI client key, unreachable from the sandbox
 - [Host daemon](/quest/m0/host-land/daemon.md) - `quest land serve` lands batches and ejects without bisecting
+- [Gate host](/quest/m0/host-land/host.md) - kixelated/nixos runs the daemon as its own user, checks in nspawn containers, and retires the Actions runner
 - [Codex fixer](/quest/m0/host-land/fixer.md) - ejected batches get one mechanical fix attempt and healthy PRs are requeued

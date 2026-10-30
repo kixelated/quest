@@ -28,9 +28,11 @@ Decided 2026-10-30 (user, /quest-plan); see the
   maintainer's last pick.
 - A flaky failure the fixer requeues becomes a suggested follow-up in its
   comment.
-- **Credentials** (user, 2026-10-30). Codex runs in the gate's sandbox with
-  no git or GitHub credential and network only to the host's CLIProxyAPI,
-  through the gate's client key ([setup](/quest/m0/host-land/bot-key.md)).
+- **Credentials** (user, 2026-10-30). Codex runs through the gate's sandbox
+  command, in its own container, with no git or GitHub credential and
+  network only to the host's CLIProxyAPI, through the gate's client key
+  ([host](/quest/m0/host-land/host.md)). It reads the full log from the
+  daemon's state directory.
   It commits locally. The daemon checks the commits against the rules here,
   pushes them as moq-bot, and requeues.
 - **Off-limits paths.** A maintainer's approval covers the pinned head, so
