@@ -85,6 +85,13 @@ export function importFixer(
 	const clean = mkdtempSync(join(state, "fix-import-"));
 	try {
 		git(clean, ["init", "--bare", "--quiet"]);
+		// The skipped launch packs' objects are the daemon's own: borrow them from its repository, never through
+		// any alternates the fixer wrote (deleted above), so the fixer's new commits connect to their history.
+		if (launched.size)
+			writeFileSync(
+				join(clean, "objects", "info", "alternates"),
+				`${join(git(root, ["rev-parse", "--absolute-git-dir"]), "objects")}\n`,
+			);
 		let copied = 0;
 		for (const path of objects) {
 			const data = read(path);

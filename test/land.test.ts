@@ -1861,19 +1861,34 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 	});
 	test("bounds a fixer's import by what it added, not the history fetched at launch", () => {
 		const root = tempDir();
+		const commit = (cwd: string, message: string) =>
+			git(cwd, "-c", "user.name=t", "-c", "user.email=t@localhost", "commit", "-qam", message);
 		git(root, "init", "-q");
-		git(root, "-c", "user.name=t", "-c", "user.email=t@localhost", "commit", "--allow-empty", "-qm", "base");
-		const head = git(root, "rev-parse", "HEAD");
+		writeFileSync(join(root, "kept.txt"), "unchanged\n");
+		writeFileSync(join(root, "code.txt"), "before\n");
+		git(root, "add", ".");
+		commit(root, "base");
+		const pinned = git(root, "rev-parse", "HEAD");
+		// The launch fetch packs the history, as startFixer's does for a real repository.
 		const checkout = tempDir();
 		git(checkout, "init", "-q");
-		git(checkout, "fetch", "-q", root, `${head}:refs/heads/pr-1`);
-		// moq's history alone is larger than the bound; a sparse file stands in for it.
-		const pack = `pack-${"a".repeat(40)}`;
-		writeFileSync(join(checkout, ".git", "objects", "pack", `${pack}.pack`), "");
-		truncateSync(join(checkout, ".git", "objects", "pack", `${pack}.pack`), 101 * 1024 * 1024);
-		writeFileSync(join(checkout, ".git", "objects", "pack", `${pack}.idx`), "");
-		expect(() => importFixer(root, tempDir(), checkout, 1, head)).toThrow("exceeds 100 MiB");
-		importFixer(root, tempDir(), checkout, 1, head, [`${pack}.pack`]);
+		git(checkout, "-c", "fetch.unpackLimit=1", "fetch", "-q", root, `${pinned}:refs/heads/pr-1`);
+		const packs = readdirSync(join(checkout, ".git", "objects", "pack")).filter((name) => name.endsWith(".pack"));
+		expect(packs).toHaveLength(1);
+		// The fix descends from that history, which it shares rather than carries.
+		git(checkout, "checkout", "-q", "pr-1");
+		writeFileSync(join(checkout, "code.txt"), "after\n");
+		commit(checkout, "mechanical fix");
+		const fixed = git(checkout, "rev-parse", "HEAD");
+		// moq's history alone is larger than the bound; a sparse launch pack stands in for it.
+		const large = `pack-${"a".repeat(40)}`;
+		writeFileSync(join(checkout, ".git", "objects", "pack", `${large}.pack`), "");
+		truncateSync(join(checkout, ".git", "objects", "pack", `${large}.pack`), 101 * 1024 * 1024);
+		writeFileSync(join(checkout, ".git", "objects", "pack", `${large}.idx`), "");
+		expect(() => importFixer(root, tempDir(), checkout, 1, fixed, packs)).toThrow("exceeds 100 MiB");
+		importFixer(root, tempDir(), checkout, 1, fixed, [...packs, `${large}.pack`]);
+		expect(git(root, "show", `${fixed}:kept.txt`)).toBe("unchanged");
+		expect(git(root, "rev-parse", `${fixed}^`)).toBe(pinned);
 	});
 	test("passes no host credentials to wrapper or agent, including inherited Git configuration", async () => {
 		for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "QUEST_LAND_KEY", "CREDENTIALS_DIRECTORY", "SSH_AUTH_SOCK"])

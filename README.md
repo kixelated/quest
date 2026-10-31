@@ -531,9 +531,10 @@ daemon validates every result, ancestry, and protected path before lease-pushing
 as the bot. The protected set as a whole must match the pinned head or its merge with the
 current base, including content and mode. It covers `flake.nix`, `flake.lock`,
 `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
-anywhere. Collection copies at most 100 MiB of Git metadata the fixer added (packs
-fetched at launch are already in the daemon's repository, so it skips them) into a clean object
-repository, ignores fixer configuration, and never follows Git alternates. Pack indexes are rebuilt with
+anywhere. Collection copies at most 100 MiB of Git metadata the fixer added into a
+clean object repository. It skips the packs fetched at launch, whose objects the clean
+repository borrows from the daemon's own. It ignores fixer configuration and never
+follows the fixer's Git alternates. Pack indexes are rebuilt with
 `git index-pack` rather than trusted; the fetch into the daemon's repository
 checks every object and link, since the import enables `fetch.fsckObjects=true`. It records `mechanical fix by <recorded agent/model>: <reason>` and the new head in
 `## Review`, enables head-pinned auto-merge, and adds `quest:merge`. Healthy PRs
