@@ -573,6 +573,11 @@ function lines(text: string): string[] {
 	return text.split("\n").filter((line) => line !== "");
 }
 
+/** Deliberately exclude HOME, Git configuration, agents, tokens, and systemd credentials. */
+export function commandEnvironment(): NodeJS.ProcessEnv {
+	return { PATH: process.env.PATH, LANG: "C.UTF-8" };
+}
+
 /** Run git without the repository's hooks, returning its status and output. */
 export function tryGit(
 	cwd: string,
@@ -584,8 +589,7 @@ export function tryGit(
 		encoding: "utf8",
 		input: options.input,
 		env: {
-			PATH: process.env.PATH,
-			LANG: "C.UTF-8",
+			...commandEnvironment(),
 			GIT_CONFIG_NOSYSTEM: "1",
 			GIT_CONFIG_GLOBAL: "/dev/null",
 			GIT_TERMINAL_PROMPT: "0",

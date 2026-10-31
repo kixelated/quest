@@ -2,21 +2,45 @@
 // standing in for github.com, including real squash commits behind the fake merge API.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	renameSync,
+	symlinkSync,
+	truncateSync,
+	watch,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "../cloudflare/dev/github";
+import { collectFixers, validateFix, fixerText, handbackRepeated } from "../src/cli/land-fixer";
+import fixerPrompt from "../assets/land-fix.md";
+import { fix, parseFixResult } from "../src/cli/land-fix";
 import { resolvePreparedQueue, prepareHead, finishFallback } from "../src/cli/land-head";
 import type { GitHubDependencies } from "../src/cli/github";
-import { type Plan, UPHELD, UPHELD_CLASSIC, build, mergeBase, pin, resolveQueue } from "../src/cli/land";
+import {
+	type Plan,
+	commandEnvironment,
+	UPHELD,
+	UPHELD_CLASSIC,
+	build,
+	mergeBase,
+	pin,
+	resolveQueue,
+} from "../src/cli/land";
 import {
 	apiDependencies,
 	daemonLoop,
 	privateRepository,
-	commandEnvironment,
 	defaultState,
 	excerpt,
 	installationToken,
@@ -1056,7 +1080,8 @@ mv '${result}.new' '${result}'
 			const [cwd, log, number, pid, session] = readFileSync(result, "utf8").trim().split("\n");
 			expect(log).toMatch(/batch-.*\.log$/);
 			expect(number).toBe("1");
-			expect(pid).toBe(session); // Detached processes lead a new session.
+			expect(Number(session)).toBeGreaterThan(0); // The detached supervisor leads the session.
+			expect(Number(pid)).toBeGreaterThan(0);
 			expect(cwd).not.toBe(trusted);
 			expect(lstatSync(join(cwd, ".git")).isDirectory()).toBe(true);
 			expect(existsSync(join(cwd, ".git/objects/info/alternates"))).toBe(false);
@@ -1549,5 +1574,428 @@ mv '${result}.new' '${result}'
 				statuses: "read",
 			},
 		});
+	});
+});
+
+/** A fake agent reached through the real container payload, with no model or GitHub access. */
+async function fixerFixture(
+	script: string,
+	options: { fork?: boolean; conflict?: boolean; blocked?: boolean; raw?: boolean } = {},
+) {
+	const forge = new Forge();
+	const pull = forge.pull(
+		"Fix me",
+		{ "code.txt": "one\nII\nthree\n" },
+		options.fork ? { contributor: "outside", edits: false } : {},
+	);
+	if (options.conflict) forge.advance({ "code.txt": "one\n2\nthree\n" });
+	const deps = await forge.deps();
+	const plan = await resolveQueue(REPOSITORY, undefined, deps);
+	const state = sandbox();
+	const tools = tempDir();
+	const fifo = join(tools, "release");
+	if (options.blocked) execFileSync("mkfifo", [fifo]);
+	const agent = join(tools, "agent");
+	writeFileSync(
+		agent,
+		`#!/bin/sh
+set -eu
+cat > /dev/null
+[ -z "\${GH_TOKEN-}" ]
+[ -z "\${GITHUB_TOKEN-}" ]
+[ -z "\${QUEST_LAND_KEY-}" ]
+[ -z "\${CREDENTIALS_DIRECTORY-}" ]
+${options.blocked ? `printf ready > '${tools}/ready'; read -r release < '${fifo}'` : ""}
+${script}
+`,
+		{ mode: 0o755 },
+	);
+	const wrapper = join(tools, "wrapper");
+	writeFileSync(
+		wrapper,
+		`#!/bin/sh
+set -eu
+[ "$#" = 2 ]
+[ -z "\${HOME-}" ]
+[ -z "\${GH_TOKEN-}" ]
+[ -z "\${GITHUB_TOKEN-}" ]
+[ -z "\${QUEST_LAND_KEY-}" ]
+[ -z "\${CREDENTIALS_DIRECTORY-}" ]
+${options.raw ? `exec '${agent}' "$@"` : `exec quest land fix --agent '${agent}' --agent-arg=- "$@"`}
+`,
+		{ mode: 0o755 },
+	);
+	// Fail a check so the ordinary ejection and launcher paths run.
+	writeFileSync(state.sandbox, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+	const root = forge.clone();
+	const finished = eventFile(state.state, (name) => name.endsWith(".exit"));
+	const ready = options.blocked ? eventFile(tools, (name) => name === "ready") : undefined;
+	await serveBatch(root, plan, { ...state, fixer: wrapper }, deps, async () => deps.token);
+	const jobs = () => readdirSync(state.state).filter((name) => /^fix-job-.*\.json$/.test(name));
+	const collect = (dependencies = deps, timeout?: number) =>
+		collectFixers(root, state.state, dependencies, async () => deps.token, timeout);
+	return { forge, pull, deps, plan, state, root, finished, ready, fifo, jobs, collect, wrapper };
+}
+function eventFile(dir: string, matches: (name: string) => boolean): Promise<void> & { cancel: () => void } {
+	let watcher: ReturnType<typeof watch>;
+	const promise = new Promise<void>((done) => {
+		watcher = watch(dir, (_event, filename) => {
+			if (filename && matches(String(filename)) && existsSync(join(dir, String(filename)))) {
+				watcher.close();
+				done();
+			}
+		});
+	});
+	return Object.assign(promise, { cancel: () => watcher.close() });
+}
+
+const requeueScript = `printf '[{"number":1,"action":"requeue","reason":"flaky check; unchanged"}]' > quest-land-result.json`;
+const fixedScript = (path = "code.txt") => `git checkout -q pr-1
+git merge --no-ff --no-commit base || test -n "$(git ls-files -u)"
+printf 'one\nII and 2\nthree\n' > '${path}'
+git add '${path}'
+git commit -qm 'mechanical conflict resolution'
+head=$(git rev-parse HEAD)
+printf '[{"number":1,"action":"fixed","head":"%s","reason":"preserve both conflict sides"}]' "$head" > quest-land-result.json`;
+
+describe("asynchronous land fixer", () => {
+	afterEach(() => vi.unstubAllEnvs());
+	test("requeues unchanged, suggests follow-up, and hands back a second ejection in the same pick", async () => {
+		const fixture = await fixerFixture(requeueScript);
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["requeued 1"]);
+		expect(fixture.pull.head).toBe(fixture.plan.queue[0].head);
+		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
+		expect(fixture.pull.labels).toContain("quest:merge");
+		expect(fixture.forge.comment(1)).toContain("Suggested follow-up");
+		const next = await resolveQueue(REPOSITORY, undefined, fixture.deps);
+		await serveBatch(
+			fixture.root,
+			next,
+			{ ...fixture.state, fixer: fixture.wrapper },
+			fixture.deps,
+			async () => fixture.deps.token,
+		);
+		expect(fixture.jobs()).toEqual([]);
+		expect(fixture.pull.landing).toBe(false);
+		expect(fixture.forge.comment(1)).toContain("already used its mechanical");
+		// A new maintainer pick grants a new attempt.
+		fixture.pull.landing = true;
+		fixture.pull.autoMerge = { enabledAt: "2099-01-01T00:00:00Z", commitBody: pin(fixture.pull.head!) };
+		const picked = await resolveQueue(REPOSITORY, undefined, fixture.deps);
+		const finished = eventFile(fixture.state.state, (name) => name.endsWith(".exit"));
+		await serveBatch(
+			fixture.root,
+			picked,
+			{ ...fixture.state, fixer: fixture.wrapper },
+			fixture.deps,
+			async () => fixture.deps.token,
+		);
+		await finished;
+		expect(await fixture.collect()).toEqual(["requeued 1"]);
+	});
+	test("collects a fixed conflict after a restart, pushes and pins the new Review head", async () => {
+		const fixture = await fixerFixture(fixedScript(), { conflict: true, blocked: true });
+		await fixture.ready;
+		expect(await fixture.collect()).toEqual([]);
+		writeFileSync(fixture.fifo, "continue\n");
+		await fixture.finished;
+		// No live child handle is needed by this new collector invocation.
+		expect(await fixture.collect(await fixture.forge.deps())).toEqual(["requeued 1"]);
+		expect(fixture.pull.head).not.toBe(fixture.plan.queue[0].head);
+		expect(git(fixture.root, "show", "-s", "--format=%P", fixture.pull.head!)).toContain(fixture.plan.base.sha);
+		expect(fixture.pull.body).toContain(
+			`mechanical fix by Codex: \`preserve both conflict sides\` (head ${fixture.pull.head}; agent / Codex)`,
+		);
+		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
+		expect(fixture.pull.labels).toContain("quest:merge");
+	});
+	test.each([
+		[
+			"handback",
+			`printf '[{"number":1,"action":"handback","diagnosis":"behavior change required","recommendation":"run quest-iterate"}]' > quest-land-result.json`,
+			{},
+			"behavior change required",
+		],
+		["protected file", fixedScript("flake.nix"), {}, "off-limits fixer edit"],
+		["shell.nix", fixedScript("shell.nix"), {}, "off-limits fixer edit"],
+		["default.nix", fixedScript("default.nix"), {}, "off-limits fixer edit"],
+		[".gitmodules", fixedScript(".gitmodules"), {}, "off-limits fixer edit"],
+		["fork", fixedScript(), { fork: true }, "fork does not allow maintainer edits"],
+		["crash", "exit 17", {}, "fixer crashed"],
+		["invalid result", "printf '{}' > quest-land-result.json", { raw: true }, "invalid fixer result"],
+		["symlink result", 'ln -s "$1" quest-land-result.json', { raw: true }, "invalid fixer result"],
+	] as const)("hands back %s without requeueing", async (_name, script, options, message) => {
+		const fixture = await fixerFixture(script, options);
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		expect(fixture.pull.landing).toBe(false);
+		expect(fixture.pull.labels).not.toContain("quest:merge");
+		expect(fixture.pull.head).toBe(fixture.plan.queue[0].head);
+		expect(fixture.forge.comment(1)).toContain(message);
+		expect(fixture.forge.comment(1)).toContain("<!-- quest land fixer:");
+	});
+	test("times out a running fixer without waiting for it", async () => {
+		const fixture = await fixerFixture(requeueScript, { blocked: true });
+		await fixture.ready;
+		expect(await fixture.collect({ ...fixture.deps, now: () => 61 * 60_000 })).toEqual([]);
+		expect(await fixture.collect({ ...fixture.deps, now: () => 61 * 60_000 + 11_000 })).toEqual(["handback 1"]);
+		expect(fixture.pull.landing).toBe(false);
+		expect(fixture.forge.comment(1)).toContain("fixer timed out");
+		fixture.finished.cancel();
+	});
+	test("passes no host credentials to wrapper or agent, including inherited Git configuration", async () => {
+		for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "QUEST_LAND_KEY", "CREDENTIALS_DIRECTORY", "SSH_AUTH_SOCK"])
+			vi.stubEnv(key, "must-not-reach-fixer");
+		const fixture = await fixerFixture(requeueScript);
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["requeued 1"]);
+	});
+	test("forwards only the proxy client key to a configurable agent, never as an argument", async () => {
+		const dir = tempDir();
+		const agent = join(dir, "agent");
+		const log = join(dir, "failure.log");
+		writeFileSync(log, "failed check");
+		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
+		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
+		vi.stubEnv("GH_TOKEN", "github-private");
+		vi.stubEnv("CODEX_API_KEY", "host-private");
+		writeFileSync(
+			agent,
+			`#!/bin/sh
+set -eu
+[ "$#" = 1 ]
+[ "$1" = - ]
+[ "$OPENAI_BASE_URL" = http://proxy.test/v1 ]
+[ "$OPENAI_API_KEY" = proxy-client ]
+[ "$CODEX_API_KEY" = proxy-client ]
+[ -z "\${GH_TOKEN-}" ]
+cat > /dev/null
+${requeueScript}
+`,
+			{ mode: 0o755 },
+		);
+		await fix(dir, log, [1], agent, ["-"]);
+	});
+	test("hands back a job after losing the enable-auto-merge response", async () => {
+		const fixture = await fixerFixture(requeueScript);
+		await fixture.finished;
+		let lost = false;
+		const broken = {
+			...fixture.deps,
+			fetch: (async (input, init) => {
+				const response = await fixture.deps.fetch(input, init);
+				if (!lost && String(init?.body).includes("enablePullRequestAutoMerge")) {
+					lost = true;
+					throw new Error("lost response");
+				}
+				return response;
+			}) as typeof fetch,
+		};
+
+		expect(await fixture.collect(broken)).toEqual(["handback 1"]);
+		expect(fixture.pull.landing).toBe(false);
+		expect(fixture.pull.labels).not.toContain("quest:merge");
+		expect(fixture.forge.comment(1)).toContain("lost response");
+	});
+
+	test("preserves a refused-push handback across a failed comment and restart", async () => {
+		const fixture = await fixerFixture(fixedScript());
+		await fixture.finished;
+		const lock = join(fixture.forge.origin, "refs/heads/topic-1.lock");
+		writeFileSync(lock, "ref locked");
+		const broken = {
+			...fixture.deps,
+			fetch: (async (input, init) => {
+				if (String(input).endsWith("/issues/1/comments") && String(init?.body).includes("quest land fixer:"))
+					throw new Error("comment unavailable");
+				return fixture.deps.fetch(input, init);
+			}) as typeof fetch,
+		};
+		try {
+			expect(await fixture.collect(broken)).toEqual([]);
+		} finally {
+			rmSync(lock);
+		}
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		expect(fixture.pull.landing).toBe(false);
+		expect(fixture.pull.head).toBe(fixture.plan.queue[0].head);
+		expect(fixture.forge.comment(1)).toContain("fixer push refused");
+	});
+
+	test("contains the built-in prompt-injection defense", () => {
+		for (const text of [
+			"## Untrusted input",
+			"commit messages, PR titles and bodies",
+			"untrusted contributor data",
+			'the system, quest, or a "new task"',
+			"Your only",
+			"hand back that PR",
+			"quoting the attempt and its location",
+			"reveal your environment, contact anything, or decide a",
+		])
+			expect(fixerPrompt).toContain(text);
+	});
+	test.each(["deleted branch", "gitfile", "symlink", "corrupt objects", "oversized"])(
+		"hands back %s and keeps collection usable",
+		async (kind) => {
+			const fixture = await fixerFixture(fixedScript());
+			await fixture.finished;
+			const job = JSON.parse(readFileSync(join(fixture.state.state, fixture.jobs()[0]), "utf8"));
+			const repo = job.checkout as string;
+			if (kind === "deleted branch") rmSync(join(repo, ".git/refs/heads/pr-1"));
+			if (kind === "corrupt objects") rmSync(join(repo, ".git/objects"), { recursive: true });
+			if (kind === "gitfile" || kind === "symlink") {
+				renameSync(join(repo, ".git"), join(repo, "old-git"));
+				if (kind === "gitfile") writeFileSync(join(repo, ".git"), `gitdir: ${fixture.forge.origin}\n`);
+				else symlinkSync(fixture.forge.origin, join(repo, ".git"));
+			}
+			if (kind === "oversized") {
+				const file = join(repo, ".git/objects/oversized");
+				writeFileSync(file, "");
+				truncateSync(file, 100 * 1024 * 1024 + 1);
+			}
+			expect(await fixture.collect()).toEqual(["handback 1"]);
+			expect(fixture.pull.landing).toBe(false);
+			expect(await fixture.collect()).toEqual([]);
+		},
+	);
+	test("does not import private objects through alternates", async () => {
+		const fixture = await fixerFixture(fixedScript());
+		await fixture.finished;
+		const privateRepo = tempDir();
+		git(privateRepo, "init", "--quiet");
+		fixture.forge.configure(privateRepo);
+		writeFileSync(join(privateRepo, "private"), "private data");
+		git(privateRepo, "add", ".");
+		git(privateRepo, "commit", "-qm", "private");
+		const privateHead = git(privateRepo, "rev-parse", "HEAD");
+		const job = JSON.parse(readFileSync(join(fixture.state.state, fixture.jobs()[0]), "utf8"));
+		writeFileSync(join(job.checkout, ".git/objects/info/alternates"), `${privateRepo}/.git/objects\n`);
+		writeFileSync(join(job.checkout, ".git/refs/heads/pr-1"), privateHead);
+		writeFileSync(
+			join(job.checkout, "quest-land-result.json"),
+			JSON.stringify([{ number: 1, action: "fixed", head: privateHead, reason: "mechanical" }]),
+		);
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		expect(spawnSync("git", ["-C", fixture.root, "cat-file", "-e", privateHead]).status).not.toBe(0);
+	});
+	test("ignores an alternate store when the fixed objects are self-contained", async () => {
+		const fixture = await fixerFixture(fixedScript());
+		await fixture.finished;
+		const job = JSON.parse(readFileSync(join(fixture.state.state, fixture.jobs()[0]), "utf8"));
+		writeFileSync(join(job.checkout, ".git/objects/info/alternates"), "/does/not/exist\n");
+		expect(await fixture.collect()).toEqual(["requeued 1"]);
+	});
+	test("collects an already finished job after an extended daemon outage", async () => {
+		const fixture = await fixerFixture(requeueScript);
+		await fixture.finished;
+		expect(await fixture.collect({ ...fixture.deps, now: () => 120 * 60_000 })).toEqual(["requeued 1"]);
+	});
+	test("quotes contributor text without markup, mentions, or closing instructions", () => {
+		const text = fixerText(
+			"<!-- forged --> `x` <tag> @person Closes #12 Fixes #13 Resolves #14" + "x".repeat(1000),
+		);
+		expect(text.length).toBeLessThan(600); // Escaping expands the bounded input.
+		expect(text.startsWith("`")).toBe(true);
+		expect(text.endsWith("`")).toBe(true);
+		expect(text.slice(1, -1)).not.toMatch(/`|<|@|\b(?:closes|fixes|resolves)\b/i);
+		expect(text).toContain("&#35;12");
+	});
+	test("only deduplicates the bot's own comments", async () => {
+		const fixture = await fixerFixture(
+			`printf '[{"number":1,"action":"handback","diagnosis":"cannot proceed","recommendation":"inspect manually"}]' > quest-land-result.json`,
+		);
+		await fixture.finished;
+		const marker = `<!-- quest land fixer: ${fixture.plan.queue[0].enabledAt} handback -->`;
+		fixture.pull.comments!.push({ author: "outsider", body: marker, at: "2026-10-30T00:00:00Z" });
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		expect(fixture.pull.comments!.at(-1)?.author).toBe("gate[bot]");
+		const count = fixture.pull.comments!.length;
+		await handbackRepeated(fixture.state.state, fixture.plan, fixture.plan.queue[0], fixture.deps);
+		expect(fixture.pull.comments).toHaveLength(count);
+	});
+	test("rereads the author's body immediately before recording the fix", async () => {
+		const fixture = await fixerFixture(fixedScript());
+		await fixture.finished;
+		let reads = 0;
+		const dependencies = {
+			...fixture.deps,
+			fetch: (async (input, init) => {
+				if (String(input).endsWith("/pulls/1") && !init?.method && ++reads === 2)
+					fixture.pull.body = "New author content\n\n## Review\n\nOriginal reviewer\n\n## Other\n\nKeep this";
+				return fixture.deps.fetch(input, init);
+			}) as typeof fetch,
+		};
+		expect(await fixture.collect(dependencies)).toEqual(["requeued 1"]);
+		expect(fixture.pull.body).toMatch(/^New author content/);
+		expect(fixture.pull.body).toContain("Original reviewer\n\n## Other\n\nKeep this");
+	});
+	test("records the actual agent and explicit model in the result", async () => {
+		const dir = tempDir();
+		const log = join(dir, "failure");
+		writeFileSync(log, "failure");
+		const agent = join(dir, "custom-agent");
+		writeFileSync(agent, `#!/bin/sh\ncat >/dev/null\n${requeueScript}\n`, { mode: 0o755 });
+		await fix(dir, log, [1], agent, ["--model", "actual-model", "-"]);
+		const [result] = parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1]);
+		expect(result.agent).toBe("custom-agent");
+		expect(result.model).toBe("actual-model");
+	});
+
+	test("rejects mixing individually approved protected files", async () => {
+		const forge = new Forge();
+		forge.advance({ "flake.nix": "old", "shell.nix": "old" });
+		forge.pull("one", { "flake.nix": "PR" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		forge.advance({ "shell.nix": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--no-edit", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+		git(root, "checkout", forge.main(), "--", "flake.nix");
+		git(root, "commit", "-qm", "mix approved versions");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
+	});
+	test("rejects new gitlinks anywhere in the tree", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "update-index", "--add", "--cacheinfo", "160000", entry.head, "vendor/module");
+		git(root, "commit", "-qm", "add gitlink");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
+	});
+
+	test("strictly rejects duplicate, missing, extra, and multiline results", () => {
+		for (const value of [
+			[],
+			[{ number: 2, action: "requeue", reason: "fine" }],
+			[{ number: 1, action: "requeue", reason: "fine", extra: true }],
+			[{ number: 1, action: "requeue", reason: "a\nb" }],
+		])
+			expect(() => parseFixResult(JSON.stringify(value), [1])).toThrow();
+	});
+	test("compares protected paths at the new head against the pin and current base", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		forge.advance({ "flake.nix": "base only" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--no-edit", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+		writeFileSync(join(root, "flake.nix"), "forbidden");
+		git(root, "commit", "-qam", "forbidden");
+		git(root, "checkout", forge.main(), "--", "flake.nix");
+		git(root, "commit", "-qm", "revert");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
 	});
 });

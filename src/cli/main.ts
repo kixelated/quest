@@ -43,6 +43,7 @@ import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteRepository, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "./land";
+import { fix } from "./land-fix";
 import { serve, type ServeOptions } from "./land-serve";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
@@ -498,17 +499,44 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			},
 		);
 
-	program
-		.command("land")
-		.summary("Land queued PRs through a host daemon")
+	const landCommand = program.command("land").summary("Land queued PRs through a host daemon");
+	landCommand
+		.command("fix")
+		.description(
+			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json. Model endpoint and client key: OPENAI_BASE_URL and OPENAI_API_KEY.",
+		)
+		.argument("<log>", "Full failure log exposed by the wrapper")
+		.argument("<prs...>", "PR numbers with pr-<n> branches")
+		.option("--agent <executable>", "Agent executable", "codex")
+		.option("--model <id>", "Agent model recorded in the result (passed to default Codex)")
+		.option(
+			"--agent-arg <argument>",
+			"Replace default codex exec arguments (repeatable)",
+			(value: string, previous: string[]) => [...previous, value],
+			[] as string[],
+		)
+		.action((log: string, prs: string[], options: { agent: string; agentArg: string[]; model?: string }) => {
+			settle(
+				fix(
+					root(),
+					log,
+					prs.map(Number),
+					options.agent,
+					options.agentArg.length ? options.agentArg : undefined,
+					options.model,
+				),
+				() => print("fixer result written"),
+			);
+		});
+	landCommand
 		.command("serve")
 		.description(
-			"Run one daemon per repository. Check a base PR plus up to floor(log2 n) cleanly merging PRs once through the sandbox. Failed batches are ejected together, never bisected. Requires quest on PATH and flock. Sandbox and fixer wrappers MUST run code as a different user from the App key owner (for example in nspawn containers); environment filtering alone cannot isolate /proc or host files. The sandbox receives the checkout path; the optional detached fixer receives the log path followed by PR numbers. Neither receives credentials. State retains full logs and pending ejections across restarts. After revalidating the queue, merge the base into each behind-base PR head with quest resolve, verify the tested tree, and lease-push that head before the pinned GitHub squash API merge. A permissions-refused branch push falls back to a leased fast-forward of the tested squash to the base, closing the PR with a linked-commit comment and removing quest:merge. A recorded daemon merge atop the original pin is recognized after restart; other moved heads require maintainer requeueing. Pending mergeability is retried briefly; confirmed conflicts or moved heads eject the remaining batch. A refusal that would repeat, such as squash being disabled, ejects as merge_refused without the fixer. An unexpected squash parent rebuilds the queue without ejecting; a tree mismatch logs CRITICAL and ejects the rest as tree_mismatch. Merged PRs drop out of the queue after restart.",
+			"Run one daemon per repository. Check a base PR plus up to floor(log2 n) cleanly merging PRs once through the sandbox. Failed batches are ejected together, never bisected. Requires quest on PATH and flock. Sandbox and fixer wrappers MUST run code as a different user from the App key owner (for example in nspawn containers); environment filtering alone cannot isolate /proc or host files. The sandbox receives the checkout path; the optional tracked background fixer receives the log path followed by PR numbers. Neither receives credentials. State retains logs, fixer jobs, and one mechanical attempt per maintainer pick across restarts. Fixer results are validated, lease-pushed, recorded in Review, and pinned for requeue; invalid results, crashes, and timeouts are handed back. After revalidating the queue, merge the base into each behind-base PR head with quest resolve, verify the tested tree, and lease-push that head before the pinned GitHub squash API merge. A permissions-refused branch push falls back to a leased fast-forward of the tested squash to the base, closing the PR with a linked-commit comment and removing quest:merge. A recorded daemon merge atop the original pin is recognized after restart; other moved heads require maintainer requeueing. Pending mergeability is retried briefly; confirmed conflicts or moved heads eject the remaining batch. A refusal that would repeat, such as squash being disabled, ejects as merge_refused without the fixer. An unexpected squash parent rebuilds the queue without ejecting; a tree mismatch logs CRITICAL and ejects the rest as tree_mismatch. Merged PRs drop out of the queue after restart.",
 		)
 		.option("--base <branch>", "Base branch (default: repository default)")
 		.option("--state <path>", "Private daemon state directory (default: $STATE_DIRECTORY or the XDG state home)")
 		.requiredOption("--sandbox <command>", "Sandbox executable that checks the supplied checkout path")
-		.option("--fixer <command>", "Detached fixer executable")
+		.option("--fixer <command>", "Credential-free fixer wrapper executable (60-minute deadline)")
 		.requiredOption("--app-id <id>", "GitHub App id")
 		.option("--timeout <minutes>", "Fail a check that runs longer than this", positiveInteger("timeout"), 60)
 		.action((options: ServeOptions) => {

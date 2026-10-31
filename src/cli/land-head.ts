@@ -81,7 +81,7 @@ function isPrepared(root: string, state: string, entry: Entry): boolean {
 }
 
 /** Fresh tokens go only to git over HTTPS, with no inherited credential helper or global config. */
-async function push(
+export async function push(
 	root: string,
 	remote: string,
 	from: string,

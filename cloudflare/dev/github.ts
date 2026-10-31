@@ -663,6 +663,8 @@ export function fakeGitHub(world: World) {
 		}
 		if (path === "/graphql") {
 			const { query, variables } = body as { query: string; variables: Record<string, any> };
+			if (query.includes("viewer { login }"))
+				return json({ data: { viewer: { login: `${world.app.slug}[bot]` } } });
 			if (query.includes("markPullRequestReadyForReview")) {
 				for (const repo of world.repos)
 					for (const pull of repo.pulls)
