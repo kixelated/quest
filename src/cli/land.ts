@@ -472,8 +472,8 @@ interface Chain {
  * with `quest resolve`. Stop at the batch limit, skipping conflicting additions;
  * a conflicting base stops the batch.
  */
-export function build(root: string, plan: Plan): Chain {
-	git(root, [
+export async function build(root: string, plan: Plan, read: RemoteRead = readRemote): Promise<Chain> {
+	await read(root, [
 		"fetch",
 		"--quiet",
 		"--no-tags",
@@ -640,3 +640,7 @@ export function git(
 	if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.trim()}`);
 	return result.stdout.trim();
 }
+
+/** A remote read is injected separately from local Git work, so credentials cannot reach child clones. */
+export type RemoteRead = (root: string, args: string[]) => Promise<string>;
+export const readRemote: RemoteRead = async (root, args) => git(root, args);

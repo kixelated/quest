@@ -1,4 +1,5 @@
 // Host orchestration: PR code runs only through the configured sandbox.
+import { authenticatedRead } from "./land-git";
 import { startFixer, collectFixers, handbackRepeated } from "./land-fixer";
 import { spawn } from "node:child_process";
 import { createPrivateKey, createSign } from "node:crypto";
@@ -19,7 +20,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { GitHub, type GitHubDependencies, type Repository, object, string } from "./github";
 import { forgetHeads, prepareHead, resolvePreparedQueue, landFallback, finishFallback } from "./land-head";
-import { build, commandEnvironment, eject, ejection, git, type Plan } from "./land";
+import { build, commandEnvironment, eject, ejection, git, readRemote, type RemoteRead, type Plan } from "./land";
 
 export interface ServeOptions {
 	base?: string;
@@ -36,9 +37,8 @@ export interface ServeOptions {
 export async function installationToken(
 	repository: Repository,
 	options: Pick<ServeOptions, "appId">,
-	workflows: boolean,
+	permissions: Record<string, "read" | "write">,
 	deps: Pick<GitHubDependencies, "fetch" | "now">,
-	administration = false,
 ): Promise<string> {
 	const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 	const now = Math.floor(deps.now() / 1000);
@@ -62,20 +62,13 @@ export async function installationToken(
 		(
 			await request(`/app/installations/${Number(installation.id)}/access_tokens`, {
 				repositories: [repository.repo],
-				permissions: {
-					// Disabling a PR's auto-merge on ejection needs contents write; this token never leaves the daemon.
-					contents: "write",
-					...(administration ? { issues: "write" } : {}),
-					pull_requests: "write",
-					...(workflows ? { workflows: "write" } : {}),
-					...(administration ? { administration: "read", checks: "read", statuses: "read" } : {}),
-				},
+				permissions,
 			})
 		).token,
 	);
 }
 
-type Chain = ReturnType<typeof build>;
+type Chain = Awaited<ReturnType<typeof build>>;
 function save(path: string, value: unknown): void {
 	writeFileSync(`${path}.new`, JSON.stringify(value), { mode: 0o600 });
 	renameSync(`${path}.new`, path);
@@ -261,6 +254,7 @@ export async function serveBatch(
 	options: Pick<ServeOptions, "state" | "sandbox" | "fixer" | "timeout">,
 	deps: GitHubDependencies,
 	token: (workflows: boolean) => Promise<string>,
+	read: RemoteRead = readRemote,
 ): Promise<string[]> {
 	mkdirSync(options.state, { recursive: true, mode: 0o700 });
 	const github = new GitHub(deps);
@@ -274,7 +268,7 @@ export async function serveBatch(
 		await handbackRepeated(options.state, plan, item, deps);
 	}
 	if (plan.queue.length === 0) return output;
-	const chain = build(root, plan);
+	const chain = await build(root, plan, read);
 	const conflict = chain.conflict;
 	const log = join(options.state, `batch-${Date.now()}-${plan.queue[0].number}.log`);
 	let failure: Failure | undefined;
@@ -365,6 +359,7 @@ export async function serveBatch(
 					expectedParent,
 					link.tree,
 					token,
+					read,
 				);
 				if ("fallback" in prepared) {
 					const completed = await landFallback(
@@ -376,6 +371,7 @@ export async function serveBatch(
 						expectedParent,
 						deps,
 						token,
+						read,
 					);
 					if (completed) output.push(completed);
 					if (!completed?.startsWith("landed ")) return output;
@@ -516,19 +512,42 @@ export async function serve(
 	};
 	try {
 		const trusted = privateRepository(options.state);
+
 		const mint = (workflows: boolean) =>
-			installationToken(repository, options, workflows, { fetch, now: Date.now });
+			installationToken(
+				repository,
+				options,
+				{ contents: "write", pull_requests: "write", ...(workflows ? { workflows: "write" as const } : {}) },
+				{ fetch, now: Date.now },
+			);
+		const read = authenticatedRead(() =>
+			installationToken(repository, options, { contents: "read" }, { fetch, now: Date.now }),
+		);
 		const deps = apiDependencies(
-			() => installationToken(repository, options, false, { fetch, now: Date.now }, true),
+			() =>
+				installationToken(
+					repository,
+					options,
+					{
+						contents: "write",
+						pull_requests: "write",
+						issues: "write",
+						administration: "read",
+						checks: "read",
+						statuses: "read",
+					},
+					{ fetch, now: Date.now },
+				),
 			{ fetch, now: Date.now, sleep, warn },
 		);
+
 		await daemonLoop(async () => {
-			for (const line of await collectFixers(trusted, options.state, deps, mint)) warn(line);
+			for (const line of await collectFixers(trusted, options.state, deps, mint, undefined, read)) warn(line);
 			for (const line of await resumeFailure(trusted, options, deps)) warn(line);
-			const completed = await finishFallback(trusted, options.state, deps, mint);
+			const completed = await finishFallback(trusted, options.state, deps, mint, read);
 			if (completed) warn(completed);
 			const plan = await resolvePreparedQueue(trusted, options.state, repository, options.base, deps);
-			const lines = await serveBatch(trusted, plan, options, deps, mint);
+			const lines = await serveBatch(trusted, plan, options, deps, mint, read);
 			for (const line of lines) warn(line);
 			return lines.length > 0;
 		}, deps);

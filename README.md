@@ -583,9 +583,13 @@ daemons using the repository (including separate worktrees) or one state directo
 PATH for the merge driver.
 
 The App key stays on the host, in `$CREDENTIALS_DIRECTORY/github-app-key` or a
-file named by `QUEST_LAND_KEY`, never in argv, where `/proc` would show it. Its fetches carry no
-credential, so it lands only public repositories for now. Installation
-tokens are scoped to this repository, with contents and pull requests write.
+file named by `QUEST_LAND_KEY`, never in argv, where `/proc` would show it. Remote fetches and `ls-remote` use a separate repository-scoped installation
+token with exactly `contents: read`, so private repositories are supported. The
+read token is refreshed before expiry and retried once on authentication refusal.
+Git receives it only through temporary `GIT_CONFIG_*` environment settings, never
+in argv or repository configuration. Local `file://` fetches into sandbox and
+fixer repositories remain credential-free. Write installation tokens are scoped
+to this repository, with contents and pull requests write.
 Tokens are minted for each push or API merge and passed only to trusted git
 and GitHub clients, never the sandbox or fixer. A PR-branch push also requests
 workflow write when the head-to-merge range carries workflow changes from the base. Workflow write is requested only when that PR's squash changes

@@ -28,6 +28,7 @@ import {
 	type Plan,
 } from "./land";
 import { readFixResult, parseFixResult, type FixResult } from "./land-fix";
+import { readRemote, type RemoteRead } from "./land";
 import { importFixer } from "./land-fixer-repository";
 import { push } from "./land-head";
 import { excerpt, type Failure } from "./land-serve";
@@ -310,6 +311,7 @@ export async function collectFixers(
 	deps: GitHubDependencies,
 	token: (workflows: boolean) => Promise<string>,
 	timeout = 60,
+	read: RemoteRead = readRemote,
 ): Promise<string[]> {
 	const output: string[] = [];
 	for (const name of readdirSync(state).filter((name) => /^fix-job-.*\.json$/.test(name))) {
@@ -323,12 +325,12 @@ export async function collectFixers(
 		}
 
 		try {
-			output.push(...(await collectJob(root, state, path, job, deps, token, timeout)));
+			output.push(...(await collectJob(root, state, path, job, deps, token, timeout, read)));
 		} catch (error) {
 			job.error = `fixer collection failed: ${String(error)}; run /quest-iterate`;
 			try {
 				save(path, job);
-				output.push(...(await collectJob(root, state, path, job, deps, token, timeout)));
+				output.push(...(await collectJob(root, state, path, job, deps, token, timeout, read)));
 			} catch (failure) {
 				deps.warn(`quest land fixer: handback pending for ${name}: ${String(failure)}`);
 			}
@@ -345,6 +347,7 @@ async function collectJob(
 	deps: GitHubDependencies,
 	token: (workflows: boolean) => Promise<string>,
 	timeout: number,
+	read: RemoteRead,
 ): Promise<string[]> {
 	const github = new GitHub(deps);
 	const output: string[] = [];
@@ -421,7 +424,7 @@ async function collectJob(
 					} catch (error) {
 						throw new FixerRefusal(String(error));
 					}
-					git(root, ["fetch", "--quiet", "--no-tags", baseRemote(job.plan), job.plan.base.ref]);
+					await read(root, ["fetch", "--quiet", "--no-tags", baseRemote(job.plan), job.plan.base.ref]);
 					try {
 						validateFix(root, entry, head, git(root, ["rev-parse", "FETCH_HEAD"]));
 					} catch (error) {

@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "../cloudflare/dev/github";
+import { authenticatedRead, gitAuthentication } from "../src/cli/land-git";
 import { collectFixers, validateFix, fixerText, handbackRepeated } from "../src/cli/land-fixer";
 import fixerPrompt from "../assets/land-fix.md";
 import { fix, parseFixResult } from "../src/cli/land-fix";
@@ -50,7 +51,7 @@ import {
 	resumeFailure,
 	serveBatch,
 } from "../src/cli/land-serve";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { tempDir } from "./fixture";
 
 const bin = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
@@ -376,7 +377,7 @@ class Forge {
 		const deps = await this.deps();
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
 		const root = this.clone();
-		const chain = build(root, plan);
+		const chain = await build(root, plan);
 		const checked = chain.links.length ? [chain.links.map((link) => link.entry.number)] : [];
 		const landing = await serveBatch(root, plan, sandbox(), deps, async () => deps.token);
 		this.settle();
@@ -418,7 +419,7 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		const deps = await forge.deps();
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
 		const root = forge.clone();
-		const link = build(root, plan).links[0];
+		const link = (await build(root, plan)).links[0];
 		expect(await serveBatch(root, plan, sandbox(), deps, async () => deps.token)).toEqual([
 			`landed 1 ${pull.squash}`,
 		]);
@@ -625,7 +626,7 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
 		const root = forge.clone();
 		const options = sandbox();
-		const link = build(root, plan).links[0];
+		const link = (await build(root, plan)).links[0];
 		const prepared = await prepareHead(
 			root,
 			options.state,
@@ -650,7 +651,7 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
 		const root = forge.clone();
 		const options = sandbox();
-		const link = build(root, plan).links[0];
+		const link = (await build(root, plan)).links[0];
 		const first = await prepareHead(
 			root,
 			options.state,
@@ -700,7 +701,7 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
 		const root = forge.clone();
 		const options = sandbox();
-		const link = build(root, plan).links[0];
+		const link = (await build(root, plan)).links[0];
 		await prepareHead(root, options.state, plan, plan.queue[0], plan.base.sha, link.tree, async () => deps.token);
 		git(forge.origin, "update-ref", "refs/heads/topic-1", plan.base.sha);
 		expect((await resolvePreparedQueue(root, options.state, REPOSITORY, undefined, deps)).eject[0].reason).toBe(
@@ -949,7 +950,7 @@ describe.skipIf(process.platform === "win32")("host daemon", () => {
 		const forge = new Forge();
 		for (let i = 0; i < count; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "ok" });
 		const plan = await resolveQueue(REPOSITORY, undefined, await forge.deps());
-		expect(build(forge.clone(), plan).links).toHaveLength(1 + Math.floor(Math.log2(count)));
+		expect((await build(forge.clone(), plan)).links).toHaveLength(1 + Math.floor(Math.log2(count)));
 	});
 
 	test("skips a conflicting addition and leaves it queued, adding a later clean PR", async () => {
@@ -1543,14 +1544,19 @@ mv '${result}.new' '${result}'
 		);
 		let body: unknown;
 		vi.stubEnv("QUEST_LAND_KEY", key);
-		const token = await installationToken(REPOSITORY, { appId: "123" }, workflows, {
-			now: Date.now,
-			fetch: (async (input, init) => {
-				if (String(input).endsWith("/installation")) return Response.json({ id: 5 });
-				body = JSON.parse(String(init?.body));
-				return Response.json({ token: "scoped" });
-			}) as typeof fetch,
-		});
+		const token = await installationToken(
+			REPOSITORY,
+			{ appId: "123" },
+			{ contents: "write", pull_requests: "write", ...(workflows ? { workflows: "write" as const } : {}) },
+			{
+				now: Date.now,
+				fetch: (async (input, init) => {
+					if (String(input).endsWith("/installation")) return Response.json({ id: 5 });
+					body = JSON.parse(String(init?.body));
+					return Response.json({ token: "scoped" });
+				}) as typeof fetch,
+			},
+		);
 		expect(token).toBe("scoped");
 		expect(body).toEqual({
 			repositories: ["project"],
@@ -1559,7 +1565,14 @@ mv '${result}.new' '${result}'
 		await installationToken(
 			REPOSITORY,
 			{ appId: "123" },
-			false,
+			{
+				contents: "write",
+				pull_requests: "write",
+				issues: "write",
+				administration: "read",
+				checks: "read",
+				statuses: "read",
+			},
 			{
 				now: Date.now,
 				fetch: (async (input, init) => {
@@ -1568,7 +1581,6 @@ mv '${result}.new' '${result}'
 					return Response.json({ token: "api" });
 				}) as typeof fetch,
 			},
-			true,
 		);
 		expect(body).toEqual({
 			repositories: ["project"],
@@ -2065,5 +2077,128 @@ ${requeueScript}
 		git(root, "checkout", forge.main(), "--", "flake.nix");
 		git(root, "commit", "-qm", "revert");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+	});
+});
+
+/** Private Git transport: require an exact ephemeral header before forwarding to the local forge. */
+function privateGit(expected?: string): { seen: string; reject: string } {
+	const tools = tempDir();
+	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+	const seen = join(tools, "seen");
+	const reject = join(tools, "reject");
+	const expectedHash = expected
+		? createHash("sha256").update(gitAuthentication(expected).GIT_CONFIG_VALUE_0).digest("hex")
+		: "";
+	writeFileSync(
+		join(tools, "git"),
+		`#!/bin/sh
+kind=; remote=
+for arg do
+ case "$arg" in fetch|ls-remote) kind=$arg;; https://github.com/*) remote=$arg;; esac
+done
+if [ -n "$kind" ]; then
+ if [ -n "$remote" ]; then
+  if [ "\${GIT_CONFIG_KEY_0-}" != http.https://github.com/.extraheader ] || [ -z "\${GIT_CONFIG_VALUE_0-}" ]; then
+   printf 'fatal: Authentication failed\\n' >&2; exit 128
+  fi
+  hash=$(printf '%s' "$GIT_CONFIG_VALUE_0" | sha256sum); hash=\${hash%% *}
+  printf '%s %s\\n' "$kind" "$hash" >> '${seen}'
+  if { [ -n '${expectedHash}' ] && [ "$hash" != '${expectedHash}' ]; } || [ -e '${reject}' ]; then
+   rm -f '${reject}'; printf 'fatal: requested URL returned error: 401\\n' >&2; exit 128
+  fi
+ else
+  [ -z "\${GIT_CONFIG_VALUE_0-}" ] || { printf 'credential leaked into a local fetch' >&2; exit 128; }
+ fi
+fi
+exec '${real}' "$@"
+`,
+		{ mode: 0o755 },
+	);
+	process.env.PATH = `${tools}:${process.env.PATH}`;
+	return { seen, reject };
+}
+
+describe.skipIf(process.platform === "win32")("private repository reads", () => {
+	afterEach(() => vi.unstubAllEnvs());
+	test.each([false, true])(
+		"authenticates private Git reads without exposing credentials to child repositories (failed batch: %s)",
+		async (failed) => {
+			const forge = new Forge();
+			forge.pull("Private", { "private.txt": "yes" });
+			const deps = await forge.deps();
+			const key = join(tempDir(), "key.pem");
+			writeFileSync(
+				key,
+				generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }),
+			);
+			vi.stubEnv("QUEST_LAND_KEY", key);
+			let mintedBody: unknown;
+			const mintDeps = {
+				now: deps.now,
+				fetch: (async (input, init) => {
+					if (String(input).endsWith("/access_tokens")) mintedBody = JSON.parse(String(init?.body));
+					return deps.fetch(input, init);
+				}) as typeof fetch,
+			};
+			const token = await installationToken(REPOSITORY, { appId: "1" }, { contents: "read" }, mintDeps);
+			expect(mintedBody).toEqual({ repositories: ["project"], permissions: { contents: "read" } });
+			const plan = await resolveQueue(REPOSITORY, undefined, deps);
+			const options = sandbox();
+			const trusted = privateRepository(options.state);
+			forge.configure(trusted);
+			const transport = privateGit(token);
+			await expect(build(trusted, plan)).rejects.toThrow("Authentication failed");
+			const read = authenticatedRead(async () => token, deps.now);
+			const checks = `test -z "\${GIT_CONFIG_COUNT-}" && test -z "\${GIT_CONFIG_VALUE_0-}" && test -z "\${GH_TOKEN-}" && test -z "$(git config --local --get-regexp 'extraheader|credential.helper')"`;
+			writeFileSync(
+				options.sandbox,
+				`#!/bin/sh\n${checks} && test "$#" = 2 && test "$PWD" = "$1" || exit 9\nexit ${failed ? 1 : 0}\n`,
+				{ mode: 0o755 },
+			);
+			const fixer = join(options.state, "fixer");
+			writeFileSync(
+				fixer,
+				`#!/bin/sh\n${checks} && test "$#" = 2 && test "$2" = 1 || exit 9\nprintf safe > '${options.state}/fixer-safe'\n`,
+				{ mode: 0o755 },
+			);
+			const finished = failed ? eventFile(options.state, (name) => name.endsWith(".exit")) : undefined;
+			expect(await serveBatch(trusted, plan, { ...options, fixer }, deps, async () => deps.token, read)).toEqual([
+				failed ? "ejected 1 failed_checks" : expect.stringMatching(/^landed 1 /),
+			]);
+			if (finished) {
+				await finished;
+				expect(readFileSync(join(options.state, "fixer-safe"), "utf8")).toBe("safe");
+			}
+			const config = readFileSync(join(trusted, "config"), "utf8");
+			expect(config).not.toContain(token);
+			expect(config).not.toContain("extraheader");
+			const calls = readFileSync(transport.seen, "utf8");
+			expect(calls).toContain("fetch ");
+			if (!failed) expect(calls).toContain("ls-remote ");
+		},
+	);
+	test("refreshes after expiry and retries a revoked read token once", async () => {
+		const forge = new Forge();
+		const root = forge.clone();
+		const transport = privateGit();
+		let clock = 0;
+		let minted = 0;
+		const read = authenticatedRead(
+			async () => `read-${++minted}`,
+			() => clock,
+		);
+		const args = ["ls-remote", "https://github.com/upstream/project.git", "refs/heads/main"];
+		await read(root, args);
+		clock += 61 * 60_000;
+		await read(root, args);
+		writeFileSync(transport.reject, "reject once");
+		await read(root, args);
+		const digest = (token: string) =>
+			createHash("sha256").update(gitAuthentication(token).GIT_CONFIG_VALUE_0).digest("hex");
+		expect(readFileSync(transport.seen, "utf8").trim().split("\n")).toEqual(
+			["read-1", "read-2", "read-2", "read-3"].map((token) => `ls-remote ${digest(token)}`),
+		);
+		expect(minted).toBe(3);
+		await expect(read(root, ["fetch", "file:///local/repository", "main"])).rejects.toThrow("GitHub HTTPS");
 	});
 });
