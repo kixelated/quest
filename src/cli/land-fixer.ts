@@ -1,6 +1,18 @@
 // Trusted host side: durable background jobs, validation, and credentialed publication.
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	constants,
+	existsSync,
+	fstatSync,
+	openSync,
+	readSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { MERGE_LABEL } from "../core";
 import { GitHub, type GitHubDependencies, object, string } from "./github";
@@ -18,9 +30,24 @@ import {
 import { readFixResult, parseFixResult, type FixResult } from "./land-fix";
 import { importFixer } from "./land-fixer-repository";
 import { push } from "./land-head";
-import { type Failure } from "./land-serve";
+import { excerpt, type Failure } from "./land-serve";
 
 class FixerRefusal extends Error {}
+
+/** Read a bounded tail, retaining the complete per-job log for host diagnosis. */
+function fixerLog(path: string): string {
+	if (!existsSync(`${path}.log`)) return "";
+	const fd = openSync(`${path}.log`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile()) return "";
+		const buffer = Buffer.alloc(Math.min(stat.size, 16_384));
+		const length = readSync(fd, buffer, 0, buffer.length, Math.max(0, stat.size - buffer.length));
+		return buffer.subarray(0, length).toString("utf8").trimEnd().split("\n").slice(-100).join("\n");
+	} finally {
+		closeSync(fd);
+	}
+}
 
 interface Job {
 	checkout: string;
@@ -66,6 +93,7 @@ async function comment(
 	text: string,
 	suffix: string,
 	attribution = "Codex",
+	log = "",
 ): Promise<void> {
 	const path = `/repos/${plan.repository}/issues/${entry.number}/comments`;
 	const marker = `<!-- quest land fixer: ${entry.enabledAt} ${suffix} -->`;
@@ -77,7 +105,9 @@ async function comment(
 	)
 		return;
 	await github.request(path, {
-		body: { body: `${attribution} land fixer: ${fixerText(text)}\n\n${marker}\n\n(written by ${attribution})` },
+		body: {
+			body: `${attribution} land fixer: ${fixerText(text)}${log ? `\n\n<pre>${excerpt(log)}</pre>` : ""}\n\n${marker}\n\n(written by ${attribution})`,
+		},
 	});
 }
 
@@ -168,19 +198,29 @@ export async function startFixer(
 	save(path, job);
 	// The supervisor survives a daemon restart and atomically records the wrapper's exit status.
 	// Its state path is never passed to the wrapper or mounted in its container.
-	const child = spawn(
-		"sh",
-		[
-			"-c",
-			`trap ':' TERM; status=$1; shift; "$@"; code=$?; printf "%s" "$code" > "$status.new"; mv "$status.new" "$status"`,
-			"quest-fixer",
-			`${path}.exit`,
-			fixer,
-			failure.log,
-			...job.numbers.map(String),
-		],
-		{ cwd: checkout, detached: true, env: commandEnvironment(), stdio: "ignore" },
+	const output = openSync(
+		`${path}.log`,
+		constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
+		0o600,
 	);
+	let child: ReturnType<typeof spawn>;
+	try {
+		child = spawn(
+			"sh",
+			[
+				"-c",
+				`trap ':' TERM; status=$1; shift; "$@"; code=$?; printf "%s" "$code" > "$status.new"; mv "$status.new" "$status"`,
+				"quest-fixer",
+				`${path}.exit`,
+				fixer,
+				failure.log,
+				...job.numbers.map(String),
+			],
+			{ cwd: checkout, detached: true, env: commandEnvironment(), stdio: ["ignore", output, output] },
+		);
+	} finally {
+		closeSync(output);
+	}
 	try {
 		await new Promise<void>((done, reject) => {
 			child.once("spawn", done);
@@ -490,6 +530,7 @@ async function collectJob(
 						: "missing result; run /quest-iterate",
 				"handback",
 				author(result),
+				fixerLog(path),
 			);
 		output.push(`${error || result?.action === "handback" ? "handback" : "requeued"} ${number}`);
 		job.numbers.shift();

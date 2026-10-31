@@ -4,6 +4,12 @@ import { constants, closeSync, fstatSync, openSync, readFileSync, rmSync, writeF
 import { basename, join } from "node:path";
 import prompt from "../../assets/land-fix.md";
 
+export class FixerAgentError extends Error {
+	constructor(readonly exitCode: number) {
+		super(`fixer agent exited ${exitCode}`);
+	}
+}
+
 export const FIX_RESULT = "quest-land-result.json";
 export function readFixResult(root: string): string {
 	const fd = openSync(join(root, FIX_RESULT), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -125,7 +131,7 @@ export async function fix(
 		child.once("error", reject);
 		child.stdin.on("error", () => {});
 		child.stdin.end(`${prompt}\n\nFailure log: ${JSON.stringify(log)}\nPRs: ${numbers.join(", ")}\n`);
-		child.once("close", (code) => (code === 0 ? done() : reject(new Error(`fixer agent exited ${code}`))));
+		child.once("close", (code) => (code === 0 ? done() : reject(new FixerAgentError(code ?? 1))));
 	});
 	const results = parseFixResult(readFixResult(root), numbers);
 	const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
