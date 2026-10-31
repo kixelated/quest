@@ -443,7 +443,8 @@ async function collectJob(
 					github,
 					job.plan,
 					entry,
-					`Requeued unchanged: ${result.reason.slice(0, 200)}. Suggested follow-up: investigate the batch failure and stabilize any flaky checks.`,
+					// The reason says why: another PR in the batch, or a flaky check worth a follow-up.
+					`Requeued unchanged: ${result.reason.slice(0, 200)}`,
 					"requeue",
 					author(result),
 				);
