@@ -44,7 +44,8 @@ export async function enqueue(github: GitHub, id: string, head: string): Promise
 	);
 	const request = object(current.node).autoMergeRequest;
 	if (request !== null && request !== undefined) {
-		if (pinned(string(object(request).commitBody)) === head) return;
+		const body = object(request).commitBody;
+		if (pinned(typeof body === "string" ? body : "") === head) return;
 		await github.graphql(
 			"mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
 			{ id },

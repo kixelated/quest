@@ -347,6 +347,15 @@ describe("merge --land", () => {
 		expect(pull.autoMerge?.commitBody).toBe(`Quest-Land-Head: ${HEAD}`);
 	});
 
+	test("replaces an unpinned auto-merge request with an empty commit body", async () => {
+		const pull = new FakePull();
+		pull.required = ["test", "quest land"];
+		pull.autoMerge = { enabledAt: "2026-10-20T12:00:00Z", commitBody: "" };
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "squash", pull.deps());
+		expect(pull.autoMerge?.commitBody).toBe(`Quest-Land-Head: ${HEAD}`);
+	});
+
 	test.each(["CLEAN", "HAS_HOOKS", "UNSTABLE"])(
 		"rereads an UNKNOWN state once after a clean refusal, then merges %s at the same head",
 		async (state) => {
