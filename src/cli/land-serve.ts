@@ -227,16 +227,15 @@ async function mergePinned(github: GitHub, path: string, head: string, previous 
 		if (pull.merged === true) return null;
 		const detail = `GitHub refused ${path}: ${String(result.message)}`;
 		if (pull.state !== "open") return { reason: "merge_refused", detail };
-		if (
-			previous !== head &&
-			response.status === 409 &&
-			(object(pull.head).sha === previous || object(pull.head).sha === head)
-		) {
+		// Right after the gate's own push, GitHub can still report the pin as the head and refuse the merge
+		// for it: a 409, or a 405 when the pin conflicts with the base that push merged. Neither is a writer.
+		const current = object(pull.head).sha;
+		if (previous !== head && (current === previous || (response.status === 409 && current === head))) {
 			if (attempt >= 3) throw new Error(`${detail}; prepared head has not propagated`);
 			await github.pause(500 * 2 ** attempt);
 			continue;
 		}
-		if (object(pull.head).sha !== head) return { reason: "head_moved", detail };
+		if (current !== head) return { reason: "head_moved", detail };
 		if (pull.mergeable === false || pull.mergeable_state === "dirty") return { reason: "merge_conflict", detail };
 		if (pull.mergeable === null || /base branch was modified/i.test(String(result.message))) {
 			if (attempt >= 3) throw new Error(`${detail}; mergeability did not settle`);
@@ -430,7 +429,18 @@ export async function serveBatch(
 						log,
 						// A refusal is the repository's settings or rules, which the fixer cannot change.
 						numbers: reason === "merge_refused" ? [] : remaining.map(({ entry }) => entry.number),
-						ejections: remaining.map(({ entry }) => ejection(entry, reason, excerpt(detail))),
+						// Only the PR that stopped the batch carries its reason; the rest name it.
+						ejections: remaining.map(({ entry }) =>
+							entry.number === link.entry.number
+								? ejection(entry, reason, excerpt(detail))
+								: ejection(
+										entry,
+										"batch_stopped",
+										excerpt(
+											`PR #${link.entry.number} stopped the batch as ${reason} before this PR merged: ${detail}`,
+										),
+									),
+						),
 					};
 				break;
 			}

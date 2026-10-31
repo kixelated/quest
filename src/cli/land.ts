@@ -73,7 +73,9 @@ export type Reason =
 	| "head_moved"
 	| "not_pinned"
 	| "tree_mismatch"
-	| "merge_refused";
+	| "merge_refused"
+	/** Another PR in its batch failed to merge, so this one never reached GitHub's merge. */
+	| "batch_stopped";
 
 /** The hidden line an ejection comment carries, which `quest status` reads. */
 export const EJECTED = /^<!-- quest land: ([a-z_]+) -->$/m;
