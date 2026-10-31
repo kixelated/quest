@@ -7,7 +7,7 @@
 // Only a terminal sees any of this. Piped output is the plain contract agents
 // and scripts read, and `main.ts` prints it unchanged.
 
-import { type Blocker, type Doc } from "../core";
+import type { Blocker, Doc } from "../core";
 
 /** stdout is a terminal. Without `colour` (NO_COLOR) the layout stays and the escape codes go. */
 export interface Terminal {

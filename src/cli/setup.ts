@@ -87,7 +87,7 @@ export function init(root: string): string[] {
 
 /**
  * Register the merge driver when `root`'s `.gitattributes` names it, so fresh
- * clones and worktrees get it from any command. Never fails.
+ * clones and worktrees get it from repository commands. Never fails.
  */
 export function heal(root: string): void {
 	let named = false;

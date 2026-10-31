@@ -1,6 +1,6 @@
 // The bundled executable: run the CLI against the process.
 
-import { main } from "./main";
+import { main } from "./entry";
 import { detect } from "./theme";
 
 // A reader that stops early, as in `quest unblocked | head -1`, closes the pipe.

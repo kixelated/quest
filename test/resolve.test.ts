@@ -323,7 +323,7 @@ describe.skipIf(process.platform === "win32")("the merge driver", () => {
 		});
 	}
 
-	test("any command registers a driver .gitattributes names, and uninstall removes it", () => {
+	test("repository commands register a driver .gitattributes names, and uninstall removes it", () => {
 		const dir = diverged();
 		writeFileSync(join(dir, ".gitattributes"), "* text=auto\nquest/** merge=quest\n");
 		heal(dir);

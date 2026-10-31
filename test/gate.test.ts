@@ -35,7 +35,9 @@ import {
 	scoped,
 } from "../src/cli/gate";
 import { forwards, foregroundStat } from "../src/cli/interrupt";
-import { gateBoundary, main } from "../src/cli/main";
+import { gateBoundary } from "../src/cli/gate-argv";
+import { main as gateMain } from "../src/cli/entry";
+import { main } from "../src/cli/main";
 import { onTerminal, run, tempDir } from "./fixture";
 
 const GiB = 2 ** 30;
@@ -619,14 +621,63 @@ test("the gated command keeps its own flags, even ones Quest also parses", () =>
 	expect(gateBoundary(["gate", "--version"])).toEqual(["gate", "--version"]);
 });
 
-test("global options after gate keep working", async () => {
+test.each([
+	["CLI", main],
+	["entry point", gateMain],
+])("global options after gate keep working through the %s", async (_name, parse) => {
 	expect(run("gate", "--version").stdout).toMatch(/^quest /);
 	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
 	const out = { stdout: () => {}, stderr: () => {} };
-	expect(await main(["gate", "--root", ".", process.execPath, "-e", "process.exit(5)"], out)).toBe(5);
+	expect(await parse(["gate", "--root", ".", process.execPath, "-e", "process.exit(5)"], out)).toBe(5);
 });
 
 test("gate has command help and requires an executable", () => {
 	expect(run("gate", "--help").stdout).toContain("Arguments forwarded verbatim");
 	expect(run("gate").code).toBe(2);
+});
+
+test.each([
+	["gate", "--help"],
+	["gate", "--version"],
+	["gate"],
+	["gate", "--root", ""],
+	["--root=", "gate", "true"],
+	["gate", "--root"],
+	["gate", "--root", "-invalid", "true"],
+])("the gate-only parser preserves output and status for %j", async (...argv) => {
+	const invoke = async (parse: typeof main) => {
+		let stdout = "";
+		let stderr = "";
+		const code = await parse(argv, {
+			stdout: (text) => void (stdout += text),
+			stderr: (text) => void (stderr += text),
+		});
+		return { code, stdout, stderr };
+	};
+	expect(await invoke(gateMain)).toEqual(await invoke(main));
+});
+
+test("the executable gates outside repositories and preserves child flags", async () => {
+	const bin = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
+	const root = join(tempDir(), "not a repository");
+	const child = spawnSync(
+		process.execPath,
+		[
+			bin,
+			"--root",
+			root,
+			"gate",
+			process.execPath,
+			"-e",
+			"console.log(JSON.stringify(process.argv.slice(1))); process.exit(19)",
+			"--",
+			"--help",
+			"--root=child",
+		],
+		{ encoding: "utf8", env: { ...process.env, QUEST_GATE_ADMITTED: "1" } },
+	);
+	expect(child.status).toBe(19);
+	expect(child.stdout.trim()).toBe(JSON.stringify(["--help", "--root=child"]));
+	expect(child.stderr).toBe("");
+	expect(existsSync(root)).toBe(false);
 });

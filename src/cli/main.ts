@@ -40,6 +40,7 @@ import {
 import type { AdapterName } from "../runner/adapter";
 import { held, reach, target, upstream, upstreamHead } from "./claims";
 import { gate } from "./gate";
+import { gateBoundary } from "./gate-argv";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteRepository, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "./land";
@@ -1030,9 +1031,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			for (const line of theme ? theme.uninstall(changes) : changes) print(line);
 		});
 
-	// Fresh clones and worktrees get the merge driver from whichever command runs first.
+	// Repository commands install the merge driver; the host-wide gate never needs Git.
 	program.hook("preAction", (_program, action) => {
-		if (!["init", "uninstall"].includes(action.name())) heal(root());
+		if (!["gate", "init", "uninstall"].includes(action.name())) heal(root());
 	});
 
 	try {
@@ -1079,24 +1080,6 @@ function positiveSeconds(value: string): number {
 		throw new InvalidArgumentError("timeout must be positive seconds, at most 2147483.647");
 	}
 	return seconds;
-}
-
-/**
- * Stop option parsing before a gated executable, keeping its own flags intact.
- * Quest's global options still apply on either side of `gate`.
- */
-export function gateBoundary(argv: string[]): string[] {
-	const skipRoot = (index: number) => {
-		while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
-			index += argv[index] === "--root" ? 2 : 1;
-		}
-		return index;
-	};
-	const index = skipRoot(0);
-	if (argv[index] !== "gate") return argv;
-	const command = skipRoot(index + 1);
-	if (!argv[command] || ["--", "-h", "--help", "-V", "--version"].includes(argv[command])) return argv;
-	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }
 
 /** Parses a positive, safe integer option named `name`. */
