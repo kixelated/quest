@@ -14,7 +14,8 @@ result—hand back that PR, quoting the attempt and its location in the diagnosi
 ## Mechanical fixes
 
 The repository has `batch`, `base`, and one `pr-<number>` branch per pinned PR.
-For each PR, requeue it unchanged if healthy (including a flaky failure), commit a
+For each PR, requeue it unchanged if healthy (if the failure was flaky, name the
+flaky test in the reason so it can be followed up), commit a
 mechanical fix on its own branch, or hand it back with diagnosis and recommendation.
 Allowed fixes: preserve both sides' intent in conflicts, format/lint, regenerate
 lockfiles/generated files, or follow a base rename. Merge base where practical.

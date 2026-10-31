@@ -124,11 +124,14 @@ class FakePull {
 			if (name === "enablePullRequestAutoMerge") {
 				const reason = this.beforeAutoMerge?.();
 				if (reason) return { errors: [{ message: reason }] };
-				this.autoMerge = { enabledAt: "2026-10-21T12:00:00Z" };
+				// Like GitHub, enabling it again keeps the existing request and its commit body.
+				this.autoMerge ??= { enabledAt: "2026-10-21T12:00:00Z", commitBody: variables.body ?? null };
 				this.event("AutoMergeEnabledEvent");
 			}
+			if (name === "disablePullRequestAutoMerge") this.autoMerge = null;
 			return { data: { [name]: { clientMutationId: null } } };
 		}
+		if (query.includes("node(id: $id)")) return { data: { node: { autoMergeRequest: this.autoMerge } } };
 		this.reads++;
 		return {
 			data: {
@@ -329,6 +332,28 @@ describe("merge --land", () => {
 		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} SQUASH Quest-Land-Head: ${HEAD}`);
 		expect(warnings).toEqual([`${URL_} lands through quest land, which squashes`]);
 		expect(pull.comparisons).toEqual([]);
+	});
+
+	test("re-pins a gated PR already auto-merging on an older head", async () => {
+		const pull = new FakePull();
+		pull.required = ["test", "quest land"];
+		pull.autoMerge = { enabledAt: "2026-10-20T12:00:00Z", commitBody: `Quest-Land-Head: ${"0".repeat(40)}` };
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "squash", pull.deps());
+		expect(pull.writes.slice(-2)).toEqual([
+			"disablePullRequestAutoMerge",
+			`enablePullRequestAutoMerge ${HEAD} SQUASH Quest-Land-Head: ${HEAD}`,
+		]);
+		expect(pull.autoMerge?.commitBody).toBe(`Quest-Land-Head: ${HEAD}`);
+	});
+
+	test("replaces an unpinned auto-merge request with an empty commit body", async () => {
+		const pull = new FakePull();
+		pull.required = ["test", "quest land"];
+		pull.autoMerge = { enabledAt: "2026-10-20T12:00:00Z", commitBody: "" };
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "squash", pull.deps());
+		expect(pull.autoMerge?.commitBody).toBe(`Quest-Land-Head: ${HEAD}`);
 	});
 
 	test.each(["CLEAN", "HAS_HOOKS", "UNSTABLE"])(

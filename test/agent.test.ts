@@ -17,7 +17,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
 	AgentInputError,
-	agentEnvironment,
+	launchEnvironment,
 	boundedLines,
 	redactedLines,
 	refuseUnsupported,
@@ -238,7 +238,7 @@ const launch = (harness: string, key: string) => [
 ];
 
 test("the agent environment holds only its own key", () => {
-	const env = agentEnvironment(
+	const env = launchEnvironment(
 		{
 			PATH: "/bin",
 			HOME: "/home/me",

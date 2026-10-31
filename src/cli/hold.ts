@@ -14,7 +14,7 @@ import {
 	requirements,
 	string,
 } from "./github";
-import { LAND_CHECK, pin } from "./land";
+import { LAND_CHECK, enqueue } from "./land";
 import { Refusal, ago } from "./start";
 
 export type State = "iterate" | "ready" | "merge";
@@ -192,12 +192,7 @@ export async function land(
 		);
 		if (gated) {
 			if (method !== "squash") deps.warn(`${snapshot.url} lands through quest land, which squashes`);
-			await labels.github.graphql(
-				`mutation($id: ID!, $sha: GitObjectID!, $body: String!) {
-					enablePullRequestAutoMerge(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: SQUASH, commitBody: $body }) { clientMutationId }
-				}`,
-				{ id: snapshot.id, sha: snapshot.head, body: pin(snapshot.head) },
-			);
+			await enqueue(labels.github, snapshot.id, snapshot.head);
 			return;
 		}
 		// The batch gate tests its own current-base chain. Ungated landings need that base in the PR head.

@@ -221,7 +221,7 @@ const STRIPPED = [
 ];
 
 /** The agent's environment: the user's, minus `STRIPPED`, plus its one key. */
-export function agentEnvironment(env: NodeJS.ProcessEnv, variable: string, key: string): NodeJS.ProcessEnv {
+export function launchEnvironment(env: NodeJS.ProcessEnv, variable: string, key: string): NodeJS.ProcessEnv {
 	return { ...strippedEnvironment(env), [variable]: key };
 }
 
@@ -658,7 +658,7 @@ export async function runAgent(
 						}),
 					);
 				};
-				const env = agentEnvironment(deps.env, harness.keyVariable, key);
+				const env = launchEnvironment(deps.env, harness.keyVariable, key);
 				if (checkouts) {
 					supervised = checkouts.run(checkout!, argv, { env, spawned: connect });
 					supervised.catch(reject);

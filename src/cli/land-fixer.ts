@@ -10,7 +10,7 @@ import {
 	contains,
 	git,
 	tryGit,
-	pin,
+	enqueue,
 	type Entry,
 	type Ejection,
 	type Plan,
@@ -419,10 +419,7 @@ async function collectJob(
 
 				// Save intent before enabling, so a lost response can be reconciled after restart.
 				save(attemptPath(state, number), { ...previous, ...actor, head });
-				await github.graphql(
-					"mutation($id: ID!, $sha: GitObjectID!, $body: String!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: SQUASH, commitBody: $body }) { clientMutationId } }",
-					{ id: entry.id, sha: head, body: pin(head) },
-				);
+				await enqueue(github, entry.id, head);
 				const enabled = await github.graphql(
 					"query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { enabledAt } } } }",
 					{ id: entry.id },
@@ -443,7 +440,8 @@ async function collectJob(
 					github,
 					job.plan,
 					entry,
-					`Requeued unchanged: ${result.reason.slice(0, 200)}. Suggested follow-up: investigate the batch failure and stabilize any flaky checks.`,
+					// The reason says why: another PR in the batch, or a flaky check worth a follow-up.
+					`Requeued unchanged: ${result.reason.slice(0, 200)}`,
 					"requeue",
 					author(result),
 				);

@@ -1667,14 +1667,14 @@ printf '[{"number":1,"action":"fixed","head":"%s","reason":"preserve both confli
 
 describe("asynchronous land fixer", () => {
 	afterEach(() => vi.unstubAllEnvs());
-	test("requeues unchanged, suggests follow-up, and hands back a second ejection in the same pick", async () => {
+	test("requeues unchanged with its reason, and hands back a second ejection in the same pick", async () => {
 		const fixture = await fixerFixture(requeueScript);
 		await fixture.finished;
 		expect(await fixture.collect()).toEqual(["requeued 1"]);
 		expect(fixture.pull.head).toBe(fixture.plan.queue[0].head);
 		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
 		expect(fixture.pull.labels).toContain("quest:merge");
-		expect(fixture.forge.comment(1)).toContain("Suggested follow-up");
+		expect(fixture.forge.comment(1)).toContain("Requeued unchanged:");
 		const next = await resolveQueue(REPOSITORY, undefined, fixture.deps);
 		await serveBatch(
 			fixture.root,
