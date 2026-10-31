@@ -336,6 +336,17 @@ describe("merge --land", () => {
 		expect(pull.labels).toEqual(["quest:merge"]);
 	});
 
+	test.each([false, true])("refuses a PR retargeted while its policy was read (gated: %s)", async (gated) => {
+		const pull = new FakePull();
+		pull.required = gated ? ["quest land"] : [];
+		pull.afterRead = () => {
+			pull.afterRead = undefined;
+			pull.baseRef = "release";
+		};
+		expect(await refused(land(PR, HEAD, "squash", pull.deps()))).toContain("retargeted from main to release");
+		expect(pull.writes).toEqual([]);
+	});
+
 	test("refuses a merged PR or a draft its starter still holds", async () => {
 		const pull = new FakePull();
 		pull.draft = true;
@@ -470,7 +481,7 @@ describe("merge --land", () => {
 				`enablePullRequestAutoMerge ${HEAD} SQUASH`,
 				`mergePullRequest ${HEAD} SQUASH`,
 			]);
-			expect(pull.reads).toBe(2); // The first read, then one reread after refusal.
+			expect(pull.reads).toBe(3); // The first read, the reread before landing, then one after refusal.
 			expect(pull.state).toBe("MERGED");
 		},
 	);
@@ -480,7 +491,7 @@ describe("merge --land", () => {
 		pull.mergeState = "UNKNOWN";
 		await land(PR, HEAD, "merge", pull.deps());
 		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
-		expect(pull.reads).toBe(1);
+		expect(pull.reads).toBe(2);
 		expect(pull.state).toBe("OPEN");
 	});
 
@@ -491,7 +502,7 @@ describe("merge --land", () => {
 			pull.mergeState = "UNKNOWN";
 			pull.beforeAutoMerge = () => reason;
 			await expect(land(PR, HEAD, "merge", pull.deps())).rejects.toThrow(reason);
-			expect(pull.reads).toBe(reason.includes("clean status") ? 2 : 1);
+			expect(pull.reads).toBe(reason.includes("clean status") ? 3 : 2);
 			expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
 		},
 	);

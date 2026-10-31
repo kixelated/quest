@@ -173,11 +173,22 @@ export async function land(
 	open(snapshot);
 	current(snapshot);
 	unheld(snapshot, undefined, deps.now());
+	// The policy below is decided for the base read above; reread before landing, since a retarget decides nothing.
+	const unchanged = async () => {
+		const fresh = await labels.read();
+		open(fresh);
+		current(fresh);
+		unheld(fresh, undefined, deps.now());
+		if (fresh.base !== snapshot.base) {
+			throw new Refusal(`${snapshot.url} was retargeted from ${snapshot.base} to ${fresh.base}; land it again`);
+		}
+	};
 	const gated = (await requirements(labels.github, pr, snapshot.base)).checks.some(
 		(check) => check.name === LAND_CHECK,
 	);
 	if (gated) {
 		if (method !== "squash") deps.warn(`${snapshot.url} lands through quest land, which squashes`);
+		await unchanged();
 		await enqueue(labels.github, snapshot.id, snapshot.head);
 		return;
 	}
@@ -211,6 +222,7 @@ export async function land(
 	if (snapshot.queue && method !== "merge") {
 		deps.warn(`${snapshot.url} lands through a merge queue, which applies its own merge method`);
 	}
+	await unchanged();
 	const submit = (mutation: "mergePullRequest" | "enablePullRequestAutoMerge") =>
 		labels.github.graphql(
 			`mutation($id: ID!, $sha: GitObjectID!, $method: PullRequestMergeMethod!) {
