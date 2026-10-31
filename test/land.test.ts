@@ -2114,7 +2114,7 @@ exec '${real}' "$@"
 `,
 		{ mode: 0o755 },
 	);
-	process.env.PATH = `${tools}:${process.env.PATH}`;
+	vi.stubEnv("PATH", `${tools}:${process.env.PATH}`);
 	return { seen, reject };
 }
 
