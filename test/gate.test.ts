@@ -658,16 +658,20 @@ test.each([
 	expect(await invoke(gateMain)).toEqual(await invoke(main));
 });
 
-test("the executable gates outside repositories and preserves child flags", async () => {
+test.each([
+	["root before gate", ["--root", "ROOT", "gate"]],
+	["inline root before gate", ["--root=ROOT", "gate"]],
+	["inline root after gate", ["gate", "--root=ROOT"]],
+	["dash-prefixed root", ["gate", "--root", "-root"]],
+	["explicit separator", ["gate", "--"]],
+])("the executable preserves child flags with %s", async (_name, prefix) => {
 	const bin = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
 	const root = join(tempDir(), "not a repository");
 	const child = spawnSync(
 		process.execPath,
 		[
 			bin,
-			"--root",
-			root,
-			"gate",
+			...prefix.map((arg) => arg.replace("ROOT", root)),
 			process.execPath,
 			"-e",
 			"console.log(JSON.stringify(process.argv.slice(1))); process.exit(19)",

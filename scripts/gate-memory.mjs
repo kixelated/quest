@@ -1,5 +1,7 @@
-// Linux wrapper memory while 1, 8, and 16 gated commands block on stdin.
-// Build first, then: bun scripts/gate-memory.mjs dist/quest.js [callers...]
+// Linux wrapper memory for 1, 8, and 16 admitted commands blocked on stdin.
+// Build first, then: scripts/gate-bench.sh memory dist/quest.js [callers...]
+// On a busy host, add --waiting before the binary to measure admission waiters.
+// This reports wrapper memory only, excluding commands and supervisor helpers.
 // Pass a baseline bundle or compiled binary to compare the same workload.
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -7,8 +9,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 if (process.platform !== "linux") throw new Error("gate memory measurement needs Linux /proc");
-const [binary, ...counts] = process.argv.slice(2);
-if (!binary) throw new Error("usage: bun scripts/gate-memory.mjs <quest> [callers...]");
+const args = process.argv.slice(2);
+const waiting = args[0] === "--waiting";
+if (waiting) args.shift();
+const [binary, ...counts] = args;
+if (!binary) throw new Error("usage: bun scripts/gate-memory.mjs [--waiting] <quest> [callers...]");
 const callers = counts.length ? counts.map(Number) : [1, 8, 16];
 if (callers.some((count) => !Number.isSafeInteger(count) || count < 1))
 	throw new Error("callers must be positive safe integers");
@@ -23,20 +28,37 @@ for (const count of callers) {
 	try {
 		const start = performance.now();
 		for (let i = 0; i < count; i++) {
+			const env = { ...process.env };
+			if (waiting) delete env.QUEST_GATE_ADMITTED;
+			else env.QUEST_GATE_ADMITTED = "1";
 			const child = spawn(resolve(binary), ["gate", process.execPath, "-e", childScript], {
-				env: { ...process.env, QUEST_GATE_ADMITTED: "1" },
-				stdio: ["pipe", "pipe", "inherit"],
+				env,
+				stdio: ["pipe", "pipe", "pipe"],
 			});
 			const exited = once(child, "exit");
-			children.push({ child, exited });
-			const ready = once(child.stdout, "data");
-			const data = await Promise.race([
+			const caller = { child, exited, phase: undefined };
+			children.push(caller);
+			const ready = new Promise((resolve, reject) => {
+				let stdout = "";
+				let stderr = "";
+				child.stdout.on("data", (data) => {
+					stdout += data;
+					if (!stdout.includes("\n")) return;
+					if (stdout === "ready\n") resolve("running");
+					else reject(new Error("unexpected command output"));
+				});
+				child.stderr.on("data", (data) => {
+					stderr += data;
+					if (stderr.includes("quest gate: waiting for ")) resolve("waiting");
+					else process.stderr.write(data);
+				});
+			});
+			caller.phase = await Promise.race([
 				ready,
 				exited.then(([code, signal]) => {
 					throw new Error(`gate exited before starting the command: ${code ?? signal}`);
 				}),
 			]);
-			if (data[0].toString() !== "ready\n") throw new Error("unexpected command output");
 		}
 		let pss = 0;
 		let swap = 0;
@@ -51,6 +73,7 @@ for (const count of callers) {
 		console.log(
 			JSON.stringify({
 				callers: count,
+				waiting: children.filter(({ phase }) => phase === "waiting").length,
 				startup_ms: Math.round(performance.now() - start),
 				pss_mib: Math.round((pss / 1024) * 10) / 10,
 				swap_mib: Math.round((swap / 1024) * 10) / 10,
@@ -58,8 +81,12 @@ for (const count of callers) {
 			}),
 		);
 	} finally {
-		for (const { child } of children) child.stdin.end("stop\n");
+		for (const { child, phase } of children) {
+			if (phase === "running") child.stdin.end("stop\n");
+			else child.kill("SIGTERM");
+		}
 		const results = await Promise.all(children.map(({ exited }) => exited));
-		if (results.some(([code]) => code !== 0)) throw new Error("a gated command failed");
+		if (results.some(([code], i) => code !== (children[i].phase === "running" ? 0 : 143)))
+			throw new Error("a gated command failed");
 	}
 }

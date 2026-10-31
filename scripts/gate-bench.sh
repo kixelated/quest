@@ -4,6 +4,9 @@
 #   scripts/gate-bench.sh overhead [runs]
 #       Admission cost: `quest gate true` with the gate bypassed, and admission
 #       alone against a fresh ledger, so no earlier run counts as recent.
+#   scripts/gate-bench.sh memory [--waiting] <quest> [callers...]
+#       Linux wrapper PSS, swap, and threads at 1, 8, and 16 callers by default.
+#       Measures admitted wrappers; --waiting also waits for admission on a busy host.
 #   scripts/gate-bench.sh gated|ungated <suites> [cpus]
 #       Start <suites> Worker test suites at once, each in its own detached
 #       worktree of HEAD, through the gate or bypassing it. `cpus` is a taskset
@@ -30,7 +33,7 @@ cleanup() {
 trap cleanup EXIT
 
 usage() {
-    echo "usage: $0 overhead [runs] | $0 gated|ungated <suites> [cpus]" >&2
+    echo "usage: $0 overhead [runs] | $0 memory [--waiting] <quest> [callers...] | $0 gated|ungated <suites> [cpus]" >&2
     exit 2
 }
 
@@ -125,6 +128,10 @@ contend() {
 
 case ${1:-} in
     overhead) overhead "${@:2}" ;;
+    memory)
+        cd "$root"
+        bun scripts/gate-memory.mjs "${@:2}"
+        ;;
     gated | ungated) contend "$@" ;;
     *) usage ;;
 esac

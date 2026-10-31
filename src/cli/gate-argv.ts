@@ -1,3 +1,5 @@
+const DISPLAY_OPTIONS = ["-h", "--help", "-V", "--version"];
+
 /** Skip the global root option wherever Commander permits it. */
 function commandIndex(argv: string[], index = 0): number {
 	while (argv[index] === "--root" || argv[index]?.startsWith("--root=")) {
@@ -11,7 +13,7 @@ export function gateBoundary(argv: string[]): string[] {
 	const index = commandIndex(argv);
 	if (argv[index] !== "gate") return argv;
 	const command = commandIndex(argv, index + 1);
-	if (!argv[command] || ["--", "-h", "--help", "-V", "--version"].includes(argv[command])) return argv;
+	if (!argv[command] || argv[command] === "--" || DISPLAY_OPTIONS.includes(argv[command])) return argv;
 	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }
 
@@ -27,9 +29,9 @@ export function gateArguments(argv: string[]): string[] | undefined {
 		if (argv[i] === "gate") continue;
 		const option = argv[i];
 		const value = option === "--root" ? argv[++i] : option.slice("--root=".length);
-		if (!value || (option === "--root" && value.startsWith("-"))) return;
+		if (!value) return;
 	}
 	if (argv[command] === "--") return argv.length > command + 1 ? argv.slice(command + 1) : undefined;
-	if (!argv[command] || ["-h", "--help", "-V", "--version"].includes(argv[command])) return;
+	if (!argv[command] || DISPLAY_OPTIONS.includes(argv[command])) return;
 	return argv.slice(command);
 }
