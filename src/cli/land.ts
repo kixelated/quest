@@ -464,6 +464,8 @@ interface Conflict {
 /** A queued PR that fails `quest check` squashed alone onto the base, with the findings the base lacks. */
 export interface Rejection {
 	entry: Entry;
+	/** The squash onto the base that fails, which a fixer starts from. */
+	commit: string;
 	findings: string[];
 }
 
@@ -570,7 +572,7 @@ function screen(
 				: questCheck(dir, commit).filter(
 						(finding) => !known.some((old) => old.path === finding.path && old.message === finding.message),
 					);
-		if (findings.length > 0) rejected.push({ entry, findings: findings.map(formatFinding) });
+		if (findings.length > 0) rejected.push({ entry, commit, findings: findings.map(formatFinding) });
 		else alone.set(entry, commit);
 	}
 	const overlaps: Overlap[] = [];

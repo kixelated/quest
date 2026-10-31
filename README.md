@@ -555,7 +555,8 @@ that runs past `--timeout` minutes (60 by default) is killed and fails its batch
 Before batching, each queued PR is squashed alone onto the current base, and
 `quest check` runs on the result. A PR with findings the base lacks, such as
 a link to a quest the base has since finished, is ejected alone as
-`failed_checks` with those findings, so it never fails a batch. This check runs
+`failed_checks` with those findings, so it never fails a batch; a configured
+fixer receives it as it would a failed batch, starting from that squash. This check runs
 in the daemon, never the sandbox: it parses quest files read from git objects
 and executes nothing from the tree. A base without a `quest/` directory skips
 it. A newly queued PR is also squashed onto each PR ahead of it; if any

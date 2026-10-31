@@ -1175,6 +1175,44 @@ mv '${result}.new' '${result}'
 		}
 	});
 
+	test("starts the fixer on a PR that fails quest check alone, from its squash onto the base", async () => {
+		const forge = new Forge();
+		forge.advance({ "quest/m0/README.md": EPIC(["a", "b"]), "quest/m0/b.md": QUEST("B") });
+		forge.pull("Link b", { "quest/m0/a.md": `${QUEST("A")}\n## Related\n\n- [B](/quest/m0/b.md) - b\n` });
+		forge.advance({ "quest/m0/README.md": EPIC(["a"]), "quest/m0/b.md": null });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const options = { ...sandbox(), fixer: join(tempDir(), "fixer") };
+		const result = join(options.state, "fixer-result");
+		writeFileSync(
+			options.fixer,
+			`#!/bin/sh\nprintf '%s\\n' "$PWD" "$1" "$2" > '${result}.new'\nmv '${result}.new' '${result}'\n`,
+			{ mode: 0o755 },
+		);
+		const trusted = privateRepository(options.state);
+		forge.configure(trusted);
+		let watcher: ReturnType<typeof watch>;
+		const launched = new Promise<void>((done) => {
+			watcher = watch(options.state, (_event, name) => {
+				if (name === "fixer-result" && existsSync(result)) done();
+			});
+		});
+		try {
+			expect(await serveBatch(trusted, plan, options, deps, async () => deps.token)).toEqual([
+				"ejected 1 failed_checks",
+			]);
+			await launched;
+			const [cwd, log, number] = readFileSync(result, "utf8").trim().split("\n");
+			expect(log).toMatch(/check-.*-1\.log$/);
+			expect(readFileSync(log, "utf8")).toMatch(/quest\/m0\/a\.md:\d+: .*\/quest\/m0\/b\.md/);
+			expect(number).toBe("1");
+			expect(git(cwd, "rev-parse", "HEAD^")).toBe(plan.base.sha);
+			expect(git(cwd, "show", "HEAD:quest/m0/a.md")).toContain("/quest/m0/b.md");
+		} finally {
+			watcher!.close();
+		}
+	});
+
 	test.each(["base", "dequeued", "requeued"])("refuses a batch whose %s changes during a check", async (change) => {
 		const forge = new Forge();
 		const pull = forge.pull("One", { "one.txt": "yes" });

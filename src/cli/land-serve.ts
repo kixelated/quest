@@ -317,14 +317,19 @@ export async function serveBatch(
 	if (plan.queue.length === 0) return output;
 	const screened = readScreened(options.state);
 	const chain = await build(root, plan, read, (entry) => screened[entry.number] !== entry.enabledAt);
-	for (const { entry, findings } of chain.rejected) {
-		await report(
-			ejection(
-				entry,
-				"failed_checks",
-				`\`quest check\` fails with it squashed alone onto the base ${plan.base.sha}.\n\n<pre>${excerpt(findings.join("\n"))}</pre>\n`,
-			),
-		);
+	// Each rejection is its own failure, so a fixer can repair it as it would a failed batch.
+	for (const { entry, commit, findings } of chain.rejected) {
+		const log = join(options.state, `check-${Date.now()}-${entry.number}.log`);
+		writeFileSync(log, `${findings.join("\n")}\n`, { mode: 0o600 });
+		const detail = `\`quest check\` fails with it squashed alone onto the base ${plan.base.sha}.\n\n<pre>${excerpt(findings.join("\n"))}</pre>\n`;
+		save(join(options.state, "failure.json"), {
+			plan,
+			tip: commit,
+			log,
+			numbers: [entry.number],
+			ejections: [ejection(entry, "failed_checks", detail)],
+		} satisfies Failure);
+		output.push(...(await resumeFailure(root, options, deps)));
 	}
 	output.push(...(await reportOverlaps(github, plan, options.state, chain.overlaps)));
 	const conflict = chain.conflict;
