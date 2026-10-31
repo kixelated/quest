@@ -693,6 +693,38 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		expect(forge.comment(1)).toBeUndefined();
 	});
 
+	// moq-dev/moq#7407: GitHub still showed the pin after the gate's base-merge push and refused the
+	// merge as conflicting, since that pin conflicts with the base. It was ejected as head_moved.
+	test("a pushed head's 405 conflict on the stale pin is retried rather than ejected as head_moved", async () => {
+		const forge = new Forge();
+		const pull = forge.pull("Old", { "old.txt": "yes" });
+		const pin = pull.head;
+		forge.advance({ "new.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		pull.mergeRefusals = [{ status: 405, message: "Pull Request has merge conflicts" }];
+		const seen: (string | undefined)[] = [];
+		forge.beforeMerge = () => {
+			seen.push(pull.head);
+		};
+		const pauses: number[] = [];
+		deps.sleep = async (delay) => {
+			pauses.push(delay);
+		};
+		let pushed = false;
+		expect(
+			await serveBatch(forge.clone(), plan, sandbox(), deps, async () => {
+				// The first token is the base-merge push; GitHub misses it for the merge and the re-read.
+				if (!pushed) forge.lag = 2;
+				pushed = true;
+				return deps.token;
+			}),
+		).toEqual([`landed 1 ${pull.squash}`]);
+		expect(seen[1]).toBe(pin);
+		expect(pauses).toEqual([500]);
+		expect(forge.comment(1)).toBeUndefined();
+	});
+
 	test("restart rejects a writer's commit after a recorded merge", async () => {
 		const forge = new Forge();
 		forge.pull("Old", { "old.txt": "yes" });
@@ -1123,7 +1155,7 @@ mv '${result}.new' '${result}'
 	});
 
 	test.each(["merge_conflict", "head_moved"])(
-		"a refused second merge ejects the remaining batch as %s and starts the fixer",
+		"a refused second merge ejects it as %s, the rest as batch_stopped, and starts the fixer",
 		async (reason) => {
 			const forge = new Forge();
 			for (let i = 1; i <= 4; i++) forge.pull(`PR ${i}`, { [`${i}.txt`]: "yes" });
@@ -1157,13 +1189,16 @@ mv '${result}.new' '${result}'
 				expect(output).toEqual([
 					`landed 1 ${forge.repo.pulls[0].squash}`,
 					`ejected 2 ${reason}`,
-					`ejected 3 ${reason}`,
+					"ejected 3 batch_stopped",
 				]);
 				expect(forge.merges.map(({ number }) => number)).toEqual([1, 2]);
 				expect(readFileSync(result, "utf8").trim().split("\n").slice(1)).toEqual(["2", "3"]);
 				expect(forge.repo.pulls[0].merged).toBe(true);
 				expect(forge.repo.pulls[3].landing).toBe(true);
 				expect(forge.comment(2)).toContain(`<!-- quest land: ${reason} -->`);
+				// The batch-mate names the PR that stopped the batch instead of inheriting its reason.
+				expect(forge.comment(3)).toContain(`PR #2 stopped the batch as ${reason}`);
+				expect(forge.comment(3)).toContain("<!-- quest land: batch_stopped -->");
 			} finally {
 				watcher!.close();
 			}
@@ -1292,11 +1327,13 @@ mv '${result}.new' '${result}'
 		expect(output).toEqual([
 			`landed 1 ${forge.repo.pulls[0].squash}`,
 			`landed 2 ${forge.repo.pulls[1].squash}`,
-			"ejected 3 tree_mismatch",
+			"ejected 3 batch_stopped",
 		]);
 		expect(forge.merges.map(({ number }) => number)).toEqual([1, 2]);
 		expect(warnings[0]).toContain("CRITICAL");
+		expect(forge.comment(3)).toContain("PR #2 stopped the batch as tree_mismatch");
 		expect(forge.comment(3)).toContain("tested chain");
+		expect(forge.comment(3)).toContain("<!-- quest land: batch_stopped -->");
 		expect(forge.repo.pulls.slice(0, 2).every((pull) => pull.merged)).toBe(true);
 		expect(forge.repo.pulls[3].landing).toBe(true);
 	});
