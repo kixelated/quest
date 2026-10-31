@@ -231,6 +231,14 @@ describe("resolve", () => {
 			expect(text).not.toContain("## Required");
 		});
 
+		test("keeps its heading while a conflict in it remains", () => {
+			// Ours removing b against theirs editing it stays a conflict, even with no lines on ours.
+			const head = ["# [S] Quest", "", "## Goal", "", "Goal.", "", "## Required", ""];
+			const kept = { ours: [], base: [item("b")], theirs: [item("b", "edited")] };
+			const merged = [head, { ours: [], base: [item("a")], theirs: [] }, [""], kept, [""]];
+			expect(resolveLists("quest/README.md", merged)).toEqual([head, [], [""], kept, [""]]);
+		});
+
 		test("keeps a Related heading for quest check to report", () => {
 			const doc = (names: string[]) => `${plan}\n## Related\n\n${names.map((n) => item(n)).join("\n")}\n`;
 			const { text, conflicts } = merge(doc(["a", "b"]), doc(["b"]), doc(["a"]));

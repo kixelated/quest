@@ -130,17 +130,21 @@ export function resolveLists(path: string, merged: Chunk[]): Chunk[] {
 
 /**
  * `merged` without each `Required` heading whose section holds one of the
- * `emptied` resolutions and otherwise only blank lines, all outside any
- * conflict, along with that section's lines. As `quest rm` does, a blank line
+ * `emptied` resolutions and otherwise only blank lines, with no conflict left
+ * in it, along with that section's lines. As `quest rm` does, a blank line
  * left doubled by the removal goes too.
  */
 function dropEmptyRequired(path: string, merged: Chunk[], emptied: Set<number>): Chunk[] {
 	// The document with every conflict taken from ours; `clean` marks lines outside a conflict.
+	// `at` and `open` hold where each emptied list and each remaining conflict
+	// sits, as the index of the line after it, since either can have no lines.
 	const lines: string[] = [];
 	const clean: boolean[] = [];
 	const at: number[] = [];
+	const open: number[] = [];
 	merged.forEach((chunk, index) => {
 		if (emptied.has(index)) at.push(lines.length);
+		if (!Array.isArray(chunk)) open.push(lines.length);
 		const own = Array.isArray(chunk) ? chunk : chunk.ours;
 		lines.push(...own);
 		clean.push(...own.map(() => Array.isArray(chunk)));
@@ -157,9 +161,10 @@ function dropEmptyRequired(path: string, merged: Chunk[], emptied: Set<number>):
 		if (next !== undefined && !clean[next.line - 1]) return;
 		// The section's body is the 0-based lines from `heading.line` up to `end`.
 		const end = next === undefined ? count : next.line - 1;
-		if (!at.some((line) => line >= heading.line && line <= end)) return;
+		const inside = (line: number) => line >= heading.line && line <= end;
+		if (!at.some(inside) || open.some(inside)) return;
 		const body = Array.from({ length: end - heading.line }, (_, i) => heading.line + i);
-		if (!body.every((i) => clean[i] && lines[i].trim() === "")) return;
+		if (!body.every((i) => lines[i].trim() === "")) return;
 		dropped.add(heading.line - 1);
 		for (const i of body) dropped.add(i);
 	});
