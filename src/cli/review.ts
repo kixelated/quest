@@ -108,6 +108,20 @@ export function runningHarness(env: NodeJS.ProcessEnv): HarnessName {
 
 const other = (harness: HarnessName): HarnessName => (harness === "claude" ? "codex" : "claude");
 
+// Reviewers use the user's chosen connection, rather than a key selected by
+// `quest agent`. Keep the allowlist narrow: plugin, permission, model, effort,
+// and parent-session variables must not change the isolated review.
+const CONNECTION: Record<HarnessName, RegExp[]> = {
+	claude: [
+		/^ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|CUSTOM_HEADERS)$/,
+		/^ANTHROPIC_(AWS|BEDROCK|BEDROCK_MANTLE|FOUNDRY|VERTEX)_(API_KEY|BASE_URL|RESOURCE|WORKSPACE_ID)$/,
+		/^CLAUDE_CODE_OAUTH_TOKEN$/,
+		/^CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY|ANTHROPIC_AWS)$/,
+		/^CLAUDE_CODE_SKIP_(BEDROCK|VERTEX|FOUNDRY)_AUTH$/,
+	],
+	codex: [/^CODEX_(API_KEY|ACCESS_TOKEN|CA_CERTIFICATE)$/],
+};
+
 export interface ReviewOptions {
 	/** The checkout to review. */
 	root: string;
@@ -651,8 +665,15 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 
 	const env = strippedEnvironment(deps.env);
-	const status = await run(reviewer.status, root, env, "");
-	if (status.code !== 0) throw new ReviewInputError(`${harness} is not logged in; run \`${reviewer.login}\``);
+	for (const [name, value] of Object.entries(deps.env)) {
+		if (CONNECTION[harness].some((pattern) => pattern.test(name))) env[name] = value;
+	}
+	// Codex accepts CODEX_API_KEY in exec/review, but login status checks only
+	// its stored login. The review itself validates an explicitly supplied key.
+	if (harness !== "codex" || !env.CODEX_API_KEY?.trim()) {
+		const status = await run(reviewer.status, root, env, "");
+		if (status.code !== 0) throw new ReviewInputError(`${harness} is not logged in; run \`${reviewer.login}\``);
+	}
 
 	// The reviewer's sandbox has no network, so the base is fetched first.
 	const baseRef = options.base ?? `origin/${defaultBranch(root, "origin")}`;

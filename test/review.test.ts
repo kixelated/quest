@@ -26,8 +26,9 @@ const FAKES: Record<string, string> = {
 const fs = require("node:fs");
 const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|FAKE_HOST)/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|ANTHROPIC|OPENAI|CODEX|QUEST|OP_)/.test(k)));
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
+if (process.env.FAKE_AUTH_VARIABLE && !process.env[process.env.FAKE_AUTH_VARIABLE]) process.exit(1);
 if (argv[0] === "auth") process.exit(process.env.FAKE_LOGGED_OUT ? 1 : 0);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
 const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
@@ -57,8 +58,11 @@ if (argv.includes("--session-id")) {
 const fs = require("node:fs");
 const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|FAKE_HOST)/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|ANTHROPIC|OPENAI|CODEX|QUEST|OP_)/.test(k)));
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
+// CODEX_API_KEY is accepted by exec/review, not by login status.
+if (argv[0] === "login" && process.env.FAKE_AUTH_VARIABLE === "CODEX_API_KEY") process.exit(1);
+if (process.env.FAKE_AUTH_VARIABLE && !process.env[process.env.FAKE_AUTH_VARIABLE]) process.exit(1);
 if (argv[0] === "login") process.exit(process.env.FAKE_LOGGED_OUT ? 1 : 0);
 const event = (value) => console.log(JSON.stringify(value));
 const message = (text) => event({ type: "item.completed", item: { type: "agent_message", text } });
@@ -309,6 +313,90 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 		expect(at("--append-system-prompt")).not.toContain("HEAD-ROOT rule");
 		expect(call.env.CODEX_THREAD_ID).toBeUndefined();
 		expect(call.env.CLAUDE_CODE_PROMPT_CACHE_TTL).toBe("1h");
+	}
+});
+
+fakes.each(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"])(
+	"Claude keeps %s and gateway routing through the status check and resumed rounds",
+	async (credential) => {
+		const s = setup("CODEX_THREAD_ID");
+		vi.stubEnv(credential, "review-credential");
+		vi.stubEnv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317");
+		vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Gateway-Tenant: review");
+		vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "");
+		vi.stubEnv("CLAUDE_CODE_PLUGIN_DIRS", "/untrusted/plugins");
+		vi.stubEnv("CLAUDE_CODE_EFFORT_LEVEL", "max");
+		vi.stubEnv("CODEX_API_KEY", "other-provider-key");
+		vi.stubEnv("OPENAI_API_KEY", "other-provider-key");
+		vi.stubEnv("QUEST_API_KEYS", "other-agent-key");
+		vi.stubEnv("OP_SERVICE_ACCOUNT_TOKEN", "secret-manager-token");
+		vi.stubEnv("FAKE_AUTH_VARIABLE", credential);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ findings: [] }));
+
+		const first = await quest("--root", s.repo, "review", "--json");
+		expect(first.code, first.stderr).toBe(0);
+		const resumed = await quest("--root", s.repo, "review", "--json");
+		expect(resumed.code, resumed.stderr).toBe(0);
+		expect(JSON.parse(resumed.stdout)).toMatchObject({ round: 2, session: JSON.parse(first.stdout).session });
+		for (const call of s.calls()) {
+			expect(call.env).toMatchObject({
+				[credential]: "review-credential",
+				ANTHROPIC_BASE_URL: "http://127.0.0.1:8317",
+				ANTHROPIC_CUSTOM_HEADERS: "X-Gateway-Tenant: review",
+				CLAUDE_CODE_USE_BEDROCK: "",
+			});
+			for (const name of [
+				"CODEX_THREAD_ID",
+				"CODEX_API_KEY",
+				"OPENAI_API_KEY",
+				"QUEST_API_KEYS",
+				"OP_SERVICE_ACCOUNT_TOKEN",
+				"CLAUDE_CODE_PLUGIN_DIRS",
+				"CLAUDE_CODE_EFFORT_LEVEL",
+			]) {
+				expect(call.env[name], name).toBeUndefined();
+			}
+		}
+	},
+);
+
+fakes("Codex reviews with an exec-only environment key without requiring a stored login", async () => {
+	const s = setup();
+	vi.stubEnv("CODEX_API_KEY", "review-key");
+	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "other-provider-token");
+	vi.stubEnv("FAKE_AUTH_VARIABLE", "CODEX_API_KEY");
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ findings: [] }));
+	const first = await quest("--root", s.repo, "review", "--json");
+	expect(first.code, first.stderr).toBe(0);
+	const resumed = await quest("--root", s.repo, "review", "--json");
+	expect(resumed.code, resumed.stderr).toBe(0);
+	expect(JSON.parse(resumed.stdout).round).toBe(2);
+	for (const call of s.calls()) {
+		expect(call.argv[0]).toBe("exec");
+		expect(call.env.CODEX_API_KEY).toBe("review-key");
+		expect(call.env.CLAUDECODE).toBeUndefined();
+		expect(call.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+	}
+});
+
+fakes.each([
+	["BEDROCK", "ANTHROPIC_BEDROCK_BASE_URL"],
+	["VERTEX", "ANTHROPIC_VERTEX_BASE_URL"],
+	["FOUNDRY", "ANTHROPIC_FOUNDRY_BASE_URL"],
+	["ANTHROPIC_AWS", "ANTHROPIC_AWS_BASE_URL"],
+])("Claude keeps the %s provider selector with its endpoint", async (provider, endpoint) => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv(`CLAUDE_CODE_USE_${provider}`, "1");
+	vi.stubEnv(endpoint, "https://provider.example");
+	vi.stubEnv("ANTHROPIC_MODEL", "parent-model");
+	vi.stubEnv("ANTHROPIC_BEDROCK_MODEL", "parent-model");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	for (const call of s.calls()) {
+		expect(call.env[`CLAUDE_CODE_USE_${provider}`]).toBe("1");
+		expect(call.env[endpoint]).toBe("https://provider.example");
+		expect(call.env.ANTHROPIC_MODEL).toBeUndefined();
+		expect(call.env.ANTHROPIC_BEDROCK_MODEL).toBeUndefined();
 	}
 });
 

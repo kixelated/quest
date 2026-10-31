@@ -668,11 +668,21 @@ command waits as long as the host stays busy.
 branch before it is pushed for review: Codex when run from Claude Code, and
 Claude Code when run from Codex. `--harness` names the reviewer instead; an
 unknown harness, or a missing or logged-out CLI, is an error rather than a
-same-model review. The reviewer uses its CLI's own login, with a
+same-model review. The reviewer keeps its CLI's saved login or environment
+credentials and provider endpoint, with a
 pinned model and effort: a default tier for routine work and, with `--deep`, a
 stronger one for a high-stakes change such as security, a wire format or public
 API, or a risk of data loss. `quest review --help` lists them; `--model` and
 `--effort` override either.
+
+For Claude Code, export `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` to use
+an LLM gateway such as CLIProxyAPI. `ANTHROPIC_API_KEY` and
+`CLAUDE_CODE_OAUTH_TOKEN` also work. Provider-specific connection variables
+for Bedrock, Vertex, Foundry, and Claude Platform on AWS are kept too. For
+Codex, `CODEX_API_KEY` works without a saved login. Only the selected reviewer's
+connection variables are restored; parent-session state, other provider keys,
+and plugin or permission overrides remain stripped. This does not change
+`quest agent`'s separate-account isolation.
 
 ```sh
 quest review                                  # round 1 against origin's default branch
