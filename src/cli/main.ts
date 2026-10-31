@@ -43,7 +43,7 @@ import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, mergedHead, pullRequest, remoteRepository, remoteUrl } from "./github";
 import { type Hold, type State, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "./land";
-import { fix } from "./land-fix";
+import { fix, FixerAgentError } from "./land-fix";
 import { serve, type ServeOptions } from "./land-serve";
 import { landed } from "./landed";
 import { type Report, moveQuest, removeQuest } from "./move";
@@ -202,7 +202,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			(result) => done(result) ?? 0,
 			(error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
-				return error instanceof Refusal ? 3 : 1;
+				return error instanceof FixerAgentError ? error.exitCode : error instanceof Refusal ? 3 : 1;
 			},
 		);
 	};
