@@ -645,6 +645,7 @@ test.each([
 	["gate", "--root"],
 	["gate", "--root", "-invalid", "true"],
 ])("the gate-only parser preserves output and status for %j", async (...argv) => {
+	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
 	const invoke = async (parse: typeof main) => {
 		let stdout = "";
 		let stderr = "";
