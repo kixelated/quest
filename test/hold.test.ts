@@ -28,6 +28,9 @@ class FakePull {
 	mergeState = "BLOCKED";
 	queue = false;
 	allowAutoMerge: boolean | null = true;
+	baseRef = "main";
+	/** Runs after each pull request read, to change it between reads. */
+	afterRead?: () => void;
 	comparison = "ahead";
 	base = BASE;
 	readonly comparisons: string[] = [];
@@ -136,6 +139,12 @@ class FakePull {
 		}
 		if (query.includes("node(id: $id)")) return { data: { node: { autoMergeRequest: this.autoMerge } } };
 		this.reads++;
+		const read = this.read();
+		this.afterRead?.();
+		return read;
+	}
+
+	private read(): ObjectValue {
 		return {
 			data: {
 				repository: {
@@ -146,7 +155,7 @@ class FakePull {
 						isDraft: this.draft,
 						body: this.body,
 						updatedAt: new Date(this.clock).toISOString(),
-						baseRefName: "main",
+						baseRefName: this.baseRef,
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,
 						isMergeQueueEnabled: this.queue,
@@ -294,6 +303,23 @@ describe("merge --land", () => {
 		expect(await refused(land(PR, token, HEAD, "squash", pull.deps()))).toContain("not visible to this token");
 		expect(pull.writes).toEqual(writes);
 		expect(pull.labels).toEqual(["quest:iterate"]);
+	});
+
+	test("refuses a PR retargeted while its hold was taken", async () => {
+		const pull = new FakePull();
+		// Swapping from another state rereads the PR after its label changes.
+		const { token } = await take(PR, "iterate", undefined, pull.deps());
+		pull.afterRead = () => {
+			pull.baseRef = "release";
+		};
+		expect(await refused(land(PR, token, HEAD, "squash", pull.deps()))).toContain(
+			"retargeted from main to release",
+		);
+		expect(
+			pull.writes.some(
+				(write) => write.startsWith("enablePullRequestAutoMerge") || write.startsWith("mergePullRequest"),
+			),
+		).toBe(false);
 	});
 
 	test("leaves a merge queue to decide, even with auto-merge off", async () => {

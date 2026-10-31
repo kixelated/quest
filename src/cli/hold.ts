@@ -186,8 +186,10 @@ export async function land(
 	};
 	// Pre-check before any label changes, preserving the caller's token on refusal.
 	let gated = false;
+	let checkedBase = "";
 	const { hold, snapshot } = await acquire(labels, "merge", token, async (snapshot) => {
 		current(snapshot);
+		checkedBase = snapshot.base;
 		gated = (await requirements(labels.github, pr, snapshot.base)).checks.some(
 			(check) => check.name === LAND_CHECK,
 		);
@@ -206,6 +208,10 @@ export async function land(
 		}
 	});
 	return holding(hold, async () => {
+		// The policy above was decided for the base read before acquiring; a retarget since then decides nothing.
+		if (snapshot.base !== checkedBase) {
+			throw new Refusal(`${snapshot.url} was retargeted from ${checkedBase} to ${snapshot.base}; land it again`);
+		}
 		current(snapshot);
 		if (gated) {
 			if (method !== "squash") deps.warn(`${snapshot.url} lands through quest land, which squashes`);
