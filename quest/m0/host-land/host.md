@@ -92,3 +92,15 @@ What remains:
   already rejects.
 - moq-bot's `organization_self_hosted_runners` write permission served only
   the retired runner; the maintainer may drop it.
+- Keep fixers running across a deploy: set `KillMode=process` on each
+  `quest-land-<repo>.service` in `modules/quest-land.nix`. The default
+  `control-group` sends SIGTERM to the daemon's detached fixer supervisor
+  too, so a fixer running during a deploy ends with exit 143. On 2026-10-31
+  that happened to moq's 23:22 batch
+  ([moq-dev/moq#7426](https://github.com/moq-dev/moq/pull/7426),
+  [moq-dev/moq#7084](https://github.com/moq-dev/moq/pull/7084)). The
+  daemon's in-flight check clients still exit on their next write to the
+  dead daemon's pipe. Check it by restarting the unit while a fixer runs:
+  the job should collect a result, not a handback naming SIGTERM. Keep
+  `ProcSubset=pid` off the unit: generation 45 had it, which hid
+  `/proc/sys/kernel/random/boot_id` from the daemon.

@@ -49,10 +49,6 @@ wasting CI on bisection?"
 - Keep the fixer's untrusted-input rules: a PR's content cannot make the
   fixer blame another PR or skip the base check.
 
-## Required
-
-- [Fixer survives ejection](/quest/m0/host-land/fixer-survives.md) - the fixer has to finish before its triage can be trusted
-
 ## Related
 
 - [Fixer proxy access](/quest/m0/host-land/fixer.md) - how the fixer reaches its model
