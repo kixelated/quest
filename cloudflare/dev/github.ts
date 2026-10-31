@@ -775,6 +775,7 @@ export function fakeGitHub(world: World) {
 				disabled: false,
 				license: { spdx_id: "MIT" },
 				allow_squash_merge: true,
+				allow_auto_merge: true,
 			});
 		const permission = tail.match(/^\/collaborators\/([^/]+)\/permission$/);
 		if (permission) {
