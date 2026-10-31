@@ -1804,7 +1804,9 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 		await fixture.finished;
 		expect(await fixture.collect()).toEqual(["requeued 1"]);
 		const log = readdirSync(fixture.state.state).find((name) => name.endsWith(".json.log"))!;
-		expect(readFileSync(join(fixture.state.state, log), "utf8")).toContain("x".repeat(1048576));
+		// Both streams relay into one log, so other output may interleave with the burst.
+		const kept = readFileSync(join(fixture.state.state, log), "utf8").match(/x/g)?.length ?? 0;
+		expect(kept).toBeGreaterThanOrEqual(1048576);
 	});
 	test("requeues a PR that only shared the batch, and hands back the one that broke it", async () => {
 		const fixture = await fixerFixture(
