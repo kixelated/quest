@@ -663,7 +663,14 @@ test("the gated command keeps its own flags, even ones Quest also parses", () =>
 	expect(gateBoundary(["gate", "--version"])).toEqual(["gate", "--version"]);
 	// Gate's own option stays Quest's; the same flag after the executable is the command's.
 	expect(gateBoundary(["gate", "--quick", "ls", "--quick"])).toEqual(["gate", "--quick", "--", "ls", "--quick"]);
-	expect(gateBoundary(["gate", "--root", "r", "--quick", "ls"])).toEqual(["gate", "--root", "r", "--quick", "--", "ls"]);
+	expect(gateBoundary(["gate", "--root", "r", "--quick", "ls"])).toEqual([
+		"gate",
+		"--root",
+		"r",
+		"--quick",
+		"--",
+		"ls",
+	]);
 	expect(gateBoundary(["--quick", "gate", "ls"])).toEqual(["--quick", "gate", "ls"]);
 });
 
