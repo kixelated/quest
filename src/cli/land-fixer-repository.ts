@@ -38,8 +38,7 @@ export function importFixer(root: string, state: string, checkout: string, numbe
 			else {
 				bytes += stat.size;
 				if (bytes > MAX_FIXER_BYTES) throw new Error("fixer repository exceeds 100 MiB");
-				if (/^objects\/(?:[0-9a-f]{2}\/[0-9a-f]{38}|pack\/pack-[0-9a-f]+\.(?:pack|idx|rev))$/.test(rel))
-					objects.push(rel);
+				if (/^objects\/(?:[0-9a-f]{2}\/[0-9a-f]{38}|pack\/pack-[0-9a-f]+\.pack)$/.test(rel)) objects.push(rel);
 			}
 		}
 	};
@@ -81,10 +80,17 @@ export function importFixer(root: string, state: string, checkout: string, numbe
 			mkdirSync(dirname(dest), { recursive: true });
 			writeFileSync(dest, data);
 		}
+		for (const path of objects.filter((path) => path.endsWith(".pack"))) {
+			// Rebuild the index rather than trust the fixer's. Not --strict: one pack may refer to another not yet
+			// indexed; fetch.fsckObjects checks every object and link when they reach the daemon's repository.
+			git(clean, ["index-pack", join(clean, path)]);
+		}
 		git(clean, ["update-ref", ref, head]);
 		git(root, [
 			"-c",
 			`safe.directory=${clean}`,
+			"-c",
+			"fetch.fsckObjects=true",
 			"-c",
 			"protocol.file.allow=always",
 			"fetch",

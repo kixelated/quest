@@ -480,14 +480,19 @@ QUEST_LAND_KEY=/run/credentials/quest-land/key quest land serve --app-id 1039466
   --sandbox /usr/local/bin/check-sandbox --fixer /usr/local/bin/fix-sandbox
 ```
 
-The sandbox executable receives the chain's checkout path and must isolate PR
-code from the host's credentials and filesystem. Both the sandbox and fixer
+The sandbox executable receives `<checkout> <base-sha>` as its two arguments,
+with cwd set to the checkout. The SHA is `plan.base.sha`, the commit the tested
+chain was built on, and is also exported as `QUEST_LAND_BASE`. Its environment
+otherwise contains only `PATH` and `LANG`. The wrapper must isolate PR code from
+the host's credentials and filesystem. Both the sandbox and fixer
 wrappers **must run code as a different user from the App key owner**, for example
 inside nspawn containers. Environment filtering cannot protect the key or later
 merge tokens from a process running under the daemon's UID through `/proc`.
-The sandbox gets a standalone, depth-1 clone of the tested commit, with no remote
-and no alternates, so `HEAD` is the commit being checked and nothing links back to
-the daemon's repository; its working directory is that clone. The fixer runs in an independent repository with batch history, no remotes,
+The sandbox gets a standalone shallow clone of the tested tip and every commit
+through that base (`batch links + 1` commits), with no remote or alternates.
+`HEAD` is the tested tip; `git diff "$2"` and `git merge-base "$2" HEAD` work,
+and nothing links back to the daemon's repository. moq's host wrapper can run
+`nix develop --command just ci "$2"`; quest's wrapper may ignore the extra argument. The fixer runs in an independent repository with batch history, no remotes,
 no alternates, and no link to the daemon's private bare repository. Fetches and
 chain construction use only that private repository in the state directory.
 The sandbox runs the repository's checks
@@ -519,7 +524,8 @@ as the bot. The protected set as a whole must match the pinned head or its merge
 current base, including content and mode. It covers `flake.nix`, `flake.lock`,
 `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
 anywhere. Collection copies at most 100 MiB of Git metadata into a clean object
-repository, ignores fixer configuration, and never follows Git alternates. It records `mechanical fix by Codex: <reason>` and the new head in
+repository, ignores fixer configuration, and never follows Git alternates. Pack indexes are rebuilt with
+`git index-pack --strict`, and the import enables `fetch.fsckObjects=true`. It records `mechanical fix by <recorded agent/model>: <reason>` and the new head in
 `## Review`, enables head-pinned auto-merge, and adds `quest:merge`. Healthy PRs
 requeue unchanged. Forks refusing maintainer edits, refused pushes, invalid results,
 crashes, or the 60-minute fixer deadline hand back with a marked comment. A flaky

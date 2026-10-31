@@ -77,7 +77,7 @@ async function comment(
 	)
 		return;
 	await github.request(path, {
-		body: { body: `Codex land fixer: ${fixerText(text)}\n\n${marker}\n\n(written by ${attribution})` },
+		body: { body: `${attribution} land fixer: ${fixerText(text)}\n\n${marker}\n\n(written by ${attribution})` },
 	});
 }
 
@@ -251,15 +251,14 @@ function author(result?: Pick<FixResult, "agent" | "model">): string {
 			.slice(0, 100) || "Codex"
 	);
 }
+/** The PR body with the fix recorded in its `## Review` section; the line names the agent, and the author's text stays as written. */
 function review(body: string, head: string, reason: string, attribution: string): string {
-	const line = `mechanical fix by Codex: ${fixerText(reason)} (head ${head}; ${attribution})`;
+	const line = `mechanical fix by ${attribution}: ${fixerText(reason)} (head ${head})`;
 	if (body.includes(line)) return body;
-	const section = /^## Review[ \t]*$/m.exec(body);
-	const start = section ? section.index + section[0].length : body.length;
-	const updated = section
-		? `${body.slice(0, start)}\n\n${line}${body.slice(start)}`
-		: `${body}\n\n## Review\n\n${line}`;
-	return `${updated}\n\n(written by ${attribution})`;
+	const section = /^## Review[ \t]*\r?$/m.exec(body);
+	if (!section) return `${body}\n\n## Review\n\n${line}`;
+	const start = section.index + section[0].length;
+	return `${body.slice(0, start)}\n\n${line}${body.slice(start)}`;
 }
 
 export async function collectFixers(
