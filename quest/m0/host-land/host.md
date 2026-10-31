@@ -69,15 +69,26 @@ Deployed 2026-10-30 from
   Issues write (user, 2026-10-30), since the daemon reads the queue as
   moq-bot where land.yml used Actions' own token.
 
+- The check container boots systemd with a user manager for the check user
+  (user, 2026-10-30), as the gate's own tests need systemd scopes, and has
+  the CI runners' tools. nspawn keeps the image's public resolvers, since the
+  host's Tailscale MagicDNS is beyond egress.
+- The first live batch landed on 2026-10-30:
+  [moq-dev/quest#299](https://github.com/moq-dev/quest/pull/299) and
+  [#300](https://github.com/moq-dev/quest/pull/300) together, then
+  [#301](https://github.com/moq-dev/quest/pull/301). moq-bot's API squash
+  merge bypasses the unreported `quest land` check.
+- The `quest-land` Actions runner is retired, and the host pins quest at
+  `49cd094`, whose checks get a standalone shallow clone.
+
 What remains:
 
-- Land a batch live, which also confirms that moq-bot's API merge bypasses
-  the unreported `quest land` check.
-- Retire the `quest-land` Actions runner in `modules/ci-runners.nix`, which
-  still mounts the same key, and merge #16 once
+- Merge #16 once
   [kixelated/nixos#13](https://github.com/kixelated/nixos/pull/13) lands.
 - The fixer's container access to CLIProxyAPI and the Codex login, which the
   [fixer](/quest/m0/host-land/fixer.md) needs.
 - VM tests for three more symlink attacks (an escaping chain, a link to a
   directory, a write through a symlinked directory), which the extraction
   already rejects.
+- moq-bot's `organization_self_hosted_runners` write permission served only
+  the retired runner; the maintainer may drop it.
