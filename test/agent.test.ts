@@ -671,6 +671,6 @@ fakes("a Codex release failure is reported instead of a finished outcome", async
 });
 
 test("a land check's base never reaches a launched agent", () => {
-	const env = agentEnvironment({ PATH: "/bin", QUEST_LAND_BASE: "0".repeat(40) }, "ANTHROPIC_API_KEY", "sk-agent");
+	const env = launchEnvironment({ PATH: "/bin", QUEST_LAND_BASE: "0".repeat(40) }, "ANTHROPIC_API_KEY", "sk-agent");
 	expect(env).toEqual({ PATH: "/bin", ANTHROPIC_API_KEY: "sk-agent" });
 });
