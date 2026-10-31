@@ -525,7 +525,8 @@ current base, including content and mode. It covers `flake.nix`, `flake.lock`,
 `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
 anywhere. Collection copies at most 100 MiB of Git metadata into a clean object
 repository, ignores fixer configuration, and never follows Git alternates. Pack indexes are rebuilt with
-`git index-pack --strict`, and the import enables `fetch.fsckObjects=true`. It records `mechanical fix by <recorded agent/model>: <reason>` and the new head in
+`git index-pack` rather than trusted; the fetch into the daemon's repository
+checks every object and link, since the import enables `fetch.fsckObjects=true`. It records `mechanical fix by <recorded agent/model>: <reason>` and the new head in
 `## Review`, enables head-pinned auto-merge, and adds `quest:merge`. Healthy PRs
 requeue unchanged. Forks refusing maintainer edits, refused pushes, invalid results,
 crashes, or the 60-minute fixer deadline hand back with a marked comment. A flaky
