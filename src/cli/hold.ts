@@ -191,10 +191,14 @@ export async function land(
 		gated = (await requirements(labels.github, pr, snapshot.base)).checks.some(
 			(check) => check.name === LAND_CHECK,
 		);
-		if (!gated && !direct) {
+		// A merge queue is the repository's own gate, so it decides; otherwise auto-merge must be on.
+		if (!gated && !direct && !snapshot.queue) {
 			const repository = object(await (await labels.github.request(repositoryPath(pr))).json());
+			// GitHub shows the merge settings only to writers; fail closed, with a next step.
 			if (typeof repository.allow_auto_merge !== "boolean")
-				throw new Error("repository allow_auto_merge is missing");
+				throw new Refusal(
+					`${snapshot.url} repository's auto-merge setting is not visible to this token, so a direct merge cannot be ruled out; follow its landing instructions in CONTRIBUTING.md or AGENTS.md`,
+				);
 			if (!repository.allow_auto_merge)
 				throw new Refusal(
 					`${snapshot.url} repository has auto-merge disabled; follow its landing instructions in CONTRIBUTING.md or AGENTS.md (for example, its label queue). Only use --direct if the user explicitly asks`,

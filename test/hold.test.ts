@@ -27,7 +27,7 @@ class FakePull {
 	head = HEAD;
 	mergeState = "BLOCKED";
 	queue = false;
-	allowAutoMerge = true;
+	allowAutoMerge: boolean | null = true;
 	comparison = "ahead";
 	base = BASE;
 	readonly comparisons: string[] = [];
@@ -72,7 +72,8 @@ class FakePull {
 		const method = init.method ?? "GET";
 		const body = init.body ? (JSON.parse(String(init.body)) as ObjectValue) : {};
 		const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status });
-		if (url.pathname === "/repos/example/project") return json(200, { allow_auto_merge: this.allowAutoMerge });
+		if (url.pathname === "/repos/example/project")
+			return json(200, this.allowAutoMerge === null ? {} : { allow_auto_merge: this.allowAutoMerge });
 		if (url.pathname === "/graphql")
 			return json(200, this.graphql(String(body.query), body.variables as ObjectValue));
 		if (url.pathname === "/repos/example/project/issues/7/labels" && method === "POST") {
@@ -282,6 +283,26 @@ describe("merge --land", () => {
 		expect(pull.labels).toEqual(["quest:iterate"]);
 		await release(PR, token, pull.deps());
 		expect(pull.labels).toEqual([]);
+	});
+
+	test("refuses, keeping the token, when the token cannot see the auto-merge setting", async () => {
+		const pull = new FakePull();
+		pull.allowAutoMerge = null;
+		pull.mergeState = "CLEAN";
+		const { token } = await take(PR, "iterate", undefined, pull.deps());
+		const writes = [...pull.writes];
+		expect(await refused(land(PR, token, HEAD, "squash", pull.deps()))).toContain("not visible to this token");
+		expect(pull.writes).toEqual(writes);
+		expect(pull.labels).toEqual(["quest:iterate"]);
+	});
+
+	test("leaves a merge queue to decide, even with auto-merge off", async () => {
+		const pull = new FakePull();
+		pull.allowAutoMerge = false;
+		pull.queue = true;
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		await land(PR, token, HEAD, "merge", pull.deps());
+		expect(pull.writes.at(-1)).toBe(`enablePullRequestAutoMerge ${HEAD} MERGE`);
 	});
 
 	test("--direct explicitly permits a clean merge with auto-merge off", async () => {
