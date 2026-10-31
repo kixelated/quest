@@ -1712,7 +1712,7 @@ describe("asynchronous land fixer", () => {
 		expect(fixture.pull.head).not.toBe(fixture.plan.queue[0].head);
 		expect(git(fixture.root, "show", "-s", "--format=%P", fixture.pull.head!)).toContain(fixture.plan.base.sha);
 		expect(fixture.pull.body).toContain(
-			`mechanical fix by agent / Codex: \`preserve both conflict sides\` (head ${fixture.pull.head}; agent / Codex)`,
+			`mechanical fix by agent / Codex: \`preserve both conflict sides\` (head ${fixture.pull.head})`,
 		);
 		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
 		expect(fixture.pull.labels).toContain("quest:merge");
@@ -2000,7 +2000,7 @@ ${requeueScript}
 			expect(await fixture.collect()).toEqual([corrupt ? "handback 1" : "requeued 1"]);
 		},
 	);
-	test("uses the recorded agent and replaces stacked body attributions", async () => {
+	test("uses the recorded agent and leaves the author's attribution alone", async () => {
 		const fixture = await fixerFixture(fixedScript());
 		await fixture.finished;
 		const job = JSON.parse(readFileSync(join(fixture.state.state, fixture.jobs()[0]), "utf8"));
@@ -2015,8 +2015,9 @@ ${requeueScript}
 		expect(fixture.pull.body).toContain("mechanical fix by Claude / actual-model:");
 		expect(fixture.pull.body).toContain("Author content");
 		expect(fixture.pull.body).toContain("Previous review");
-		expect(fixture.pull.body?.match(/\(written by /g)).toHaveLength(1);
-		expect(fixture.pull.body).toMatch(/\(written by Claude \/ actual-model\)$/);
+		// The author's attributions stay; the fix is credited only in its own Review line.
+		expect(fixture.pull.body).toMatch(/\(written by old-model\)\n\n\(written by older-model\)$/);
+		expect(fixture.pull.body).not.toContain("(written by Claude");
 	});
 
 	test("strictly rejects duplicate, missing, extra, and multiline results", () => {

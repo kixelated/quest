@@ -81,7 +81,9 @@ export function importFixer(root: string, state: string, checkout: string, numbe
 			writeFileSync(dest, data);
 		}
 		for (const path of objects.filter((path) => path.endsWith(".pack"))) {
-			git(clean, ["index-pack", "--strict", join(clean, path)]);
+			// Rebuild the index rather than trust the fixer's. Not --strict: one pack may refer to another not yet
+			// indexed; fetch.fsckObjects checks every object and link when they reach the daemon's repository.
+			git(clean, ["index-pack", join(clean, path)]);
 		}
 		git(clean, ["update-ref", ref, head]);
 		git(root, [
