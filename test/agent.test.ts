@@ -17,7 +17,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
 	AgentInputError,
-	agentEnvironment,
+	launchEnvironment,
 	boundedLines,
 	redactedLines,
 	refuseUnsupported,
@@ -238,7 +238,7 @@ const launch = (harness: string, key: string) => [
 ];
 
 test("the agent environment holds only its own key", () => {
-	const env = agentEnvironment(
+	const env = launchEnvironment(
 		{
 			PATH: "/bin",
 			HOME: "/home/me",
@@ -248,6 +248,7 @@ test("the agent environment holds only its own key", () => {
 			ANTHROPIC_BASE_URL: "https://proxy",
 			QUEST_API_KEYS: "a b",
 			QUEST_GATE_ADMITTED: "1",
+			QUEST_LAND_BASE: "0123456789abcdef0123456789abcdef01234567",
 			OP_SERVICE_ACCOUNT_TOKEN: "t",
 			OP_SESSION_me: "s",
 			OPENAI_API_KEY: "o",
