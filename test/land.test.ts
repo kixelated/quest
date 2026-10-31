@@ -1717,6 +1717,26 @@ describe("asynchronous land fixer", () => {
 		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
 		expect(fixture.pull.labels).toContain("quest:merge");
 	});
+	test("waits for GitHub to show the pushed fix before recording it", async () => {
+		const fixture = await fixerFixture(fixedScript(), { conflict: true });
+		await fixture.finished;
+		const deps = await fixture.forge.deps();
+		const old = fixture.plan.queue[0].head;
+		// GitHub's REST view lags the push: the first two reads after it still show the old head.
+		let stale = 2;
+		const original = deps.fetch;
+		deps.fetch = (async (input, init) => {
+			const response = await original(input, init);
+			if (!String(input).endsWith("/pulls/1") || (init?.method ?? "GET") !== "GET" || fixture.pull.head === old)
+				return response;
+			if (stale-- <= 0) return response;
+			const body = (await response.json()) as { head: Record<string, unknown> };
+			return Response.json({ ...body, head: { ...body.head, sha: old } });
+		}) as typeof fetch;
+		deps.sleep = async () => {};
+		expect(await fixture.collect(deps)).toEqual(["requeued 1"]);
+		expect(fixture.pull.body).toContain(`(head ${fixture.pull.head})`);
+	});
 	test.each([
 		[
 			"handback",

@@ -82,6 +82,9 @@ async function comment(
 }
 
 /** Queue eligibility can eject a previously requeued PR before building another batch. */
+/** How many one-second pauses to wait for GitHub to show a pushed head. */
+const SYNC_PAUSES = 60;
+
 export async function handbackRepeated(
 	state: string,
 	plan: Plan,
@@ -402,7 +405,12 @@ async function collectJob(
 				}
 
 				if (result?.action === "fixed") {
-					const latest = object(await (await github.request(pullPath)).json());
+					// GitHub shows a push a moment later. Wait for our own head; only a third head is a real move.
+					let latest = object(await (await github.request(pullPath)).json());
+					for (let wait = 0; object(latest.head).sha === entry.head && wait < SYNC_PAUSES; wait++) {
+						await github.pause(1000);
+						latest = object(await (await github.request(pullPath)).json());
+					}
 					if (object(latest.head).sha !== head) throw new FixerRefusal("head moved before Review update");
 					await github.request(pullPath, {
 						method: "PATCH",
