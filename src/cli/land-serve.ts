@@ -99,18 +99,18 @@ export function privateRepository(state: string): string {
 }
 
 /**
- * A standalone, depth-1 clone of the tip: `HEAD` is the commit being checked, so tools that need a
+ * A standalone shallow clone from the tested tip through its base: `HEAD` is the commit being checked, so tools that need a
  * repository work. It has no remote and no alternates, so nothing in it links back to the daemon's
  * repository, and a checkout ignores `export-ignore` and `export-subst`, so a PR cannot hide files.
  */
-function sandboxTree(root: string, state: string, tip: string): string {
+function sandboxTree(root: string, state: string, tip: string, links: number): string {
 	const checkout = mkdtempSync(join(state, "check-"));
 	// A shallow fetch needs a ref; this one lives only for the fetch.
 	const ref = "refs/quest-land/check";
 	git(root, ["update-ref", ref, tip]);
 	try {
 		git(checkout, ["init", "--quiet"]);
-		git(checkout, ["fetch", "--quiet", "--no-tags", "--depth=1", `file://${root}`, ref]);
+		git(checkout, ["fetch", "--quiet", "--no-tags", `--depth=${links + 1}`, `file://${root}`, ref]);
 		git(checkout, ["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
 	} finally {
 		git(root, ["update-ref", "-d", ref]);
@@ -289,15 +289,15 @@ export async function serveBatch(
 		};
 	} else {
 		const tip = chain.links.at(-1)!;
-		const checkout = sandboxTree(root, options.state, tip.commit);
+		const checkout = sandboxTree(root, options.state, tip.commit, chain.links.length);
 		writeFileSync(log, "", { mode: 0o600 });
 		let code: number;
 		try {
 			code = await new Promise<number>((done, reject) => {
-				const child = spawn(options.sandbox, [checkout], {
+				const child = spawn(options.sandbox, [checkout, plan.base.sha], {
 					cwd: checkout,
 					detached: true,
-					env: commandEnvironment(),
+					env: { ...commandEnvironment(), QUEST_LAND_BASE: plan.base.sha },
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 				// A hung check would stall the queue: kill its whole process group at the deadline.

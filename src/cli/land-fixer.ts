@@ -77,7 +77,7 @@ async function comment(
 	)
 		return;
 	await github.request(path, {
-		body: { body: `Codex land fixer: ${fixerText(text)}\n\n${marker}\n\n(written by ${attribution})` },
+		body: { body: `${attribution} land fixer: ${fixerText(text)}\n\n${marker}\n\n(written by ${attribution})` },
 	});
 }
 
@@ -252,9 +252,15 @@ function author(result?: Pick<FixResult, "agent" | "model">): string {
 	);
 }
 function review(body: string, head: string, reason: string, attribution: string): string {
-	const line = `mechanical fix by Codex: ${fixerText(reason)} (head ${head}; ${attribution})`;
-	if (body.includes(line)) return body;
-	const section = /^## Review[ \t]*$/m.exec(body);
+	for (;;) {
+		const stripped = body.replace(/(?:^|\r?\n)[ \t]*\(written by [^\r\n)]+\)[ \t\r\n]*$/, "");
+		if (stripped === body) break;
+		body = stripped;
+	}
+
+	const line = `mechanical fix by ${attribution}: ${fixerText(reason)} (head ${head}; ${attribution})`;
+	if (body.includes(line)) return `${body}\n\n(written by ${attribution})`;
+	const section = /^## Review[ \t]*\r?$/m.exec(body);
 	const start = section ? section.index + section[0].length : body.length;
 	const updated = section
 		? `${body.slice(0, start)}\n\n${line}${body.slice(start)}`

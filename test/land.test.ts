@@ -1014,15 +1014,22 @@ describe.skipIf(process.platform === "win32")("host daemon", () => {
 		expect(forge.main()).toBe(old);
 	});
 
-	test("gives the sandbox a standalone shallow clone, separate from the private bare repository", async () => {
+	test.each([1, 3])("gives the sandbox its base and a standalone shallow chain (%s queued PRs)", async (count) => {
 		const forge = new Forge();
-		forge.pull("One", { "one.txt": "yes" });
+		forge.advance({ "base.txt": "base history" });
+		for (let number = 1; number <= count; number++) forge.pull(`PR ${number}`, { [`file-${number}.txt`]: "yes" });
 		const deps = await forge.deps();
 		const plan = await resolveQueue(REPOSITORY, undefined, deps);
+		const links = 1 + Math.floor(Math.log2(count));
 		const options = sandbox(
-			'test "$PWD" = "$1" && test -d .git && test -z "$(git remote)" && test ! -e .git/objects/info/alternates && ' +
-				'test "$(git rev-parse --is-shallow-repository)" = true && test "$(git log --format=%s)" = "One (#1)" && ' +
-				"git diff --quiet HEAD && test ! -e key.pem && test ! -e repository.git && test -f one.txt",
+			'test "$PWD" = "$1" && test "$#" = 2 && test "$QUEST_LAND_BASE" = "$2" && ' +
+				`test "$2" = '${plan.base.sha}' && ` +
+				'test -d .git && test -z "$(git remote)" && test ! -e .git/objects/info/alternates && ' +
+				'test "$(git rev-parse --is-shallow-repository)" = true && ' +
+				`test "$(git rev-list --count HEAD)" = '${links + 1}' && ` +
+				'test "$(git merge-base "$2" HEAD)" = "$2" && ' +
+				"git diff --quiet HEAD && test ! -e key.pem && test ! -e repository.git || exit 1;\n" +
+				'git diff --quiet "$2"..HEAD -- file-1.txt; code=$?; test "$code" = 1',
 		);
 		const trusted = privateRepository(options.state);
 		forge.configure(trusted);
@@ -1705,7 +1712,7 @@ describe("asynchronous land fixer", () => {
 		expect(fixture.pull.head).not.toBe(fixture.plan.queue[0].head);
 		expect(git(fixture.root, "show", "-s", "--format=%P", fixture.pull.head!)).toContain(fixture.plan.base.sha);
 		expect(fixture.pull.body).toContain(
-			`mechanical fix by Codex: \`preserve both conflict sides\` (head ${fixture.pull.head}; agent / Codex)`,
+			`mechanical fix by agent / Codex: \`preserve both conflict sides\` (head ${fixture.pull.head}; agent / Codex)`,
 		);
 		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
 		expect(fixture.pull.labels).toContain("quest:merge");
@@ -1970,6 +1977,46 @@ ${requeueScript}
 		git(root, "update-index", "--add", "--cacheinfo", "160000", entry.head, "vendor/module");
 		git(root, "commit", "-qm", "add gitlink");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
+	});
+
+	test.each([false, true])(
+		"rebuilds pack indexes and strictly validates packs (corrupt pack: %s)",
+		async (corrupt) => {
+			const fixture = await fixerFixture(fixedScript());
+			await fixture.finished;
+			const job = JSON.parse(readFileSync(join(fixture.state.state, fixture.jobs()[0]), "utf8"));
+			git(job.checkout, "gc", "--prune=now");
+			const packs = join(job.checkout, ".git/objects/pack");
+			const pack = readdirSync(packs).find((name) => name.endsWith(".pack"))!;
+			expect(pack).toBeTruthy();
+			for (const name of readdirSync(packs).filter((name) => /\.(idx|rev)$/.test(name))) {
+				rmSync(join(packs, name));
+				writeFileSync(join(packs, name), "untrusted index");
+			}
+			if (corrupt) {
+				rmSync(join(packs, pack));
+				writeFileSync(join(packs, pack), "corrupt pack");
+			}
+			expect(await fixture.collect()).toEqual([corrupt ? "handback 1" : "requeued 1"]);
+		},
+	);
+	test("uses the recorded agent and replaces stacked body attributions", async () => {
+		const fixture = await fixerFixture(fixedScript());
+		await fixture.finished;
+		const job = JSON.parse(readFileSync(join(fixture.state.state, fixture.jobs()[0]), "utf8"));
+		const resultPath = join(job.checkout, "quest-land-result.json");
+		const results = JSON.parse(readFileSync(resultPath, "utf8"));
+		results[0].agent = "Claude";
+		results[0].model = "actual-model";
+		writeFileSync(resultPath, JSON.stringify(results));
+		fixture.pull.body =
+			"Author content\r\n\r\n## Review\r\n\r\nPrevious review\r\n\r\n(written by old-model)\n\n(written by older-model)";
+		expect(await fixture.collect()).toEqual(["requeued 1"]);
+		expect(fixture.pull.body).toContain("mechanical fix by Claude / actual-model:");
+		expect(fixture.pull.body).toContain("Author content");
+		expect(fixture.pull.body).toContain("Previous review");
+		expect(fixture.pull.body?.match(/\(written by /g)).toHaveLength(1);
+		expect(fixture.pull.body).toMatch(/\(written by Claude \/ actual-model\)$/);
 	});
 
 	test("strictly rejects duplicate, missing, extra, and multiline results", () => {
