@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-import { MERGE_LABEL } from "../core";
 import { repositoryPath } from "./claims";
 import {
 	GitHub,
@@ -563,9 +562,9 @@ export function ejection(entry: Entry, reason: Reason, detail: string): Ejection
 }
 
 /**
- * Remove `ejection` from the queue: disable its auto-merge, drop `quest:merge`,
- * and comment with the reason. A PR whose auto-merge was enabled again since
- * the queue was read is a new entry and is left alone. Returns whether it ejected.
+ * Remove `ejection` from the queue: disable its auto-merge and comment with the
+ * reason. A PR whose auto-merge was enabled again since the queue was read is a
+ * new entry and is left alone. Returns whether it ejected.
  */
 export async function eject(github: GitHub, plan: Plan, ejection: Ejection): Promise<boolean> {
 	const data = await github.graphql(
@@ -584,7 +583,6 @@ export async function eject(github: GitHub, plan: Plan, ejection: Ejection): Pro
 	}
 	const [owner, repo] = plan.repository.split("/");
 	const issue = `${repositoryPath({ owner, repo })}/issues/${ejection.number}`;
-	await github.request(`${issue}/labels/${encodeURIComponent(MERGE_LABEL)}`, { method: "DELETE", allow: [404] });
 	await github.request(`${issue}/comments`, {
 		body: {
 			body: `quest land removed this pull request from the queue: ${ejection.detail}.\n\n<!-- quest land: ${ejection.reason} -->`,
