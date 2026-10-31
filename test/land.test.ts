@@ -1677,7 +1677,8 @@ git commit -qm 'mechanical conflict resolution'
 head=$(git rev-parse HEAD)
 printf '[{"number":1,"action":"fixed","head":"%s","reason":"preserve both conflict sides"}]' "$head" > quest-land-result.json`;
 
-describe("asynchronous land fixer", () => {
+// The fixer, like the daemon, needs Linux process groups and fifos.
+describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 	afterEach(() => vi.unstubAllEnvs());
 	test("requeues unchanged with its reason, and hands back a second ejection in the same pick", async () => {
 		const fixture = await fixerFixture(requeueScript);
