@@ -28,6 +28,35 @@ export function pin(sha: string): string {
 	return `${PIN}: ${sha}`;
 }
 
+/**
+ * Queue `head` for the gate: squash auto-merge whose commit body pins it. GitHub keeps an
+ * existing auto-merge request, and its old commit body, when asked to enable it again, so an
+ * existing request is disabled first and the pin always names `head`.
+ */
+export async function enqueue(github: GitHub, id: string, head: string): Promise<void> {
+	const current = object(
+		await github.graphql(
+			"query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { commitBody } } } }",
+			{
+				id,
+			},
+		),
+	);
+	const request = object(current.node).autoMergeRequest;
+	if (request !== null && request !== undefined) {
+		const body = object(request).commitBody;
+		if (pinned(typeof body === "string" ? body : "") === head) return;
+		await github.graphql(
+			"mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
+			{ id },
+		);
+	}
+	await github.graphql(
+		"mutation($id: ID!, $sha: GitObjectID!, $body: String!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: SQUASH, commitBody: $body }) { clientMutationId } }",
+		{ id, sha: head, body: pin(head) },
+	);
+}
+
 /** The head an auto-merge commit body pins, if any. */
 function pinned(body: string): string | null {
 	return new RegExp(`^${PIN}: ([0-9a-f]{40})$`, "m").exec(body)?.[1] ?? null;
