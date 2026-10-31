@@ -14,7 +14,6 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { MERGE_LABEL } from "../core";
 import { GitHub, type GitHubDependencies, object, string } from "./github";
 import {
 	baseRemote,
@@ -482,21 +481,16 @@ async function collectJob(
 				error = `${String(failure)}; run /quest-iterate before picking it again`;
 			}
 		}
-		if (!error && result?.action !== "handback") {
-			await github.request(`/repos/${job.plan.repository}/issues/${number}/labels`, {
-				body: { labels: [MERGE_LABEL] },
-			});
-			if (result?.action === "requeue")
-				await comment(
-					github,
-					job.plan,
-					entry,
-					// The reason says why: another PR in the batch, or a flaky check worth a follow-up.
-					`Requeued unchanged: ${result.reason.slice(0, 200)}`,
-					"requeue",
-					author(result),
-				);
-		}
+		if (!error && result?.action === "requeue")
+			await comment(
+				github,
+				job.plan,
+				entry,
+				// The reason says why: another PR in the batch, or a flaky check worth a follow-up.
+				`Requeued unchanged: ${result.reason.slice(0, 200)}`,
+				"requeue",
+				author(result),
+			);
 
 		if (
 			error &&
@@ -508,10 +502,6 @@ async function collectJob(
 			await github.graphql(
 				"mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
 				{ id: entry.id },
-			);
-			await github.request(
-				`/repos/${job.plan.repository}/issues/${number}/labels/${encodeURIComponent(MERGE_LABEL)}`,
-				{ method: "DELETE", allow: [404] },
 			);
 		}
 

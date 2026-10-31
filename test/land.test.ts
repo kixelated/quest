@@ -227,7 +227,6 @@ class Forge {
 			merge: "CLEAN",
 			runs: [{ name: "test", conclusion: "SUCCESS", url: "https://ci.test/1" }],
 			review: null,
-			labels: ["quest:merge"],
 			landing: true,
 			autoMerge: { enabledAt: `2026-10-26T00:00:0${number}Z`, commitBody: pin(head) },
 			contributor: options.contributor,
@@ -480,7 +479,6 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 			expect(git(forge.origin, "show", "-s", "--format=%P", "main")).toBe(base);
 			expect(pull.closed).toBe(true);
 			expect(pull.merged).not.toBe(true);
-			expect(pull.labels).toEqual([]);
 			expect(forge.comment(1)).toContain(`https://github.com/upstream/project/commit/${forge.main()}`);
 			expect(forge.comment(1)).toContain("GitHub cannot show a fork PR as merged");
 			expect(forge.ref("friend/project", "topic-1")).toBe(head);
@@ -597,10 +595,9 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 			}),
 		).toBe(`landed 1 ${landed}`);
 		expect(forge.main()).toBe(landed);
-		// The landed commit is always recorded once; only the PR as tested is closed and unlabeled.
+		// The landed commit is always recorded once; only the PR as tested is closed.
 		expect(pull.comments?.filter((comment) => comment.body.includes(`landed ${landed}`))).toHaveLength(1);
 		expect(pull.closed === true).toBe(!requeued);
-		expect(pull.labels?.includes("quest:merge") ?? false).toBe(requeued);
 	});
 
 	test("a branch lease failure ejects head_moved", async () => {
@@ -965,7 +962,6 @@ describe.skipIf(process.platform === "win32")("host daemon", () => {
 		expect(forge.comment(2)).toBeUndefined();
 		// Once it is the oldest, its own conflict with main ejects it.
 		expect((await forge.round()).landing).toEqual(["ejected 2 merge_conflict"]);
-		expect(clash.labels).toEqual([]);
 	});
 
 	test("ejects the whole failing batch with a log tail, retaining the complete log", async () => {
@@ -1238,7 +1234,6 @@ mv '${result}.new' '${result}'
 				// A refusal that would repeat every round is ejected with GitHub's reason, without a fixer.
 				expect(await run).toEqual(["ejected 1 merge_refused"]);
 				expect(forge.comment(1)).toContain(message);
-				expect(pull.labels).not.toContain("quest:merge");
 			} else if (mode === "closed") {
 				// Closed by hand: nothing to eject, and nothing left to retry.
 				expect(await run).toEqual([]);
@@ -1246,7 +1241,6 @@ mv '${result}.new' '${result}'
 			} else {
 				await expect(run).rejects.toThrow(message);
 				expect(forge.comment(1)).toBeUndefined();
-				expect(pull.labels).toContain("quest:merge");
 			}
 			if (mode === "pending" || mode === "base modified") expect(pauses).toEqual([500, 1000, 2000]);
 		},
@@ -1686,7 +1680,6 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 		expect(await fixture.collect()).toEqual(["requeued 1"]);
 		expect(fixture.pull.head).toBe(fixture.plan.queue[0].head);
 		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
-		expect(fixture.pull.labels).toContain("quest:merge");
 		expect(fixture.forge.comment(1)).toContain("Requeued unchanged:");
 		const next = await resolveQueue(REPOSITORY, undefined, fixture.deps);
 		await serveBatch(
@@ -1728,7 +1721,6 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 			`mechanical fix by agent / Codex: \`preserve both conflict sides\` (head ${fixture.pull.head})`,
 		);
 		expect(fixture.pull.autoMerge?.commitBody).toBe(pin(fixture.pull.head!));
-		expect(fixture.pull.labels).toContain("quest:merge");
 	});
 	test("waits for GitHub to show the pushed fix before recording it", async () => {
 		const fixture = await fixerFixture(fixedScript(), { conflict: true });
@@ -1770,7 +1762,6 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 		await fixture.finished;
 		expect(await fixture.collect()).toEqual(["handback 1"]);
 		expect(fixture.pull.landing).toBe(false);
-		expect(fixture.pull.labels).not.toContain("quest:merge");
 		expect(fixture.pull.head).toBe(fixture.plan.queue[0].head);
 		expect(fixture.forge.comment(1)).toContain(message);
 		expect(fixture.forge.comment(1)).toContain("<!-- quest land fixer:");
@@ -1835,7 +1826,6 @@ ${requeueScript}
 
 		expect(await fixture.collect(broken)).toEqual(["handback 1"]);
 		expect(fixture.pull.landing).toBe(false);
-		expect(fixture.pull.labels).not.toContain("quest:merge");
 		expect(fixture.forge.comment(1)).toContain("lost response");
 	});
 
