@@ -87,8 +87,13 @@ can hand off instead.
   PR. The healthy PR lands after the requeue, the mechanical one lands after
   its fix, and the other is handed back. `CONTRIBUTING.md` and the README's
   landing section describe the host gate.
+- Amended 2026-10-31 (user): the fixer triages a failing batch before
+  anything is ejected, and only the PR it blames is ejected. See
+  [batch triage](/quest/m0/host-land/triage.md).
 
 ## Required
 
 - [Gate host](/quest/m0/host-land/host.md) - kixelated/nixos runs the daemon as its own user, checks in nspawn containers, and retires the Actions runner
 - [Fixer proxy access](/quest/m0/host-land/fixer.md) - connect the nixos fixer container to CLIProxyAPI with the gate client key and maintainer login
+- [Fixer survives ejection](/quest/m0/host-land/fixer-survives.md) - the fixer finishes after every ejection and requeues collateral PRs itself
+- [Batch triage](/quest/m0/host-land/triage.md) - the fixer blames the failing PR before ejection, and a red base halts the queue
