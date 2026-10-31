@@ -476,26 +476,29 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"merge commit unless --squash or --rebase picks another method; a merge queue applies its own. On a base " +
 			`that requires the \`${LAND_CHECK}\` check, it queues the PR for \`quest land\` instead: squash ` +
 			"auto-merge whose commit body pins the head. The label stays on while the PR is queued or auto-merging, " +
-			"until it merges.",
+			"until it merges. On an ungated base with auto-merge disabled, it refuses unless --direct is passed. " +
+			"Follow the repository landing instructions in CONTRIBUTING.md or AGENTS.md; never retry with --direct unless the user asks.",
 	)
 		.option("--land <sha>", "Land this full 40-character head SHA; needs the token")
 		.addOption(new Option("--squash", "Squash and merge").conflicts("rebase"))
 		.option("--rebase", "Rebase and merge")
+		.option("--direct", "Allow landing when repository auto-merge is disabled; needs --land")
 		.action(
 			(
 				value: string,
 				token: string | undefined,
-				options: { land?: string; squash?: boolean; rebase?: boolean },
+				options: { land?: string; squash?: boolean; rebase?: boolean; direct?: boolean },
 			) => {
 				const pr = pullRequest(value, root());
 				if (options.land === undefined) {
+					if (options.direct) throw new UsageError("--direct needs --land");
 					if (options.squash || options.rebase) throw new UsageError("--squash and --rebase need --land");
 					return printToken(take(pr, "merge", token, gitHubDependencies(warn)));
 				}
 				if (token === undefined) throw new UsageError("--land needs the hold token");
 				if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
 				const method = options.squash ? "squash" : options.rebase ? "rebase" : "merge";
-				printToken(land(pr, token, options.land, method, gitHubDependencies(warn)));
+				printToken(land(pr, token, options.land, method, gitHubDependencies(warn), options.direct));
 			},
 		);
 

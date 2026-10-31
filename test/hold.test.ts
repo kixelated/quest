@@ -27,6 +27,7 @@ class FakePull {
 	head = HEAD;
 	mergeState = "BLOCKED";
 	queue = false;
+	allowAutoMerge = true;
 	comparison = "ahead";
 	base = BASE;
 	readonly comparisons: string[] = [];
@@ -71,6 +72,7 @@ class FakePull {
 		const method = init.method ?? "GET";
 		const body = init.body ? (JSON.parse(String(init.body)) as ObjectValue) : {};
 		const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status });
+		if (url.pathname === "/repos/example/project") return json(200, { allow_auto_merge: this.allowAutoMerge });
 		if (url.pathname === "/graphql")
 			return json(200, this.graphql(String(body.query), body.variables as ObjectValue));
 		if (url.pathname === "/repos/example/project/issues/7/labels" && method === "POST") {
@@ -268,6 +270,41 @@ describe("ready --done", () => {
 });
 
 describe("merge --land", () => {
+	test.each(["CLEAN", "BLOCKED", "UNKNOWN"])("refuses auto-merge off before changing labels (%s)", async (state) => {
+		const pull = new FakePull();
+		pull.allowAutoMerge = false;
+		pull.mergeState = state;
+		const { token } = await take(PR, "iterate", undefined, pull.deps());
+		const writes = [...pull.writes];
+		expect(await refused(land(PR, token, HEAD, "squash", pull.deps()))).toContain("CONTRIBUTING.md or AGENTS.md");
+		expect(pull.writes).toEqual(writes);
+		expect(pull.state).toBe("OPEN");
+		expect(pull.labels).toEqual(["quest:iterate"]);
+		await release(PR, token, pull.deps());
+		expect(pull.labels).toEqual([]);
+	});
+
+	test("--direct explicitly permits a clean merge with auto-merge off", async () => {
+		const pull = new FakePull();
+		pull.allowAutoMerge = false;
+		pull.mergeState = "CLEAN";
+		const { token } = await take(PR, "merge", undefined, pull.deps());
+		vi.stubEnv("GH_TOKEN", "token");
+		vi.stubGlobal("fetch", pull.deps().fetch);
+		try {
+			expect(
+				await main(["merge", URL_, token, "--land", HEAD, "--direct"], {
+					stdout: () => undefined,
+					stderr: () => undefined,
+				}),
+			).toBe(0);
+			expect(pull.writes.at(-1)).toBe(`mergePullRequest ${HEAD} MERGE`);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.unstubAllGlobals();
+		}
+	});
+
 	test.each(["behind", "diverged"])(
 		"refuses a stale ungated head (%s), then accepts it after a base merge",
 		async (status) => {
@@ -325,6 +362,7 @@ describe("merge --land", () => {
 	test("queues a gated base's PR for quest land: squash auto-merge pinning the head", async () => {
 		const pull = new FakePull();
 		pull.required = ["test", "quest land"];
+		pull.allowAutoMerge = false; // The host-gated path does not use the ungated pre-check.
 		pull.comparison = "diverged";
 		const warnings: string[] = [];
 		const { token } = await take(PR, "merge", undefined, pull.deps());
@@ -508,6 +546,7 @@ describe("arguments", () => {
 		[["ready", URL_, "--done"], "--done needs the hold token"],
 		[["merge", URL_, "--land", HEAD], "--land needs the hold token"],
 		[["merge", URL_, "token", "--land", "abc"], "--land needs a full 40-character SHA"],
+		[["merge", URL_, "--direct"], "--direct needs --land"],
 		[["merge", URL_, "--squash"], "--squash and --rebase need --land"],
 		[["iterate", "https://example.com/pull/1"], "expected a GitHub pull request URL"],
 	])("%j is a usage error", async (args, message) => {
