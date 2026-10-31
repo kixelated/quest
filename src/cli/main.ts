@@ -777,7 +777,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Review the checkout's committed branch against its base with the other harness: Codex when run from " +
 				"Claude Code, Claude Code when run from Codex, detected from the variables each sets. --harness names " +
-				"the reviewer instead; there is no other fallback. The reviewer uses its CLI's own login, " +
+				"the reviewer instead; there is no other fallback. The reviewer keeps its CLI's own login or " +
+				"environment credentials and provider endpoint, " +
 				`with ${models("default")}. --deep, for a high-stakes change, picks ${models("deep")}. ` +
 				"--model and --effort override either.\n\n" +
 				"The first round runs the reviewer's own review (`codex exec review --base`, or Claude Code's " +
